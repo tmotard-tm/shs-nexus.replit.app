@@ -223,3 +223,35 @@ function fileDateIso(fileDate: unknown): string | null {
   }
   return null;
 }
+
+/**
+ * Recover an image MIME type from a media URL/key file extension.
+ *
+ * Outbound attachments are uploaded through /comms/upload, which names the
+ * Object Storage key from the validated image MIME
+ * (`fs-comms-outbound/<ts>-<rand>.<ext>`), so the extension round-trips the
+ * type losslessly. The inbox render gate requires media_type to display an
+ * image, so outbound appends must stamp it (inbound already stores Twilio's
+ * ContentType) — otherwise senders never see their own sent photos. Legacy
+ * NULL rows are healed at boot with the same mapping (schema-init).
+ */
+export function mediaTypeFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  const clean = String(url).trim().split(/[?#]/)[0];
+  const m = /\.([a-z0-9]+)$/i.exec(clean);
+  switch ((m?.[1] || "").toLowerCase()) {
+    case "jpg":
+    case "jpeg":
+      return "image/jpeg";
+    case "png":
+      return "image/png";
+    case "gif":
+      return "image/gif";
+    case "webp":
+      return "image/webp";
+    case "heic":
+      return "image/heic";
+    default:
+      return null;
+  }
+}

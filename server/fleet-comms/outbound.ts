@@ -23,7 +23,7 @@ import {
 } from "@shared/fleet-scope-schema";
 import { and, eq, lte, sql, inArray } from "drizzle-orm";
 import { sendTwilioMessage, getNextAllowedSendTime } from "../fleet-scope-reg-messaging";
-import { isValidCategory, normalizeDigits, countSegments } from "./lib";
+import { isValidCategory, normalizeDigits, countSegments, mediaTypeFromUrl } from "./lib";
 import {
   getContactByLdap,
   getOrCreateTechThread,
@@ -222,6 +222,9 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     status: "sent",
     twilioSid: sid,
     mediaUrl: input.mediaUrl && input.mediaUrl.length ? input.mediaUrl[0] : null,
+    // Stamp the image type or the inbox render gate never shows the sender
+    // their own sent photo (thread preview says "Photo" but the bubble is blank).
+    mediaType: input.mediaUrl && input.mediaUrl.length ? mediaTypeFromUrl(input.mediaUrl[0]) : null,
     sentBy: input.sentBy ?? null,
     senderName: input.senderName ?? null,
     segments,
@@ -407,6 +410,7 @@ export async function processSendQueue(
         status: "sent",
         twilioSid: sid,
         mediaUrl: media && media.length ? media[0] : null,
+        mediaType: media && media.length ? mediaTypeFromUrl(media[0]) : null,
         sentBy: row.createdBy,
         senderName: row.senderName,
         segments: countSegments(row.body),

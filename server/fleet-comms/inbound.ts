@@ -188,11 +188,14 @@ export async function handleInbound(payload: InboundPayload): Promise<InboundRes
   // Category attribution: inherit last outbound category within 72h.
   const category = (await lastOutboundCategoryWithin(threadId, ATTRIBUTION_WINDOW_MS)) || "general_fleet";
 
-  // MMS → object storage.
+  // MMS → object storage. The first attachment rides on the text message row;
+  // any EXTRA attachments (multi-photo MMS) become their own body-less rows
+  // below — previously everything past media[0] was silently dropped.
+  const mediaItems = payload.media ?? [];
   let mediaUrl: string | null = null;
   let mediaType: string | null = null;
-  if (payload.media && payload.media.length) {
-    const first = payload.media[0];
+  if (mediaItems.length) {
+    const first = mediaItems[0];
     mediaUrl = await downloadTwilioMediaToStorage(first.url, first.contentType);
     mediaType = first.contentType;
   }
@@ -210,6 +213,33 @@ export async function handleInbound(payload: InboundPayload): Promise<InboundRes
     mediaUrl,
     mediaType,
   });
+
+  // Extra attachments: one row each, deduped independently via a synthetic SID
+  // suffix (`<MessageSid>:m<i>`) under the partial unique index — a webhook
+  // retry can't double-insert them even if a first pass crashed mid-way. A
+  // failed download skips that one attachment, never the whole message.
+  for (let i = 1; i < mediaItems.length; i++) {
+    try {
+      const extra = mediaItems[i];
+      const key = await downloadTwilioMediaToStorage(extra.url, extra.contentType);
+      if (!key) continue;
+      await appendMessage({
+        threadId,
+        ldap,
+        category,
+        direction: "inbound",
+        contactRole,
+        body: "",
+        phone: payload.from,
+        status: "received",
+        twilioSid: payload.messageSid ? `${payload.messageSid}:m${i}` : null,
+        mediaUrl: key,
+        mediaType: extra.contentType,
+      });
+    } catch (err: any) {
+      console.error(`[Comms Inbound] extra media #${i} failed:`, err?.message);
+    }
+  }
 
   if (deduped) return { action: "deduped", threadId, contactRole };
 

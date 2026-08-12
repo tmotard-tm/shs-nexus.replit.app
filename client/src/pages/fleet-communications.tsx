@@ -23,6 +23,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import {
   MessageSquare,
   Send,
@@ -194,6 +195,15 @@ function resolveMediaUrl(mediaUrl: string) {
   return mediaUrl.startsWith("http") ? mediaUrl : `/api/fs/comms/media/${mediaUrl}`;
 }
 
+// Image detection for message bubbles. New rows carry media_type (outbound
+// stamps it at append time; inbound stores Twilio's ContentType), but legacy
+// outbound rows — and prod until its boot heal runs — have a URL with no
+// type: fall back to the file extension so senders still see sent photos.
+function isImageMedia(mediaUrl: string, mediaType?: string | null) {
+  if (mediaType) return mediaType.startsWith("image/");
+  return /\.(jpe?g|png|gif|webp|heic)$/i.test(mediaUrl.split(/[?#]/)[0]);
+}
+
 // Full-size image lightbox: zoom, download, and open-in-new-tab for MMS images.
 function ImageViewer({ src, onClose }: { src: string | null; onClose: () => void }) {
   const { toast } = useToast();
@@ -312,6 +322,9 @@ export default function FleetCommunications() {
   const [districtFilter, setDistrictFilter] = useState("");
   const [inRentalOnly, setInRentalOnly] = useState(false);
   const [positionFilter, setPositionFilter] = useState("all");
+  // Participant ("Sent by") filter — server-side EXISTS on outbound sent_by,
+  // so each user can scope the inbox to threads they've been part of.
+  const [participantFilter, setParticipantFilter] = useState("");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [scope, setScope] = useState<"active" | "archived">("active");
   const [body, setBody] = useState("");
@@ -339,6 +352,13 @@ export default function FleetCommunications() {
   const { data: config } = useQuery<CommsConfig>({ queryKey: ["/api/fs/comms/config"] });
   const { data: health } = useQuery<any>({ queryKey: ["/api/fs/comms/health"], refetchInterval: 60000 });
   const { data: districtOptions = [] } = useQuery<string[]>({ queryKey: ["/api/fs/comms/threads/districts"] });
+  // Everyone who has ever sent from the inbox (id + display name) — powers the
+  // "Sent by" filter. The current user is pinned to the top as "My threads".
+  const { data: participantOptions = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["/api/fs/comms/threads/participants"],
+    staleTime: 5 * 60 * 1000,
+  });
+  const { user: authUser } = useAuth();
 
   // Techs currently in an open rental get a badge. Uses `scope=managed` so this
   // matches the Fleet Scope / Rental Ops "rentals open" list (fs_trucks) — the same
@@ -355,7 +375,7 @@ export default function FleetCommunications() {
   const isInRental = (t: { ldap: string | null }) =>
     !!t.ldap && openRentalEidSet.has(t.ldap.toUpperCase());
 
-  const threadsKey = ["/api/fs/comms/threads", category, search, districtFilter, unreadOnly, scope] as const;
+  const threadsKey = ["/api/fs/comms/threads", category, search, districtFilter, participantFilter, unreadOnly, scope] as const;
   const { data: threads = [], isLoading: threadsLoading } = useQuery<Thread[]>({
     queryKey: threadsKey,
     queryFn: async () => {
@@ -363,6 +383,7 @@ export default function FleetCommunications() {
       if (category !== "all") params.set("category", category);
       if (search) params.set("search", search);
       if (districtFilter.trim()) params.set("district", districtFilter.trim());
+      if (participantFilter) params.set("participant", participantFilter);
       if (unreadOnly) params.set("unread", "true");
       if (scope !== "active") params.set("scope", scope);
       // Fetch the full list (thread volume is small) so the client-side

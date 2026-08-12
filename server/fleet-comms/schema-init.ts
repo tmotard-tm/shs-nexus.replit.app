@@ -116,6 +116,28 @@ CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_category_thread_created"
 -- Dedupe inbound retries and status-callback races by Twilio SID.
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_comms_messages_twilio_sid"
   ON "fs_comms_messages" ("twilio_sid") WHERE "twilio_sid" IS NOT NULL;
+-- Participant ("Sent by") thread filter: EXISTS probe per thread by sender id.
+CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_sent_by_thread"
+  ON "fs_comms_messages" ("sent_by", "thread_id") WHERE "direction" = 'outbound';
+
+-- Heal (idempotent): outbound sends used to store media_url without media_type,
+-- and the inbox render gate requires media_type to show an image — so senders
+-- never saw their own sent photos. New sends stamp the type at append time;
+-- this backfills legacy rows from the upload key's extension (the upload route
+-- names keys from the validated image MIME, so the mapping is lossless).
+UPDATE "fs_comms_messages" SET "media_type" =
+  CASE lower(substring("media_url" from '\\.([a-z0-9]+)$'))
+    WHEN 'jpg'  THEN 'image/jpeg'
+    WHEN 'jpeg' THEN 'image/jpeg'
+    WHEN 'png'  THEN 'image/png'
+    WHEN 'gif'  THEN 'image/gif'
+    WHEN 'webp' THEN 'image/webp'
+    WHEN 'heic' THEN 'image/heic'
+  END
+WHERE ("media_type" IS NULL OR "media_type" = '')
+  AND "media_url" IS NOT NULL
+  AND lower(substring("media_url" from '\\.([a-z0-9]+)$'))
+      IN ('jpg','jpeg','png','gif','webp','heic');
 
 CREATE TABLE IF NOT EXISTS "fs_comms_optouts" (
   "phone_digits" varchar(10) PRIMARY KEY,

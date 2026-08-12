@@ -447,6 +447,20 @@ export function registerCommsRoutes(app: Router): void {
         );
       }
       if (unreadOnly) conds.push(eq(commsThreads.unread, true));
+      // Participant ("Sent by") filter: only threads where this Nexus user has
+      // sent at least one message. sent_by stores the sender's user id for both
+      // manual and bulk/queued sends (automation uses service ids like
+      // 'loa-outreach', selectable too). Lives in `conds`, so the category-tab
+      // counts from getCategoryScopedThreadRows stay consistent with the list.
+      const participant = String(req.query.participant || "").trim();
+      if (participant) {
+        conds.push(sql`EXISTS (
+          SELECT 1 FROM fs_comms_messages pm
+          WHERE pm.thread_id = ${commsThreads.id}
+            AND pm.direction = 'outbound'
+            AND pm.sent_by = ${participant}
+        )`);
+      }
       if (district) {
         // Canonical match: district is stored in mixed formats (padded "0008147"
         // from the roster, unpadded "8147" from holman truck→district backfill).
@@ -521,6 +535,35 @@ export function registerCommsRoutes(app: Router): void {
         .filter(Boolean)
         .sort((a, b) => Number(a) - Number(b));
       res.json(districts);
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // Distinct senders across outbound messages — powers the "Sent by"
+  // participant filter dropdown. `sent_by` is the Nexus user id captured at
+  // send time; `sender_name` the display name (falls back to the raw id for
+  // automation ids like 'loa-outreach'). Registered BEFORE /threads/:id so it
+  // isn't swallowed by the :id param route.
+  app.get("/comms/threads/participants", gate, async (_req: any, res) => {
+    try {
+      const result: any = await retryOnceOnTransient(() => fsDb.execute(sql`
+        SELECT sent_by AS id,
+               coalesce(nullif(max(sender_name), ''), sent_by) AS name,
+               count(*)::int AS messages
+        FROM fs_comms_messages
+        WHERE direction = 'outbound' AND sent_by IS NOT NULL AND sent_by <> ''
+        GROUP BY sent_by
+      `));
+      const rows: any[] = result?.rows ?? result ?? [];
+      const participants = rows
+        .map((r) => ({
+          id: String(r.id),
+          name: String(r.name || r.id),
+          messages: Number(r.messages) || 0,
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      res.json(participants);
     } catch (e: any) {
       res.status(500).json({ message: e?.message });
     }

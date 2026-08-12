@@ -383,8 +383,15 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           AND upper(c.ticket_status) = 'OPEN'
           AND a.employment_status = 'A'
           AND a.tech_racfid IS NOT NULL
+          -- medium+RESOLVED is included deliberately. Those are spelling and
+          -- name-order variants (Vicente/Vince, Terence/Terrance, Frank Eaddy
+          -- III), every one hand-verified 2026-08-12 against home state vs
+          -- pickup state. REVIEW is still excluded: that is a genuine
+          -- same-name ambiguity and texting it sends a stranger a link.
+          -- Worst case on a wrong medium match is a text the recipient cannot
+          -- action, because the form still verifies LDAP and truck.
           AND (ir.override_employee_id IS NOT NULL
-               OR (ir.confidence = 'high' AND upper(ir.state) = 'RESOLVED'))
+               OR (ir.confidence IN ('high','medium') AND upper(ir.state) = 'RESOLVED'))
           AND COALESCE(
                 NULLIF(regexp_replace(COALESCE(t.mobile_phone,''), '\D', '', 'g'), ''),
                 NULLIF(regexp_replace(COALESCE(split_part(t.email,'@',1),''), '\D', '', 'g'), ''),
