@@ -100,4 +100,5 @@
 - [Drizzle sql-tag regex escaping](drizzle-sql-tag-regex-escaping.md) — `\D` inside a drizzle sql`` template cooks to literal `D`; write `\\D` or bind params; audit by running both variants against prod counts.
 - [Pooled advisory locks don't single-flight](pooled-advisory-lock-not-single-flight.md) — pool-issued pg_try_advisory_lock is re-entrant across requests sharing a connection + unlock leaks; use one dedicated client or row-level CAS.
 - [LUCA shop-contact intake loop](luca-shop-contact-intake.md) — the one inbound LUCA write; vendor-match 409, humans win under a FOR UPDATE re-check, accepted contacts ALWAYS locked (unlocked luca phones are feed-invisible).
+- [Test-fixture deletion scope](test-fixture-deletion-scope.md) — Tyler's "delete test records" means PROD pollution only; dev synthetic rows are working fixtures. Capture full rows before any delete.
 - [Rental survey send audit findings](rental-survey-send-audit.md) — no vendor filter, submitted≠blocked re-issue, send never re-checks book, LDAP-in-employee_id join drops, home_phone unread, prod schema-health = deploy-liveness oracle.
