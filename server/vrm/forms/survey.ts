@@ -660,8 +660,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                COALESCE(NULLIF(btrim(s.assigned_truck_number),''),
                         NULLIF(btrim(s.rental_truck_number),''),
                         s.truck_number)                        AS truck_number,
-               COALESCE(NULLIF(btrim(a.district_no::text),''),
-                        NULLIF(btrim(a.unit::text),''))        AS unit
+               NULLIF(btrim(a.district_no::text),'')           AS unit
         FROM vrm_rental_tech_survey s
         JOIN all_techs a ON upper(a.tech_racfid) = upper(s.ldap)
         WHERE s.has_rental
@@ -702,6 +701,38 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         if (out.ok) filed++;
         else if (out.skipReason) skipped++;
         else failed++;
+
+        // Tracking. A filed block that leaves no trace outside this response
+        // body cannot be reconciled tomorrow, so record it against the
+        // technician before moving on.
+        const blkStatus = out.ok ? (live ? "filed" : "test")
+                        : out.skipReason ? "skipped" : "failed";
+        try {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_cutover
+              (ldap, tech_name, truck_number, route_block_status,
+               route_block_project_id, route_block_project_name, route_block_date,
+               route_block_live, route_block_filed_at, route_block_error, updated_at)
+            VALUES (${r.ldap}, ${r.tech_name ?? null}, ${truck}, ${blkStatus},
+                    ${out.projectId ?? null}, ${out.projectName ?? null}, ${date}::date,
+                    ${live}, ${out.ok ? sql`now()` : sql`NULL`},
+                    ${out.errorMessage ?? out.skipReason ?? null}, now())
+            ON CONFLICT (ldap) DO UPDATE SET
+              tech_name                = COALESCE(EXCLUDED.tech_name, vrm_rental_cutover.tech_name),
+              truck_number             = COALESCE(EXCLUDED.truck_number, vrm_rental_cutover.truck_number),
+              route_block_status       = EXCLUDED.route_block_status,
+              route_block_project_id   = EXCLUDED.route_block_project_id,
+              route_block_project_name = EXCLUDED.route_block_project_name,
+              route_block_date         = EXCLUDED.route_block_date,
+              route_block_live         = EXCLUDED.route_block_live,
+              route_block_filed_at     = EXCLUDED.route_block_filed_at,
+              route_block_error        = EXCLUDED.route_block_error,
+              updated_at               = now()
+          `);
+        } catch (trackErr: any) {
+          // Never let bookkeeping fail a block that was actually filed.
+          console.error("[survey] cutover tracking failed for", r.ldap, trackErr?.message);
+        }
         results.push({
           ldap: r.ldap, tech_name: r.tech_name, truck_number: truck, unit,
           ok: out.ok, skipReason: out.skipReason ?? null,
@@ -1084,6 +1115,132 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     } catch (error: any) {
       console.error("[survey] reservation queue failed:", error?.message || error);
       res.status(500).json({ message: "Failed to load reservation queue." });
+    }
+  });
+
+  /**
+   * Record what the ETD booker did. Called by scripts/book_cutover.py once per
+   * technician so the reservation exists somewhere other than a local file.
+   *
+   * Upsert on LDAP: re-running the booker corrects the row rather than
+   * duplicating it, and a later route block lands on the same row.
+   */
+  router.post("/forms/rental-survey/record-booking", async (req, res) => {
+    try {
+      const items = Array.isArray(req.body?.results) ? req.body.results : [];
+      if (!items.length) return res.status(400).json({ message: "results[] required" });
+
+      let recorded = 0;
+      for (const it of items) {
+        const ldap = String(it?.ldap || "").trim().toUpperCase();
+        if (!ldap) continue;
+        const status = it?.error ? "failed" : (it?.etd_reference ? "booked" : "validated");
+        await db.execute(sql`
+          INSERT INTO vrm_rental_cutover
+            (ldap, tech_name, truck_number, van_status, reservation_status,
+             etd_reference, etd_reservation_id, branch_code_wanted, branch_code_booked,
+             branch_pinned, branch_name, branch_address, vehicle_class,
+             reservation_start, reservation_end, reserved_at, reservation_error, updated_at)
+          VALUES (${ldap}, ${it?.tech_name ?? null}, ${it?.truck_number ?? null},
+                  ${it?.van_status ?? null}, ${status},
+                  ${it?.etd_reference ?? null}, ${it?.etd_reservation_id ?? null},
+                  ${it?.branch_code_wanted ?? null}, ${it?.branch_code_booked ?? null},
+                  ${it?.branch_pinned ?? null}, ${it?.branch_name ?? null},
+                  ${it?.branch_address ?? null}, ${it?.vehicle_class ?? null},
+                  ${it?.start ?? null}, ${it?.end ?? null},
+                  ${status === "booked" ? sql`now()` : sql`NULL`},
+                  ${it?.error ?? null}, now())
+          ON CONFLICT (ldap) DO UPDATE SET
+            tech_name          = COALESCE(EXCLUDED.tech_name, vrm_rental_cutover.tech_name),
+            truck_number       = COALESCE(EXCLUDED.truck_number, vrm_rental_cutover.truck_number),
+            van_status         = COALESCE(EXCLUDED.van_status, vrm_rental_cutover.van_status),
+            reservation_status = EXCLUDED.reservation_status,
+            etd_reference      = COALESCE(EXCLUDED.etd_reference, vrm_rental_cutover.etd_reference),
+            etd_reservation_id = COALESCE(EXCLUDED.etd_reservation_id, vrm_rental_cutover.etd_reservation_id),
+            branch_code_wanted = EXCLUDED.branch_code_wanted,
+            branch_code_booked = EXCLUDED.branch_code_booked,
+            branch_pinned      = EXCLUDED.branch_pinned,
+            branch_name        = EXCLUDED.branch_name,
+            branch_address     = EXCLUDED.branch_address,
+            vehicle_class      = EXCLUDED.vehicle_class,
+            reservation_start  = EXCLUDED.reservation_start,
+            reservation_end    = EXCLUDED.reservation_end,
+            reserved_at        = COALESCE(vrm_rental_cutover.reserved_at, EXCLUDED.reserved_at),
+            reservation_error  = EXCLUDED.reservation_error,
+            updated_at         = now()
+        `);
+        recorded++;
+      }
+      res.json({ recorded });
+    } catch (error: any) {
+      console.error("[survey] record-booking failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "record-booking failed" });
+    }
+  });
+
+  /**
+   * The cutover scoreboard: every surveyed technician still in a rental, and
+   * how far they have moved. Answers "who is surveyed but not reserved" and
+   * "who is reserved but has no route block" without opening a spreadsheet.
+   *
+   * Read straight from the survey table LEFT JOINed to tracking, so a
+   * technician who has not been touched by the booker still appears, as
+   * `surveyed`, rather than silently missing.
+   */
+  router.get("/forms/rental-survey/cutover-status", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        WITH latest AS (
+          SELECT DISTINCT ON (upper(s.ldap))
+                 upper(s.ldap) AS ldap, s.tech_name, s.van_status,
+                 COALESCE(NULLIF(btrim(s.assigned_truck_number),''),
+                          NULLIF(btrim(s.rental_truck_number),''),
+                          s.truck_number) AS truck_number,
+                 s.rental_branch_city, s.rental_branch_state, s.created_at AS surveyed_at
+          FROM vrm_rental_tech_survey s
+          WHERE s.has_rental AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
+          ORDER BY upper(s.ldap), s.created_at DESC
+        )
+        SELECT l.ldap, l.tech_name, l.truck_number, l.van_status,
+               l.rental_branch_city, l.rental_branch_state, l.surveyed_at,
+               COALESCE(c.reservation_status, 'pending') AS reservation_status,
+               c.etd_reference, c.branch_name, c.branch_pinned, c.vehicle_class,
+               c.reserved_at, c.reservation_error,
+               COALESCE(c.route_block_status, 'pending') AS route_block_status,
+               c.route_block_project_name, c.route_block_date, c.route_block_live,
+               c.route_block_filed_at, c.route_block_error,
+               CASE
+                 WHEN l.van_status = 'unknown_escalate'      THEN 'held: van location unknown'
+                 WHEN c.reservation_status = 'booked'
+                  AND c.route_block_status IN ('filed')      THEN 'complete'
+                 WHEN c.reservation_status = 'booked'        THEN 'reserved, no route block'
+                 WHEN c.reservation_status = 'failed'        THEN 'reservation failed'
+                 ELSE 'surveyed only'
+               END AS stage
+        FROM latest l
+        LEFT JOIN vrm_rental_cutover c ON c.ldap = l.ldap
+        ORDER BY l.ldap
+      `);
+
+      const tally = (key: string) => {
+        const out: Record<string, number> = {};
+        for (const r of rows as any[]) {
+          const k = String((r as any)[key] ?? "pending");
+          out[k] = (out[k] || 0) + 1;
+        }
+        return out;
+      };
+
+      res.json({
+        total: rows.length,
+        by_stage: tally("stage"),
+        by_reservation: tally("reservation_status"),
+        by_route_block: tally("route_block_status"),
+        rows,
+      });
+    } catch (error: any) {
+      console.error("[survey] cutover-status failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "cutover-status failed" });
     }
   });
 }

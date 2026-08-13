@@ -794,7 +794,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if ((req.method === "GET" && req.path === "/forms/schema-health")
         || (req.method === "GET" && req.path === "/forms/rental-request/booking-queue")
         || (req.method === "POST" && req.path === "/forms/etd-churn/record")
-        || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/booked$/.test(req.path))) {
+        || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/booked$/.test(req.path))
+        // Same convention for the Holman->direct-billing cutover: book_cutover.py
+        // runs on Tyler's machine (ETD credentials live there, not here) and posts
+        // each reservation back so the survey pool, the reservation and the route
+        // block are one queryable record instead of a JSON file on one laptop.
+        || (req.method === "POST" && req.path === "/forms/rental-survey/record-booking")
+        || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")) {
         const t = req.headers["x-internal-cron"];
         if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)
                || (process.env.NEXUS_CRON_SECRET && t === process.env.NEXUS_CRON_SECRET))) {

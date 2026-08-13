@@ -247,6 +247,34 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL;
   `);
 
+  // One live request per technician on the OPEN front door.
+  //
+  // The index above is partial on `token_id IS NOT NULL`, so it does not cover
+  // self-serve submissions at all. Without this, two tabs or one double-tap on
+  // a slow phone produce two records, and two records become two real ETD
+  // reservations for one technician - the same duplicate-booking failure the
+  // token index exists to prevent, through the door that has no token.
+  //
+  // Older duplicates are DEMOTED, never deleted: a live row can already carry
+  // a reservation, and this migration runs unattended behind a non-fatal
+  // catch. Losing a booked request here would be undiscoverable.
+  await db.execute(sql`
+    UPDATE vrm_rental_request a
+    SET status = superseded, updated_at = now()
+    FROM vrm_rental_request b
+    WHERE a.token_id IS NULL AND b.token_id IS NULL
+      AND a.ldap = b.ldap
+      AND a.status IN (screened,approved,booked)
+      AND b.status IN (screened,approved,booked)
+      AND a.created_at < b.created_at
+      AND a.etd_booked_at IS NULL;
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_open_live_uniq
+      ON vrm_rental_request (ldap)
+      WHERE token_id IS NULL AND status IN ('screened','approved','booked');
+  `);
+
   // Where a request came from. A survey-originated request has no token and no
   // policy acknowledgement, because the technician never saw that form — so it
   // must be visibly distinguishable from one they actually filled in.
@@ -369,5 +397,56 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_tech_survey (truck_decommissioned) WHERE truck_decommissioned;
   `);
 
-  console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey)");
+
+  /**
+   * Cutover tracking: one row per technician moving off Holman billing.
+   *
+   * The survey answer, the ETD reservation and the route block were three
+   * disconnected steps whose only record was a JSON file on one laptop. This
+   * table is the join, so "where is this technician in the cutover" is a query
+   * rather than an archaeology exercise.
+   *
+   * Keyed on LDAP and upserted, so re-running the booker or the route filer
+   * updates the same row instead of stacking duplicates.
+   */
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_cutover (
+      id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      ldap                    text NOT NULL UNIQUE,
+      tech_name               text,
+      truck_number            text,
+      van_status              text,
+
+      reservation_status      text NOT NULL DEFAULT 'pending',
+      etd_reference           text,
+      etd_reservation_id      text,
+      branch_code_wanted      text,
+      branch_code_booked      text,
+      branch_pinned           boolean,
+      branch_name             text,
+      branch_address          text,
+      vehicle_class           text,
+      reservation_start       text,
+      reservation_end         text,
+      reserved_at             timestamptz,
+      reservation_error       text,
+
+      route_block_status      text NOT NULL DEFAULT 'pending',
+      route_block_project_id   text,
+      route_block_project_name text,
+      route_block_date        date,
+      route_block_live        boolean,
+      route_block_filed_at    timestamptz,
+      route_block_error       text,
+
+      created_at              timestamptz NOT NULL DEFAULT now(),
+      updated_at              timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS vrm_rental_cutover_res_idx
+      ON vrm_rental_cutover (reservation_status);
+    CREATE INDEX IF NOT EXISTS vrm_rental_cutover_blk_idx
+      ON vrm_rental_cutover (route_block_status);
+  `);
+
+  console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover)");
 }
