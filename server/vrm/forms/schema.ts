@@ -465,5 +465,35 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_cutover (route_block_status);
   `);
 
+
+  /**
+   * AMS vehicle-status mirror, pushed from LIVHR raw_ams by a local runner
+   * (Nexus cannot reach the LIVHR database). Keyed on the truck number with
+   * leading zeros stripped, because TPMS pads to six and the rental feed to
+   * five and joining them raw matches nothing.
+   *
+   * sale_date is stored because "Sent To Auction" is never rolled off after
+   * the sale; a status without its sale_date is a known lie.
+   */
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_ams_status (
+      truck_norm        text PRIMARY KEY,
+      truck_number      text,
+      truck_status_name text,
+      in_repair         text,
+      repair_status     text,
+      svc_reason        text,
+      disposition       text,
+      tech_ldap         text,
+      tech_name         text,
+      outof_svc_date    date,
+      sale_date         date,
+      cur_loc_city      text,
+      cur_loc_state     text,
+      ams_synced_at     timestamptz,
+      pushed_at         timestamptz NOT NULL DEFAULT now()
+    );
+  `);
+
   console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover)");
 }

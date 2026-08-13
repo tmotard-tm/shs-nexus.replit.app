@@ -298,10 +298,22 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                  WHEN c.reservation_status = 'failed'      THEN 'failed'
                  ELSE ''
                END AS cutover_status,
-               c.etd_reference AS cutover_reference
+               c.etd_reference AS cutover_reference,
+               -- What AMS says about their van, next to what they claimed.
+               a.truck_status_name AS ams_status,
+               a.in_repair         AS ams_in_repair,
+               a.repair_status     AS ams_repair_status,
+               a.sale_date         AS ams_sale_date,
+               a.cur_loc_city      AS ams_loc_city,
+               a.cur_loc_state     AS ams_loc_state,
+               a.ams_synced_at
         FROM vrm_rental_tech_survey r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
         LEFT JOIN vrm_rental_cutover c ON c.ldap = upper(r.ldap)
+        LEFT JOIN vrm_ams_status a
+          ON a.truck_norm = ltrim(regexp_replace(
+               COALESCE(NULLIF(btrim(r.assigned_truck_number),''), r.truck_number, ''),
+               '\D', '', 'g'), '0')
         ORDER BY r.created_at DESC
       `);
       res.json({ responses: rows });
@@ -1160,6 +1172,56 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * Upsert on LDAP: re-running the booker corrects the row rather than
    * duplicating it, and a later route block lands on the same row.
    */
+  /**
+   * AMS mirror push. A local runner reads LIVHR raw_ams (the ruled source;
+   * Nexus cannot reach that database) and posts rows here. Batch upsert on
+   * the normalized truck number; safe to re-run any time.
+   */
+  router.post("/forms/rental-survey/ams-status", async (req, res) => {
+    try {
+      const items = Array.isArray(req.body?.rows) ? req.body.rows : [];
+      if (!items.length) return res.status(400).json({ message: "rows[] required" });
+      let upserted = 0;
+      for (const it of items) {
+        const norm = String(it?.truck_number ?? "").replace(/\D/g, "").replace(/^0+/, "");
+        if (!norm) continue;
+        await db.execute(sql`
+          INSERT INTO vrm_ams_status
+            (truck_norm, truck_number, truck_status_name, in_repair, repair_status,
+             svc_reason, disposition, tech_ldap, tech_name, outof_svc_date,
+             sale_date, cur_loc_city, cur_loc_state, ams_synced_at, pushed_at)
+          VALUES (${norm}, ${String(it?.truck_number ?? "")},
+                  ${it?.truck_status_name ?? null}, ${it?.in_repair ?? null},
+                  ${it?.repair_status ?? null}, ${it?.svc_reason ?? null},
+                  ${it?.disposition ?? null}, ${it?.tech_ldap ?? null},
+                  ${it?.tech_name ?? null}, ${it?.outof_svc_date ?? null},
+                  ${it?.sale_date ?? null}, ${it?.cur_loc_city ?? null},
+                  ${it?.cur_loc_state ?? null}, ${it?.ams_synced_at ?? null}, now())
+          ON CONFLICT (truck_norm) DO UPDATE SET
+            truck_number      = EXCLUDED.truck_number,
+            truck_status_name = EXCLUDED.truck_status_name,
+            in_repair         = EXCLUDED.in_repair,
+            repair_status     = EXCLUDED.repair_status,
+            svc_reason        = EXCLUDED.svc_reason,
+            disposition       = EXCLUDED.disposition,
+            tech_ldap         = EXCLUDED.tech_ldap,
+            tech_name         = EXCLUDED.tech_name,
+            outof_svc_date    = EXCLUDED.outof_svc_date,
+            sale_date         = EXCLUDED.sale_date,
+            cur_loc_city      = EXCLUDED.cur_loc_city,
+            cur_loc_state     = EXCLUDED.cur_loc_state,
+            ams_synced_at     = EXCLUDED.ams_synced_at,
+            pushed_at         = now()
+        `);
+        upserted++;
+      }
+      res.json({ upserted });
+    } catch (error: any) {
+      console.error("[survey] ams-status failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "ams-status failed" });
+    }
+  });
+
   router.post("/forms/rental-survey/record-booking", async (req, res) => {
     try {
       const items = Array.isArray(req.body?.results) ? req.body.results : [];

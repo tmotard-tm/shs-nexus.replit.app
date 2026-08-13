@@ -800,6 +800,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // each reservation back so the survey pool, the reservation and the route
         // block are one queryable record instead of a JSON file on one laptop.
         || (req.method === "POST" && req.path === "/forms/rental-survey/record-booking")
+        || (req.method === "POST" && req.path === "/forms/rental-survey/ams-status")
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")) {
         const t = req.headers["x-internal-cron"];
         if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)

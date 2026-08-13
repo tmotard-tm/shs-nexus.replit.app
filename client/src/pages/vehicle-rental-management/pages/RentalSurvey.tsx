@@ -29,6 +29,13 @@ interface SurveyRow {
   tech_name: string | null;
   cutover_status?: string | null;
   cutover_reference?: string | null;
+  ams_status?: string | null;
+  ams_in_repair?: string | null;
+  ams_repair_status?: string | null;
+  ams_sale_date?: string | null;
+  ams_loc_city?: string | null;
+  ams_loc_state?: string | null;
+  ams_synced_at?: string | null;
   truck_number: string | null;
   has_rental: boolean | null;
   no_rental_reason: string | null;
@@ -450,6 +457,7 @@ export default function RentalSurvey() {
     atruck: (r) => r.assigned_truck_number,
     status: (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status,
     cutover: (r) => r.cutover_status ?? "",
+    ams: (r) => (r.ams_sale_date ? "SOLD" : r.ams_status ?? ""),
     shop: (r) => r.shop_name,
     ready: (r) => r.promised_ready_date,
     submitted: (r) => r.created_at,
@@ -473,6 +481,9 @@ export default function RentalSurvey() {
       ["truck_mismatch", (r) => (r.truck_mismatch ? "YES" : "")],
       ["van_status", (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status],
       ["cutover", (r) => r.cutover_status], ["cutover_reference", (r) => r.cutover_reference],
+      ["ams_status", (r) => r.ams_status], ["ams_sale_date", (r) => r.ams_sale_date],
+      ["ams_repair_status", (r) => r.ams_repair_status],
+      ["ams_location", (r) => [r.ams_loc_city, r.ams_loc_state].filter(Boolean).join(", ")],
       ["shop_name", (r) => r.shop_name], ["shop_city", (r) => r.shop_city], ["shop_state", (r) => r.shop_state],
       ["shop_phone", (r) => r.shop_phone], ["promised_ready", (r) => r.promised_ready_date],
       ["techhub_still_using", (r) => (r.techhub_still_using == null ? "" : r.techhub_still_using ? "Yes" : "No")],
@@ -581,6 +592,7 @@ export default function RentalSurvey() {
                 <SortHeader col="rtruck" text="Rental truck" sort={sort} setSort={setSort} />
                 <SortHeader col="atruck" text="Assigned truck" sort={sort} setSort={setSort} />
                 <SortHeader col="status" text="Van status" sort={sort} setSort={setSort} />
+                <SortHeader col="ams" text="AMS says" sort={sort} setSort={setSort} />
                 <SortHeader col="cutover" text="Cutover" sort={sort} setSort={setSort} />
                 <SortHeader col="shop" text="Shop" sort={sort} setSort={setSort} />
                 <SortHeader col="ready" text="Promised" sort={sort} setSort={setSort} />
@@ -622,6 +634,19 @@ export default function RentalSurvey() {
                     {r.van_status === "unknown_escalate"
                       ? <Pill text="UNKNOWN" fg={colors.red} bg={colors.redLight} />
                       : (VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status ?? "—")}
+                  </td>
+                  <td style={tdBase}
+                      title={[r.ams_repair_status && `Repair: ${r.ams_repair_status}`,
+                              (r.ams_loc_city || r.ams_loc_state) && `Loc: ${r.ams_loc_city ?? ""} ${r.ams_loc_state ?? ""}`,
+                              r.ams_synced_at && `AMS synced ${String(r.ams_synced_at).slice(0, 10)}`]
+                             .filter(Boolean).join("  ·  ")}>
+                    {r.ams_sale_date
+                      ? <Pill text={`SOLD ${String(r.ams_sale_date).slice(0, 10)}`} fg={colors.red} bg={colors.redLight} />
+                      : r.ams_status
+                      ? (r.ams_status === "In Repair"
+                          ? <Pill text="In Repair" fg={colors.amber} bg={colors.amberLight} />
+                          : r.ams_status)
+                      : "—"}
                   </td>
                   <td style={tdBase} title={r.cutover_reference ? `ETD ${r.cutover_reference}` : ""}>
                     {r.cutover_status === "complete"
