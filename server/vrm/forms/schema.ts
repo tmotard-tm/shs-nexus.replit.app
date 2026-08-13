@@ -264,15 +264,16 @@ export async function initFormsSchema(): Promise<void> {
     FROM vrm_rental_request b
     WHERE a.token_id IS NULL AND b.token_id IS NULL
       AND a.ldap = b.ldap
-      AND a.status IN ('screened','approved','booked')
-      AND b.status IN ('screened','approved','booked')
+      AND a.status IN ('pending','approved','booked')
+      AND b.status IN ('pending','approved','booked')
       AND a.created_at < b.created_at
       AND a.etd_booked_at IS NULL;
   `);
   await db.execute(sql`
+    DROP INDEX IF EXISTS vrm_rental_request_open_live_uniq;
     CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_open_live_uniq
       ON vrm_rental_request (ldap)
-      WHERE token_id IS NULL AND status IN ('screened','approved','booked');
+      WHERE token_id IS NULL AND status IN ('pending','approved','booked');
   `);
 
   // Where a request came from. A survey-originated request has no token and no

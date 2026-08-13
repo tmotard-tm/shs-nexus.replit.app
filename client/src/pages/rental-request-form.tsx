@@ -39,7 +39,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Loader2, CheckCircle, AlertCircle, Truck, XCircle, Clock } from "lucide-react";
+import { Loader2, CheckCircle, AlertCircle, Truck } from "lucide-react";
 
 const STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
@@ -141,7 +141,9 @@ export default function RentalRequestForm() {
   const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  const isMaintenance = problemCategory === "scheduled_maintenance";
+  // Maintenance used to end the form on the spot with a denial script. It does
+  // not any more: Tyler decides every request, so every request is completed and
+  // submitted. Kept as a category because the denial mix still needs to count it.
   const visibleAcks = ACKS.filter(([k]) => k !== "ackHasAppointment" || !identity?.isByov);
   const clearErr = (k: string) =>
     setFieldErrors((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
@@ -193,19 +195,6 @@ export default function RentalRequestForm() {
 
   /** ETD needs an hour, not just a day. */
   const appointmentAt = appointmentDate ? `${appointmentDate}T${appointmentTime || "08:00"}` : "";
-
-  /** Maintenance short-circuits: submit it so the denial is on record, then stop. */
-  const submitMaintenance = () => {
-    // Carry identity even on the short-circuit. A denial with no district or
-    // state is useless in the denial-mix report, which is the number this whole
-    // form exists to produce.
-    submitMutation.mutate({
-      ldap, truckNumber, problemCategory: "scheduled_maintenance",
-      symptom, isDrivable, isSafeToDrive,
-      district: identity?.district, homeState: identity?.homeState,
-      mobilePhone: identity?.mobilePhone,
-    });
-  };
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -268,23 +257,20 @@ export default function RentalRequestForm() {
   }
 
   if (step === "done" || linkInfo?.completed) {
-    const d = result?.decision;
-    const good = d === "APPROVE";
-    const wait = d === "DEFER" || d === "REVIEW";
-    const Icon = good ? CheckCircle : wait ? Clock : XCircle;
-    const tone = good ? "text-green-600" : wait ? "text-amber-600" : "text-red-600";
-    const title = good ? "Approved" : d === "DEFER" ? "Not yet" : d === "REVIEW" ? "Sent to Fleet" : "Not approved";
+    // One outcome, because the form decides nothing. Telling a technician
+    // "approved" before a person has looked would be a commitment in Fleet's
+    // name that nothing keeps.
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
         <Card className="w-full max-w-md">
           <CardHeader>
-            <div className={`flex items-center gap-2 ${tone}`}><Icon className="h-5 w-5" />
-              <CardTitle className="text-lg">{title}</CardTitle></div>
+            <div className="flex items-center gap-2 text-green-600">
+              <CheckCircle className="h-5 w-5" />
+              <CardTitle className="text-lg">Request received</CardTitle>
+            </div>
             <CardDescription>
               {result?.message
-                || (good
-                  ? "Your rental is approved. Fleet will send the reservation details shortly."
-                  : "Your request is recorded. Fleet will follow up.")}
+                || "Fleet has your request and will review it. You will get a text as soon as it is decided."}
             </CardDescription>
           </CardHeader>
           {result?.requestNo && (
@@ -410,22 +396,7 @@ export default function RentalRequestForm() {
                 </Select>
                 {fieldErrors.problemCategory && <p className="text-sm text-red-600">{fieldErrors.problemCategory}</p>}
 
-                {isMaintenance ? (
-                  <div className="space-y-3 rounded-md border border-red-200 bg-red-50 p-3">
-                    <p className="text-sm text-red-900">
-                      Rentals are not provided for oil changes, tires, preventive maintenance,
-                      inspections or recalls. Schedule this as a wait through routing.
-                    </p>
-                    <p className="text-xs text-red-800">
-                      We will still log it so Fleet can see the volume.
-                    </p>
-                    <Button variant="outline" className="w-full border-red-300 bg-white"
-                            onClick={submitMaintenance} disabled={submitMutation.isPending}>
-                      {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Log it and close"}
-                    </Button>
-                  </div>
-                ) : (
-                  <>
+                <>
                     <div className="space-y-2">
                       <Label htmlFor="symptom">In your own words, what is it doing?</Label>
                       <Textarea id="symptom" rows={3} value={symptom}
@@ -470,13 +441,12 @@ export default function RentalRequestForm() {
                       <Textarea id="tried" rows={2} value={whatWasTried}
                                 onChange={(e) => setWhatWasTried(e.target.value)} />
                     </div>
-                  </>
-                )}
+                </>
               </CardContent>
             </Card>
 
             {/* Section C — where it is going. Not applicable to BYOV. */}
-            {!isMaintenance && !identity?.isByov && (
+            {!identity?.isByov && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Where is it going?</CardTitle>
@@ -573,7 +543,7 @@ export default function RentalRequestForm() {
             )}
 
             {/* Section D — acknowledgements */}
-            {!isMaintenance && (
+            {(
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Before you submit</CardTitle>
@@ -594,7 +564,7 @@ export default function RentalRequestForm() {
 
             {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
-            {!isMaintenance && (
+            {(
               <Button className="w-full" onClick={onSubmit} disabled={submitMutation.isPending}>
                 {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
               </Button>

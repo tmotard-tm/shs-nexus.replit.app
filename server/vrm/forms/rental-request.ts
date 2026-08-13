@@ -542,7 +542,10 @@ async function alertFleet(r: {
   homeState?: string | null; shopName?: string | null; appointmentAt?: string | null;
   regionOwner?: string | null;
 }): Promise<void> {
-  if (r.decision !== "APPROVE" && r.decision !== "REVIEW") return;
+  // Every request needs a person now, so every request pushes. The old filter
+  // existed to keep the alert worth reading when the engine resolved most
+  // requests by itself; it resolves nothing now.
+
   const to = String(process.env.RENTAL_REQUEST_ALERT_PHONES || "")
     .split(",").map((s) => s.trim()).filter(Boolean);
   if (!to.length) {
@@ -550,12 +553,14 @@ async function alertFleet(r: {
       + `request #${r.requestNo} (${r.decision}) landed with no push`);
     return;
   }
-  const head = r.decision === "APPROVE" ? "AUTO-APPROVED" : "NEEDS YOU";
+  const head = "NEEDS YOU";
   const body =
     `Fleet rental request #${r.requestNo} ${head}\n`
     + `${r.techName || r.ldap} (${r.ldap})${r.truck ? ` truck ${r.truck}` : ""}`
     + `${r.homeState ? ` ${r.homeState}` : ""}\n`
-    + `${r.category.replace(/_/g, " ")} - rule ${r.rule}: ${r.reason}\n`
+    + `${r.category.replace(/_/g, " ")}\n`
+    // The engine's opinion rides along as a hint. It decided nothing.
+    + `(engine would have said ${r.decision}, rule ${r.rule}: ${r.reason})\n`
     + (r.shopName ? `Shop: ${r.shopName}${r.appointmentAt ? ` on ${String(r.appointmentAt).slice(0, 10)}` : ""}\n` : "")
     + (r.regionOwner ? `Region: ${r.regionOwner}\n` : "")
     + `Queue: ${(process.env.PUBLIC_BASE_URL || "https://SHS-Nexus.replit.app").replace(/\/+$/, "")}`
@@ -668,8 +673,8 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // BYOV technician was previously made to attest to an appointment the form
   // deliberately hid from them, which is a false attestation in an audit
   // trail whose entire purpose is being true.
-  const acksRequired = verdict.decision === "APPROVE" || verdict.decision === "REVIEW";
-  const appointmentAsked = !isByov;
+  const acksRequired = true;
+  const appointmentAsked = bool(b.hasAppointment) === true;
   const acks = {
     ack_not_maintenance: b.ackNotMaintenance === true,
     ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
@@ -686,11 +691,16 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     }
   }
 
-  const status =
-    verdict.decision === "APPROVE" ? "approved"
-    : verdict.decision === "DENY" ? "denied"
-    : verdict.decision === "DEFER" ? "deferred"
-    : "screened";
+  // ONE PATH: every request lands pending and waits for a person.
+  //
+  // Tyler, 2026-08-13: "Simple for now. Request form, manual approval, approval
+  // creates the reservation." So the eight rules no longer decide anything. The
+  // engine still runs and its verdict is still recorded on the row, because when
+  // the rules are reworked the useful input is what the engine WOULD have said
+  // against what Tyler actually decided. It is data, not a gate. `status` is a
+  // constant here on purpose: there is no expression that can route a request
+  // anywhere except to a human.
+  const status = "pending";
 
   const homeState = ctx.identity.homeState ?? (facts?.home_state ?? null);
   const shopState = s(b.shopState, 2);
@@ -761,14 +771,18 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     regionOwner,
   });
 
+  // Never hand back the engine's verdict. It decided nothing, and showing a
+  // technician "approved" before a person has looked would be a promise in
+  // Fleet's name that nothing keeps — the exact failure the survey escalation
+  // was reverted for on 2026-08-13.
   return {
     code: 200,
     json: {
       success: true,
       requestNo,
-      decision: verdict.decision,
-      rule: verdict.rule,
-      message: verdict.script ?? null,
+      decision: "PENDING",
+      message: "Fleet has your request and will review it. "
+             + "You will get a text as soon as it is decided.",
     },
   };
 }
@@ -824,7 +838,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       // A technician who already has one in flight must not open a second.
       const { rows: live } = await db.execute(sql`
         SELECT request_no, status FROM vrm_rental_request
-        WHERE ldap = ${ldap} AND status IN ('screened','approved','booked')
+        WHERE ldap = ${ldap} AND status IN ('pending','approved','booked')
           AND created_at > now() - interval '30 days'
         ORDER BY created_at DESC LIMIT 1
       `);
@@ -923,7 +937,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       // backstop underneath this; this is here to give a readable answer.
       const { rows: live } = await db.execute(sql`
         SELECT request_no, status FROM vrm_rental_request
-        WHERE ldap = ${ldap} AND status IN ('screened','approved','booked')
+        WHERE ldap = ${ldap} AND status IN ('pending','approved','booked')
           AND created_at > now() - interval '30 days'
         ORDER BY created_at DESC LIMIT 1
       `);
@@ -1275,7 +1289,6 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         SET claimed_at = now(), claimed_by = ${runner}
         WHERE status = 'approved' AND etd_booked_at IS NULL
           AND appointment_at IS NOT NULL
-          AND COALESCE(is_byov, false) = false
           AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
       `);
       const { rows } = await db.execute(sql`
@@ -1287,12 +1300,17 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                to_char(r.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
                to_char(r.appointment_at + ((COALESCE(r.shop_estimated_days,1) + 1) * interval '1 day'),
                        'YYYY-MM-DD"T"HH24:MI:SS')                    AS end_dt,
-               r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference
+               r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference,
+               -- Class is decided from the roster, never asked. Tyler's cutover
+               -- ruling 2026-08-13: not HVAC gets a sedan, HVAC keeps a vehicle
+               -- sized like the one they have because the equipment does not fit
+               -- in a trunk. Sent as the raw title so the runner owns the mapping.
+               a.job_title                                           AS job_title
         FROM vrm_rental_request r
+        LEFT JOIN all_techs a ON upper(a.tech_racfid) = upper(r.ldap)
         WHERE r.status = 'approved'
           AND r.etd_booked_at IS NULL
           AND r.appointment_at IS NOT NULL
-          AND COALESCE(r.is_byov, false) = false
           AND r.claimed_by = ${runner}
         ORDER BY r.appointment_at
       `);
