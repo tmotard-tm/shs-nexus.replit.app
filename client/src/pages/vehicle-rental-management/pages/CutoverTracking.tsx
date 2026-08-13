@@ -6,10 +6,11 @@
  * unconnected places, the reservation in a JSON file on one laptop, so
  * "is this person done" was unanswerable without opening three things.
  *
- * Reads GET /api/vrm/forms/rental-survey/cutover-status, which LEFT JOINs the
- * survey pool to vrm_rental_cutover. A technician nobody has touched appears as
- * "surveyed only" rather than going missing, which matters because the missing
- * ones are the work.
+ * Reads GET /api/vrm/forms/rental-survey/cutover-status, which returns
+ * COMPLETE records only: a technician appears here once their ETD reservation
+ * is booked AND their route block is filed live — never before. The page is
+ * deliberately blank until then (per Tyler, 2026-08-13); "who is surveyed but
+ * not yet reserved" lives in the reservation queue, not here.
  *
  * Table conventions per the standing standard: sortable headers, multi-select
  * filters with live counts, "N shown of M", search, CSV of the filtered and
@@ -19,7 +20,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ArrowUp, ArrowDown, ArrowUpDown, Search, Download, X, Loader2,
-  CheckCircle2, CalendarClock, AlertTriangle, CircleDashed,
+  CheckCircle2, CalendarClock, AlertTriangle,
 } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
 
@@ -181,9 +182,6 @@ export default function CutoverTracking() {
 
   const reserved = rows.filter((r) => r.reservation_status === "booked").length;
   const blocked = rows.filter((r) => r.route_block_status === "filed").length;
-  const complete = rows.filter((r) => r.stage === "complete").length;
-  const failed = rows.filter((r) => r.reservation_status === "failed"
-                                 || r.route_block_status === "failed").length;
 
   const card = {
     background: colors.surface, border: `1px solid ${colors.rule}`,
@@ -231,14 +229,12 @@ export default function CutoverTracking() {
   }
 
   const kpis = [
-    { label: "In the cutover pool", value: rows.length, icon: CircleDashed, tone: colors.inkMuted,
-      sub: "surveyed, still in a rental" },
+    { label: "Complete records", value: rows.length, icon: CheckCircle2, tone: colors.greenDeep,
+      sub: "reserved and route-blocked" },
     { label: "Reservation created", value: reserved, icon: CheckCircle2, tone: colors.blue,
-      sub: rows.length ? `${Math.round((reserved / rows.length) * 100)}% of pool` : "" },
+      sub: "ETD booking confirmed" },
     { label: "Route block filed", value: blocked, icon: CalendarClock, tone: colors.purple,
       sub: "on a real route" },
-    { label: "Both done", value: complete, icon: CheckCircle2, tone: colors.greenDeep,
-      sub: "reserved and blocked" },
   ];
 
   return (
@@ -262,8 +258,8 @@ export default function CutoverTracking() {
       </div>
       <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft,
                   margin: "0 0 18px" }}>
-        Every technician who told us they are still in a rental, and how far they have moved.
-        A row with no reservation has not been booked yet — it is not an error.
+        Complete records only: a technician appears here once their Enterprise reservation is
+        booked and their route block is filed. Until both happen, they are not on this page.
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))",
@@ -285,17 +281,6 @@ export default function CutoverTracking() {
           </div>
         ))}
       </div>
-
-      {failed > 0 && (
-        <div style={{ ...card, borderColor: colors.red, background: colors.redLight,
-                      marginBottom: 18, display: "flex", gap: 9, alignItems: "center" }}>
-          <AlertTriangle size={17} color={colors.red} />
-          <span style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
-            <strong>{failed}</strong> technician{failed === 1 ? "" : "s"} had a reservation or
-            route block fail. Filter the Stage column to see them.
-          </span>
-        </div>
-      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
         <div style={card}>
@@ -467,7 +452,9 @@ export default function CutoverTracking() {
               <tr>
                 <td colSpan={9} style={{ ...td, textAlign: "center", color: colors.inkMuted,
                                          padding: 30 }}>
-                  Nothing matches those filters.
+                  {rows.length === 0
+                    ? "No complete records yet. A technician appears here once their reservation is booked and their route block is filed."
+                    : "Nothing matches those filters."}
                 </td>
               </tr>
             )}

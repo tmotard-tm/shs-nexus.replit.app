@@ -1179,47 +1179,40 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
   });
 
   /**
-   * The cutover scoreboard: every surveyed technician still in a rental, and
-   * how far they have moved. Answers "who is surveyed but not reserved" and
-   * "who is reserved but has no route block" without opening a spreadsheet.
+   * The cutover scoreboard: COMPLETE records only.
    *
-   * Read straight from the survey table LEFT JOINed to tracking, so a
-   * technician who has not been touched by the booker still appears, as
-   * `surveyed`, rather than silently missing.
+   * A row appears here only after BOTH steps have really happened — the ETD
+   * reservation is booked AND the route block is filed live. Per Tyler
+   * (2026-08-13): the tracking must be blank until then; it must NOT seed a
+   * line for every surveyed technician. A previous version drove this from
+   * the survey table (LEFT JOIN to tracking) so every surveyed tech appeared
+   * as "surveyed only" — that pool view was never the intent of this page.
+   * "Who is surveyed but not yet reserved" is the reservation queue's job.
    */
   router.get("/forms/rental-survey/cutover-status", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
-        WITH latest AS (
-          SELECT DISTINCT ON (upper(s.ldap))
-                 upper(s.ldap) AS ldap, s.tech_name, s.van_status,
-                 COALESCE(NULLIF(btrim(s.assigned_truck_number),''),
-                          NULLIF(btrim(s.rental_truck_number),''),
-                          s.truck_number) AS truck_number,
-                 s.rental_branch_city, s.rental_branch_state, s.created_at AS surveyed_at
-          FROM vrm_rental_tech_survey s
-          WHERE s.has_rental AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
-          ORDER BY upper(s.ldap), s.created_at DESC
-        )
-        SELECT l.ldap, l.tech_name, l.truck_number, l.van_status,
-               l.rental_branch_city, l.rental_branch_state, l.surveyed_at,
-               COALESCE(c.reservation_status, 'pending') AS reservation_status,
+        SELECT c.ldap, c.tech_name, c.truck_number, c.van_status,
+               s.rental_branch_city, s.rental_branch_state, s.surveyed_at,
+               c.reservation_status,
                c.etd_reference, c.branch_name, c.branch_pinned, c.vehicle_class,
                c.reserved_at, c.reservation_error,
-               COALESCE(c.route_block_status, 'pending') AS route_block_status,
+               c.route_block_status,
                c.route_block_project_name, c.route_block_date, c.route_block_live,
                c.route_block_filed_at, c.route_block_error,
-               CASE
-                 WHEN l.van_status = 'unknown_escalate'      THEN 'held: van location unknown'
-                 WHEN c.reservation_status = 'booked'
-                  AND c.route_block_status IN ('filed')      THEN 'complete'
-                 WHEN c.reservation_status = 'booked'        THEN 'reserved, no route block'
-                 WHEN c.reservation_status = 'failed'        THEN 'reservation failed'
-                 ELSE 'surveyed only'
-               END AS stage
-        FROM latest l
-        LEFT JOIN vrm_rental_cutover c ON c.ldap = l.ldap
-        ORDER BY l.ldap
+               'complete' AS stage
+        FROM vrm_rental_cutover c
+        LEFT JOIN LATERAL (
+          SELECT s.rental_branch_city, s.rental_branch_state, s.created_at AS surveyed_at
+          FROM vrm_rental_tech_survey s
+          WHERE upper(s.ldap) = upper(c.ldap)
+          ORDER BY s.created_at DESC
+          LIMIT 1
+        ) s ON true
+        WHERE c.reservation_status = 'booked'
+          AND c.route_block_status = 'filed'
+          AND c.route_block_live IS TRUE
+        ORDER BY c.ldap
       `);
 
       const tally = (key: string) => {
