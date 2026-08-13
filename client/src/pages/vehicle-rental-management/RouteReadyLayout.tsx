@@ -15,6 +15,7 @@ import RightsizeTracker from "./pages/RightsizeTracker";
 import InboundCalls from "./pages/InboundCalls";
 import LucaActivity from "./pages/LucaActivity";
 import RentalSurvey from "./pages/RentalSurvey";
+import CutoverTracking from "./pages/CutoverTracking";
 import RentalRequests from "./pages/RentalRequests";
 import Settings from "./pages/Settings";
 
@@ -84,6 +85,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management/luca-activity" component={LucaActivity} />
             <Route path="/vehicle-rental-management/rental-requests" component={RentalRequests} />
             <Route path="/vehicle-rental-management/rental-survey" component={RentalSurvey} />
+            <Route path="/vehicle-rental-management/cutover-tracking" component={CutoverTracking} />
             <Route path="/vehicle-rental-management/settings" component={Settings} />
             <Route>
               <WipPlaceholder moduleName="Page Not Found" />

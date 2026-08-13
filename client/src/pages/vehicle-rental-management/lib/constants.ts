@@ -126,5 +126,6 @@ export const navItems: NavItem[] = [
   { label: "LUCA Activity", path: "/vehicle-rental-management/luca-activity", icon: Activity },
   { label: "Rental Requests", path: "/vehicle-rental-management/rental-requests", icon: FileQuestion },
   { label: "Rental Survey", path: "/vehicle-rental-management/rental-survey", icon: ClipboardCheck },
+  { label: "Cutover Tracking", path: "/vehicle-rental-management/cutover-tracking", icon: ClipboardCheck },
   { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
 ];
