@@ -796,6 +796,70 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Repair sent_at from the comms log.
+   *
+   * A rejected batch can still have delivered part of itself, and the stamp
+   * only runs after the whole batch returns, so those recipients keep
+   * sent_at NULL forever: under-counted on the dashboard and re-texted by the
+   * next send. This reconciles from proof of delivery.
+   *
+   * Matches on the TOKEN appearing in the message body, not on the LDAP, so a
+   * technician who holds two tokens cannot have the wrong one stamped. Only
+   * ever sets a NULL stamp; never clears one.
+   */
+  router.post("/forms/rental-survey/reconcile-sent", async (req, res) => {
+    try {
+      const confirm = req.body?.confirm === true;
+
+      const { rows: candidates } = await db.execute(sql`
+        SELECT tk.id, tk.ldap, tk.tech_name,
+               min(m.created_at)                AS first_message_at,
+               bool_or(tk.submitted_at IS NOT NULL) AS answered
+        FROM vrm_form_tokens tk
+        JOIN fs_comms_messages m
+          ON m.created_at > now() - interval '30 days'
+         AND position(tk.token in m.body) > 0
+        WHERE tk.form_type = 'rental_tech_survey'
+          AND tk.sent_at IS NULL
+        GROUP BY tk.id, tk.ldap, tk.tech_name
+        ORDER BY tk.ldap
+      `);
+
+      if (!confirm) {
+        return res.json({
+          dryRun: true,
+          would_stamp: candidates.length,
+          note: "Nothing written. Re-post with confirm:true to apply.",
+          candidates,
+        });
+      }
+
+      const { rows: updated } = await db.execute(sql`
+        UPDATE vrm_form_tokens t
+        SET sent_at = sub.first_message_at
+        FROM (
+          SELECT tk.id, min(m.created_at) AS first_message_at
+          FROM vrm_form_tokens tk
+          JOIN fs_comms_messages m
+            ON m.created_at > now() - interval '30 days'
+           AND position(tk.token in m.body) > 0
+          WHERE tk.form_type = 'rental_tech_survey'
+            AND tk.sent_at IS NULL
+          GROUP BY tk.id
+        ) sub
+        WHERE t.id = sub.id
+          AND t.sent_at IS NULL
+        RETURNING t.ldap, t.sent_at
+      `);
+
+      res.json({ stamped: updated.length, rows: updated });
+    } catch (error: any) {
+      console.error("[survey] reconcile-sent failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "reconcile-sent failed" });
+    }
+  });
+
   router.post("/forms/rental-survey/pending", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
