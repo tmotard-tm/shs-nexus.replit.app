@@ -9891,14 +9891,115 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // TPMS rejects unpadded numbers with "Invalid truck and/or dist passed".
       const paddedVehicle = toHolmanRef(vehicle.holmanVehicleNumber);
 
-      // Reject if assigned in either system — TPMS forbids a district change while assigned.
-      const tpmsAssigned = !!String(vehicle.tpmsAssignedTechId || "").trim();
+      // Reject if Holman shows the vehicle assigned — TPMS forbids a district
+      // change while assigned, and this flow only knows how to clear TPMS.
+      const cacheTpmsAssigned = !!String(vehicle.tpmsAssignedTechId || "").trim();
       const holmanAssigned = !!String(vehicle.holmanTechAssigned || "").trim();
-      if (tpmsAssigned || holmanAssigned) {
+      if (holmanAssigned) {
         return res.status(409).json({
           error: "This vehicle is assigned to a tech. Unassign it before changing its district.",
         });
       }
+
+      // ── Live TPMS assignment pre-check (Task #623) ──
+      // The cache's tpms_assigned_tech_id is refreshed off the techsupdatedafter
+      // feed, which never reports truck assign/unassign moves — so it goes stale
+      // and a vehicle can look Unassigned here while live TPMS still has a tech
+      // on it (TPMS then rejects updatetruckdist, e.g. vehicle #23713). Ask TPMS
+      // directly (GET /techinfo accepts a truck number) before the doomed call.
+      const clearTpmsAssignment = req.body?.clearTpmsAssignment === true;
+      const {
+        checkLiveTpmsTruckAssignment,
+        clearTpmsAssignmentForTruck,
+        decideDistrictTpmsGate,
+      } = await import("./fleet-operations-service");
+      const liveTpms = await checkLiveTpmsTruckAssignment(vehicle.holmanVehicleNumber);
+      const gate = decideDistrictTpmsGate({ live: liveTpms, cacheTpmsAssigned, clearTpmsAssignment });
+      let tpmsCleared: string | null = null;
+      if (gate.action === "conflict" || gate.action === "clear-and-proceed") {
+        // Heal the stale cache columns so the fleet card stops claiming Unassigned.
+        // The UPDATE keys on the RAW stored holman_vehicle_number, never a padded form.
+        try {
+          const now = new Date();
+          await db.update(holmanVehiclesCache)
+            .set({
+              tpmsAssignedTechId: gate.ldapId,
+              tpmsAssignedTechName: gate.techName ?? null,
+              tpmsLastSyncAt: now,
+              updatedAt: now,
+            })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicle.holmanVehicleNumber));
+          console.log(`[District] Healed stale TPMS cache columns for ${vehicle.holmanVehicleNumber}: live TPMS shows ${gate.ldapId}`);
+        } catch (healErr) {
+          console.warn("[District] TPMS cache heal failed:", healErr);
+        }
+
+        const who = gate.techName ? `${gate.techName} (${gate.ldapId})` : gate.ldapId;
+        if (gate.action === "conflict") {
+          // Structured conflict — the dialog names the tech and offers an
+          // explicit "clear TPMS and continue" confirmation.
+          return res.status(409).json({
+            error: `TPMS still shows ${who} assigned to this truck, so TPMS would reject the district change. Nexus/Holman shows it unassigned — one side is stale. You can clear the stale TPMS assignment and continue, or cancel and investigate first.`,
+            tpmsConflict: {
+              ldapId: gate.ldapId,
+              techName: gate.techName ?? null,
+              truckNo: vehicle.holmanVehicleNumber,
+            },
+          });
+        }
+        // Operator explicitly confirmed: clear the stale TPMS assignment
+        // (live-verified batch PUT /techinfo with truckNo ""), then continue.
+        const clearResult = await clearTpmsAssignmentForTruck({
+          truckNumber: vehicle.holmanVehicleNumber,
+          ldapId: gate.ldapId,
+          requestedBy: (req.user as any)?.username || "NEXUS",
+        });
+        if (clearResult.status === "failed") {
+          return res.status(502).json({
+            error: `Couldn't clear the TPMS assignment for ${who}: ${clearResult.message}`,
+            tpmsConflict: {
+              ldapId: gate.ldapId,
+              techName: gate.techName ?? null,
+              truckNo: vehicle.holmanVehicleNumber,
+            },
+          });
+        }
+        tpmsCleared = gate.ldapId;
+        console.log(`[District] Cleared stale TPMS assignment for ${vehicle.holmanVehicleNumber}: ${clearResult.message}`);
+        // The truck is now genuinely unassigned in TPMS — reflect that on the card.
+        try {
+          const now = new Date();
+          await db.update(holmanVehiclesCache)
+            .set({ tpmsAssignedTechId: null, tpmsAssignedTechName: null, tpmsLastSyncAt: now, updatedAt: now })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicle.holmanVehicleNumber));
+        } catch (healErr) {
+          console.warn("[District] TPMS cache clear-heal failed:", healErr);
+        }
+      } else if (gate.action === "proceed") {
+        // Live TPMS confirms the truck is unassigned. If the cache still claims a
+        // tech (opposite drift direction), heal it and proceed — live TPMS is the
+        // authority for its own assignment state.
+        if (gate.healUnassigned) {
+          try {
+            const now = new Date();
+            await db.update(holmanVehiclesCache)
+              .set({ tpmsAssignedTechId: null, tpmsAssignedTechName: null, tpmsLastSyncAt: now, updatedAt: now })
+              .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicle.holmanVehicleNumber));
+            console.log(`[District] Healed stale TPMS cache columns for ${vehicle.holmanVehicleNumber}: live TPMS shows unassigned`);
+          } catch (healErr) {
+            console.warn("[District] TPMS cache heal failed:", healErr);
+          }
+        }
+      } else if (gate.action === "blocked") {
+        // Live check unavailable (TPMS down / not configured) and the cache says
+        // assigned — fall back to the original cache-based gate, unchanged.
+        return res.status(409).json({
+          error: "This vehicle is assigned to a tech. Unassign it before changing its district.",
+        });
+      }
+      // gate.action === "proceed-unverified": live check unavailable but the
+      // cache shows unassigned — same as today's behavior, updatetruckdist will
+      // surface any real TPMS rejection (now shown in full in the dialog).
 
       // --- District-derived values (mirror the Create Vehicle flow) ---
       const tpmsDistNo = paddedDistrict;                 // padded to 7
@@ -10059,6 +10160,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         success: tpms.success && wms.success && holman.success,
         accepted: tpms.success && wms.success && holmanPending,
         holmanPending,
+        // Set when the operator confirmed clearing a stale TPMS assignment as
+        // part of this request (ldapId of the cleared tech).
+        tpmsCleared,
         district,
         costCenter: matchedCostCenter.costCenter,
         tpms,

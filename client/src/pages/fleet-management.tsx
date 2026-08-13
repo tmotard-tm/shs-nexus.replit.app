@@ -618,6 +618,9 @@ export default function FleetManagement() {
   const [showDistrictDialog, setShowDistrictDialog] = useState(false);
   const [districtChoice, setDistrictChoice] = useState("");
   const [districtResult, setDistrictResult] = useState<any>(null);
+  // Task #623: structured "TPMS still shows a tech assigned" conflict from the
+  // district endpoint — drives the confirm-and-clear panel in the dialog.
+  const [districtTpmsConflict, setDistrictTpmsConflict] = useState<any>(null);
 
   // Reset all assign form fields when modal opens or closes
   useEffect(() => {
@@ -1352,12 +1355,30 @@ export default function FleetManagement() {
   });
 
   // Update-district mutation (Task #453) — fans out to TPMS, WMS, and Holman.
+  // Task #623: a 409 with tpmsConflict is a structured "TPMS still shows a tech
+  // assigned" conflict, not a plain error — it drives a confirm-and-clear panel.
   const districtMutation = useMutation({
-    mutationFn: async ({ truckNo, district }: { truckNo: string; district: string }) => {
-      const res = await apiRequest("POST", `/api/fleet/vehicle/${encodeURIComponent(truckNo)}/district`, { district });
-      return res.json();
+    mutationFn: async ({ truckNo, district, clearTpmsAssignment }: { truckNo: string; district: string; clearTpmsAssignment?: boolean }) => {
+      const res = await fetch(`/api/fleet/vehicle/${encodeURIComponent(truckNo)}/district`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ district, clearTpmsAssignment: !!clearTpmsAssignment }),
+        credentials: "include",
+      });
+      const json = await res.json().catch(() => null);
+      if (res.status === 409 && json?.tpmsConflict) return { ...json, __tpmsConflict: true };
+      if (!res.ok) throw new Error(json?.error || `${res.status}: District update failed`);
+      return json;
     },
     onSuccess: (data: any, variables) => {
+      if (data?.__tpmsConflict) {
+        setDistrictTpmsConflict({ ...data.tpmsConflict, message: data.error });
+        // The server healed the card's stale TPMS columns — refresh so the
+        // vehicle no longer falsely shows as Unassigned.
+        queryClient.invalidateQueries({ queryKey: ["/api/holman/fleet-vehicles"] });
+        return;
+      }
+      setDistrictTpmsConflict(null);
       setDistrictResult(data);
       const vNum = selectedVehicle?.vehicleNumber;
       if (vNum && data?.success) {
@@ -2844,6 +2865,7 @@ export default function FleetManagement() {
                       className="w-full"
                       onClick={() => {
                         setDistrictResult(null);
+                        setDistrictTpmsConflict(null);
                         setDistrictChoice("");
                         setShowDistrictDialog(true);
                       }}
@@ -3852,7 +3874,7 @@ export default function FleetManagement() {
       </Dialog>
 
       {/* Update District Modal (Task #453) */}
-      <Dialog open={showDistrictDialog} onOpenChange={(o) => { if (!o) { setShowDistrictDialog(false); setDistrictResult(null); } }}>
+      <Dialog open={showDistrictDialog} onOpenChange={(o) => { if (!o) { setShowDistrictDialog(false); setDistrictResult(null); setDistrictTpmsConflict(null); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><MapPin className="h-4 w-4" />Update District — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
@@ -3869,19 +3891,68 @@ export default function FleetManagement() {
                     ? `TPMS & WMS updated to ${districtResult.district}${districtResult.costCenter ? ` (CC ${districtResult.costCenter})` : ""}. Holman accepted the change and is confirming it — the card updates on the next fleet sync.`
                     : "District update finished with some problems."}
               </p>
+              {districtResult.tpmsCleared && (
+                <p className="text-xs text-muted-foreground" data-testid="text-district-tpms-cleared">
+                  The stale TPMS assignment for <strong>{districtResult.tpmsCleared}</strong> was cleared before the update.
+                </p>
+              )}
               {(["tpms", "wms", "holman"] as const).map(sys => (
-                <div key={sys} className="flex items-center justify-between">
-                  <span className="text-sm uppercase font-mono">{sys}</span>
-                  <div className="flex items-center gap-2">
+                <div key={sys} className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm uppercase font-mono">{sys}</span>
                     <SystemStatusBadge status={districtResult?.[sys]?.skipped ? "skipped" : districtResult?.[sys]?.pending ? "accepted" : districtResult?.[sys]?.success ? "success" : "failed"} />
-                    {districtResult?.[sys]?.error && (
-                      <span className="text-xs text-muted-foreground max-w-[220px] truncate" title={districtResult[sys].error}>{districtResult[sys].error}</span>
-                    )}
                   </div>
+                  {/* Task #623: show the COMPLETE error text (wrapped, scrollable) — the
+                      old truncated one-liner hid real TPMS/WMS/Holman rejection reasons. */}
+                  {districtResult?.[sys]?.error && (
+                    <p className="text-xs text-destructive whitespace-pre-wrap break-words rounded bg-destructive/10 p-2 max-h-40 overflow-y-auto" data-testid={`text-district-error-${sys}`}>
+                      {districtResult[sys].error}
+                    </p>
+                  )}
+                  {districtResult?.[sys]?.message && !districtResult?.[sys]?.error && (
+                    <p className="text-xs text-muted-foreground whitespace-pre-wrap break-words">{districtResult[sys].message}</p>
+                  )}
                 </div>
               ))}
               <DialogFooter>
-                <Button variant="outline" onClick={() => { setShowDistrictDialog(false); setDistrictResult(null); }}>Close</Button>
+                <Button variant="outline" onClick={() => { setShowDistrictDialog(false); setDistrictResult(null); setDistrictTpmsConflict(null); }}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : districtTpmsConflict ? (
+            /* Task #623: TPMS still shows a tech assigned (stale cache made the
+               vehicle look Unassigned). Offer an explicit confirm-and-clear. */
+            <div className="space-y-4" data-testid="district-tpms-conflict">
+              <div className="rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-3 space-y-2">
+                <p className="text-sm font-medium flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                  TPMS still shows a tech on this truck
+                </p>
+                <p className="text-sm">
+                  TPMS currently has{" "}
+                  <strong>
+                    {districtTpmsConflict.techName
+                      ? `${districtTpmsConflict.techName} (${districtTpmsConflict.ldapId})`
+                      : districtTpmsConflict.ldapId}
+                  </strong>{" "}
+                  assigned to vehicle #{selectedVehicle?.vehicleNumber}, so TPMS would reject the district change.
+                  Nexus/Holman shows the vehicle unassigned — one side is stale, and it may be Nexus/Holman rather than TPMS.
+                </p>
+                <p className="text-sm">
+                  Continuing will <strong>clear the assignment in TPMS</strong> for {districtTpmsConflict.ldapId} (a real write to TPMS),
+                  then update the district in all systems. If TPMS is the correct side, cancel and unassign the vehicle properly instead.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setDistrictTpmsConflict(null)} data-testid="button-district-conflict-back">Back</Button>
+                <Button
+                  variant="destructive"
+                  disabled={districtMutation.isPending || !districtChoice}
+                  onClick={() => selectedVehicle && districtMutation.mutate({ truckNo: selectedVehicle.vehicleNumber, district: districtChoice, clearTpmsAssignment: true })}
+                  data-testid="button-clear-tpms-and-update"
+                >
+                  {districtMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+                  Clear TPMS Assignment & Update District
+                </Button>
               </DialogFooter>
             </div>
           ) : (

@@ -1033,6 +1033,155 @@ function padDistrictForApi(input: string | undefined | null): string {
   return digits.padStart(7, "0").slice(-7);
 }
 
+// ─── Live TPMS truck-assignment pre-check (Task #623: district-update staleness) ───
+//
+// holman_vehicles_cache.tpms_assigned_tech_id is refreshed off the
+// techsupdatedafter feed, which NEVER reports truck assign/unassign moves — so
+// it can claim "Unassigned" while live TPMS still has a tech on the truck (and
+// TPMS then rejects updatetruckdist). GET /techinfo/{id} accepts a TRUCK number
+// (6-digit padded), so the decision path can ask TPMS directly.
+
+export interface LiveTpmsTruckAssignment {
+  /** true when the live TPMS read completed — `assigned` is then trustworthy */
+  checked: boolean;
+  assigned: boolean;
+  ldapId?: string;
+  techName?: string;
+  districtNo?: string;
+  /** transport/API error when checked === false */
+  error?: string;
+}
+
+/**
+ * Pure classifier for a live GET /techinfo/{truckNo} outcome. Exported for unit
+ * tests. "No Data Found" (HTTP 400) and an empty techInfoList both mean the
+ * truck is genuinely unassigned; any other error leaves the answer unknown
+ * (checked: false) so callers can fall back to cache-based behavior.
+ */
+export function classifyLiveTpmsTruckLookup(args: {
+  info?: { ldapId?: string | null; firstName?: string | null; lastName?: string | null; districtNo?: string | null } | null;
+  error?: { statusCode?: number; message?: string } | null;
+}): LiveTpmsTruckAssignment {
+  if (args.error) {
+    const msg = String(args.error.message ?? "");
+    const notFound =
+      (args.error.statusCode === 400 && /no data found/i.test(msg)) ||
+      /no tech info entries/i.test(msg);
+    if (notFound) return { checked: true, assigned: false };
+    return { checked: false, assigned: false, error: msg };
+  }
+  const ldapId = String(args.info?.ldapId ?? "").trim().toUpperCase();
+  if (!ldapId) return { checked: true, assigned: false };
+  const techName =
+    [args.info?.firstName, args.info?.lastName].map(s => String(s ?? "").trim()).filter(Boolean).join(" ") || undefined;
+  const districtNo = String(args.info?.districtNo ?? "").trim() || undefined;
+  return { checked: true, assigned: true, ldapId, techName, districtNo };
+}
+
+/**
+ * Pure decision matrix for the Update District TPMS gate (exported for unit
+ * tests — the live-conflict shape is rare in the wild, so the branch must be
+ * verifiable without a drifted vehicle).
+ *
+ *  - live assigned, no confirm   → "conflict" (409 + heal cache to assigned)
+ *  - live assigned, confirmed    → "clear-and-proceed" (clear TPMS, then update)
+ *  - live unassigned             → "proceed" (heal cache to unassigned if it drifted)
+ *  - live unavailable            → original cache-based gate ("blocked" when the
+ *                                  cache claims a tech, else "proceed-unverified")
+ */
+export type DistrictTpmsGateDecision =
+  | { action: "conflict"; ldapId: string; techName?: string }
+  | { action: "clear-and-proceed"; ldapId: string; techName?: string }
+  | { action: "proceed"; healUnassigned: boolean }
+  | { action: "blocked" }
+  | { action: "proceed-unverified" };
+
+export function decideDistrictTpmsGate(args: {
+  live: LiveTpmsTruckAssignment;
+  cacheTpmsAssigned: boolean;
+  clearTpmsAssignment: boolean;
+}): DistrictTpmsGateDecision {
+  const { live, cacheTpmsAssigned, clearTpmsAssignment } = args;
+  if (live.checked && live.assigned) {
+    const ldapId = String(live.ldapId ?? "");
+    return clearTpmsAssignment
+      ? { action: "clear-and-proceed", ldapId, techName: live.techName }
+      : { action: "conflict", ldapId, techName: live.techName };
+  }
+  if (live.checked && !live.assigned) {
+    return { action: "proceed", healUnassigned: cacheTpmsAssigned };
+  }
+  return cacheTpmsAssigned ? { action: "blocked" } : { action: "proceed-unverified" };
+}
+
+/** Live truck→tech lookup against TPMS (padded truck number). */
+export async function checkLiveTpmsTruckAssignment(truckNumber: string): Promise<LiveTpmsTruckAssignment> {
+  try {
+    const { getTPMSService } = await import("./tpms-service");
+    const tpms = getTPMSService();
+    if (!tpms.isConfigured()) return { checked: false, assigned: false, error: "TPMS not configured" };
+    const paddedTruck = toTpmsRef(truckNumber);
+    try {
+      const info: any = await tpms.getTechInfo(paddedTruck);
+      return classifyLiveTpmsTruckLookup({ info });
+    } catch (e: any) {
+      return classifyLiveTpmsTruckLookup({ error: { statusCode: e?.statusCode, message: String(e?.message ?? e) } });
+    }
+  } catch (e: any) {
+    return { checked: false, assigned: false, error: String(e?.message ?? e) };
+  }
+}
+
+/**
+ * Clear a stale TPMS truck assignment after explicit operator confirmation.
+ * Mirrors the fleet-ops unassign machinery's live-verified clear path
+ * (callTpms "unassign" cache-miss fallback): re-verify via live TPMS that the
+ * tech still holds THIS truck, then batch PUT /techinfo with truckNo "".
+ * We clear the live-verified holder directly rather than routing through the
+ * cache-first resolution, because this path only runs when the caches are
+ * known to be stale for this truck.
+ */
+export async function clearTpmsAssignmentForTruck(params: {
+  truckNumber: string;
+  ldapId: string;
+  requestedBy: string;
+}): Promise<SystemResult> {
+  const { getTPMSService } = await import("./tpms-service");
+  const tpms = getTPMSService();
+  if (!tpms.isConfigured()) return { status: "skipped", message: "TPMS not configured" };
+  const ldap = String(params.ldapId ?? "").trim().toUpperCase();
+  // Guard: TPMS PUT requires ldapId to be 2–9 chars (same rule as callTpms unassign).
+  if (!ldap || ldap.length < 2 || ldap.length > 9) {
+    return { status: "failed", message: `"${ldap}" is not a valid TPMS tech ID` };
+  }
+  const live = await tpms.getTechInfo(ldap).catch(() => null);
+  if (!live) {
+    return { status: "failed", message: "TPMS API unreachable during verification — please retry" };
+  }
+  const liveTruck = String(live.truckNo ?? "").trim();
+  if (!liveTruck) {
+    return { status: "skipped", message: `${ldap} is already unassigned in TPMS` };
+  }
+  if (toCanonical(liveTruck) !== toCanonical(params.truckNumber)) {
+    // Cross-truck: the tech moved to a DIFFERENT truck between the pre-check and
+    // this clear. Leave their real assignment untouched.
+    return {
+      status: "skipped",
+      message: `${ldap} is actually assigned to truck ${liveTruck} in TPMS — their assignment was left untouched`,
+      effectiveTruck: liveTruck,
+    } as SystemResult;
+  }
+  // Same updatedBy normalization as callTpms: strip colon suffixes, cap at 9 chars.
+  const updatedBy = (String(params.requestedBy ?? "").split(":")[0]?.trim() || "NEXUS").substring(0, 9).toUpperCase();
+  await tpms.updateTechInfo({
+    ldapId: ldap,
+    truckNo: "",
+    districtNo: live.districtNo ?? "",
+    updatedBy,
+  });
+  return { status: "success", message: `Cleared TPMS assignment for ${ldap}`, effectiveLdap: ldap };
+}
+
 /**
  * Fetch the tech's CURRENT district from live TPMS (system of record) and heal
  * the tpms_tech_profiles mirror row when it disagrees. Returns the raw live
