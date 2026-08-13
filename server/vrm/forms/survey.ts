@@ -663,12 +663,19 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         SELECT DISTINCT ON (upper(s.ldap))
                upper(s.ldap)                                   AS ldap,
                s.tech_name,
-               COALESCE(NULLIF(btrim(s.assigned_truck_number),''),
-                        NULLIF(btrim(s.rental_truck_number),''),
+               COALESCE(NULLIF(btrim(cut.truck_number),''),
+                        NULLIF(btrim(s.assigned_truck_number),''),
                         s.truck_number)                        AS truck_number,
+               cut.branch_name, cut.branch_address, cut.etd_reference,
                NULLIF(btrim(a.district_no::text),'')           AS unit
         FROM vrm_rental_tech_survey s
         JOIN all_techs a ON upper(a.tech_racfid) = upper(s.ldap)
+        -- Reservation first, block second. A block sending a technician to a
+        -- branch with no reservation waiting is a wasted trip, so only booked
+        -- technicians are candidates, and the branch on the note is the branch
+        -- we booked, not the one the survey guessed.
+        JOIN vrm_rental_cutover cut
+          ON cut.ldap = upper(s.ldap) AND cut.reservation_status = 'booked'
         WHERE s.has_rental
           AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
           AND COALESCE(s.van_status,'') <> 'unknown_escalate'
@@ -697,14 +704,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           durationMinutes: 30,
           live,
           projectLabel: "Enterprise Contract Change",
+          // Tyler 2026-08-13: short and labeled. The long instructions go in
+          // the technician's TEXT, not the block. No truck number here — the
+          // project name already carries it.
           projectNotes:
-            "Fleet direct-billing cutover. 30 minutes for the technician to stop by "
-            + "their Enterprise branch and sign the replacement rental agreement. The "
-            + "block can be taken any time during the day.",
+            "30 minutes requested first thing in the morning. If there is a "
+            + "conflict, the time can be moved during normal business hours "
+            + "for Enterprise.",
           rowNotes:
-            `Stop by your Enterprise branch any time during the day to sign the new `
-            + `rental agreement. You keep the same vehicle. Truck ${truck}. `
-            + `Takes about 30 minutes.`,
+            `Location: Enterprise ${String(r.branch_name || "").trim()}, `
+            + `${String(r.branch_address || "").trim()}. `
+            + `Enterprise billing swap from Holman contract to direct billing contract.`,
         });
         if (out.ok) filed++;
         else if (out.skipReason) skipped++;
