@@ -708,12 +708,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           results.push({ ldap: r.ldap, ok: false, reason: "no district on the roster; Unit is required" });
           continue;
         }
+        // Zip from the booked branch address ("...,VENTURA,93003-6653").
+        // Structured location = drive time; Notes alone are invisible to the
+        // scheduler.
+        const zipMatch = String(r.branch_address || "").match(/(\d{5}(?:-\d{4})?)\s*$/);
         const out = await sendStandardActivity({
           techLdap: r.ldap,
           unit,
           truckNumber: truck,
           date,
           durationMinutes: 30,
+          locationZip: zipMatch ? zipMatch[1] : null,
           live,
           projectLabel: "Enterprise Contract Change",
           // Tyler 2026-08-13: short and labeled. The long instructions go in

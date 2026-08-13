@@ -207,6 +207,13 @@ export interface StandardActivityArgs {
   shopName?: string | null;
   /** YYYY-MM-DD, the day the block lands on. See nextBusinessDay(). */
   date: string;
+  /**
+   * Zip of the location the technician must be routed to (e.g. the Enterprise
+   * branch). Emits LocationType "Supplied" + LocationValue zip so the DCA can
+   * compute drive time. Without it the location rides only in Notes, which the
+   * scheduler cannot use — found on the first live blocks, 2026-08-13.
+   */
+  locationZip?: string | null;
   durationMinutes?: number;
   /**
    * What this block IS. Becomes the project name prefix and therefore the
@@ -300,8 +307,8 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
         // first live submission.
         StartTime: "",
         Duration: duration,
-        LocationType: "None",
-        LocationValue: "",
+        LocationType: args.locationZip ? "Supplied" : "None",
+        LocationValue: args.locationZip ?? "",
         TravelBehavior: "None",
         Notes: args.rowNotes
           ?? `Return rental, pick up truck ${args.truckNumber}${where}`,
