@@ -647,6 +647,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     try {
       const dryRun = req.body?.dryRun !== false;
       const limit = Math.min(Number(req.body?.limit) || 500, 500);
+      // Optional: file for these technicians only. Without it the endpoint
+      // takes the whole candidate pool, which made a single-technician
+      // end-to-end proof impossible through the API.
+      const onlyLdaps: string[] = Array.isArray(req.body?.ldaps)
+        ? req.body.ldaps.map((x: any) => String(x).trim().toUpperCase()).filter(Boolean)
+        : [];
       const date = String(req.body?.date || "").trim() || nextBusinessDayISO();
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ message: "date must be YYYY-MM-DD" });
@@ -667,6 +673,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
           AND COALESCE(s.van_status,'') <> 'unknown_escalate'
           AND a.employment_status = 'A'
+          AND (${onlyLdaps.length === 0}
+               OR upper(s.ldap) = ANY(string_to_array(${onlyLdaps.join(",")}, ',')))
         ORDER BY upper(s.ldap), s.created_at DESC
         LIMIT ${limit}
       `);
@@ -1135,6 +1143,34 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         const ldap = String(it?.ldap || "").trim().toUpperCase();
         if (!ldap) continue;
         const status = it?.error ? "failed" : (it?.etd_reference ? "booked" : "validated");
+
+        // A runner outside the box (ETD credentials live on Tyler's machine)
+        // can also file route blocks; without this the page reports
+        // "reserved, no route block" about blocks that exist.
+        if (it?.route_block_status) {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_cutover (ldap, route_block_status,
+              route_block_project_id, route_block_project_name, route_block_date,
+              route_block_live, route_block_filed_at, route_block_error, updated_at)
+            VALUES (${ldap}, ${String(it.route_block_status)},
+              ${it?.route_block_project_id ?? null}, ${it?.route_block_project_name ?? null},
+              ${it?.route_block_date ?? null},
+              ${it?.route_block_live ?? null},
+              ${String(it.route_block_status) === "filed" ? sql`now()` : sql`NULL`},
+              ${it?.route_block_error ?? null}, now())
+            ON CONFLICT (ldap) DO UPDATE SET
+              route_block_status       = EXCLUDED.route_block_status,
+              route_block_project_id   = EXCLUDED.route_block_project_id,
+              route_block_project_name = EXCLUDED.route_block_project_name,
+              route_block_date         = EXCLUDED.route_block_date,
+              route_block_live         = EXCLUDED.route_block_live,
+              route_block_filed_at     = COALESCE(vrm_rental_cutover.route_block_filed_at, EXCLUDED.route_block_filed_at),
+              route_block_error        = EXCLUDED.route_block_error,
+              updated_at               = now()
+          `);
+          recorded++;
+          if (!it?.etd_reference && !it?.error) continue;
+        }
         await db.execute(sql`
           INSERT INTO vrm_rental_cutover
             (ldap, tech_name, truck_number, van_status, reservation_status,
