@@ -497,11 +497,70 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         LIMIT ${limit}
       `);
 
-      const eligible = (rows as any[]).filter((r) => {
+      /**
+       * Off-roster fallback (2026-08-13).
+       *
+       * A rehire on a NEW enterprise id is absent from all_techs until the roster
+       * feed catches up, so the join above drops them and they are never texted.
+       * Luther Erby Cooper sat on an open Enterprise rental this way: TPMS has
+       * carried him as LERBYCO since 2026-03-20, while all_techs holds only his
+       * 2022 termination under LCOOPER. Neither an identity override nor a
+       * confidence change rescues that - the join has nothing to land on.
+       *
+       * Deliberately narrow. Fires ONLY where the resolver itself concluded
+       * "truck (tpms, not on roster)" AND all_techs has no row for the TPMS id at
+       * all. Anyone the roster DOES carry keeps their existing verdict, so a
+       * terminated, pending or on-leave technician stays excluded exactly as
+       * before. Measured against prod 2026-08-13: 3 cases, 0 overlap with the 341
+       * already texted.
+       *
+       * Truck numbers are compared with ltrim because TPMS pads to six ('037275')
+       * and the rental feed to five ('37275'). Joining them raw matches nothing
+       * and fails silently.
+       *
+       * The character class is [^0-9] for the same reason spelled out above. Do
+       * not write the regex shorthand here.
+       */
+      const { rows: offRoster } = await db.execute(sql`
+        SELECT DISTINCT ON (upper(tp.enterprise_id))
+               upper(tp.enterprise_id)                  AS ldap,
+               tp.first_name, tp.last_name,
+               c.vehicle_number                         AS truck_number,
+               -- The enterprise feed does not always carry the RENTING_* keys
+               -- (Luther Erby Cooper's row has none), and the parsed columns
+               -- always do. Prefill the branch from whichever exists.
+               COALESCE(NULLIF(c.feed_json->>'RENTING_CITY_NAME', ''), c.renting_city)  AS branch_city,
+               COALESCE(NULLIF(c.feed_json->>'RENTING_STATE', ''), c.renting_state)     AS branch_state,
+               c.rental_vendor,
+               NULLIF(regexp_replace(COALESCE(tp.mobile_phone,''), '[^0-9]', '', 'g'), '') AS phone
+        FROM vrm_rental_operations_cases c
+        JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
+        JOIN tpms_tech_profiles tp
+          ON ltrim(tp.truck_no, '0') = ltrim(c.vehicle_number_padded, '0')
+        WHERE c.present_in_latest
+          AND upper(c.ticket_status) = 'OPEN'
+          AND ir.method = 'truck (tpms, not on roster)'
+          AND NOT EXISTS (
+            SELECT 1 FROM all_techs a2
+            WHERE upper(a2.tech_racfid) = upper(tp.enterprise_id)
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM vrm_form_tokens ft
+            WHERE ft.form_type = 'rental_tech_survey'
+              AND upper(ft.ldap) = upper(tp.enterprise_id)
+              AND ft.submitted_at IS NULL
+              AND ft.expires_at > now()
+          )
+        ORDER BY upper(tp.enterprise_id), c.days_open DESC NULLS LAST
+      `);
+
+      const allRows = [...(rows as any[]), ...(offRoster as any[])];
+
+      const eligible = allRows.filter((r) => {
         const d = String(r.phone || "");
         return d.length === 10 || (d.length === 11 && d.startsWith("1"));
       });
-      const noPhone = (rows as any[]).length - eligible.length;
+      const noPhone = allRows.length - eligible.length;
 
       const out: any[] = [];
       for (const r of eligible) {
