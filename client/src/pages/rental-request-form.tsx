@@ -13,6 +13,19 @@
  *      early as possible. Choosing scheduled maintenance ends the form on the
  *      spot rather than letting someone fill in four sections before being told
  *      no.
+ *
+ * TWO DOORS, ONE FORM:
+ *
+ *   /rental-request         open. The permanent link the field is given. No
+ *                           token; identity is proven by LDAP + truck against
+ *                           the roster. This is the door a technician standing
+ *                           next to a dead van can actually use, because it is
+ *                           the only one that does not require somebody to have
+ *                           handed them a link first.
+ *   /rental-request/:token  personal. Fleet or a supervisor issues it for
+ *                           planned work.
+ *
+ * Both post the same fields and produce one record with one schema.
  */
 import { useState } from "react";
 import { useRoute } from "wouter";
@@ -70,9 +83,28 @@ type Identity = {
   district: string; homeState: string; mobilePhone: string; isByov: boolean;
 };
 
+/**
+ * Drop-off times the branch is actually open for.
+ *
+ * The appointment used to be a bare date input, so every reservation reached
+ * ETD as T00:00:00 and asked Enterprise for a midnight pickup. A date without
+ * an hour is not a booking.
+ */
+const DROP_TIMES: Array<[string, string]> = [
+  ["07:00", "7:00 AM"], ["08:00", "8:00 AM"], ["09:00", "9:00 AM"],
+  ["10:00", "10:00 AM"], ["11:00", "11:00 AM"], ["12:00", "12:00 PM"],
+  ["13:00", "1:00 PM"], ["14:00", "2:00 PM"], ["15:00", "3:00 PM"],
+  ["16:00", "4:00 PM"],
+];
+
 export default function RentalRequestForm() {
   const [, params] = useRoute("/rental-request/:token");
   const token = params?.token || "";
+  /** No token means the open front door. */
+  const openMode = !token;
+  const api = openMode
+    ? "/api/public/rental-request/open"
+    : `/api/public/rental-request/${encodeURIComponent(token)}`;
 
   const [step, setStep] = useState<"verify" | "form" | "done">("verify");
   const [ldap, setLdap] = useState("");
@@ -80,6 +112,9 @@ export default function RentalRequestForm() {
   const [verifyError, setVerifyError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [identity, setIdentity] = useState<Identity | null>(null);
+  const [resume, setResume] = useState<{
+    requestNo?: number; status?: string; missingText?: string[]; note?: string | null;
+  } | null>(null);
   const [result, setResult] = useState<{ decision?: string; message?: string; requestNo?: number } | null>(null);
 
   const [identityOk, setIdentityOk] = useState<"" | "yes" | "no">("");
@@ -99,35 +134,65 @@ export default function RentalRequestForm() {
   const [shopState, setShopState] = useState("");
   const [shopPhone, setShopPhone] = useState("");
   const [hasAppointment, setHasAppointment] = useState("");
-  const [appointmentAt, setAppointmentAt] = useState("");
+  const [appointmentDate, setAppointmentDate] = useState("");
+  const [appointmentTime, setAppointmentTime] = useState("08:00");
   const [shopEstimatedDays, setShopEstimatedDays] = useState("");
 
   const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const isMaintenance = problemCategory === "scheduled_maintenance";
+  const visibleAcks = ACKS.filter(([k]) => k !== "ackHasAppointment" || !identity?.isByov);
   const clearErr = (k: string) =>
     setFieldErrors((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
 
   const { data: linkInfo, isLoading } = useQuery<{ valid: boolean; completed?: boolean; message?: string }>({
-    queryKey: ["/api/public/rental-request", token],
-    queryFn: async () => (await fetch(`/api/public/rental-request/${encodeURIComponent(token)}`)).json(),
-    enabled: !!token,
+    queryKey: [api, "start"],
+    queryFn: async () => (await fetch(openMode ? `${api}/start` : api)).json(),
     retry: false,
   });
 
   const verifyMutation = useMutation({
-    mutationFn: () => postJson(`/api/public/rental-request/${encodeURIComponent(token)}/verify`, { ldap, truckNumber }),
-    onSuccess: (d: any) => { setVerifyError(""); setIdentity(d.identity); setStep("form"); },
+    mutationFn: () => postJson(`${api}/verify`, { ldap, truckNumber }),
+    onSuccess: (d: any) => {
+      setVerifyError("");
+      setIdentity(d.identity);
+      // A send-back that makes someone retype everything is a send-back they
+      // abandon, and an abandoned request becomes a phone call to Fleet, which
+      // is the cost this whole process exists to remove. Give them back what
+      // they already told us and ask only for the gap.
+      const a = d.resume?.answers;
+      if (a) {
+        setProblemCategory(a.problemCategory || "");
+        setSymptom(a.symptom || "");
+        setIsDrivable(a.isDrivable || "");
+        setIsSafeToDrive(a.isSafeToDrive || "");
+        setJobsAffected(a.jobsAffected || "");
+        setWhatWasTried(a.whatWasTried || "");
+        setShopName(a.shopName || "");
+        setShopAddress(a.shopAddress || "");
+        setShopCity(a.shopCity || "");
+        setShopState(a.shopState || "");
+        setShopPhone(a.shopPhone || "");
+        setHasAppointment(a.hasAppointment || "");
+        setAppointmentDate(a.appointmentDate || "");
+        setAppointmentTime(a.appointmentTime || "08:00");
+        setShopEstimatedDays(a.shopEstimatedDays || "");
+      }
+      setResume(d.resume || null);
+      setStep("form");
+    },
     onError: (e: any) => setVerifyError(e.message),
   });
 
   const submitMutation = useMutation({
-    mutationFn: (payload: Record<string, unknown>) =>
-      postJson(`/api/public/rental-request/${encodeURIComponent(token)}/submit`, payload),
+    mutationFn: (payload: Record<string, unknown>) => postJson(`${api}/submit`, payload),
     onSuccess: (d: any) => { setResult(d); setStep("done"); },
     onError: (e: any) => setSubmitError(e.message),
   });
+
+  /** ETD needs an hour, not just a day. */
+  const appointmentAt = appointmentDate ? `${appointmentDate}T${appointmentTime || "08:00"}` : "";
 
   /** Maintenance short-circuits: submit it so the denial is on record, then stop. */
   const submitMaintenance = () => {
@@ -155,11 +220,15 @@ export default function RentalRequestForm() {
       if (hasAppointment === "yes") {
         if (!shopName.trim()) e.shopName = "Which shop?";
         if (!shopCity.trim()) e.shopCity = "Shop city?";
-        if (!appointmentAt) e.appointmentAt = "When is it going in?";
+        if (!appointmentDate) e.appointmentAt = "When is it going in?";
+        if (!appointmentTime) e.appointmentAt = "What time are you dropping it?";
         if (!shopEstimatedDays.trim()) e.shopEstimatedDays = "How many days did the SHOP say?";
       }
     }
-    for (const [k] of ACKS) if (!acks[k]) e.acks = "Please tick every box.";
+    // A BYOV technician is never shown the shop section, so demanding they
+    // attest to a confirmed shop appointment puts a statement they were never
+    // asked to make into an audit trail whose only value is being true.
+    for (const [k] of visibleAcks) if (!acks[k]) e.acks = "Please tick every box.";
     setFieldErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -186,7 +255,7 @@ export default function RentalRequestForm() {
       <Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div>;
   }
 
-  if (!token || !linkInfo?.valid) {
+  if (!linkInfo?.valid) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
         <Card className="w-full max-w-md"><CardHeader>
@@ -237,7 +306,12 @@ export default function RentalRequestForm() {
           <Card>
             <CardHeader>
               <CardTitle className="text-lg">Rental request</CardTitle>
-              <CardDescription>Enter your LDAP and truck number to start.</CardDescription>
+              <CardDescription>
+                {openMode
+                  ? "Start here if your van is down and you cannot finish your route. "
+                    + "Enter your LDAP and truck number so we know it is you."
+                  : "Enter your LDAP and truck number to start."}
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
@@ -260,6 +334,28 @@ export default function RentalRequestForm() {
 
         {step === "form" && (
           <>
+            {resume?.missingText?.length ? (
+              <Card className="border-amber-300 bg-amber-50">
+                <CardHeader>
+                  <div className="flex items-center gap-2 text-amber-900">
+                    <AlertCircle className="h-5 w-5" />
+                    <CardTitle className="text-base">We need a bit more</CardTitle>
+                  </div>
+                  <CardDescription className="text-amber-900">
+                    Your answers are saved below. To approve a rental we still need:
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <ul className="list-disc space-y-1 pl-5 text-sm text-amber-900">
+                    {resume.missingText.map((t) => <li key={t}>{t}</li>)}
+                  </ul>
+                  {resume.note && (
+                    <p className="rounded-md bg-white/70 p-2 text-sm text-amber-900">{resume.note}</p>
+                  )}
+                </CardContent>
+              </Card>
+            ) : null}
+
             {/* Section A — confirm, do not type */}
             <Card>
               <CardHeader>
@@ -439,12 +535,28 @@ export default function RentalRequestForm() {
                         <Label htmlFor="sphone">Shop phone</Label>
                         <Input id="sphone" inputMode="tel" value={shopPhone} onChange={(e) => setShopPhone(e.target.value)} />
                       </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="appt">Date it goes in</Label>
-                        <Input id="appt" type="date" value={appointmentAt}
-                               onChange={(e) => { setAppointmentAt(e.target.value); clearErr("appointmentAt"); }} />
-                        {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="appt">Date it goes in</Label>
+                          <Input id="appt" type="date" value={appointmentDate}
+                                 onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Drop-off time</Label>
+                          <Select value={appointmentTime}
+                                  onValueChange={(v) => { setAppointmentTime(v); clearErr("appointmentAt"); }}>
+                            <SelectTrigger><SelectValue placeholder="Time" /></SelectTrigger>
+                            <SelectContent className="max-h-64">
+                              {DROP_TIMES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
+                      <p className="text-xs text-slate-500">
+                        Your rental starts at this time, so it needs to be when you actually
+                        drop the van off.
+                      </p>
+                      {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                       <div className="space-y-2">
                         <Label htmlFor="days">How many days did the SHOP say it needs?</Label>
                         <Input id="days" inputMode="numeric" value={shopEstimatedDays}
@@ -468,7 +580,7 @@ export default function RentalRequestForm() {
                   <CardDescription>Tick each one. These are recorded with your request.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {ACKS.map(([k, text]) => (
+                  {visibleAcks.map(([k, text]) => (
                     <label key={k} className="flex items-start gap-3 text-sm text-slate-700">
                       <Checkbox checked={!!acks[k]}
                                 onCheckedChange={(v) => { setAcks((p) => ({ ...p, [k]: v === true })); clearErr("acks"); }} />

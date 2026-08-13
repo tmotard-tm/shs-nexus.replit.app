@@ -63,6 +63,10 @@ const DECISION_TONE: Record<string, [string, string]> = {
   APPROVE: [colors.green, colors.greenLight],
   DENY: [colors.red, colors.redLight],
   DEFER: [colors.amber, colors.amberLight],
+  RETURN: [colors.amber, colors.amberLight],
+  // A send-back is not a denial and must not be coloured like one. It says
+  // "we cannot book this yet", which is a different fact from "no", and the
+  // denial-mix number is only worth reporting if the two stay separate.
   REVIEW: [colors.accent, colors.accentLight],
 };
 
@@ -190,6 +194,7 @@ export default function RentalRequests() {
   const [detail, setDetail] = useState<Req | null>(null);
   const [note, setNote] = useState("");
   const [actionErr, setActionErr] = useState("");
+  const [missing, setMissing] = useState<string[]>([]);
 
   const { data, isLoading, error } = useQuery<{ requests: Req[] }>({
     queryKey: ["/api/vrm/forms/rental-request/list"], refetchInterval: 60_000,
@@ -197,19 +202,25 @@ export default function RentalRequests() {
   const { data: stats } = useQuery<Record<string, any>>({
     queryKey: ["/api/vrm/forms/rental-request/stats"], refetchInterval: 60_000,
   });
+  // Served rather than duplicated: the checkbox label here and the sentence the
+  // technician receives are the same string, so they can never drift.
+  const { data: reasonData } = useQuery<{ reasons: Record<string, string> }>({
+    queryKey: ["/api/vrm/forms/rental-request/missing-reasons"],
+  });
+  const REASONS = reasonData?.reasons ?? {};
 
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[] }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [] }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.message || "decision failed");
       return j;
     },
     onSuccess: () => {
-      setActionErr(""); setNote(""); setDetail(null);
+      setActionErr(""); setNote(""); setMissing([]); setDetail(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/stats"] });
     },
@@ -437,6 +448,40 @@ export default function RentalRequests() {
                     </button>
                   );
                 })}
+              </div>
+
+              {/* Send back as incomplete.
+                  Kept apart from the three verdicts on purpose. This is not a
+                  judgement about whether the technician should get a rental, it
+                  is "we do not have enough to book one", and it has to name the
+                  gap: a send-back that just says incomplete returns them to a
+                  form they already believe they filled in. */}
+              <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${colors.rule}` }}>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                  Or send it back for more information
+                </div>
+                <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
+                  {Object.entries(REASONS).map(([k, label]) => (
+                    <label key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, cursor: "pointer" }}>
+                      <input type="checkbox" checked={missing.includes(k)}
+                             onChange={(e) => setMissing((prev) =>
+                               e.target.checked ? [...prev, k] : prev.filter((x) => x !== k))} />
+                      <span>We still need {label}</span>
+                    </label>
+                  ))}
+                </div>
+                <button type="button" disabled={decide.isPending || !missing.length}
+                        onClick={() => decide.mutate({ requestNo: detail.request_no, decision: "RETURN", note, missing })}
+                        style={{ ...ctrl, cursor: missing.length ? "pointer" : "not-allowed", width: "100%",
+                                 color: DECISION_TONE.RETURN[0], background: DECISION_TONE.RETURN[1],
+                                 borderColor: DECISION_TONE.RETURN[0], fontWeight: 600,
+                                 opacity: missing.length ? 1 : 0.5 }}>
+                  SEND BACK{missing.length ? ` (${missing.length})` : ""}
+                </button>
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 6 }}>
+                  Texts the technician exactly what is missing plus the link. Their
+                  existing answers are kept, so they only add the gap.
+                </p>
               </div>
               {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, marginTop: 8 }}>{actionErr}</p>}
             </div>

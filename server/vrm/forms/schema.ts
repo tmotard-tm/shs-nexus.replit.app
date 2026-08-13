@@ -260,12 +260,12 @@ export async function initFormsSchema(): Promise<void> {
   // catch. Losing a booked request here would be undiscoverable.
   await db.execute(sql`
     UPDATE vrm_rental_request a
-    SET status = superseded, updated_at = now()
+    SET status = 'superseded', updated_at = now()
     FROM vrm_rental_request b
     WHERE a.token_id IS NULL AND b.token_id IS NULL
       AND a.ldap = b.ldap
-      AND a.status IN (screened,approved,booked)
-      AND b.status IN (screened,approved,booked)
+      AND a.status IN ('screened','approved','booked')
+      AND b.status IN ('screened','approved','booked')
       AND a.created_at < b.created_at
       AND a.etd_booked_at IS NULL;
   `);
@@ -294,6 +294,22 @@ export async function initFormsSchema(): Promise<void> {
         ack_not_maintenance AND ack_cannot_drive_safely AND ack_has_appointment
         AND ack_last_resort AND ack_return_one_day AND ack_accurate
       ) STORED;
+  `);
+
+  // Sent back as incomplete.
+  //
+  // A request missing the shop's estimate is not a denial and must not be
+  // recorded as one: the technician did nothing wrong, we simply cannot price
+  // or end-date a reservation without it. Denying it would both insult the
+  // technician and poison the denial-mix number, which is the single figure
+  // this whole process exists to produce. `returned` is deliberately absent
+  // from the live-request statuses so a send-back reopens the front door
+  // instead of locking them out of it.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS missing_fields text[],
+      ADD COLUMN IF NOT EXISTS returned_at    timestamptz,
+      ADD COLUMN IF NOT EXISTS return_count   integer NOT NULL DEFAULT 0;
   `);
 
   // The audit loop the spec asks for: what the technician claimed against what

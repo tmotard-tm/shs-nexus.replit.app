@@ -20,8 +20,27 @@ import type { Express, Router } from "express";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
+import { regionForState, REGION_OWNER } from "../rental-operations/region";
 
 export const POLICY_VERSION = "2026-08-11.a";
+
+/**
+ * The permanent front door. No token, no login.
+ *
+ * A tokenised link cannot serve this form. The survey is Fleet-initiated, so
+ * minting a token per technician up front is natural there. A rental request is
+ * technician-initiated at the worst possible moment, standing next to a dead
+ * van, and that technician has no link and no way to get one without making
+ * Fleet answer a phone — which is exactly the intake labour going direct to
+ * Enterprise was supposed to remove.
+ *
+ * Identity is proven by LDAP + truck against the roster instead. That is the
+ * same check the tokenised path already ran after opening the link; the token
+ * was never the thing establishing who someone was.
+ */
+export const PUBLIC_REQUEST_URL =
+  (process.env.PUBLIC_BASE_URL || "https://SHS-Nexus.replit.app").replace(/\/+$/, "")
+  + "/rental-request";
 
 /** Categories that are maintenance by definition. Rule 1 kills these outright. */
 const MAINTENANCE = new Set([
@@ -41,6 +60,25 @@ const PROBLEM_CATEGORIES = new Set([
   "decom_replacement",
   "scheduled_maintenance",
 ]);
+
+/**
+ * What Fleet can send a request back for.
+ *
+ * A closed list, not free text, because "incomplete" has to be countable. If
+ * three quarters of send-backs are the shop's estimate, that is a question the
+ * FORM should be asking better, and you only learn it if the reason is a value
+ * rather than a sentence.
+ */
+export const MISSING_REASONS: Record<string, string> = {
+  shop_estimate: "how many days the shop said it needs",
+  shop_appointment: "a confirmed shop appointment date and drop-off time",
+  shop_details: "the shop name, address and phone number",
+  symptom_detail: "a clear description of what the vehicle is doing",
+  what_was_tried: "what has already been tried to get it running",
+  repair_order: "the shop's repair order or work order number",
+  contact: "a phone number we can reach you on",
+  other: "more information",
+};
 
 export type Decision = "APPROVE" | "DENY" | "DEFER" | "REVIEW";
 
@@ -120,6 +158,41 @@ export function evaluate(f: RequestFacts): Eligibility {
     };
   }
 
+  // 5 — BYOV runs BEFORE the shop questions, and that ordering is load-bearing.
+  //
+  // A BYOV technician has no company van going to a shop, so the form never
+  // asks them for an appointment. Evaluating rule 3 first therefore returned
+  // "book the appointment first, then come back and finish this request" to a
+  // form that will never show that question — an instruction they cannot
+  // follow, on a link a DEFER deliberately leaves live. Every BYOV technician
+  // looped there forever. The shop questions cannot gate someone the shop
+  // questions were never asked of.
+  //
+  // Spare-unit availability (the other half of rule 5) is still not automatable
+  // here: the spares feed is not wired into this path and guessing "no spare"
+  // would quietly approve rentals the pool could have covered.
+  if (f.isByovKnown === false) {
+    // Never assume "not BYOV". Nexus's own byov_enrollments table was four
+    // months stale and would have said exactly that for 113+ enrolled
+    // technicians.
+    return {
+      decision: "REVIEW",
+      rule: 5,
+      reason: "BYOV status unknown — mirror missing or stale; refusing to assume",
+      script: "We need to check your vehicle programme before approving this. Fleet will contact you.",
+    };
+  }
+  if (f.isByov) {
+    return {
+      decision: "REVIEW",
+      rule: 5,
+      reason: "BYOV technician — no company vehicle, policy not defined",
+      script:
+        "You are enrolled in BYOV, so this needs a person to look at it. Fleet " +
+        "will contact you.",
+    };
+  }
+
   // 3 — the rental starts when the truck goes in, not when the problem appears.
   if (f.hasAppointment !== true) {
     return {
@@ -157,32 +230,6 @@ export function evaluate(f: RequestFacts): Eligibility {
     };
   }
 
-  // 5 — a spare in range beats a rental. Not automatable yet: the spares feed is
-  //     not wired into this path, and guessing "no spare" would quietly approve
-  //     rentals the pool could have covered. Surfaced for a human instead of
-  //     silently skipped.
-  if (f.isByovKnown === false) {
-    // Never assume "not BYOV". Nexus's own byov_enrollments table was four
-    // months stale and would have said exactly that for 113+ enrolled
-    // technicians.
-    return {
-      decision: "REVIEW",
-      rule: 5,
-      reason: "BYOV status unknown — mirror missing or stale; refusing to assume",
-      script: "We need to check your vehicle programme before approving this. Fleet will contact you.",
-    };
-  }
-  if (f.isByov) {
-    return {
-      decision: "REVIEW",
-      rule: 5,
-      reason: "BYOV technician — no company vehicle, policy not defined",
-      script:
-        "You are enrolled in BYOV, so this needs a person to look at it. Fleet " +
-        "will contact you.",
-    };
-  }
-
   // 8 — what remains.
   return {
     decision: "APPROVE",
@@ -216,13 +263,45 @@ async function loadToken(token: string) {
   return row;
 }
 
-/** Everything the engine needs that the technician cannot be trusted to supply. */
+/**
+ * Everything the engine needs that the technician cannot be trusted to supply,
+ * plus the identity fields the open front door has to resolve for itself.
+ *
+ * The tokenised path got name / truck / phone from the token row, which Fleet
+ * had already populated. Nothing pre-populates a self-serve request, so those
+ * columns are read from the roster here and CONFIRMED by the technician rather
+ * than typed by them. Same rule as before: never ask for something we hold.
+ *
+ * ⚠ The phone character class is `[^0-9]` deliberately and must stay that way.
+ * The regex shorthand for a non-digit, written inside a drizzle tagged
+ * template, is cooked by JavaScript down to the bare letter D before drizzle
+ * sees the string, which strips Ds out of phone numbers and leaves every dash
+ * in place. Proven on the box 2026-08-12; do not reintroduce the shorthand.
+ */
 async function factsFor(ldap: string) {
   const { rows } = await db.execute(sql`
     SELECT a.employment_status,
            a.district_no,
            a.home_state,
            upper(a.tech_racfid) AS ldap,
+           COALESCE(NULLIF(btrim(a.tech_name), ''),
+                    NULLIF(btrim(COALESCE(a.first_name,'') || ' ' || COALESCE(a.last_name,'')), ''))
+                                                        AS tech_name,
+           a.first_name,
+           -- Truck on file, best source first, and ALL of them kept for the
+           -- match. A technician mid-swap legitimately answers with the truck
+           -- TPMS has not caught up to yet, or with the one they just handed
+           -- back; refusing either would lock a real person out of the front
+           -- door over a feed lag.
+           COALESCE(NULLIF(btrim(tp.truck_no), ''),
+                    NULLIF(btrim(a.truck_lu), ''),
+                    NULLIF(btrim(a.last_known_truck_lu), ''))  AS truck_number,
+           ARRAY[NULLIF(btrim(tp.truck_no), ''),
+                 NULLIF(btrim(a.truck_lu), ''),
+                 NULLIF(btrim(a.last_known_truck_lu), '')]     AS truck_candidates,
+           NULLIF(regexp_replace(COALESCE(tp.mobile_phone,''), '[^0-9]', '', 'g'), '') AS tpms_phone,
+           NULLIF(regexp_replace(COALESCE(a.cell_phone,''),    '[^0-9]', '', 'g'), '') AS cell_phone,
+           NULLIF(regexp_replace(COALESCE(a.main_phone,''),    '[^0-9]', '', 'g'), '') AS main_phone,
            (SELECT count(*) FROM vrm_byov_status v
              WHERE v.ldap = upper(a.tech_racfid)
                AND upper(coalesce(v.status,'')) = 'ENROLLED') AS byov_count,
@@ -234,10 +313,46 @@ async function factsFor(ldap: string) {
              WHERE c.present_in_latest AND upper(c.ticket_status) = 'OPEN'
                AND COALESCE(ir.override_employee_id, ir.resolved_employee_id) = a.employee_id) AS open_rentals
     FROM all_techs a
+    -- 88 enterprise_ids carry MORE THAN ONE tpms profile row, 79 of them with
+    -- conflicting mobile numbers. A plain join lets both through and the
+    -- planner decides which one you get, so the number we text is not stable.
+    -- Pick one here, preferring the row that actually carries a mobile.
+    LEFT JOIN LATERAL (
+      SELECT tpp.truck_no, tpp.mobile_phone
+      FROM tpms_tech_profiles tpp
+      WHERE upper(tpp.enterprise_id) = upper(a.tech_racfid)
+      ORDER BY (NULLIF(regexp_replace(COALESCE(tpp.mobile_phone,''), '[^0-9]', '', 'g'), '') IS NULL),
+               NULLIF(regexp_replace(COALESCE(tpp.mobile_phone,''), '[^0-9]', '', 'g'), '')
+      LIMIT 1
+    ) tp ON true
     WHERE upper(a.tech_racfid) = upper(${ldap})
     LIMIT 1
   `);
   return (rows as any[])[0] ?? null;
+}
+
+/** First ten-digit number we hold for this technician, or null. */
+function phoneFor(f: any): string | null {
+  for (const c of [f?.tpms_phone, f?.cell_phone, f?.main_phone]) {
+    const d = String(c || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
+    if (d.length === 10) return d;
+  }
+  return null;
+}
+
+/**
+ * Who owns this request regionally. Derived, never asked, never sent by the
+ * client — the previous version read `regionOwner` off the request body, which
+ * the form has never populated, so every row shipped with region_owner NULL.
+ *
+ * Annex A of SOP v4 resolves by the technician's own HOME STATE. The district
+ * vote is gone: three districts legitimately span two regions and keeping them
+ * whole misrouted ~15% of escalations. Shop state is the fallback for the case
+ * where we hold no home state at all.
+ */
+function regionOwnerFor(homeState: string | null, shopState: string | null): string | null {
+  const region = regionForState(homeState) ?? regionForState(shopState);
+  return region ? REGION_OWNER[region] : null;
 }
 
 
@@ -262,31 +377,599 @@ export async function syncByovStatus(): Promise<{ synced: number; enrolled: numb
     : (payload.data || payload.rows || payload.technicians || payload.roster || []);
   if (!rows.length) throw new Error("byov roster returned no rows");
 
-  let enrolled = 0;
-  for (const r of rows) {
-    const ldap = String(r.enterprise_id || "").trim().toUpperCase();
-    if (!ldap) continue;
-    const status = r.byov_enrollment_status ? String(r.byov_enrollment_status) : null;
-    if ((status || "").toUpperCase() === "ENROLLED") enrolled++;
-    await db.execute(sql`
-      INSERT INTO vrm_byov_status (ldap, status, is_new_hire, pilot_tier, started_on, synced_at)
-      VALUES (${ldap}, ${status}, ${r.byov_is_new_hire === true || r.byov_is_new_hire === "True"},
-              ${r.byov_pilot_tier ?? null}, ${r.byov_started_date ?? null}, now())
-      ON CONFLICT (ldap) DO UPDATE SET
-        status = EXCLUDED.status, is_new_hire = EXCLUDED.is_new_hire,
-        pilot_tier = EXCLUDED.pilot_tier, started_on = EXCLUDED.started_on,
-        synced_at = now()
-    `);
-  }
-  console.log(`[byov-mirror] synced ${rows.length} rows, ${enrolled} enrolled`);
-  return { synced: rows.length, enrolled };
+  // ONE statement, not one per technician.
+  //
+  // This used to loop 1,600+ sequential round trips, which took long enough
+  // that nobody ever ran it, which is why the mirror sat 37 hours stale and
+  // every single rental request failed closed to REVIEW at rule 5. A sync that
+  // is too slow to run is a sync that does not exist, and the eligibility
+  // engine is only as good as the freshness of what it reads.
+  const payloadRows = rows
+    .map((r) => ({
+      ldap: String(r.enterprise_id || "").trim().toUpperCase(),
+      status: r.byov_enrollment_status ? String(r.byov_enrollment_status) : null,
+      is_new_hire: r.byov_is_new_hire === true || r.byov_is_new_hire === "True",
+      pilot_tier: r.byov_pilot_tier ?? null,
+      started_on: r.byov_started_date ?? null,
+    }))
+    .filter((r) => r.ldap);
+  if (!payloadRows.length) throw new Error("byov roster returned no usable ldaps");
+
+  const enrolled = payloadRows.filter((r) => (r.status || "").toUpperCase() === "ENROLLED").length;
+
+  await db.execute(sql`
+    INSERT INTO vrm_byov_status (ldap, status, is_new_hire, pilot_tier, started_on, synced_at)
+    SELECT x.ldap, x.status, x.is_new_hire, x.pilot_tier,
+           NULLIF(x.started_on, '')::date, now()
+    FROM jsonb_to_recordset(${JSON.stringify(payloadRows)}::jsonb)
+         AS x(ldap text, status text, is_new_hire boolean, pilot_tier text, started_on text)
+    ON CONFLICT (ldap) DO UPDATE SET
+      status = EXCLUDED.status, is_new_hire = EXCLUDED.is_new_hire,
+      pilot_tier = EXCLUDED.pilot_tier, started_on = EXCLUDED.started_on,
+      synced_at = now()
+  `);
+
+  console.log(`[byov-mirror] synced ${payloadRows.length} rows, ${enrolled} enrolled`);
+  return { synced: payloadRows.length, enrolled };
 }
 
+
+/**
+ * Keep the BYOV mirror fresh enough for rule 5 to mean something.
+ *
+ * Rule 5 fails CLOSED: an unknown or stale BYOV status sends the request to a
+ * human rather than risking an auto-approved rental for a technician who has
+ * no company van. That is the right default and it must not change. But the
+ * freshness window is 36 hours and nothing was refreshing the mirror, so the
+ * gate went from a safety net to a blanket: measured on the box, the mirror was
+ * 37 hours old and EVERY request would have routed to REVIEW. Fleet would have
+ * hand-decided all of them, which is the opposite of the promise the process
+ * makes.
+ *
+ * So the mirror refreshes itself on use. Single-flight, because a burst of
+ * requests must not become a burst of roster fetches, and time-boxed, because
+ * a slow byovdashboard must never hold up a technician standing next to a dead
+ * van. If the refresh fails or times out, nothing is lost: the caller falls
+ * through to the same fail-closed REVIEW it would have given anyway.
+ *
+ * In-process schedulers are deliberately not used. This codebase already
+ * documents that setInterval does not run dependably on the deployment because
+ * instances scale, and sync-scheduler.ts disables its daily interval in
+ * production outright. Refresh-on-use has no such dependency.
+ */
+const BYOV_REFRESH_AFTER_MS = 12 * 3600 * 1000;
+const BYOV_REFRESH_TIMEOUT_MS = 8000;
+let byovRefreshInFlight: Promise<unknown> | null = null;
+
+export async function ensureByovFresh(): Promise<void> {
+  try {
+    const { rows } = await db.execute(sql`
+      SELECT max(synced_at) AS synced_at, count(*)::int AS n FROM vrm_byov_status
+    `);
+    const row = (rows as any[])[0];
+    const age = row?.synced_at ? Date.now() - new Date(row.synced_at).getTime() : Infinity;
+    if (Number(row?.n ?? 0) > 0 && age < BYOV_REFRESH_AFTER_MS) return;
+
+    if (!byovRefreshInFlight) {
+      console.log(`[byov-mirror] stale (${Math.round(age / 3600000)}h), refreshing`);
+      byovRefreshInFlight = syncByovStatus()
+        .catch((e) => console.error("[byov-mirror] refresh failed:", e?.message || e))
+        .finally(() => { byovRefreshInFlight = null; });
+    }
+    // Wait, but not forever. A technician does not wait on our cache.
+    await Promise.race([
+      byovRefreshInFlight,
+      new Promise((r) => setTimeout(r, BYOV_REFRESH_TIMEOUT_MS)),
+    ]);
+  } catch (e: any) {
+    console.error("[byov-mirror] freshness check failed:", e?.message || e);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Telling people things.
+//
+// Everything below is best-effort and MUST NOT be able to fail a request. A
+// comms outage that rejected submissions would strand the technician the form
+// exists to help. Failures are logged loudly and swallowed.
+//
+// The real URL is /api/fs/comms/api/send-batch: routes.ts declares
+// "/comms/api/send-batch" on a Router mounted under /api/fs. Calling it at the
+// root returns the SPA HTML shell with HTTP 200, which reads exactly like "not
+// deployed" — hence the content-type assertion.
+// ---------------------------------------------------------------------------
+
+type Sms = { ldap?: string; phone: string; body: string };
+
+async function sendSms(messages: Sms[], why: string): Promise<number> {
+  const key = process.env.COMMS_SEND_API_KEY;
+  if (!key) {
+    console.warn(`[rental-request] ${why}: COMMS_SEND_API_KEY not set, nothing sent`);
+    return 0;
+  }
+  const clean = messages
+    .map((m) => ({
+      ...m,
+      phone: String(m.phone || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, ""),
+      category: "rental_management",
+    }))
+    .filter((m) => m.phone.length === 10);
+  if (!clean.length) {
+    console.warn(`[rental-request] ${why}: no reachable phone, nothing sent`);
+    return 0;
+  }
+  try {
+    const host = process.env.COMMS_SEND_BASE_URL || `http://localhost:${process.env.PORT || "5000"}`;
+    const resp = await fetch(`${host}/api/fs/comms/api/send-batch`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-comms-api-key": key },
+      body: JSON.stringify({ category: "rental_management", messages: clean, confirm: true }),
+    });
+    const ctype = resp.headers.get("content-type") || "";
+    if (!ctype.includes("application/json")) {
+      console.error(`[rental-request] ${why}: comms returned ${resp.status} ${ctype || "no content-type"}`);
+      return 0;
+    }
+    const out: any = await resp.json();
+    // "sent" is the API's word, and every outbound row is written 'sent' with
+    // zero delivery callbacks recorded. Count what it claims; never treat it as
+    // proof the technician's handset rang.
+    const results: any[] = out?.results || out?.commsResult?.results || [];
+    const good = results.filter((r) => ["sent", "queued"].includes(String(r?.status || "").toLowerCase()));
+    console.log(`[rental-request] ${why}: comms accepted ${good.length}/${clean.length}`);
+    return good.length;
+  } catch (e: any) {
+    console.error(`[rental-request] ${why}: comms threw:`, e?.message || e);
+    return 0;
+  }
+}
+
+/**
+ * Push a landed request at Fleet.
+ *
+ * Deliberately only for the outcomes a person has to act on. A DENY or a DEFER
+ * is a self-service answer the technician already read on screen, and paging
+ * Fleet for every oil-change denial would train everyone to ignore the alert —
+ * which costs you the APPROVE and REVIEW ones that actually matter.
+ *
+ * Recipients come from RENTAL_REQUEST_ALERT_PHONES (comma-separated, 10-digit).
+ * Unset means alerting is off and says so in the log, rather than guessing at
+ * somebody's mobile number.
+ */
+async function alertFleet(r: {
+  requestNo: number | null; ldap: string; techName?: string | null; truck?: string | null;
+  decision: Decision; rule: number; reason: string; category: string;
+  homeState?: string | null; shopName?: string | null; appointmentAt?: string | null;
+  regionOwner?: string | null;
+}): Promise<void> {
+  if (r.decision !== "APPROVE" && r.decision !== "REVIEW") return;
+  const to = String(process.env.RENTAL_REQUEST_ALERT_PHONES || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  if (!to.length) {
+    console.warn("[rental-request] alertFleet: RENTAL_REQUEST_ALERT_PHONES not set, "
+      + `request #${r.requestNo} (${r.decision}) landed with no push`);
+    return;
+  }
+  const head = r.decision === "APPROVE" ? "AUTO-APPROVED" : "NEEDS YOU";
+  const body =
+    `Fleet rental request #${r.requestNo} ${head}\n`
+    + `${r.techName || r.ldap} (${r.ldap})${r.truck ? ` truck ${r.truck}` : ""}`
+    + `${r.homeState ? ` ${r.homeState}` : ""}\n`
+    + `${r.category.replace(/_/g, " ")} - rule ${r.rule}: ${r.reason}\n`
+    + (r.shopName ? `Shop: ${r.shopName}${r.appointmentAt ? ` on ${String(r.appointmentAt).slice(0, 10)}` : ""}\n` : "")
+    + (r.regionOwner ? `Region: ${r.regionOwner}\n` : "")
+    + `Queue: ${(process.env.PUBLIC_BASE_URL || "https://SHS-Nexus.replit.app").replace(/\/+$/, "")}`
+    + `/vehicle-rental-management/rental-requests`;
+  await sendSms(to.map((phone) => ({ phone, body })), `alert #${r.requestNo}`);
+}
+
+/**
+ * Tell the technician what happened.
+ *
+ * The submit screen already tells them "Fleet will send the reservation details
+ * shortly." Nothing sent anything, which made that a promise in Fleet's name
+ * that no code kept. This is what keeps it.
+ */
+async function notifyTech(requestNo: number, body: string, why: string): Promise<void> {
+  try {
+    const { rows } = await db.execute(sql`
+      SELECT ldap, mobile_phone FROM vrm_rental_request WHERE request_no = ${requestNo}
+    `);
+    const row = (rows as any[])[0];
+    if (!row) return;
+    let phone = String(row.mobile_phone || "").replace(/[^0-9]/g, "");
+    if (phone.length !== 10) {
+      const f = await factsFor(String(row.ldap));
+      phone = phoneFor(f) || "";
+    }
+    if (!phone) {
+      console.warn(`[rental-request] ${why}: no phone for ${row.ldap} on #${requestNo}`);
+      return;
+    }
+    await sendSms([{ ldap: row.ldap, phone, body }], `${why} #${requestNo}`);
+  } catch (e: any) {
+    console.error(`[rental-request] ${why} failed:`, e?.message || e);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
+/** How many requests one technician may file in a day before we make them talk to a person. */
+const SELF_SERVE_DAILY_CAP = 5;
+
+interface SubmitContext {
+  /** The token row, or null on the open front door. */
+  tokenRow: any | null;
+  ldap: string;
+  source: "form" | "self_serve";
+  identity: {
+    techName: string | null;
+    truckNumber: string | null;
+    district: string | null;
+    homeState: string | null;
+    mobilePhone: string | null;
+  };
+  body: any;
+  ip: string;
+}
+
+/**
+ * Screen a request, write the record, and tell everyone who needs to know.
+ *
+ * Shared by both front doors on purpose. The channel is cosmetic: a self-serve
+ * submission and a Fleet-issued link produce one record with one schema, one
+ * eligibility verdict and one audit trail. The only thing `source` changes is
+ * how it is reported.
+ */
+async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json: any }> {
+  const { ldap, body: b, tokenRow } = ctx;
+  const s = (v: any, max = 300) => String(v ?? "").trim().slice(0, max) || null;
+  const bool = (v: any) => (v === true || v === "yes" ? true : v === false || v === "no" ? false : null);
+  const num = (v: any) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v));
+
+  const category = s(b.problemCategory, 40) ?? "";
+  if (!PROBLEM_CATEGORIES.has(category)) {
+    return { code: 400, json: { success: false, message: "Please choose what is wrong with the vehicle." } };
+  }
+
+  // Refresh before reading, not after failing. Rule 5 is about to make a
+  // decision out of this mirror.
+  await ensureByovFresh();
+
+  const facts = await factsFor(ldap);
+  const isByov = Number(facts?.byov_count ?? 0) > 0;
+  // A mirror older than a day cannot be trusted to say someone is NOT byov.
+  const syncedAt = facts?.byov_synced_at ? new Date(facts.byov_synced_at).getTime() : 0;
+  const mirrorFresh = syncedAt > 0 && Date.now() - syncedAt < 36 * 3600 * 1000;
+  // A fresh mirror that simply has no row for this person does NOT mean
+  // "not BYOV". The roster endpoint joins to the active roster, so a new
+  // hire can be enrolled and still absent. Global freshness alone would
+  // re-create exactly the false negative the stale table caused.
+  const byovFresh = mirrorFresh && Number(facts?.byov_row_present ?? 0) > 0;
+
+  const verdict = evaluate({
+    ldap,
+    isByov,
+    isByovKnown: byovFresh,
+    employmentStatus: facts?.employment_status ?? null,
+    openRentalCount: Number(facts?.open_rentals ?? 0),
+    problemCategory: category,
+    isDrivable: bool(b.isDrivable),
+    isSafeToDrive: bool(b.isSafeToDrive),
+    hasAppointment: bool(b.hasAppointment),
+    shopEstimatedDays: num(b.shopEstimatedDays),
+    hvacCarveOut: b.hvacCarveOut === true,
+  });
+
+  // Maintenance ends the form immediately, so the acknowledgements are not
+  // required on a path the technician never reached. Neither is the shop
+  // appointment acknowledgement on a path that never asked for a shop: a
+  // BYOV technician was previously made to attest to an appointment the form
+  // deliberately hid from them, which is a false attestation in an audit
+  // trail whose entire purpose is being true.
+  const acksRequired = verdict.decision === "APPROVE" || verdict.decision === "REVIEW";
+  const appointmentAsked = !isByov;
+  const acks = {
+    ack_not_maintenance: b.ackNotMaintenance === true,
+    ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
+    ack_has_appointment: b.ackHasAppointment === true,
+    ack_last_resort: b.ackLastResort === true,
+    ack_return_one_day: b.ackReturnOneDay === true,
+    ack_accurate: b.ackAccurate === true,
+  };
+  if (acksRequired) {
+    const required = Object.entries(acks)
+      .filter(([k]) => appointmentAsked || k !== "ack_has_appointment");
+    if (!required.every(([, v]) => v)) {
+      return { code: 400, json: { success: false, message: "Please tick every acknowledgement before submitting." } };
+    }
+  }
+
+  const status =
+    verdict.decision === "APPROVE" ? "approved"
+    : verdict.decision === "DENY" ? "denied"
+    : verdict.decision === "DEFER" ? "deferred"
+    : "screened";
+
+  const homeState = ctx.identity.homeState ?? (facts?.home_state ?? null);
+  const shopState = s(b.shopState, 2);
+  const regionOwner = regionOwnerFor(homeState, shopState);
+
+  // One row per technician per attempt. A technician who was deferred and has
+  // now come back supersedes their own earlier deferral rather than adding a
+  // duplicate. Keyed on the token where there is one, and on the LDAP on the
+  // open door, where there is not.
+  if (tokenRow) {
+    await db.execute(sql`
+      DELETE FROM vrm_rental_request WHERE token_id = ${tokenRow.id} AND status = 'deferred'
+    `);
+  } else {
+    await db.execute(sql`
+      DELETE FROM vrm_rental_request
+      WHERE ldap = ${ldap} AND token_id IS NULL AND status IN ('deferred','returned')
+    `);
+  }
+
+  const { rows: ins } = await db.execute(sql`
+    INSERT INTO vrm_rental_request (
+      token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
+      identity_corrected, identity_correction, is_byov,
+      problem_category, symptom, is_drivable, is_safe_to_drive, occurred_at,
+      jobs_affected, what_was_tried,
+      shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
+      has_appointment, appointment_at, shop_estimated_days,
+      policy_version, policy_acknowledged_at, policy_ip,
+      ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
+      ack_last_resort, ack_return_one_day, ack_accurate,
+      approved_vehicle_class, reason_code, region_owner,
+      status, auto_decision, auto_reason, auto_rule, source
+    ) VALUES (
+      ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
+      ${s(b.truckNumber, 30) || ctx.identity.truckNumber},
+      ${s(b.district, 20) || ctx.identity.district},
+      ${s(b.homeState, 2) || homeState},
+      ${s(b.mobilePhone, 30) || ctx.identity.mobilePhone},
+      ${b.identityCorrected === true}, ${s(b.identityCorrection, 400)}, ${isByov},
+      ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)},
+      ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
+      ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
+      ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
+      ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
+      ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
+      ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
+      ${acks.ack_last_resort}, ${acks.ack_return_one_day}, ${acks.ack_accurate},
+      ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
+      ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
+    )
+    RETURNING request_no
+  `);
+  const requestNo = (ins as any[])[0]?.request_no ?? null;
+
+  // A DEFER tells the technician to go book an appointment and come back.
+  // Consuming the token here would make that instruction impossible to
+  // follow, so the link stays live and the next submit supersedes this row.
+  if (tokenRow && verdict.decision !== "DEFER") {
+    await db.execute(sql`UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${tokenRow.id}`);
+  }
+
+  // Fire and forget. A comms outage must never fail a submission.
+  void alertFleet({
+    requestNo, ldap, techName: ctx.identity.techName, truck: ctx.identity.truckNumber,
+    decision: verdict.decision, rule: verdict.rule, reason: verdict.reason, category,
+    homeState, shopName: s(b.shopName, 200), appointmentAt: s(b.appointmentAt, 40),
+    regionOwner,
+  });
+
+  return {
+    code: 200,
+    json: {
+      success: true,
+      requestNo,
+      decision: verdict.decision,
+      rule: verdict.rule,
+      message: verdict.script ?? null,
+    },
+  };
+}
+
 export function registerRentalRequestPublicRoutes(app: Express): void {
+  // -------------------------------------------------------------------------
+  // The open front door. Registered BEFORE the tokenised routes so that
+  // "/open/..." can never be captured as a :token value.
+  // -------------------------------------------------------------------------
+
+  app.get("/api/public/rental-request/open/start", async (_req, res) => {
+    res.json({ valid: true, open: true, policyVersion: POLICY_VERSION });
+  });
+
+  /**
+   * Prove who you are against the roster.
+   *
+   * This is the check the tokenised path ran too; the token was never what
+   * established identity, it only decided who had been handed a link. LDAP has
+   * to exist and be ACTIVE-adjacent (roster status is judged by rule 6, not
+   * here) and the truck has to match something we hold for that person.
+   */
+  app.post("/api/public/rental-request/open/verify", async (req, res) => {
+    try {
+      const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      const truck = String(req.body?.truckNumber || "").trim();
+      if (!ldap || !truck) {
+        return res.status(400).json({ verified: false, message: "Please enter both your LDAP and your truck number." });
+      }
+
+      const f = await factsFor(ldap);
+      if (!f) {
+        return res.status(403).json({
+          verified: false,
+          message: "We could not find that LDAP on the technician roster. Check the spelling, "
+                 + "or contact Fleet if you have just started.",
+        });
+      }
+
+      const candidates = ((f.truck_candidates as any[]) || [])
+        .filter(Boolean).map((t: any) => normTruck(String(t)));
+      // If we hold no truck at all for someone, accept what they typed rather
+      // than locking them out of the front door over our own missing data. The
+      // value is recorded and the mismatch is visible to Fleet either way.
+      if (candidates.length && !candidates.includes(normTruck(truck))) {
+        return res.status(403).json({
+          verified: false,
+          message: "That truck number does not match our records for you. Enter the number on "
+                 + "your current van, or contact Fleet if it has just changed.",
+        });
+      }
+
+      // A technician who already has one in flight must not open a second.
+      const { rows: live } = await db.execute(sql`
+        SELECT request_no, status FROM vrm_rental_request
+        WHERE ldap = ${ldap} AND status IN ('screened','approved','booked')
+          AND created_at > now() - interval '30 days'
+        ORDER BY created_at DESC LIMIT 1
+      `);
+      const open = (live as any[])[0];
+      if (open) {
+        return res.status(409).json({
+          verified: false,
+          message: `You already have rental request #${open.request_no} with us (${open.status}). `
+                 + "Fleet is working it. Contact Fleet rather than starting a second one.",
+        });
+      }
+
+      const { rows: recent } = await db.execute(sql`
+        SELECT count(*)::int AS n FROM vrm_rental_request
+        WHERE ldap = ${ldap} AND created_at > now() - interval '24 hours'
+      `);
+      if (Number((recent as any[])[0]?.n ?? 0) >= SELF_SERVE_DAILY_CAP) {
+        return res.status(429).json({
+          verified: false,
+          message: "You have filed several requests today already. Please contact Fleet directly "
+                 + "so a person can help you.",
+        });
+      }
+
+      // Anything they already told us, so a send-back is "add the missing bit",
+      // not "start again". Covers both a Fleet send-back and a rule-3/4 defer.
+      const { rows: prior } = await db.execute(sql`
+        SELECT request_no, status, missing_fields, decision_note, problem_category, symptom,
+               is_drivable, is_safe_to_drive, jobs_affected, what_was_tried,
+               shop_name, shop_address, shop_city, shop_state, shop_phone,
+               has_appointment, shop_estimated_days,
+               to_char(appointment_at, 'YYYY-MM-DD') AS appointment_date,
+               to_char(appointment_at, 'HH24:MI')    AS appointment_time
+        FROM vrm_rental_request
+        WHERE ldap = ${ldap} AND status IN ('returned','deferred')
+        ORDER BY created_at DESC LIMIT 1
+      `);
+      const p = (prior as any[])[0] || null;
+
+      res.json({
+        verified: true,
+        policyVersion: POLICY_VERSION,
+        resume: p && {
+          requestNo: p.request_no,
+          status: p.status,
+          missing: (p.missing_fields || []) as string[],
+          missingText: ((p.missing_fields || []) as string[])
+            .map((m) => MISSING_REASONS[m]).filter(Boolean),
+          note: p.decision_note || null,
+          answers: {
+            problemCategory: p.problem_category || "",
+            symptom: p.symptom || "",
+            isDrivable: p.is_drivable === true ? "yes" : p.is_drivable === false ? "no" : "",
+            isSafeToDrive: p.is_safe_to_drive === true ? "yes" : p.is_safe_to_drive === false ? "no" : "",
+            jobsAffected: p.jobs_affected == null ? "" : String(p.jobs_affected),
+            whatWasTried: p.what_was_tried || "",
+            shopName: p.shop_name || "",
+            shopAddress: p.shop_address || "",
+            shopCity: p.shop_city || "",
+            shopState: p.shop_state || "",
+            shopPhone: p.shop_phone || "",
+            hasAppointment: p.has_appointment === true ? "yes" : p.has_appointment === false ? "no" : "",
+            appointmentDate: p.appointment_date || "",
+            appointmentTime: p.appointment_time || "08:00",
+            shopEstimatedDays: p.shop_estimated_days == null ? "" : String(p.shop_estimated_days),
+          },
+        },
+        identity: {
+          ldap,
+          techName: f.tech_name || "",
+          truckNumber: String(f.truck_number || truck),
+          district: f.district_no ?? "",
+          homeState: f.home_state ?? "",
+          mobilePhone: phoneFor(f) ?? "",
+          isByov: Number(f.byov_count ?? 0) > 0,
+        },
+      });
+    } catch (e: any) {
+      console.error("[rental-request] open verify failed:", e?.message || e);
+      res.status(500).json({ verified: false, message: "Something went wrong. Please try again." });
+    }
+  });
+
+  app.post("/api/public/rental-request/open/submit", async (req, res) => {
+    try {
+      const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      if (!ldap) return res.status(400).json({ success: false, message: "Missing LDAP." });
+
+      const f = await factsFor(ldap);
+      if (!f) return res.status(403).json({ success: false, message: "We could not find that LDAP on the roster." });
+
+      // Re-check the in-flight guard at submit time, not just at verify time.
+      // Two tabs, or a double-tap on a slow phone, would otherwise each pass
+      // the earlier check and produce two records and two ETD reservations.
+      // The partial unique index on (ldap) WHERE token_id IS NULL is the
+      // backstop underneath this; this is here to give a readable answer.
+      const { rows: live } = await db.execute(sql`
+        SELECT request_no, status FROM vrm_rental_request
+        WHERE ldap = ${ldap} AND status IN ('screened','approved','booked')
+          AND created_at > now() - interval '30 days'
+        ORDER BY created_at DESC LIMIT 1
+      `);
+      const open = (live as any[])[0];
+      if (open) {
+        return res.status(409).json({
+          success: false,
+          requestNo: open.request_no,
+          message: `You already have rental request #${open.request_no} with us (${open.status}).`,
+        });
+      }
+
+      const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+      const out = await screenAndRecord({
+        tokenRow: null,
+        ldap,
+        source: "self_serve",
+        identity: {
+          techName: f.tech_name || null,
+          truckNumber: f.truck_number ? String(f.truck_number) : null,
+          district: f.district_no ?? null,
+          homeState: f.home_state ?? null,
+          mobilePhone: phoneFor(f),
+        },
+        body: req.body || {},
+        ip,
+      });
+      res.status(out.code).json(out.json);
+    } catch (e: any) {
+      // The unique index firing here means a genuine race, not a bug.
+      if (String(e?.message || "").includes("vrm_rental_request_open_live_uniq")) {
+        return res.status(409).json({
+          success: false,
+          message: "You already have a rental request with us. Fleet is working it.",
+        });
+      }
+      console.error("[rental-request] open submit failed:", e?.message || e);
+      res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Tokenised routes. Still live: Fleet or a supervisor can issue a personal
+  // link for planned work, and the two paths write the same record.
+  // -------------------------------------------------------------------------
+
   app.get("/api/public/rental-request/:token", async (req, res) => {
     try {
       const row = await loadToken(req.params.token);
@@ -353,121 +1036,30 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       if (!ldap || (row.ldap && ldap !== String(row.ldap).trim().toUpperCase())) {
         return res.status(403).json({ success: false, message: "That LDAP does not match this link." });
       }
-      const s = (v: any, max = 300) => String(v ?? "").trim().slice(0, max) || null;
-      const bool = (v: any) => (v === true || v === "yes" ? true : v === false || v === "no" ? false : null);
-      const num = (v: any) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v));
-
-      const category = s(b.problemCategory, 40) ?? "";
-      if (!PROBLEM_CATEGORIES.has(category)) {
-        return res.status(400).json({ success: false, message: "Please choose what is wrong with the vehicle." });
-      }
-
-      const facts = await factsFor(ldap);
-      const isByov = Number(facts?.byov_count ?? 0) > 0;
-      // A mirror older than a day cannot be trusted to say someone is NOT byov.
-      const syncedAt = facts?.byov_synced_at ? new Date(facts.byov_synced_at).getTime() : 0;
-      const mirrorFresh = syncedAt > 0 && Date.now() - syncedAt < 36 * 3600 * 1000;
-      // A fresh mirror that simply has no row for this person does NOT mean
-      // "not BYOV". The roster endpoint joins to the active roster, so a new
-      // hire can be enrolled and still absent. Global freshness alone would
-      // re-create exactly the false negative the stale table caused.
-      const byovFresh = mirrorFresh && Number(facts?.byov_row_present ?? 0) > 0;
-
-      const verdict = evaluate({
+      const facts0 = await factsFor(ldap);
+      const ip0 = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+      const out = await screenAndRecord({
+        tokenRow: row,
         ldap,
-        isByov,
-        isByovKnown: byovFresh,
-        employmentStatus: facts?.employment_status ?? null,
-        openRentalCount: Number(facts?.open_rentals ?? 0),
-        problemCategory: category,
-        isDrivable: bool(b.isDrivable),
-        isSafeToDrive: bool(b.isSafeToDrive),
-        hasAppointment: bool(b.hasAppointment),
-        shopEstimatedDays: num(b.shopEstimatedDays),
-        hvacCarveOut: b.hvacCarveOut === true,
+        source: "form",
+        identity: {
+          techName: row.tech_name || facts0?.tech_name || null,
+          truckNumber: row.truck_number || (facts0?.truck_number ? String(facts0.truck_number) : null),
+          district: facts0?.district_no ?? null,
+          homeState: facts0?.home_state ?? null,
+          mobilePhone: row.phone || phoneFor(facts0),
+        },
+        body: b,
+        ip: ip0,
       });
-
-      // Maintenance ends the form immediately, so the acknowledgements are not
-      // required on a path the technician never reached.
-      const acksRequired = verdict.decision === "APPROVE" || verdict.decision === "REVIEW";
-      const acks = {
-        ack_not_maintenance: b.ackNotMaintenance === true,
-        ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
-        ack_has_appointment: b.ackHasAppointment === true,
-        ack_last_resort: b.ackLastResort === true,
-        ack_return_one_day: b.ackReturnOneDay === true,
-        ack_accurate: b.ackAccurate === true,
-      };
-      if (acksRequired && !Object.values(acks).every(Boolean)) {
-        return res.status(400).json({ success: false, message: "Please tick every acknowledgement before submitting." });
-      }
-
-      const status =
-        verdict.decision === "APPROVE" ? "approved"
-        : verdict.decision === "DENY" ? "denied"
-        : verdict.decision === "DEFER" ? "deferred"
-        : "screened";
-
-      const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
-
-      // One row per token. A technician who was deferred and has now come back
-      // supersedes their own earlier deferral rather than adding a duplicate.
-      await db.execute(sql`
-        DELETE FROM vrm_rental_request
-        WHERE token_id = ${row.id} AND status = 'deferred'
-      `);
-
-      const { rows: ins } = await db.execute(sql`
-        INSERT INTO vrm_rental_request (
-          token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
-          identity_corrected, identity_correction, is_byov,
-          problem_category, symptom, is_drivable, is_safe_to_drive, occurred_at,
-          jobs_affected, what_was_tried,
-          shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
-          has_appointment, appointment_at, shop_estimated_days,
-          policy_version, policy_acknowledged_at, policy_ip,
-          ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
-          ack_last_resort, ack_return_one_day, ack_accurate,
-          approved_vehicle_class, reason_code, region_owner,
-          status, auto_decision, auto_reason, auto_rule
-        ) VALUES (
-          ${row.id}, ${ldap}, ${row.tech_name || null}, ${s(b.truckNumber, 30) || row.truck_number},
-          ${s(b.district, 20)}, ${s(b.homeState, 2)}, ${s(b.mobilePhone, 30) || row.phone},
-          ${b.identityCorrected === true}, ${s(b.identityCorrection, 400)}, ${isByov},
-          ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)},
-          ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
-          ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
-          ${s(b.shopState, 2)}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
-          ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
-          ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ip || null},
-          ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
-          ${acks.ack_last_resort}, ${acks.ack_return_one_day}, ${acks.ack_accurate},
-          ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${s(b.regionOwner, 80)},
-          ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}
-        )
-        RETURNING request_no
-      `);
-
-      // A DEFER tells the technician to go book an appointment and come back.
-      // Consuming the token here would make that instruction impossible to
-      // follow, so the link stays live and the next submit supersedes this row.
-      if (verdict.decision !== "DEFER") {
-        await db.execute(sql`UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${row.id}`);
-      }
-
-      res.json({
-        success: true,
-        requestNo: (ins as any[])[0]?.request_no ?? null,
-        decision: verdict.decision,
-        rule: verdict.rule,
-        message: verdict.script ?? null,
-      });
+      return res.status(out.code).json(out.json);
     } catch (e: any) {
       console.error("[rental-request] submit failed:", e?.message || e);
       res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
     }
   });
 }
+
 
 // ---------------------------------------------------------------------------
 // Admin surface
@@ -505,7 +1097,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          // The concurrency guards. Omitted from the first version of this list,
          // which then reported ok:true while claimed_at did not exist — the one
          // failure mode a pre-flight check must never have.
-         "claimed_at", "claimed_by", "source", "origin_survey_id"]],
+         "claimed_at", "claimed_by", "source", "origin_survey_id",
+         // Send-back. A health check that passes while the thing it guards is
+         // missing is worse than no health check; that lesson cost a publish.
+         "missing_fields", "returned_at", "return_count"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
     ];
@@ -528,7 +1123,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
 
       // Indexes are part of correctness here, not tuning: without the unique
       // index a concurrent double-submit becomes two ETD bookings.
-      const requiredIndexes = ["vrm_rental_request_token_uniq"];
+      const requiredIndexes = ["vrm_rental_request_token_uniq", "vrm_rental_request_open_live_uniq"];
       for (const idx of requiredIndexes) {
         const { rows } = await db.execute(sql`
           SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = ${idx}
@@ -604,6 +1199,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "log failed" });
     }
+  });
+
+  router.get("/forms/rental-request/missing-reasons", async (_req, res) => {
+    res.json({ reasons: MISSING_REASONS });
   });
 
   router.get("/forms/rental-request/list", async (_req, res) => {
@@ -710,6 +1309,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const ref = String(req.body?.etdReference || "").trim();
       const resId = String(req.body?.etdReservationId || "").trim();
       const error = String(req.body?.error || "").trim();
+      // The branch is what the technician actually has to walk into, and
+      // nearest_branch_name existed as a column that nothing ever wrote. The
+      // runner knows it from the quote; take it while it is in hand.
+      const branch = String(req.body?.branchName || "").trim().slice(0, 200);
 
       if (error) {
         // Never stamp an error onto a row that already booked. A late failure
@@ -730,10 +1333,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const { rows } = await db.execute(sql`
         UPDATE vrm_rental_request
         SET etd_reference = ${ref || null}, etd_reservation_id = ${resId || null},
+            nearest_branch_name = COALESCE(${branch || null}, nearest_branch_name),
             etd_booked_at = now(), etd_error = NULL,
             status = 'booked', claimed_at = NULL, updated_at = now()
         WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
-        RETURNING request_no, status
+        RETURNING request_no, status, appointment_at, shop_name
       `);
       if (!(rows as any[]).length) {
         const { rows: cur } = await db.execute(sql`
@@ -747,7 +1351,23 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
           status: c.status, etdReference: c.etd_reference,
         });
       }
-      res.json({ ok: true, ...(rows as any[])[0] });
+      const booked = (rows as any[])[0];
+
+      // The confirmation number is the whole point. Storing it and never
+      // telling the technician leaves them exactly where Holman left them:
+      // waiting for a phone call. This is the promise the submit screen makes.
+      void notifyTech(
+        no,
+        `Sears Fleet: your rental is booked. Confirmation ${ref || resId}.`
+        + (branch ? `\nPick up at Enterprise ${branch}.` : "")
+        + (booked?.appointment_at
+            ? `\nFrom ${new Date(booked.appointment_at).toLocaleDateString("en-US")}`
+              + (booked.shop_name ? `, when your van goes into ${booked.shop_name}.` : ".")
+            : "")
+        + `\nReturn it within one business day of your van being ready.`,
+        "booked-notice",
+      );
+      res.json({ ok: true, ...booked });
     } catch (e: any) {
       console.error("[rental-request] booked failed:", e?.message || e);
       res.status(500).json({ message: e?.message || "Failed to record booking." });
@@ -758,10 +1378,23 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
   router.post("/forms/rental-request/:requestNo/decide", async (req, res) => {
     try {
       const decision = String(req.body?.decision || "").toUpperCase();
-      if (!["APPROVE", "DENY", "DEFER"].includes(decision)) {
-        return res.status(400).json({ message: "decision must be APPROVE, DENY or DEFER" });
+      if (!["APPROVE", "DENY", "DEFER", "RETURN"].includes(decision)) {
+        return res.status(400).json({ message: "decision must be APPROVE, DENY, DEFER or RETURN" });
       }
       const note = String(req.body?.note || "").trim();
+
+      // RETURN is "you have not given us enough to book this", which is a
+      // different fact from "no". It must name what is missing, because a
+      // send-back that just says incomplete sends the technician back to a
+      // form they already believe they filled in.
+      const missing: string[] = Array.isArray(req.body?.missing)
+        ? req.body.missing.map((m: any) => String(m)).filter((m: string) => m in MISSING_REASONS)
+        : [];
+      if (decision === "RETURN" && !missing.length) {
+        return res.status(400).json({
+          message: "Say what is missing. Pick at least one of: " + Object.keys(MISSING_REASONS).join(", "),
+        });
+      }
       const actor = (req as any).user?.username || (req as any).user?.email || "unknown";
 
       const { rows } = await db.execute(sql`
@@ -778,10 +1411,25 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       // Never overwrite a booked row. Denying one would leave a live ETD
       // reservation attached to a request the record says was refused, and
       // nothing downstream would ever go cancel it.
+      const nextStatus =
+        decision === "APPROVE" ? "approved"
+        : decision === "DENY" ? "denied"
+        : decision === "RETURN" ? "returned"
+        : "deferred";
       const { rows: upd } = await db.execute(sql`
         UPDATE vrm_rental_request
-        SET status = ${decision === "APPROVE" ? "approved" : decision === "DENY" ? "denied" : "deferred"},
+        SET status = ${nextStatus},
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
+            missing_fields = ${decision === "RETURN"
+              // string_to_array, not a bound JS array. Interpolating an array into
+              // a drizzle sql`` template binds it as a record and Postgres answers
+              // "cannot cast type record to text[]". Same family of trap as the
+              // ANY() one. The values are keys already filtered against
+              // MISSING_REASONS, so they are a known-safe shape with no commas.
+              ? sql`string_to_array(${missing.join(",")}, ',')`
+              : sql`missing_fields`},
+            returned_at    = ${decision === "RETURN" ? sql`now()` : sql`returned_at`},
+            return_count   = ${decision === "RETURN" ? sql`return_count + 1` : sql`return_count`},
             updated_at = now()
         WHERE request_no = ${Number(req.params.requestNo)} AND status <> 'booked'
         RETURNING request_no
@@ -792,6 +1440,28 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                  + "changing the decision here would leave a live rental on a denied request.",
         });
       }
+
+      // Close the loop. A decision that only lands in a table is invisible to
+      // the one person waiting on it, and silence is what drives the call to
+      // Fleet that this whole process exists to remove.
+      const no = Number(req.params.requestNo);
+      const missingText = missing.map((m) => MISSING_REASONS[m]).join(", ");
+      const text =
+        decision === "RETURN"
+          ? `Sears Fleet: we cannot approve rental request #${no} yet because we still need `
+            + `${missingText}.${note ? ` ${note}` : ""}\nFinish it here: ${PUBLIC_REQUEST_URL}`
+            + `\nYour earlier answers are saved, you only need to add what is missing.`
+        : decision === "APPROVE"
+          ? "Sears Fleet: your rental request is approved. We are booking the reservation now "
+            + "and will text you the confirmation number and branch."
+          : decision === "DENY"
+          ? `Sears Fleet: your rental request was not approved.${note ? ` ${note}` : ""}`
+            + " Reply to this message if your situation has changed."
+          : `Sears Fleet: we are holding your rental request until you have a confirmed shop `
+            + `appointment.${note ? ` ${note}` : ""} Start a new request once the shop gives you a date: `
+            + PUBLIC_REQUEST_URL;
+      void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
+
       res.json({ ok: true, decision });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "decide failed" });

@@ -229,6 +229,14 @@ function Router() {
 
       {/* Rental REQUEST — public, tokenized. The front door that replaces the
           technician's call to Holman. Outside ProtectedRoute by design. */}
+      {/* The OPEN door is the load-bearing one. A tokenised link cannot serve a
+          technician standing next to a van that just died: nobody has handed them
+          a link, and getting one would mean Fleet answering a phone, which is the
+          intake labour going direct to Enterprise was supposed to remove. Identity
+          is proven by LDAP + truck against the roster instead. */}
+      <Route path="/rental-request">
+        <RentalRequestForm />
+      </Route>
       <Route path="/rental-request/:token">
         <RentalRequestForm />
       </Route>
