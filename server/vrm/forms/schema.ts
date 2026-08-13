@@ -286,6 +286,26 @@ export async function initFormsSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS vrm_rental_request_source_idx ON vrm_rental_request (source);
   `);
 
+  // policy_complete is GENERATED, so it cannot be altered in place. Drop it only
+  // when its stored expression predates the new acknowledgements, otherwise this
+  // would rewrite the table on every boot. Rows signed under an older
+  // policy_version keep whatever they actually agreed to; nothing is backfilled
+  // true, because that would forge a signature.
+  await db.execute(sql`
+    DO $$
+    DECLARE d text;
+    BEGIN
+      SELECT pg_get_expr(ad.adbin, ad.adrelid) INTO d
+        FROM pg_attrdef ad
+        JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
+       WHERE ad.adrelid = 'vrm_rental_request'::regclass
+         AND a.attname = 'policy_complete';
+      IF d IS NOT NULL AND d NOT LIKE '%ack_discipline%' THEN
+        ALTER TABLE vrm_rental_request DROP COLUMN policy_complete;
+      END IF;
+    END $$;
+  `);
+
   // Every acknowledgement ticked. Stored rather than recomputed so a later
   // change to the policy text cannot retroactively alter what someone agreed to.
   await db.execute(sql`
@@ -294,7 +314,22 @@ export async function initFormsSchema(): Promise<void> {
       GENERATED ALWAYS AS (
         ack_not_maintenance AND ack_cannot_drive_safely AND ack_has_appointment
         AND ack_last_resort AND ack_return_one_day AND ack_accurate
+        AND ack_working_hours_only AND ack_return_before_time_off AND ack_discipline
       ) STORED;
+  `);
+
+  // Use-of-vehicle acknowledgements (Tyler, 2026-08-13).
+  //
+  // These three are the disciplinary half of the policy: work-hours-only use,
+  // return before any absence of three days or more, and the consequence of
+  // breaking either. They are the reason the acknowledgement block exists at
+  // all — a signed record of what the technician was told, on the day they
+  // were told it.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS ack_working_hours_only     boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS ack_return_before_time_off boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS ack_discipline             boolean NOT NULL DEFAULT false;
   `);
 
   // Sent back as incomplete.

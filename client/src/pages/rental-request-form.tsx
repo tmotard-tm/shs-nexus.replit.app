@@ -65,6 +65,17 @@ const ACKS: Array<[string, string]> = [
   ["ackReturnOneDay",
    "I will return the rental within one business day of my vehicle being ready, and I understand failing to do so is a cost to the business."],
   ["ackAccurate", "The information above is accurate and may be verified against shop records."],
+  // Use-of-vehicle terms (Tyler, 2026-08-13). These are the ones with a
+  // consequence attached, so they are worded as plainly as the rest.
+  ["ackWorkingHoursOnly",
+   "I understand the rental is only for use while working. Off the clock use is not allowed, "
+   + "and I will not drive it outside of my working hours."],
+  ["ackReturnBeforeTimeOff",
+   "I understand I must turn the rental in before any time off of 3 days in a row or more, "
+   + "including vacation or a leave of absence."],
+  ["ackDiscipline",
+   "I understand any violation of these terms can result in disciplinary action, up to and "
+   + "including termination."],
 ];
 
 async function postJson(url: string, body: unknown) {
