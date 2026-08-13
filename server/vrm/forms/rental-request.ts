@@ -1103,6 +1103,12 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "missing_fields", "returned_at", "return_count"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
+      // Cutover tracking. Without this the survey pool, the ETD reservation and
+      // the route block have no shared record and the scoreboard reads empty
+      // rather than broken.
+      ["vrm_rental_cutover",
+        ["ldap", "reservation_status", "etd_reference", "reserved_at",
+         "route_block_status", "route_block_project_id", "route_block_filed_at"]],
     ];
     try {
       const problems: string[] = [];
