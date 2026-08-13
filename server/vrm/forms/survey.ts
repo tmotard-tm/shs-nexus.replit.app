@@ -290,6 +290,11 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         SELECT r.*, t.sent_at, t.opened_at, t.batch, t.phone
         FROM vrm_rental_tech_survey r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
+        -- Booked technicians have MOVED to the cutover page. Appearing on
+        -- both pages is not a move, it is a copy.
+        WHERE NOT EXISTS (SELECT 1 FROM vrm_rental_cutover c
+                          WHERE c.ldap = upper(r.ldap)
+                            AND c.reservation_status = booked)
         ORDER BY r.created_at DESC
       `);
       res.json({ responses: rows });
@@ -1240,6 +1245,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       const { rows } = await db.execute(sql`
         SELECT c.ldap, c.tech_name, c.truck_number, c.van_status,
                s.rental_branch_city, s.rental_branch_state, s.surveyed_at,
+               s.shop_name, s.shop_city, s.shop_state, s.shop_phone,
+               s.promised_ready_date, s.rental_company, s.rental_vehicle_desc,
                c.reservation_status,
                c.etd_reference, c.branch_name, c.branch_pinned, c.vehicle_class,
                c.reserved_at, c.reservation_error,
@@ -1249,7 +1256,9 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                'complete' AS stage
         FROM vrm_rental_cutover c
         LEFT JOIN LATERAL (
-          SELECT s.rental_branch_city, s.rental_branch_state, s.created_at AS surveyed_at
+          SELECT s.rental_branch_city, s.rental_branch_state, s.created_at AS surveyed_at,
+                 s.shop_name, s.shop_city, s.shop_state, s.shop_phone,
+                 s.promised_ready_date, s.rental_company, s.rental_vehicle_desc
           FROM vrm_rental_tech_survey s
           WHERE upper(s.ldap) = upper(c.ldap)
           ORDER BY s.created_at DESC
