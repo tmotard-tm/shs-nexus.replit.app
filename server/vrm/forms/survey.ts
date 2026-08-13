@@ -486,12 +486,19 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           AND p.phone IS NOT NULL
           AND (length(p.phone) = 10
                OR (length(p.phone) = 11 AND left(p.phone, 1) = '1'))
+          -- ANY prior token suppresses, not just a live unsubmitted one.
+          -- This clause used to read "submitted_at IS NULL AND expires_at >
+          -- now()", which meant a technician who had ALREADY COMPLETED the
+          -- survey passed straight through it. Measured on prod 2026-08-13, a
+          -- second run of this route would have issued 246 tokens of which
+          -- 241 were people who answered on 8/12. The docstring above always
+          -- claimed "re-running never double-texts"; now it is true.
+          -- A genuine resend is a deliberate act, not a side effect of
+          -- re-running issue, and a second text converts at 0% anyway.
           AND NOT EXISTS (
             SELECT 1 FROM vrm_form_tokens ft
             WHERE ft.form_type = 'rental_tech_survey'
               AND upper(ft.ldap) = upper(a.tech_racfid)
-              AND ft.submitted_at IS NULL
-              AND ft.expires_at > now()
           )
         ORDER BY upper(a.tech_racfid), c.days_open DESC NULLS LAST, c.vehicle_number
         LIMIT ${limit}
@@ -544,12 +551,16 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             SELECT 1 FROM all_techs a2
             WHERE upper(a2.tech_racfid) = upper(tp.enterprise_id)
           )
+          -- Same rule as above, and this branch is where the hole was found:
+          -- Donta Sims (DSIMS2) was texted and completed the survey on 8/12,
+          -- yet came back as a recipient here because his token was submitted
+          -- rather than pending. Match on the truck too, because a broken
+          -- ldap linkage is the exact failure this branch exists to survive.
           AND NOT EXISTS (
             SELECT 1 FROM vrm_form_tokens ft
             WHERE ft.form_type = 'rental_tech_survey'
-              AND upper(ft.ldap) = upper(tp.enterprise_id)
-              AND ft.submitted_at IS NULL
-              AND ft.expires_at > now()
+              AND (upper(ft.ldap) = upper(tp.enterprise_id)
+                OR ltrim(ft.truck_number, '0') = ltrim(c.vehicle_number_padded, '0'))
           )
         ORDER BY upper(tp.enterprise_id), c.days_open DESC NULLS LAST
       `);
