@@ -590,7 +590,14 @@ export default function RentalSurvey() {
             <tbody>
               {sorted.map((r, i) => (
                 <tr key={`${r.id}-${r._truck}-${i}`} onClick={() => setDetail(r)}
-                    style={{ cursor: "pointer", background: r.truck_mismatch ? colors.redLight : undefined }}>
+                    style={{
+                      cursor: "pointer",
+                      // Cutover complete wins: once booked + route block filed live,
+                      // the tech is done — green whole-row highlight (Tyler 2026-08-13).
+                      background: r.cutover_status === "complete"
+                        ? colors.greenDeepLight
+                        : r.truck_mismatch ? colors.redLight : undefined,
+                    }}>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains, fontWeight: 600 }}>
                     {r._truck || "—"}
                     {r._role && <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 10.5, marginLeft: 6 }}>{r._role}</span>}
