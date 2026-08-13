@@ -55,7 +55,6 @@ export default function RentalTechSurvey() {
   const [verifyError, setVerifyError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [escalated, setEscalated] = useState(false);
-  const [requestRaised, setRequestRaised] = useState<number | null>(null);
 
   const [hasRental, setHasRental] = useState<"" | "yes" | "no">("");
   const [noRentalReason, setNoRentalReason] = useState("");
@@ -144,7 +143,6 @@ export default function RentalTechSurvey() {
       postJson(`/api/public/rental-survey/${encodeURIComponent(token)}/submit`, buildPayload(override)),
     onSuccess: (data: any) => {
       setEscalated(!!data?.escalated);
-      setRequestRaised(data?.requestRaised ?? null);
       setStep("done");
     },
     onError: (e: any) => setSubmitError(e.message),
@@ -227,8 +225,6 @@ export default function RentalTechSurvey() {
             <CardDescription>
               {escalated
                 ? "We have flagged your van as unaccounted for. Someone from Fleet will contact you directly to track it down."
-                : requestRaised
-                ? `Your answers are recorded, and we have raised rental request #${requestRaised} for you. Fleet will follow up.`
                 : "Your answers are recorded. If anything needs to change we will reach out."}
             </CardDescription>
           </CardHeader>
@@ -337,12 +333,6 @@ export default function RentalTechSurvey() {
                         <SelectItem value="totaled">Totaled in an accident</SelectItem>
                       </SelectContent>
                     </Select>
-                    {(vanStatus === "in_shop" || vanStatus === "decommissioned" || vanStatus === "totaled") && (
-                      <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
-                        You have told us you have no rental and no working van. We will raise a
-                        rental request for you and Fleet will follow up.
-                      </p>
-                    )}
                   </div>
 
                   <div className="space-y-2">

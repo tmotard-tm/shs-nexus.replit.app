@@ -17,7 +17,6 @@ import type { Express, Router } from "express";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
-import { raiseRequestFromSurvey } from "./rental-request";
 import { sendStandardActivity } from "../dca-task-client";
 import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
 
@@ -263,44 +262,15 @@ export function registerRentalSurveyPublicRoutes(app: Express): void {
         UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${row.id}
       `);
 
-      // Tyler's ruling 2026-08-12: a survey answer that needs a rental raises a
-      // request rather than sitting in survey data. Narrow on purpose — this
-      // must not manufacture demand.
-      const STRANDED = new Set(["in_shop", "decommissioned", "totaled"]);
-      const needsRental = !hasRental && (
-        (vanStatus != null && STRANDED.has(vanStatus))
-        || noRentalReason === "never_had_one"
-      );
-
-      let raisedRequestNo: number | null = null;
-      if (needsRental) {
-        try {
-          raisedRequestNo = await raiseRequestFromSurvey({
-            surveyId: String(surveyId ?? ""),
-            ldap: id.ldap,
-            truckNumber: id.truck,
-            techName: row.tech_name || null,
-            vanStatus,
-            shopName: s(b.shopName),
-            shopCity: s(b.shopCity, 80),
-            shopState: s(b.shopState, 2),
-            shopPhone: s(b.shopPhone, 30),
-            symptom: s(b.blocker, 600)
-              || (noRentalReason === "never_had_one"
-                ? "Survey: says a rental was never received"
-                : "Survey: no rental and the van is not available"),
-          });
-        } catch (e: any) {
-          // A failure here must not lose the survey answer the technician just
-          // gave us. Log it and move on; Fleet can raise the request by hand.
-          console.error("[survey] could not raise a request:", e?.message || e);
-        }
-      }
-
+      // The survey reconciles EXISTING rentals. It does not open new ones.
+      // A previous version auto-raised a rental request from a no-rental
+      // answer and told the technician on screen that Fleet would follow up.
+      // Removed 2026-08-13: it was never in the spec, and it committed Fleet
+      // to a request nobody had approved. The front door for a new rental is
+      // the rental request form.
       res.json({
         success: true,
         escalated: vanStatus === "unknown_escalate",
-        requestRaised: raisedRequestNo,
       });
     } catch (error: any) {
       console.error("[survey] submit failed:", error?.message || error);
