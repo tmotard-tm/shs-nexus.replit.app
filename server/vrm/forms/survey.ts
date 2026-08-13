@@ -287,14 +287,21 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
   router.get("/forms/rental-survey/responses", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
-        SELECT r.*, t.sent_at, t.opened_at, t.batch, t.phone
+        SELECT r.*, t.sent_at, t.opened_at, t.batch, t.phone,
+               -- Tyler 2026-08-13: rows STAY here; each carries an identifier
+               -- for where the technician stands in the cutover instead.
+               CASE
+                 WHEN c.reservation_status = 'booked'
+                  AND c.route_block_status = 'filed'
+                  AND c.route_block_live IS TRUE           THEN 'complete'
+                 WHEN c.reservation_status = 'booked'      THEN 'reserved'
+                 WHEN c.reservation_status = 'failed'      THEN 'failed'
+                 ELSE ''
+               END AS cutover_status,
+               c.etd_reference AS cutover_reference
         FROM vrm_rental_tech_survey r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
-        -- Booked technicians have MOVED to the cutover page. Appearing on
-        -- both pages is not a move, it is a copy.
-        WHERE NOT EXISTS (SELECT 1 FROM vrm_rental_cutover c
-                          WHERE c.ldap = upper(r.ldap)
-                            AND c.reservation_status = booked)
+        LEFT JOIN vrm_rental_cutover c ON c.ldap = upper(r.ldap)
         ORDER BY r.created_at DESC
       `);
       res.json({ responses: rows });

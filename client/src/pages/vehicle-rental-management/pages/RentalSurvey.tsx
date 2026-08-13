@@ -27,6 +27,8 @@ interface SurveyRow {
   id: string;
   ldap: string;
   tech_name: string | null;
+  cutover_status?: string | null;
+  cutover_reference?: string | null;
   truck_number: string | null;
   has_rental: boolean | null;
   no_rental_reason: string | null;
@@ -447,6 +449,7 @@ export default function RentalSurvey() {
     rtruck: (r) => r.rental_truck_number,
     atruck: (r) => r.assigned_truck_number,
     status: (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status,
+    cutover: (r) => r.cutover_status ?? "",
     shop: (r) => r.shop_name,
     ready: (r) => r.promised_ready_date,
     submitted: (r) => r.created_at,
@@ -469,6 +472,7 @@ export default function RentalSurvey() {
       ["rental_truck", (r) => r.rental_truck_number], ["assigned_truck", (r) => r.assigned_truck_number],
       ["truck_mismatch", (r) => (r.truck_mismatch ? "YES" : "")],
       ["van_status", (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status],
+      ["cutover", (r) => r.cutover_status], ["cutover_reference", (r) => r.cutover_reference],
       ["shop_name", (r) => r.shop_name], ["shop_city", (r) => r.shop_city], ["shop_state", (r) => r.shop_state],
       ["shop_phone", (r) => r.shop_phone], ["promised_ready", (r) => r.promised_ready_date],
       ["techhub_still_using", (r) => (r.techhub_still_using == null ? "" : r.techhub_still_using ? "Yes" : "No")],
@@ -577,6 +581,7 @@ export default function RentalSurvey() {
                 <SortHeader col="rtruck" text="Rental truck" sort={sort} setSort={setSort} />
                 <SortHeader col="atruck" text="Assigned truck" sort={sort} setSort={setSort} />
                 <SortHeader col="status" text="Van status" sort={sort} setSort={setSort} />
+                <SortHeader col="cutover" text="Cutover" sort={sort} setSort={setSort} />
                 <SortHeader col="shop" text="Shop" sort={sort} setSort={setSort} />
                 <SortHeader col="ready" text="Promised" sort={sort} setSort={setSort} />
                 <SortHeader col="submitted" text="Submitted" sort={sort} setSort={setSort} />
@@ -610,6 +615,15 @@ export default function RentalSurvey() {
                     {r.van_status === "unknown_escalate"
                       ? <Pill text="UNKNOWN" fg={colors.red} bg={colors.redLight} />
                       : (VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status ?? "—")}
+                  </td>
+                  <td style={tdBase} title={r.cutover_reference ? `ETD ${r.cutover_reference}` : ""}>
+                    {r.cutover_status === "complete"
+                      ? <Pill text="Complete" fg={colors.greenDeep} bg={colors.greenDeepLight} />
+                      : r.cutover_status === "reserved"
+                      ? <Pill text="Reserved" fg={colors.blue} bg={colors.blueLight} />
+                      : r.cutover_status === "failed"
+                      ? <Pill text="Failed" fg={colors.red} bg={colors.redLight} />
+                      : "—"}
                   </td>
                   <td style={tdBase} title={r.shop_name ?? ""}>{r.shop_name || "—"}</td>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{fmtDate(r.promised_ready_date)}</td>
