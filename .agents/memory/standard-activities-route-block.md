@@ -13,9 +13,14 @@ via the Standard Activities API client (`sendStandardActivity`).
 **Rules that bite:**
 - **TEST prefix ≠ no POST.** `live:false` still fires the HTTP POST; the
   project name is prefixed `TEST ` and the receiving system ignores it. The
-  live gate is env `LUCA_ROUTE_BLOCK_ENABLED` (`^(true|1|yes|on)$/i`), unset
-  by default — deliberate dark launch because the client's ActivityType "46"
-  is evidence-based, unconfirmed by the API owner.
+  live gate is env `LUCA_ROUTE_BLOCK_ENABLED` (`^(true|1|yes|on)$/i`).
+  **2026-08-13: Tyler directed live filing — flag set `true` in the
+  PRODUCTION env only (takes effect on next publish); dev deliberately left
+  unset so testing keeps filing TEST.** ActivityType "46" remains
+  evidence-based; verify the first live submission lands correctly.
+- **filed_test does not block a re-file.** The re-fire guard only checks
+  `filed_live`/`duplicate`/`pending`, and the live project name differs from
+  the TEST name, so cases filed as TEST can simply be re-scheduled once live.
 - **409 = duplicate, never re-fire.** An identical POST re-sent leaves a tech
   double-blocked with no reversal handle. Treat duplicate as success-ish
   ("already filed"), surface it, move on.
