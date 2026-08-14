@@ -312,22 +312,22 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
         LEFT JOIN vrm_rental_cutover c ON c.ldap = upper(r.ldap)
         LEFT JOIN LATERAL (
-          SELECT NULLIF(btrim(a2.district_no::text),) AS district,
+          SELECT NULLIF(btrim(a2.district_no::text),'') AS district,
                  ma.tech_name  AS supervisor_name,
                  upper(tp2.tech_manager_ldap_id) AS supervisor_ldap,
                  COALESCE(mgp.mobile_phone, ma.cell_phone, ma.main_phone) AS supervisor_phone
           FROM (SELECT 1) one
           LEFT JOIN LATERAL (SELECT a.district_no FROM all_techs a
                              WHERE upper(a.tech_racfid) = upper(r.ldap)
-                             ORDER BY (a.employment_status=A) DESC LIMIT 1) a2 ON TRUE
+                             ORDER BY (a.employment_status='A') DESC LIMIT 1) a2 ON TRUE
           LEFT JOIN LATERAL (SELECT t.tech_manager_ldap_id FROM tpms_tech_profiles t
                              WHERE upper(t.enterprise_id) = upper(r.ldap)
                              ORDER BY t.synced_at DESC NULLS LAST LIMIT 1) tp2 ON TRUE
           LEFT JOIN LATERAL (SELECT a.tech_name, a.cell_phone, a.main_phone FROM all_techs a
-                             WHERE upper(a.tech_racfid) = upper(COALESCE(tp2.tech_manager_ldap_id,))
-                             ORDER BY (a.employment_status=A) DESC LIMIT 1) ma ON TRUE
+                             WHERE upper(a.tech_racfid) = upper(COALESCE(tp2.tech_manager_ldap_id,''))
+                             ORDER BY (a.employment_status='A') DESC LIMIT 1) ma ON TRUE
           LEFT JOIN LATERAL (SELECT t.mobile_phone FROM tpms_tech_profiles t
-                             WHERE upper(t.enterprise_id) = upper(COALESCE(tp2.tech_manager_ldap_id,))
+                             WHERE upper(t.enterprise_id) = upper(COALESCE(tp2.tech_manager_ldap_id,''))
                              LIMIT 1) mgp ON TRUE
         ) sup ON TRUE
         LEFT JOIN vrm_ams_status a
