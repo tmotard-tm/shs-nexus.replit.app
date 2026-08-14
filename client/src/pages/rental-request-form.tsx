@@ -451,12 +451,12 @@ export default function RentalRequestForm() {
                     <p className="text-sm font-medium text-slate-700">Fix what is wrong below.</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label htmlFor="ctruck">Truck number</Label>
+                        <Label htmlFor="ctruck" className="flex min-h-10 items-end">Truck number</Label>
                         <Input id="ctruck" inputMode="numeric" value={correctedTruck}
                                onChange={(e) => { setCorrectedTruck(e.target.value); clearErr("identityCorrection"); }} />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="cphone">Mobile number</Label>
+                        <Label htmlFor="cphone" className="flex min-h-10 items-end">Mobile number</Label>
                         <Input id="cphone" inputMode="tel" value={correctedPhone}
                                onChange={(e) => { setCorrectedPhone(e.target.value); clearErr("correctedPhone"); clearErr("identityCorrection"); }} />
                         {fieldErrors.correctedPhone && <p className="text-sm text-red-600">{fieldErrors.correctedPhone}</p>}
@@ -539,12 +539,12 @@ export default function RentalRequestForm() {
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-2">
-                      <Label htmlFor="need">When do you need it from?</Label>
+                      <Label htmlFor="need" className="flex min-h-10 items-end">When do you need it from?</Label>
                       <Input id="need" type="date" value={appointmentDate}
                              onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                     </div>
                     <div className="space-y-2">
-                      <Label>Pickup time</Label>
+                      <Label className="flex min-h-10 items-end">Pickup time</Label>
                       <Select value={appointmentTime}
                               onValueChange={(v) => { setAppointmentTime(v); clearErr("appointmentAt"); }}>
                         <SelectTrigger><SelectValue placeholder="Time" /></SelectTrigger>
@@ -602,13 +602,13 @@ export default function RentalRequestForm() {
                       </div>
                       <div className="grid grid-cols-3 gap-3">
                         <div className="col-span-2 space-y-2">
-                          <Label htmlFor="scity">City</Label>
+                          <Label htmlFor="scity" className="flex min-h-10 items-end">City</Label>
                           <Input id="scity" value={shopCity}
                                  onChange={(e) => { setShopCity(e.target.value); clearErr("shopCity"); }} />
                           {fieldErrors.shopCity && <p className="text-sm text-red-600">{fieldErrors.shopCity}</p>}
                         </div>
                         <div className="space-y-2">
-                          <Label>State</Label>
+                          <Label className="flex min-h-10 items-end">State</Label>
                           <Select value={shopState} onValueChange={(v) => { setShopState(v); clearErr("shopState"); }}>
                             <SelectTrigger><SelectValue placeholder="ST" /></SelectTrigger>
                             <SelectContent className="max-h-64">
@@ -628,12 +628,12 @@ export default function RentalRequestForm() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
-                          <Label htmlFor="appt">Date your van goes into the shop</Label>
+                          <Label htmlFor="appt" className="flex min-h-10 items-end">Date your van goes into the shop</Label>
                           <Input id="appt" type="date" value={appointmentDate}
                                  onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                         </div>
                         <div className="space-y-2">
-                          <Label>Drop-off time</Label>
+                          <Label className="flex min-h-10 items-end">Drop-off time</Label>
                           <Select value={appointmentTime}
                                   onValueChange={(v) => { setAppointmentTime(v); clearErr("appointmentAt"); }}>
                             <SelectTrigger><SelectValue placeholder="Time" /></SelectTrigger>
