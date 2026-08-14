@@ -431,7 +431,7 @@ export default function RentalRequestForm() {
                     reviewed by a person rather than approved automatically.
                   </p>
                 )}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 items-end gap-3">
                   <Button type="button" variant={identityOk === "yes" ? "default" : "outline"}
                           className={identityOk === "yes" ? "bg-[#00529B] hover:bg-[#003A70]" : ""}
                           onClick={() => { setIdentityOk("yes"); clearErr("identityOk"); }}>Correct</Button>
@@ -449,7 +449,7 @@ export default function RentalRequestForm() {
                 {identityOk === "no" && (
                   <div className="space-y-3 rounded-lg border border-[#D8E2EE] bg-[#F4F8FC] p-3">
                     <p className="text-sm font-medium text-slate-700">Fix what is wrong below.</p>
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-2 items-end gap-3">
                       <div className="space-y-1.5">
                         <Label htmlFor="ctruck" className="flex min-h-10 items-end">Truck number</Label>
                         <Input id="ctruck" inputMode="numeric" value={correctedTruck}
@@ -537,7 +537,7 @@ export default function RentalRequestForm() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 items-end gap-3">
                     <div className="space-y-2">
                       <Label htmlFor="need" className="flex min-h-10 items-end">When do you need it from?</Label>
                       <Input id="need" type="date" value={appointmentDate}
@@ -600,7 +600,7 @@ export default function RentalRequestForm() {
                                onChange={(e) => { setShopAddress(e.target.value); clearErr("shopAddress"); }} />
                         {fieldErrors.shopAddress && <p className="text-sm text-red-600">{fieldErrors.shopAddress}</p>}
                       </div>
-                      <div className="grid grid-cols-3 gap-3">
+                      <div className="grid grid-cols-3 items-end gap-3">
                         <div className="col-span-2 space-y-2">
                           <Label htmlFor="scity" className="flex min-h-10 items-end">City</Label>
                           <Input id="scity" value={shopCity}
@@ -626,7 +626,7 @@ export default function RentalRequestForm() {
                         </p>
                         {fieldErrors.shopPhone && <p className="text-sm text-red-600">{fieldErrors.shopPhone}</p>}
                       </div>
-                      <div className="grid grid-cols-2 gap-3">
+                      <div className="grid grid-cols-2 items-end gap-3">
                         <div className="space-y-2">
                           <Label htmlFor="appt" className="flex min-h-10 items-end">Date your van goes into the shop</Label>
                           <Input id="appt" type="date" value={appointmentDate}
