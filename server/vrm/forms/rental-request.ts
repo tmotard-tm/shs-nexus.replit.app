@@ -26,7 +26,8 @@ import { regionForState, REGION_OWNER } from "../rental-operations/region";
 // checkbox listing them as bullets; the four terms of use stay individual.
 // The statements did not change, but how assent is given did, and the stored
 // version is what proves which mechanics a technician went through.
-export const POLICY_VERSION = "2026-08-14.b";
+// .c: the confirmed-appointment statement removed from the set (Tyler).
+export const POLICY_VERSION = "2026-08-14.c";
 
 /**
  * The permanent front door. No token, no login.
@@ -745,6 +746,26 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // now come back supersedes their own earlier deferral rather than adding a
   // duplicate. Keyed on the token where there is one, and on the LDAP on the
   // open door, where there is not.
+  // Structured identity corrections (Tyler, 2026-08-14): the technician edits
+  // their own truck and mobile instead of describing them in prose. Flagged,
+  // recorded as before -> after, and the corrected values become the request's
+  // values of record, so decision texts reach the number they just fixed.
+  const rosterTruck = ctx.identity.truckNumber || null;
+  const rosterPhone = ctx.identity.mobilePhone || null;
+  const corrTruck = s(b.correctedTruck, 30);
+  const corrDigits = String(b.correctedPhone || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
+  const corrPhone = corrDigits.length === 10 ? corrDigits : null;
+  const corrected = b.identityCorrected === true;
+  const truckFinal = (corrected && corrTruck) ? corrTruck : (s(b.truckNumber, 30) || rosterTruck);
+  const phoneFinal = (corrected && corrPhone) ? corrPhone : (s(b.mobilePhone, 30) || rosterPhone);
+  const corrParts: string[] = [];
+  if (corrected) {
+    if (corrTruck && corrTruck !== String(rosterTruck || "")) corrParts.push(`truck: ${rosterTruck || "none"} -> ${corrTruck}`);
+    if (corrPhone && corrPhone !== String(rosterPhone || "").replace(/[^0-9]/g, "")) corrParts.push(`mobile: ${rosterPhone || "none"} -> ${corrPhone}`);
+    const note = s(b.identityCorrection, 300);
+    if (note) corrParts.push(note);
+  }
+
   if (tokenRow) {
     await db.execute(sql`
       DELETE FROM vrm_rental_request WHERE token_id = ${tokenRow.id} AND status = 'deferred'
@@ -773,11 +794,11 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       status, auto_decision, auto_reason, auto_rule, source
     ) VALUES (
       ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
-      ${s(b.truckNumber, 30) || ctx.identity.truckNumber},
+      ${truckFinal},
       ${s(b.district, 20) || ctx.identity.district},
       ${s(b.homeState, 2) || homeState},
-      ${s(b.mobilePhone, 30) || ctx.identity.mobilePhone},
-      ${b.identityCorrected === true}, ${s(b.identityCorrection, 400)}, ${isByov},
+      ${phoneFinal},
+      ${corrected}, ${corrParts.length ? corrParts.join("; ").slice(0, 400) : null}, ${isByov},
       ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)},
       ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
       ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},

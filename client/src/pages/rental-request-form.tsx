@@ -63,7 +63,6 @@ const CORE_ACKS: Array<[string, string]> = [
   ["ackNotMaintenance",
    "This is not scheduled maintenance. I understand rentals are not provided for oil changes, tires, preventive maintenance or inspections."],
   ["ackCannotDriveSafely", "My vehicle cannot be driven safely to complete my route."],
-  ["ackHasAppointment", "I have a confirmed shop appointment for the date entered above."],
   ["ackReturnOneDay",
    "I will return the rental within 1 working day of my vehicle being ready, and I understand failing to do so is a cost to the business."],
   ["ackAccurate", "The information above is accurate and may be verified against shop records."],
@@ -116,6 +115,29 @@ const DROP_TIMES: Array<[string, string]> = [
   ["16:00", "4:00 PM"],
 ];
 
+/** Sears blue. The lockup is set type, deliberately: no official logo file
+ * exists in this repo, and a hand-traced trademark would look less official
+ * than a clean wordmark in the brand colour. Swap in the real asset when
+ * marketing supplies one. */
+function BrandHeader() {
+  return (
+    <div className="bg-gradient-to-r from-[#003A70] via-[#00529B] to-[#0A66B7] shadow-md">
+      <div className="mx-auto flex w-full max-w-md items-center gap-3 px-4 py-4">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/25">
+          <Truck className="h-5 w-5 text-white" />
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-baseline gap-2">
+            <span className="text-xl font-extrabold tracking-tight text-white">SEARS</span>
+            <span className="text-[11px] font-semibold tracking-[0.18em] text-blue-100">HOME SERVICES</span>
+          </div>
+          <div className="text-xs text-blue-200">Fleet Operations · Rental Vehicle Request</div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function RentalRequestForm() {
   const [, params] = useRoute("/rental-request/:token");
   const token = params?.token || "";
@@ -147,6 +169,8 @@ export default function RentalRequestForm() {
   const [result, setResult] = useState<{ decision?: string; message?: string; requestNo?: number } | null>(null);
 
   const [identityOk, setIdentityOk] = useState<"" | "yes" | "no">("");
+  const [correctedTruck, setCorrectedTruck] = useState("");
+  const [correctedPhone, setCorrectedPhone] = useState("");
   const [identityCorrection, setIdentityCorrection] = useState("");
 
   const [problemCategory, setProblemCategory] = useState("");
@@ -228,7 +252,15 @@ export default function RentalRequestForm() {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!identityOk) e.identityOk = "Please confirm your details.";
-    if (identityOk === "no" && !identityCorrection.trim()) e.identityCorrection = "Tell us what is wrong.";
+    if (identityOk === "no") {
+      const digits = correctedPhone.replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
+      if (correctedPhone.trim() && digits.length !== 10) e.correctedPhone = "Enter a 10-digit mobile number.";
+      const tChanged = correctedTruck.trim() !== String(identity?.truckNumber || "").trim();
+      const pChanged = digits !== String(identity?.mobilePhone || "").replace(/[^0-9]/g, "");
+      if (!tChanged && !pChanged && !identityCorrection.trim()) {
+        e.identityCorrection = "Update your truck or mobile number, or tell us what else is wrong.";
+      }
+    }
     if (!problemCategory) e.problemCategory = "Please choose what is going on.";
     if (!symptom.trim()) e.symptom = "Describe the problem in your own words.";
     if (!isNoVan) {
@@ -268,6 +300,7 @@ export default function RentalRequestForm() {
       district: identity?.district, homeState: identity?.homeState,
       identityCorrected: identityOk === "no",
       identityCorrection,
+      correctedTruck, correctedPhone,
       problemCategory, symptom, isDrivable, isSafeToDrive, isTowed,
       occurredAt: occurredAt || null,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
@@ -278,18 +311,21 @@ export default function RentalRequestForm() {
   };
 
   if (isLoading) {
-    return <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    return <div className="min-h-screen flex items-center justify-center bg-[#EAF1F8]">
       <Loader2 className="h-8 w-8 animate-spin text-slate-400" /></div>;
   }
 
   if (!linkInfo?.valid) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-        <Card className="w-full max-w-md"><CardHeader>
+      <div className="min-h-screen bg-[#EAF1F8]">
+        <BrandHeader />
+        <div className="mx-auto w-full max-w-md p-4 pt-8">
+        <Card className="w-full rounded-xl border-[#D8E2EE] shadow-sm"><CardHeader>
           <div className="flex items-center gap-2 text-red-600"><AlertCircle className="h-5 w-5" />
             <CardTitle className="text-lg">Link not valid</CardTitle></div>
           <CardDescription>{linkInfo?.message || "This link is invalid or has expired."}</CardDescription>
         </CardHeader></Card>
+        </div>
       </div>
     );
   }
@@ -299,8 +335,10 @@ export default function RentalRequestForm() {
     // "approved" before a person has looked would be a commitment in Fleet's
     // name that nothing keeps.
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-        <Card className="w-full max-w-md">
+      <div className="min-h-screen bg-[#EAF1F8]">
+        <BrandHeader />
+        <div className="mx-auto w-full max-w-md p-4 pt-8">
+        <Card className="w-full rounded-xl border-[#D8E2EE] shadow-sm">
           <CardHeader>
             <div className="flex items-center gap-2 text-green-600">
               <CheckCircle className="h-5 w-5" />
@@ -315,19 +353,18 @@ export default function RentalRequestForm() {
             <CardContent><p className="text-sm text-slate-500">Request #{result.requestNo}</p></CardContent>
           )}
         </Card>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4">
-      <div className="mx-auto w-full max-w-md space-y-4">
-        <div className="flex items-center gap-2 pt-2 text-slate-700">
-          <Truck className="h-5 w-5" /><span className="font-semibold">Sears Home Services Fleet</span>
-        </div>
+    <div className="min-h-screen bg-[#EAF1F8] pb-8">
+      <BrandHeader />
+      <div className="mx-auto w-full max-w-md space-y-4 p-4">
 
         {step === "verify" && (
-          <Card>
+          <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
             <CardHeader>
               <CardTitle className="text-lg">Rental request</CardTitle>
               <CardDescription>
@@ -345,7 +382,7 @@ export default function RentalRequestForm() {
               </div>
 
               {verifyError && <p className="text-sm text-red-600">{verifyError}</p>}
-              <Button className="w-full" onClick={() => verifyMutation.mutate()} disabled={verifyMutation.isPending}>
+              <Button className="w-full bg-[#00529B] hover:bg-[#003A70]" onClick={() => verifyMutation.mutate()} disabled={verifyMutation.isPending}>
                 {verifyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Start"}
               </Button>
             </CardContent>
@@ -377,9 +414,9 @@ export default function RentalRequestForm() {
             ) : null}
 
             {/* Section A — confirm, do not type */}
-            <Card>
+            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
               <CardHeader>
-                <CardTitle className="text-base">Is this still right?</CardTitle>
+                <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">1</span>Is this still right?</CardTitle>
                 <CardDescription>From our records. Tell us if anything is wrong.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -402,16 +439,40 @@ export default function RentalRequestForm() {
                 )}
                 <div className="grid grid-cols-2 gap-3">
                   <Button type="button" variant={identityOk === "yes" ? "default" : "outline"}
+                          className={identityOk === "yes" ? "bg-[#00529B] hover:bg-[#003A70]" : ""}
                           onClick={() => { setIdentityOk("yes"); clearErr("identityOk"); }}>Correct</Button>
                   <Button type="button" variant={identityOk === "no" ? "default" : "outline"}
-                          onClick={() => { setIdentityOk("no"); clearErr("identityOk"); }}>Something&apos;s wrong</Button>
+                          className={identityOk === "no" ? "bg-[#00529B] hover:bg-[#003A70]" : ""}
+                          onClick={() => {
+                            setIdentityOk("no");
+                            // Hand them their own values to EDIT, not a blank prose box.
+                            setCorrectedTruck((c) => c || identity?.truckNumber || "");
+                            setCorrectedPhone((c) => c || identity?.mobilePhone || "");
+                            clearErr("identityOk");
+                          }}>Something&apos;s wrong</Button>
                 </div>
                 {fieldErrors.identityOk && <p className="text-sm text-red-600">{fieldErrors.identityOk}</p>}
                 {identityOk === "no" && (
-                  <div className="space-y-2">
-                    <Label htmlFor="corr">What is wrong?</Label>
-                    <Textarea id="corr" rows={2} value={identityCorrection}
-                              onChange={(e) => { setIdentityCorrection(e.target.value); clearErr("identityCorrection"); }} />
+                  <div className="space-y-3 rounded-lg border border-[#D8E2EE] bg-[#F4F8FC] p-3">
+                    <p className="text-sm font-medium text-slate-700">Fix what is wrong below.</p>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="ctruck">Truck number</Label>
+                        <Input id="ctruck" inputMode="numeric" value={correctedTruck}
+                               onChange={(e) => { setCorrectedTruck(e.target.value); clearErr("identityCorrection"); }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="cphone">Mobile number</Label>
+                        <Input id="cphone" inputMode="tel" value={correctedPhone}
+                               onChange={(e) => { setCorrectedPhone(e.target.value); clearErr("correctedPhone"); clearErr("identityCorrection"); }} />
+                        {fieldErrors.correctedPhone && <p className="text-sm text-red-600">{fieldErrors.correctedPhone}</p>}
+                      </div>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="corr">Anything else that is wrong? (optional)</Label>
+                      <Textarea id="corr" rows={2} value={identityCorrection}
+                                onChange={(e) => { setIdentityCorrection(e.target.value); clearErr("identityCorrection"); }} />
+                    </div>
                     {fieldErrors.identityCorrection && <p className="text-sm text-red-600">{fieldErrors.identityCorrection}</p>}
                   </div>
                 )}
@@ -419,10 +480,9 @@ export default function RentalRequestForm() {
             </Card>
 
             {/* Section B — the problem */}
-            <Card>
+            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
               <CardHeader>
-                <CardTitle className="text-base">
-                  {isNoVan ? "What is going on?" : "What is wrong with your work van?"}
+                <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">2</span>{isNoVan ? "What is going on?" : "What issues are you having with your work van?"}
                 </CardTitle>
                 <CardDescription>
                   {isNoVan
@@ -502,9 +562,9 @@ export default function RentalRequestForm() {
             {/* No van yet: no shop to name, but the reservation still needs a
                 start date and a location. Same columns the booking chain reads. */}
             {isNoVan && (
-              <Card>
+              <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
                 <CardHeader>
-                  <CardTitle className="text-base">Your rental</CardTitle>
+                  <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">3</span>Your rental</CardTitle>
                   <CardDescription>
                     You have no work van yet, so we just need when and where.
                   </CardDescription>
@@ -550,9 +610,9 @@ export default function RentalRequestForm() {
 
             {/* Section C — where it is going. Not applicable to BYOV or no-van. */}
             {!identity?.isByov && !isNoVan && (
-              <Card>
+              <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
                 <CardHeader>
-                  <CardTitle className="text-base">Where is your work van being repaired?</CardTitle>
+                  <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">3</span>Where is your work van being repaired?</CardTitle>
                   <CardDescription>
                     Your rental starts on the day your van goes into the shop, not today,
                     so we need the shop and the appointment before we can book anything.
@@ -631,9 +691,7 @@ export default function RentalRequestForm() {
                           <p className="mt-1">
                             Your reservation is sent to this location and this is where you pick the
                             car up. If you do not know it, stop and Google{" "}
-                            <span className="font-semibold">
-                              &quot;Enterprise Rent-A-Car near {shopCity.trim() || "the shop"}&quot;
-                            </span>{" "}
+                            <span className="font-semibold">&quot;Enterprise Rent-A-Car near me&quot;</span>{" "}
                             right now, and type in the name and street of the closest branch.
                           </p>
                         </div>
@@ -647,9 +705,9 @@ export default function RentalRequestForm() {
 
             {/* Section D — acknowledgements */}
             {(
-              <Card>
+              <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
                 <CardHeader>
-                  <CardTitle className="text-base">Before you submit</CardTitle>
+                  <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">4</span>Before you submit</CardTitle>
                   <CardDescription>
                     The first box covers the request statements. The four terms of use
                     are agreed to one by one. All are recorded with your request.
@@ -689,12 +747,15 @@ export default function RentalRequestForm() {
             {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
             {(
-              <Button className="w-full" onClick={onSubmit} disabled={submitMutation.isPending}>
+              <Button className="h-11 w-full bg-[#00529B] text-base hover:bg-[#003A70]" onClick={onSubmit} disabled={submitMutation.isPending}>
                 {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
               </Button>
             )}
           </>
         )}
+        <p className="pt-3 text-center text-[11px] font-medium tracking-[0.14em] text-slate-400">
+          SEARS HOME SERVICES · FLEET OPERATIONS
+        </p>
       </div>
     </div>
   );
