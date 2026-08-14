@@ -87,6 +87,7 @@ export const MISSING_REASONS: Record<string, string> = {
   what_was_tried: "what has already been tried to get it running",
   repair_order: "the shop's repair order or work order number",
   contact: "a phone number we can reach you on",
+  nearest_branch: "the closest Enterprise Rent-A-Car branch to the shop (Google it if unsure)",
   other: "more information",
 };
 
@@ -756,6 +757,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       problem_category, symptom, is_drivable, is_safe_to_drive, occurred_at,
       jobs_affected, what_was_tried,
       shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
+      tech_reported_branch,
       has_appointment, appointment_at, shop_estimated_days,
       policy_version, policy_acknowledged_at, policy_ip,
       ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
@@ -774,6 +776,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
       ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
       ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
+      ${s(b.nearestBranch, 200)},
       ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
       ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
       ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
@@ -902,6 +905,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         SELECT request_no, status, missing_fields, decision_note, problem_category, symptom,
                is_drivable, is_safe_to_drive, jobs_affected, what_was_tried,
                shop_name, shop_address, shop_city, shop_state, shop_phone,
+               tech_reported_branch,
                has_appointment, shop_estimated_days,
                to_char(appointment_at, 'YYYY-MM-DD') AS appointment_date,
                to_char(appointment_at, 'HH24:MI')    AS appointment_time
@@ -933,6 +937,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
             shopCity: p.shop_city || "",
             shopState: p.shop_state || "",
             shopPhone: p.shop_phone || "",
+            nearestBranch: p.tech_reported_branch || "",
             hasAppointment: p.has_appointment === true ? "yes" : p.has_appointment === false ? "no" : "",
             appointmentDate: p.appointment_date || "",
             appointmentTime: p.appointment_time || "08:00",
@@ -1162,7 +1167,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
@@ -1344,6 +1349,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const { rows } = await db.execute(sql`
         SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
                r.shop_name, r.shop_address, r.shop_city, r.shop_state, r.shop_postal,
+               r.tech_reported_branch,
                r.appointment_at,
                r.shop_estimated_days,
                COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,

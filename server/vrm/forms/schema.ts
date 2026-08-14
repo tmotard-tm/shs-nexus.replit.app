@@ -333,6 +333,17 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS ack_discipline             boolean NOT NULL DEFAULT false;
   `);
 
+  // The Enterprise branch the TECHNICIAN says is closest to the shop.
+  //
+  // Distinct from nearest_branch_code/name, which is what actually got BOOKED
+  // and is written back by the booking runner. This column is what the person
+  // standing there reported. When the two disagree, one of them is wrong, and
+  // knowing which question to ask is the whole value of collecting both.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS tech_reported_branch text;
+  `);
+
   // Sent back as incomplete.
   //
   // A request missing the shop's estimate is not a denial and must not be

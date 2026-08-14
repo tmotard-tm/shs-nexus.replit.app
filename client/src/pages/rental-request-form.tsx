@@ -143,6 +143,7 @@ export default function RentalRequestForm() {
   const [shopCity, setShopCity] = useState("");
   const [shopState, setShopState] = useState("");
   const [shopPhone, setShopPhone] = useState("");
+  const [nearestBranch, setNearestBranch] = useState("");
   const [hasAppointment, setHasAppointment] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("08:00");
@@ -186,6 +187,7 @@ export default function RentalRequestForm() {
         setShopCity(a.shopCity || "");
         setShopState(a.shopState || "");
         setShopPhone(a.shopPhone || "");
+        setNearestBranch(a.nearestBranch || "");
         setHasAppointment(a.hasAppointment || "");
         setAppointmentDate(a.appointmentDate || "");
         setAppointmentTime(a.appointmentTime || "08:00");
@@ -222,6 +224,7 @@ export default function RentalRequestForm() {
         if (!appointmentDate) e.appointmentAt = "When is it going in?";
         if (!appointmentTime) e.appointmentAt = "What time are you dropping it?";
         if (!shopEstimatedDays.trim()) e.shopEstimatedDays = "How many days did the SHOP say?";
+        if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
       }
     }
     // A BYOV technician is never shown the shop section, so demanding they
@@ -243,7 +246,7 @@ export default function RentalRequestForm() {
       identityCorrection,
       problemCategory, symptom, isDrivable, isSafeToDrive,
       occurredAt: occurredAt || null, jobsAffected, whatWasTried,
-      shopName, shopAddress, shopCity, shopState, shopPhone,
+      shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       hasAppointment, appointmentAt: appointmentAt || null, shopEstimatedDays,
       ...acks,
     });
@@ -560,6 +563,24 @@ export default function RentalRequestForm() {
                           The shop&apos;s estimate, not yours. This sets your return date.
                         </p>
                         {fieldErrors.shopEstimatedDays && <p className="text-sm text-red-600">{fieldErrors.shopEstimatedDays}</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="branch">Closest Enterprise Rent-A-Car branch to the shop</Label>
+                        <Input id="branch" value={nearestBranch}
+                               placeholder="e.g. Enterprise, 2841 Airline Blvd, Portsmouth"
+                               onChange={(e) => { setNearestBranch(e.target.value); clearErr("nearestBranch"); }} />
+                        <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                          <p className="font-semibold">This is where your rental will be. It has to be right.</p>
+                          <p className="mt-1">
+                            Your reservation is sent to this location and this is where you pick the
+                            car up. If you do not know it, stop and Google{" "}
+                            <span className="font-semibold">
+                              &quot;Enterprise Rent-A-Car near {shopCity.trim() || "the shop"}&quot;
+                            </span>{" "}
+                            right now, and type in the name and street of the closest branch.
+                          </p>
+                        </div>
+                        {fieldErrors.nearestBranch && <p className="text-sm text-red-600">{fieldErrors.nearestBranch}</p>}
                       </div>
                     </div>
                   )}
