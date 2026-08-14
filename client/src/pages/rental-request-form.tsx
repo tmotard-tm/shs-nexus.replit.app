@@ -101,20 +101,6 @@ type Identity = {
   district: string; homeState: string; mobilePhone: string; isByov: boolean;
 };
 
-/**
- * Drop-off times the branch is actually open for.
- *
- * The appointment used to be a bare date input, so every reservation reached
- * ETD as T00:00:00 and asked Enterprise for a midnight pickup. A date without
- * an hour is not a booking.
- */
-const DROP_TIMES: Array<[string, string]> = [
-  ["07:00", "7:00 AM"], ["08:00", "8:00 AM"], ["09:00", "9:00 AM"],
-  ["10:00", "10:00 AM"], ["11:00", "11:00 AM"], ["12:00", "12:00 PM"],
-  ["13:00", "1:00 PM"], ["14:00", "2:00 PM"], ["15:00", "3:00 PM"],
-  ["16:00", "4:00 PM"],
-];
-
 /** Sears blue. The lockup is set type, deliberately: no official logo file
  * exists in this repo, and a hand-traced trademark would look less official
  * than a clean wordmark in the brand colour. Swap in the real asset when
@@ -185,7 +171,6 @@ export default function RentalRequestForm() {
   const [shopPhone, setShopPhone] = useState("");
   const [nearestBranch, setNearestBranch] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
-  const [appointmentTime, setAppointmentTime] = useState("08:00");
 
   const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -228,7 +213,6 @@ export default function RentalRequestForm() {
         setShopPhone(a.shopPhone || "");
         setNearestBranch(a.nearestBranch || "");
         setAppointmentDate(a.appointmentDate || "");
-        setAppointmentTime(a.appointmentTime || "08:00");
       }
       setResume(d.resume || null);
       setStep("form");
@@ -243,7 +227,7 @@ export default function RentalRequestForm() {
   });
 
   /** ETD needs an hour, not just a day. */
-  const appointmentAt = appointmentDate ? `${appointmentDate}T${appointmentTime || "08:00"}` : "";
+  const appointmentAt = appointmentDate ? `${appointmentDate}T08:00` : "";
 
   const validate = () => {
     const e: Record<string, string> = {};
@@ -278,7 +262,6 @@ export default function RentalRequestForm() {
         e.shopPhone = "Enter the shop's 10-digit phone number.";
       }
       if (!appointmentDate) e.appointmentAt = "When is it going in?";
-      if (!appointmentTime) e.appointmentAt = "What time are you dropping it?";
       if (!nearestBranch.trim()) e.nearestBranch = "We need the Enterprise location for your reservation. Google it if you are not sure.";
     }
     if (!coreAll || INDIVIDUAL_ACKS.some(([k]) => !acks[k])) e.acks = "Please tick every box.";
@@ -537,22 +520,10 @@ export default function RentalRequestForm() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 items-end gap-3">
-                    <div className="space-y-2">
-                      <Label htmlFor="need" className="flex min-h-10 items-end">When is your first day on the road?</Label>
-                      <Input id="need" type="date" value={appointmentDate}
-                             onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="flex min-h-10 items-end">Pickup time</Label>
-                      <Select value={appointmentTime}
-                              onValueChange={(v) => { setAppointmentTime(v); clearErr("appointmentAt"); }}>
-                        <SelectTrigger><SelectValue placeholder="Time" /></SelectTrigger>
-                        <SelectContent className="max-h-64">
-                          {DROP_TIMES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="need">When is your first day on the road?</Label>
+                    <Input id="need" type="date" value={appointmentDate}
+                           onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                   </div>
                   {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                   <div className="space-y-2">
@@ -626,26 +597,13 @@ export default function RentalRequestForm() {
                         </p>
                         {fieldErrors.shopPhone && <p className="text-sm text-red-600">{fieldErrors.shopPhone}</p>}
                       </div>
-                      <div className="grid grid-cols-2 items-end gap-3">
-                        <div className="space-y-2">
-                          <Label htmlFor="appt" className="flex min-h-10 items-end">Date your van goes into the shop</Label>
-                          <Input id="appt" type="date" value={appointmentDate}
-                                 onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="flex min-h-10 items-end">Drop-off time</Label>
-                          <Select value={appointmentTime}
-                                  onValueChange={(v) => { setAppointmentTime(v); clearErr("appointmentAt"); }}>
-                            <SelectTrigger><SelectValue placeholder="Time" /></SelectTrigger>
-                            <SelectContent className="max-h-64">
-                              {DROP_TIMES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="appt">Date your van goes into the shop</Label>
+                        <Input id="appt" type="date" value={appointmentDate}
+                               onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                       </div>
                       <p className="text-xs text-slate-500">
-                        Your rental starts at this time, so it needs to be when you actually
-                        drop the van off.
+                        Your rental starts on this date.
                       </p>
                       {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                       <div className="space-y-2">
