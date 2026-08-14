@@ -220,7 +220,14 @@ export default function RentalRequestForm() {
       if (!hasAppointment) e.hasAppointment = "Please answer.";
       if (hasAppointment === "yes") {
         if (!shopName.trim()) e.shopName = "Which shop?";
+        if (!shopAddress.trim()) e.shopAddress = "We need the shop's street address.";
         if (!shopCity.trim()) e.shopCity = "Shop city?";
+        if (!shopState) e.shopState = "State?";
+        // Fleet dials this number to confirm the estimate and chase the
+        // repair. Ten digits or it is not a phone number we can call.
+        if (shopPhone.replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "").length !== 10) {
+          e.shopPhone = "Enter the shop's 10-digit phone number.";
+        }
         if (!appointmentDate) e.appointmentAt = "When is it going in?";
         if (!appointmentTime) e.appointmentAt = "What time are you dropping it?";
         if (!shopEstimatedDays.trim()) e.shopEstimatedDays = "How many days did the SHOP say?";
@@ -507,7 +514,9 @@ export default function RentalRequestForm() {
                       </div>
                       <div className="space-y-2">
                         <Label htmlFor="saddr">Street address of the shop</Label>
-                        <Input id="saddr" value={shopAddress} onChange={(e) => setShopAddress(e.target.value)} />
+                        <Input id="saddr" value={shopAddress} placeholder="Street and number"
+                               onChange={(e) => { setShopAddress(e.target.value); clearErr("shopAddress"); }} />
+                        {fieldErrors.shopAddress && <p className="text-sm text-red-600">{fieldErrors.shopAddress}</p>}
                       </div>
                       <div className="grid grid-cols-3 gap-3">
                         <div className="col-span-2 space-y-2">
@@ -518,12 +527,13 @@ export default function RentalRequestForm() {
                         </div>
                         <div className="space-y-2">
                           <Label>State</Label>
-                          <Select value={shopState} onValueChange={setShopState}>
+                          <Select value={shopState} onValueChange={(v) => { setShopState(v); clearErr("shopState"); }}>
                             <SelectTrigger><SelectValue placeholder="ST" /></SelectTrigger>
                             <SelectContent className="max-h-64">
                               {STATES.map((x) => <SelectItem key={x} value={x}>{x}</SelectItem>)}
                             </SelectContent>
                           </Select>
+                          {fieldErrors.shopState && <p className="text-sm text-red-600">{fieldErrors.shopState}</p>}
                         </div>
                       </div>
                       <div className="space-y-2">
@@ -532,6 +542,7 @@ export default function RentalRequestForm() {
                         <p className="text-xs text-slate-500">
                           Fleet calls the shop to check on your van, so this one needs to be right.
                         </p>
+                        {fieldErrors.shopPhone && <p className="text-sm text-red-600">{fieldErrors.shopPhone}</p>}
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
