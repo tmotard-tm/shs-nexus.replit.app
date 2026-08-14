@@ -503,7 +503,7 @@ export default function RentalRequestForm() {
                     {!isNoVan && (<>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label>Can your van still be driven?</Label>
+                        <Label className="flex min-h-10 items-end">Can your van still be driven?</Label>
                         <Select value={isDrivable} onValueChange={(v) => { setIsDrivable(v); clearErr("isDrivable"); }}>
                           <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                           <SelectContent>
@@ -512,7 +512,7 @@ export default function RentalRequestForm() {
                         </Select>
                       </div>
                       <div className="space-y-2">
-                        <Label>Is it safe to drive?</Label>
+                        <Label className="flex min-h-10 items-end">Is it safe to drive?</Label>
                         <Select value={isSafeToDrive} onValueChange={(v) => { setIsSafeToDrive(v); clearErr("isSafeToDrive"); }}>
                           <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                           <SelectContent>
