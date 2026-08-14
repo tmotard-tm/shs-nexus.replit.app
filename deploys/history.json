@@ -1,23 +1,5 @@
 [
   {
-    "deployedAt": "2026-06-04T12:41:57.167Z",
-    "bundleHash": "BP9-Js6X",
-    "gitSha": "9de41ea4",
-    "snapshotKey": null,
-    "migrationsApplied": [
-      "0000_chemical_dormammu.sql",
-      "0001_add_is_tlt_to_queue_items.sql",
-      "0002_add_last_observed_tech_to_holman_submissions.sql",
-      "0003_add_bulk_fix_runs.sql",
-      "0004_add_vin_license_plate_to_trucks.sql",
-      "0005_add_automation_detail_to_queue_items.sql",
-      "0006_add_offboarding_return_tokens.sql",
-      "0007_add_byov_intent_to_onboarding_hires.sql",
-      "0008_add_logical_entities.sql"
-    ],
-    "fingerprint": "2cc566693262"
-  },
-  {
     "deployedAt": "2026-06-04T13:33:08.390Z",
     "bundleHash": "Bjq8fZs0",
     "gitSha": "48af8b2f",
@@ -898,5 +880,23 @@
       "0008_add_logical_entities.sql"
     ],
     "fingerprint": "44fe266161ef"
+  },
+  {
+    "deployedAt": "2026-08-14T12:16:59.513Z",
+    "bundleHash": "CoEuhDYE",
+    "gitSha": "fe2281ab",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-14T12-16-15-598Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "a2e2c9afdb80"
   }
 ]

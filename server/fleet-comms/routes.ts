@@ -63,7 +63,7 @@ import {
 import { storage } from "../storage";
 import { deepMergePermissions, getServerDefaultPermissions } from "../permission-utils";
 import type { RolePermissionSettings } from "@shared/schema";
-import { sendMessage, createBulkSend, processSendQueue } from "./outbound";
+import { sendMessage, createBulkSend, processSendQueue, findRecentDuplicateDigits } from "./outbound";
 import { handleInbound } from "./inbound";
 import { COMMS_CONTACTS_SYNC_TYPE, syncCommsContacts } from "./contacts-sync";
 
@@ -1098,7 +1098,7 @@ export function registerCommsRoutes(app: Router): void {
   // `source` (or x-comms-source header) tags the sending app; see COMMS_API_SOURCES.
   app.post("/comms/api/send", apiOrGate, async (req: any, res) => {
     try {
-      const { ldap, phone, category, body, mediaUrl, managerCc, force } = req.body || {};
+      const { ldap, phone, category, body, mediaUrl, managerCc, force, allowDuplicate } = req.body || {};
       const cat = category || apiDefaultCategory(req);
       const hasMedia = Array.isArray(mediaUrl) && mediaUrl.length > 0;
       if (!isValidCategory(cat)) return res.status(400).json({ message: "Valid category required" });
@@ -1117,6 +1117,10 @@ export function registerCommsRoutes(app: Router): void {
         sentBy: a.id,
         senderName: a.name,
         dryRun: !live,
+        // Same retry-storm guard as send-batch: machine callers that retry on
+        // timeout must not re-text an identical message within 24h.
+        // {"allowDuplicate":true} is the intentional-resend escape hatch.
+        skipRecentDuplicate: !allowDuplicate,
       });
       res.json({ live, category: cat, source: req.commsApiSource?.name ?? null, ...result });
     } catch (e: any) {
@@ -1132,7 +1136,7 @@ export function registerCommsRoutes(app: Router): void {
   // (or x-comms-source header) sets the sender actor + default category.
   app.post("/comms/api/send-batch", apiOrGate, async (req: any, res) => {
     try {
-      const { messages, category, force } = req.body || {};
+      const { messages, category, force, allowDuplicate } = req.body || {};
       if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ message: "messages[] required" });
       if (messages.length > SEND_CAP) return res.status(400).json({ message: `Too many messages (max ${SEND_CAP})` });
       const defCat = category || apiDefaultCategory(req);
@@ -1159,6 +1163,11 @@ export function registerCommsRoutes(app: Router): void {
           sentBy: a.id,
           senderName: a.name,
           dryRun: !live,
+          // Machine callers retry on timeout; without this, a retried batch
+          // re-texts every recipient (2026-08-14 duplicate-blast incident).
+          // {"allowDuplicate":true} is the explicit escape hatch for an
+          // intentional identical re-send within 24h.
+          skipRecentDuplicate: !allowDuplicate,
         });
         results.push({ ldap: m.ldap ?? null, phone: m.phone ?? null, category: m.category || defCat, ...r });
       }
@@ -1198,11 +1207,39 @@ export function registerCommsRoutes(app: Router): void {
       }
       if (!withPhone.length) return res.status(400).json({ message: "No recipients with a valid phone" });
       const perRecipientBody = renderForContacts(String(body), withPhone);
+      // Retry-storm guard (2026-08-14 duplicate-blast incident): machine
+      // callers retry on timeout, so drop any recipient whose exact rendered
+      // message was already sent or queued in the last 24h. A retried call
+      // becomes a cheap no-op instead of a second text to everyone.
+      // {"allowDuplicate":true} is the explicit intentional-resend escape hatch.
+      let sendable = withPhone;
+      let duplicatesSkipped = 0;
+      if (!req.body?.allowDuplicate) {
+        // Set-based: one query per table for the whole audience (per-recipient
+        // checks were slow enough to re-create the caller-timeout retry loop).
+        const dupDigits = await findRecentDuplicateDigits(
+          withPhone.map((c) => ({
+            digits: normalizeDigits(c.phone),
+            body: perRecipientBody.get(c.ldap) ?? String(body),
+          })),
+          cat,
+        );
+        sendable = withPhone.filter((c) => !dupDigits.has(normalizeDigits(c.phone).slice(-10)));
+        duplicatesSkipped = withPhone.length - sendable.length;
+        if (!sendable.length) {
+          return res.json({
+            live: true,
+            queued: 0,
+            duplicatesSkipped,
+            message: "All recipients already received this exact message within 24h",
+          });
+        }
+      }
       const a = actor(req);
       const result = await createBulkSend({
         category: cat,
         body: String(body),
-        ldaps: withPhone.map((c) => c.ldap),
+        ldaps: sendable.map((c) => c.ldap),
         managerCc: !!managerCc,
         sentBy: a.id,
         senderName: a.name,
@@ -1210,7 +1247,7 @@ export function registerCommsRoutes(app: Router): void {
         perRecipientBody,
       });
       processSendQueue(100, "api-bulk-kick").catch(() => {});
-      res.json({ live: true, ...result });
+      res.json({ live: true, duplicatesSkipped, ...result });
     } catch (e: any) {
       console.error("[Fleet-Comms] api/bulk error:", e?.message);
       res.status(500).json({ message: e?.message });

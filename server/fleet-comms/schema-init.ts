@@ -120,6 +120,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_comms_messages_twilio_sid"
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_sent_by_thread"
   ON "fs_comms_messages" ("sent_by", "thread_id") WHERE "direction" = 'outbound';
 
+-- Retry-storm dedupe guard (2026-08-14 duplicate-blast incident): sargable
+-- "identical outbound in last 24h" lookups on the API send surfaces.
+CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_dedupe"
+  ON "fs_comms_messages" ("category", "phone_digits", "created_at") WHERE "direction" = 'outbound';
+
 -- Heal (idempotent): outbound sends used to store media_url without media_type,
 -- and the inbox render gate requires media_type to show an image — so senders
 -- never saw their own sent photos. New sends stamp the type at append time;
@@ -194,6 +199,9 @@ CREATE TABLE IF NOT EXISTS "fs_comms_send_queue" (
 );
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_send_queue_status" ON "fs_comms_send_queue" ("status", "scheduled_for");
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_send_queue_batch" ON "fs_comms_send_queue" ("batch_id");
+-- Retry-storm dedupe guard (2026-08-14): see idx_fs_comms_messages_dedupe.
+CREATE INDEX IF NOT EXISTS "idx_fs_comms_send_queue_dedupe"
+  ON "fs_comms_send_queue" ("category", "phone_digits", "created_at");
 
 -- LOA Rental outreach (Task #543): the drain must NOT re-resolve locked rows to
 -- the contact's current TPMS number (used for personal-number sends).

@@ -19,6 +19,7 @@ import {
   commsSendQueue,
   commsSendBatches,
   commsContacts,
+  commsMessages,
   type CommsContact,
 } from "@shared/fleet-scope-schema";
 import { and, eq, lte, sql, inArray } from "drizzle-orm";
@@ -64,6 +65,16 @@ export interface SendMessageInput {
   senderName?: string | null;
   force?: boolean; // bypass quiet-hours (send now)
   dryRun?: boolean; // resolve + gate checks only; no thread/queue/Twilio side effects
+  /**
+   * Skip the send when an IDENTICAL message (same recipient digits + body +
+   * category) was already sent or queued within the last 24h. Set on the API
+   * surfaces only: machine callers retry on timeout, and without this guard a
+   * retried batch re-enqueues every recipient (2026-08-14 incident: the
+   * rental-reminder job retried /comms/api/send-batch 6x, techs got 4-5 copies).
+   * Human UI sends intentionally do NOT set this — a person may legitimately
+   * repeat the same text.
+   */
+  skipRecentDuplicate?: boolean;
 }
 
 export interface SendMessageResult {
@@ -136,6 +147,104 @@ async function enqueue(params: {
   return row.id;
 }
 
+/**
+ * True when an identical outbound (same last-10 phone digits + body +
+ * category) was already sent, or is still pending/claimed in the queue,
+ * within the last `hours`. Guards machine/API surfaces against caller retry
+ * storms: a timed-out POST that gets retried must not re-text every
+ * recipient. Fail-open on the messages check is NOT allowed — a thrown DB
+ * error propagates so the caller fails loudly instead of double-sending.
+ */
+export async function isRecentDuplicateSend(
+  phoneDigits: string,
+  body: string,
+  category: string,
+  hours = 24,
+): Promise<boolean> {
+  const digits10 = normalizeDigits(phoneDigits).slice(-10);
+  if (digits10.length < 10 || !body.trim()) return false;
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+
+  const [q] = await fsDb
+    .select({ id: commsSendQueue.id })
+    .from(commsSendQueue)
+    .where(
+      and(
+        eq(commsSendQueue.category, category),
+        eq(commsSendQueue.phoneDigits, digits10),
+        eq(commsSendQueue.body, body),
+        inArray(commsSendQueue.status, ["pending", "claimed", "sent"]),
+        sql`${commsSendQueue.createdAt} >= ${since}`,
+      ),
+    )
+    .limit(1);
+  if (q) return true;
+
+  const [m] = await fsDb
+    .select({ id: commsMessages.id })
+    .from(commsMessages)
+    .where(
+      and(
+        eq(commsMessages.direction, "outbound"),
+        eq(commsMessages.category, category),
+        eq(commsMessages.phoneDigits, digits10),
+        eq(commsMessages.body, body),
+        sql`${commsMessages.createdAt} >= ${since}`,
+      ),
+    )
+    .limit(1);
+  return !!m;
+}
+
+/**
+ * Set-based variant for bulk surfaces: ONE query per table for the whole
+ * audience instead of 2 queries per recipient (which is itself slow enough to
+ * cause the caller timeouts this guard exists to defuse). Returns the set of
+ * 10-digit phone numbers whose exact (digits, body, category) was already
+ * sent or is pending/claimed in the last `hours`.
+ */
+export async function findRecentDuplicateDigits(
+  candidates: { digits: string; body: string }[],
+  category: string,
+  hours = 24,
+): Promise<Set<string>> {
+  const valid = candidates
+    .map((c) => ({ digits: normalizeDigits(c.digits).slice(-10), body: c.body }))
+    .filter((c) => c.digits.length === 10 && c.body.trim());
+  const dupes = new Set<string>();
+  if (!valid.length) return dupes;
+  const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+  // Per-element binds (VALUES list), NOT a single array param — the pg pool
+  // driver mangles raw JS-array binds into malformed array literals.
+  const values = sql.join(
+    valid.map((c) => sql`(${c.digits}, ${c.body})`),
+    sql`, `,
+  );
+  const qRes = await fsDb.execute(sql`
+    SELECT DISTINCT c.digits
+    FROM (VALUES ${values}) AS c(digits, body)
+    JOIN fs_comms_send_queue q
+      ON q.category = ${category}
+     AND q.phone_digits = c.digits
+     AND q.body = c.body
+     AND q.status IN ('pending', 'claimed', 'sent')
+     AND q.created_at >= ${since}
+  `);
+  for (const r of qRes.rows as { digits: string }[]) dupes.add(String(r.digits));
+  const mRes = await fsDb.execute(sql`
+    SELECT DISTINCT c.digits
+    FROM (VALUES ${values}) AS c(digits, body)
+    JOIN fs_comms_messages m
+      ON m.direction = 'outbound'
+     AND m.category = ${category}
+     AND m.phone_digits = c.digits
+     AND m.body = c.body
+     AND m.created_at >= ${since}
+  `);
+  for (const r of mRes.rows as { digits: string }[]) dupes.add(String(r.digits));
+  return dupes;
+}
+
 /** The core single-recipient send. Immediate when allowed; queued otherwise. */
 export async function sendMessage(input: SendMessageInput): Promise<SendMessageResult> {
   if (!isValidCategory(input.category)) {
@@ -156,6 +265,16 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   }
   if (await isOptedOut(phoneDigits)) {
     return { status: "skipped", reason: "recipient opted out" };
+  }
+  if (
+    input.skipRecentDuplicate &&
+    (await isRecentDuplicateSend(phoneDigits, input.body, input.category))
+  ) {
+    return {
+      status: "skipped",
+      reason: "duplicate: identical message already sent or queued within 24h",
+      ...(input.dryRun ? { dryRun: true } : {}),
+    };
   }
 
   // DRY RUN: report what WOULD happen (send now vs quiet-hours queue) after the
