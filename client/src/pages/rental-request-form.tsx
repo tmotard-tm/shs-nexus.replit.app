@@ -175,8 +175,6 @@ export default function RentalRequestForm() {
 
   const [problemCategory, setProblemCategory] = useState("");
   const [symptom, setSymptom] = useState("");
-  const [isDrivable, setIsDrivable] = useState("");
-  const [isSafeToDrive, setIsSafeToDrive] = useState("");
   const [occurredAt, setOccurredAt] = useState("");
   const [isTowed, setIsTowed] = useState("");
 
@@ -222,8 +220,6 @@ export default function RentalRequestForm() {
       if (a) {
         setProblemCategory(a.problemCategory || "");
         setSymptom(a.symptom || "");
-        setIsDrivable(a.isDrivable || "");
-        setIsSafeToDrive(a.isSafeToDrive || "");
         setIsTowed(a.isTowed || "");
         setShopName(a.shopName || "");
         setShopAddress(a.shopAddress || "");
@@ -264,8 +260,6 @@ export default function RentalRequestForm() {
     if (!problemCategory) e.problemCategory = "Please choose what is going on.";
     if (!symptom.trim()) e.symptom = "Describe the problem in your own words.";
     if (!isNoVan) {
-      if (!isDrivable) e.isDrivable = "Please answer.";
-      if (!isSafeToDrive) e.isSafeToDrive = "Please answer.";
       if (!isTowed) e.isTowed = "Please answer.";
       if (!occurredAt) e.occurredAt = "When did the problem start?";
     }
@@ -301,7 +295,7 @@ export default function RentalRequestForm() {
       identityCorrected: identityOk === "no",
       identityCorrection,
       correctedTruck, correctedPhone,
-      problemCategory, symptom, isDrivable, isSafeToDrive, isTowed,
+      problemCategory, symptom, isTowed,
       occurredAt: occurredAt || null,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       noVehicle: isNoVan,
@@ -501,33 +495,6 @@ export default function RentalRequestForm() {
 
                 <>
                     {!isNoVan && (<>
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label className="flex min-h-10 items-end">Can your van still be driven?</Label>
-                        <Select value={isDrivable} onValueChange={(v) => { setIsDrivable(v); clearErr("isDrivable"); }}>
-                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className="flex min-h-10 items-end">Is it safe to drive?</Label>
-                        <Select value={isSafeToDrive} onValueChange={(v) => { setIsSafeToDrive(v); clearErr("isSafeToDrive"); }}>
-                          <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      These are two different questions. A van can still move and
-                      not be safe to drive, and a van can be safe to sit in and
-                      not move at all.
-                    </p>
-                    {(fieldErrors.isDrivable || fieldErrors.isSafeToDrive) &&
-                      <p className="text-sm text-red-600">Please answer both.</p>}
                     <div className="space-y-2">
                       <Label>Is your van being towed?</Label>
                       <Select value={isTowed} onValueChange={(v) => { setIsTowed(v); clearErr("isTowed"); }}>
