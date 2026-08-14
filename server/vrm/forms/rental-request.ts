@@ -1308,9 +1308,26 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
   router.get("/forms/rental-request/list", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
-        SELECT r.*, t.sent_at, t.opened_at
+        SELECT r.*, t.sent_at, t.opened_at,
+               -- The Holman-workflow evaluation: latest profitability snapshot
+               -- for this technician rides on the request so the decision is
+               -- made with the number in view, never from memory.
+               pf.daily_revenue        AS prof_daily_revenue,
+               pf.daily_costs          AS prof_daily_costs,
+               pf.daily_net_before_rental AS prof_net_before,
+               pf.daily_net_with_rental   AS prof_net_with,
+               pf.recommendation       AS prof_recommendation,
+               pf.scorecard_score      AS prof_scorecard,
+               pf.tenure_months        AS prof_tenure_months,
+               pf.new_hire_exempt      AS prof_new_hire_exempt,
+               pf.synced_at            AS prof_synced_at
         FROM vrm_rental_request r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
+        LEFT JOIN LATERAL (
+          SELECT * FROM vrm_profitability_snapshot p
+          WHERE upper(p.tech_ldap) = upper(r.ldap)
+          ORDER BY p.synced_at DESC LIMIT 1
+        ) pf ON true
         ORDER BY r.created_at DESC
       `);
       res.json({ requests: rows });

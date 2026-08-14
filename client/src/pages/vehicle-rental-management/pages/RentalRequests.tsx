@@ -432,6 +432,35 @@ export default function RentalRequests() {
                 </div>
               ))}
 
+            {/* The Holman-workflow evaluation: profitability in view before the
+                decision. Green when the tech is profitable WITH the rental. */}
+            <div style={{ marginTop: 16, padding: "10px 12px", borderRadius: 6,
+                          background: (detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0
+                            ? colors.greenLight : colors.redLight,
+                          border: `1px solid ${(detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0 ? colors.green : colors.red}` }}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                Profitability
+              </div>
+              {(detail as any).prof_synced_at ? (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, display: "grid", gap: 3 }}>
+                  <div><b>{(detail as any).prof_recommendation || "no recommendation"}</b></div>
+                  <div>Daily net with rental: <b>${Number((detail as any).prof_net_with ?? 0).toFixed(0)}</b>
+                       &nbsp;·&nbsp; without: ${Number((detail as any).prof_net_before ?? 0).toFixed(0)}</div>
+                  <div>Revenue ${Number((detail as any).prof_daily_revenue ?? 0).toFixed(0)}/day
+                       &nbsp;·&nbsp; costs ${Number((detail as any).prof_daily_costs ?? 0).toFixed(0)}/day
+                       &nbsp;·&nbsp; scorecard {(detail as any).prof_scorecard ?? "n/a"}
+                       &nbsp;·&nbsp; tenure {(detail as any).prof_tenure_months ?? "?"} mo
+                       {(detail as any).prof_new_hire_exempt ? " · new-hire exempt" : ""}</div>
+                  <div style={{ fontSize: 11, color: colors.inkMuted }}>
+                    as of {String((detail as any).prof_synced_at).slice(0, 10)}</div>
+                </div>
+              ) : (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
+                  No profitability snapshot for this technician. Evaluate by hand before deciding.
+                </div>
+              )}
+            </div>
+
             <div style={{ marginTop: 16 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
                 Decide
