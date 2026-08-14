@@ -317,6 +317,7 @@ export async function initFormsSchema(): Promise<void> {
          AND a.attname = 'policy_complete';
       IF d IS NOT NULL AND (d NOT LIKE '%ack_discipline%'
                             OR d NOT LIKE '%ack_extension_weekly%'
+                            OR d NOT LIKE '%new_hire_awaiting_vehicle%'
                             OR d LIKE '%ack_last_resort%') THEN
         ALTER TABLE vrm_rental_request DROP COLUMN policy_complete;
       END IF;
@@ -329,10 +330,13 @@ export async function initFormsSchema(): Promise<void> {
     ALTER TABLE vrm_rental_request
       ADD COLUMN IF NOT EXISTS policy_complete boolean
       GENERATED ALWAYS AS (
-        ack_not_maintenance AND ack_cannot_drive_safely AND ack_has_appointment
-        AND ack_return_one_day AND ack_accurate
+        ack_not_maintenance AND ack_return_one_day AND ack_accurate
         AND ack_working_hours_only AND ack_return_before_time_off
         AND ack_extension_weekly AND ack_discipline
+        -- The van attestation applies only when there is a van.
+        AND (ack_cannot_drive_safely OR problem_category = 'new_hire_awaiting_vehicle')
+        -- The appointment attestation applies only when one was claimed.
+        AND (ack_has_appointment OR has_appointment IS NOT TRUE)
       ) STORED;
   `);
 

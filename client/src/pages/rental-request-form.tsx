@@ -120,6 +120,8 @@ export default function RentalRequestForm() {
     : `/api/public/rental-request/${encodeURIComponent(token)}`;
 
   const [step, setStep] = useState<"verify" | "form" | "done">("verify");
+  const [noTruck, setNoTruck] = useState(false);
+  const [phone, setPhone] = useState("");
   const [ldap, setLdap] = useState("");
   const [truckNumber, setTruckNumber] = useState("");
   const [verifyError, setVerifyError] = useState("");
@@ -158,7 +160,10 @@ export default function RentalRequestForm() {
   // Maintenance used to end the form on the spot with a denial script. It does
   // not any more: Tyler decides every request, so every request is completed and
   // submitted. Kept as a category because the denial mix still needs to count it.
-  const visibleAcks = ACKS.filter(([k]) => k !== "ackHasAppointment" || !identity?.isByov);
+  const isNoVan = noTruck || problemCategory === "new_hire_awaiting_vehicle";
+  const visibleAcks = ACKS.filter(([k]) =>
+    (k !== "ackHasAppointment" || !(identity?.isByov || isNoVan))
+    && (k !== "ackCannotDriveSafely" || !isNoVan));
   const clearErr = (k: string) =>
     setFieldErrors((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
 
@@ -169,7 +174,7 @@ export default function RentalRequestForm() {
   });
 
   const verifyMutation = useMutation({
-    mutationFn: () => postJson(`${api}/verify`, { ldap, truckNumber }),
+    mutationFn: () => postJson(`${api}/verify`, { ldap, truckNumber, noTruck, phone }),
     onSuccess: (d: any) => {
       setVerifyError("");
       setIdentity(d.identity);
@@ -217,9 +222,15 @@ export default function RentalRequestForm() {
     if (identityOk === "no" && !identityCorrection.trim()) e.identityCorrection = "Tell us what is wrong.";
     if (!problemCategory) e.problemCategory = "Please choose what is going on.";
     if (!symptom.trim()) e.symptom = "Describe the problem in your own words.";
-    if (!isDrivable) e.isDrivable = "Please answer.";
-    if (!isSafeToDrive) e.isSafeToDrive = "Please answer.";
-    if (!identity?.isByov) {
+    if (!isNoVan) {
+      if (!isDrivable) e.isDrivable = "Please answer.";
+      if (!isSafeToDrive) e.isSafeToDrive = "Please answer.";
+    }
+    if (isNoVan) {
+      if (!appointmentDate) e.appointmentAt = "When do you need the rental from?";
+      if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
+    }
+    if (!identity?.isByov && !isNoVan) {
       if (!hasAppointment) e.hasAppointment = "Please answer.";
       if (hasAppointment === "yes") {
         if (!shopName.trim()) e.shopName = "Which shop?";
@@ -257,7 +268,9 @@ export default function RentalRequestForm() {
       problemCategory, symptom, isDrivable, isSafeToDrive,
       occurredAt: occurredAt || null, jobsAffected, whatWasTried,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
-      hasAppointment, appointmentAt: appointmentAt || null, shopEstimatedDays,
+      noVehicle: isNoVan,
+      hasAppointment: isNoVan ? null : hasAppointment,
+      appointmentAt: appointmentAt || null, shopEstimatedDays,
       ...acks,
     });
   };
@@ -328,11 +341,27 @@ export default function RentalRequestForm() {
                 <Input id="ldap" autoCapitalize="characters" value={ldap}
                        onChange={(e) => setLdap(e.target.value)} placeholder="e.g. JSMITH1" />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="truck">Your truck number</Label>
-                <Input id="truck" inputMode="numeric" value={truckNumber}
-                       onChange={(e) => setTruckNumber(e.target.value)} placeholder="e.g. 61843" />
-              </div>
+              {!noTruck && (
+                <div className="space-y-2">
+                  <Label htmlFor="truck">Your truck number</Label>
+                  <Input id="truck" inputMode="numeric" value={truckNumber}
+                         onChange={(e) => setTruckNumber(e.target.value)} placeholder="e.g. 61843" />
+                </div>
+              )}
+              {noTruck && (
+                <div className="space-y-2">
+                  <Label htmlFor="vphone">Your mobile number</Label>
+                  <Input id="vphone" inputMode="tel" value={phone}
+                         onChange={(e) => setPhone(e.target.value)} placeholder="10 digits" />
+                  <p className="text-xs text-slate-500">
+                    The number Sears has on file for you. We use it to confirm it is you.
+                  </p>
+                </div>
+              )}
+              <label className="flex items-start gap-3 text-sm text-slate-700">
+                <Checkbox checked={noTruck} onCheckedChange={(v) => setNoTruck(v === true)} />
+                <span>I am a new hire and do not have a truck number yet</span>
+              </label>
               {verifyError && <p className="text-sm text-red-600">{verifyError}</p>}
               <Button className="w-full" onClick={() => verifyMutation.mutate()} disabled={verifyMutation.isPending}>
                 {verifyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Start"}
@@ -410,9 +439,13 @@ export default function RentalRequestForm() {
             {/* Section B — the problem */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">What is wrong with your work van?</CardTitle>
+                <CardTitle className="text-base">
+                  {isNoVan ? "What is going on?" : "What is wrong with your work van?"}
+                </CardTitle>
                 <CardDescription>
-                  Pick the closest match, then tell us what happened in your own words.
+                  {isNoVan
+                    ? "Pick the closest match, then tell us your situation in your own words."
+                    : "Pick the closest match, then tell us what happened in your own words."}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -426,11 +459,14 @@ export default function RentalRequestForm() {
 
                 <>
                     <div className="space-y-2">
-                      <Label htmlFor="symptom">What is your work van doing, or not doing?</Label>
+                      <Label htmlFor="symptom">
+                        {isNoVan ? "Tell us your situation" : "What is your work van doing, or not doing?"}
+                      </Label>
                       <Textarea id="symptom" rows={3} value={symptom}
                                 onChange={(e) => { setSymptom(e.target.value); clearErr("symptom"); }} />
                       {fieldErrors.symptom && <p className="text-sm text-red-600">{fieldErrors.symptom}</p>}
                     </div>
+                    {!isNoVan && (<>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
                         <Label>Can your van still be driven?</Label>
@@ -475,12 +511,62 @@ export default function RentalRequestForm() {
                       <Textarea id="tried" rows={2} value={whatWasTried}
                                 onChange={(e) => setWhatWasTried(e.target.value)} />
                     </div>
+                    </>)}
                 </>
               </CardContent>
             </Card>
 
-            {/* Section C — where it is going. Not applicable to BYOV. */}
-            {!identity?.isByov && (
+            {/* No van yet: no shop to name, but the reservation still needs a
+                start date and a location. Same columns the booking chain reads. */}
+            {isNoVan && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Your rental</CardTitle>
+                  <CardDescription>
+                    You have no work van yet, so we just need when and where.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label htmlFor="need">When do you need it from?</Label>
+                      <Input id="need" type="date" value={appointmentDate}
+                             onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Pickup time</Label>
+                      <Select value={appointmentTime}
+                              onValueChange={(v) => { setAppointmentTime(v); clearErr("appointmentAt"); }}>
+                        <SelectTrigger><SelectValue placeholder="Time" /></SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {DROP_TIMES.map(([v, l]) => <SelectItem key={v} value={v}>{l}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
+                  <div className="space-y-2">
+                    <Label htmlFor="branch2">Closest Enterprise Rent-A-Car branch to you</Label>
+                    <Input id="branch2" value={nearestBranch}
+                           placeholder="e.g. Enterprise, 2841 Airline Blvd, Portsmouth"
+                           onChange={(e) => { setNearestBranch(e.target.value); clearErr("nearestBranch"); }} />
+                    <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+                      <p className="font-semibold">This is where your rental will be. It has to be right.</p>
+                      <p className="mt-1">
+                        Your reservation is sent to this location and this is where you pick the
+                        car up. If you do not know it, stop and Google{" "}
+                        <span className="font-semibold">&quot;Enterprise Rent-A-Car near me&quot;</span>{" "}
+                        right now, and type in the name and street of the closest branch.
+                      </p>
+                    </div>
+                    {fieldErrors.nearestBranch && <p className="text-sm text-red-600">{fieldErrors.nearestBranch}</p>}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Section C — where it is going. Not applicable to BYOV or no-van. */}
+            {!identity?.isByov && !isNoVan && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Where is your work van being repaired?</CardTitle>

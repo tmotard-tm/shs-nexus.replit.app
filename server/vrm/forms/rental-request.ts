@@ -702,6 +702,10 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // trail whose entire purpose is being true.
   const acksRequired = true;
   const appointmentAsked = bool(b.hasAppointment) === true;
+  // No van, no van attestations. Requiring "my vehicle cannot be driven
+  // safely" from someone whose category is "no work van assigned to me yet"
+  // is demanding a false statement as the price of entry.
+  const noVehicle = category === "new_hire_awaiting_vehicle" || b.noVehicle === true;
   const acks = {
     ack_not_maintenance: b.ackNotMaintenance === true,
     ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
@@ -715,7 +719,8 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   };
   if (acksRequired) {
     const required = Object.entries(acks)
-      .filter(([k]) => appointmentAsked || k !== "ack_has_appointment");
+      .filter(([k]) => appointmentAsked || k !== "ack_has_appointment")
+      .filter(([k]) => !noVehicle || k !== "ack_cannot_drive_safely");
     if (!required.every(([, v]) => v)) {
       return { code: 400, json: { success: false, message: "Please tick every acknowledgement before submitting." } };
     }
@@ -843,8 +848,18 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
     try {
       const ldap = String(req.body?.ldap || "").trim().toUpperCase();
       const truck = String(req.body?.truckNumber || "").trim();
-      if (!ldap || !truck) {
-        return res.status(400).json({ verified: false, message: "Please enter both your LDAP and your truck number." });
+      // A new hire has no truck number, and the category that exists for them
+      // was unreachable while the door demanded one. Identity stays
+      // two-factor: the truck is swapped for the mobile number we hold.
+      const noTruck = req.body?.noTruck === true;
+      const claimedPhone = String(req.body?.phone || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
+      if (!ldap || (!noTruck && !truck) || (noTruck && claimedPhone.length !== 10)) {
+        return res.status(400).json({
+          verified: false,
+          message: noTruck
+            ? "Please enter your LDAP and your 10-digit mobile number."
+            : "Please enter both your LDAP and your truck number.",
+        });
       }
 
       const f = await factsFor(ldap);
@@ -856,17 +871,37 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         });
       }
 
-      const candidates = ((f.truck_candidates as any[]) || [])
-        .filter(Boolean).map((t: any) => normTruck(String(t)));
-      // If we hold no truck at all for someone, accept what they typed rather
-      // than locking them out of the front door over our own missing data. The
-      // value is recorded and the mismatch is visible to Fleet either way.
-      if (candidates.length && !candidates.includes(normTruck(truck))) {
-        return res.status(403).json({
-          verified: false,
-          message: "That truck number does not match our records for you. Enter the number on "
-                 + "your current van, or contact Fleet if it has just changed.",
-        });
+      if (noTruck) {
+        const onFile = [f.tpms_phone, f.cell_phone, f.main_phone]
+          .map((c: any) => String(c || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, ""))
+          .filter((c: string) => c.length === 10);
+        if (!onFile.length) {
+          return res.status(403).json({
+            verified: false,
+            message: "We have no phone number on file for you, so we cannot verify you this "
+                   + "way. Contact Fleet and we will set you up directly.",
+          });
+        }
+        if (!onFile.includes(claimedPhone)) {
+          return res.status(403).json({
+            verified: false,
+            message: "That mobile number does not match what we have on file for you. "
+                   + "Contact Fleet if your number has changed.",
+          });
+        }
+      } else {
+        const candidates = ((f.truck_candidates as any[]) || [])
+          .filter(Boolean).map((t: any) => normTruck(String(t)));
+        // If we hold no truck at all for someone, accept what they typed rather
+        // than locking them out of the front door over our own missing data. The
+        // value is recorded and the mismatch is visible to Fleet either way.
+        if (candidates.length && !candidates.includes(normTruck(truck))) {
+          return res.status(403).json({
+            verified: false,
+            message: "That truck number does not match our records for you. Enter the number on "
+                   + "your current van, or contact Fleet if it has just changed.",
+          });
+        }
       }
 
       // A technician who already has one in flight must not open a second.
@@ -948,7 +983,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         identity: {
           ldap,
           techName: f.tech_name || "",
-          truckNumber: String(f.truck_number || truck),
+          truckNumber: String(f.truck_number || truck || ""),
           district: f.district_no ?? "",
           homeState: f.home_state ?? "",
           mobilePhone: phoneFor(f) ?? "",
