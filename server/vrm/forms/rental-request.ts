@@ -942,9 +942,10 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           truckNumber: String(f.truck_number || ""),
           district: f.district_no ?? "",
           homeState: f.home_state ?? "",
-          // Masked on purpose. An LDAP-only door plus a full echo would be a
-          // phone-number lookup service for the whole roster.
-          mobilePhone: (() => { const ph = phoneFor(f); return ph ? `••• ••• ${ph.slice(-4)}` : ""; })(),
+          // Full number by Tyler's ruling 2026-08-14. Tradeoff accepted
+          // knowingly: any valid LDAP entered here returns that
+          // technician's mobile. Every request is still human-reviewed.
+          mobilePhone: phoneFor(f) ?? "",
           isByov: Number(f.byov_count ?? 0) > 0,
         },
       });
@@ -1083,10 +1084,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           truckNumber: onFile || truck,
           district: f?.district_no ?? "",
           homeState: f?.home_state ?? "",
-          mobilePhone: (() => {
-            const ph = String(row.phone || "").replace(/[^0-9]/g, "");
-            return ph.length >= 4 ? `\u2022\u2022\u2022 \u2022\u2022\u2022 ${ph.slice(-4)}` : "";
-          })(),
+          mobilePhone: row.phone || "",
           isByov: Number(f?.byov_count ?? 0) > 0,
         },
       });
