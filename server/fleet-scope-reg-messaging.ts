@@ -120,8 +120,13 @@ export function getNextAllowedSendTime(state: string): Date | null {
       quietEnd = 9;    // 9 AM
     }
   } else {
+    // Company policy (Tyler, Aug 14 2026): open the general send window at
+    // 7 AM local so operations can respond to techs first thing in the
+    // morning. NOTE: this is earlier than the TCPA presumptive 8 AM floor —
+    // an accepted business decision. States with explicit statutes above
+    // (FL/CT/MD/OK/WA 8 AM, TX 9 AM / noon Sun) keep their statutory windows.
     quietStart = 21; // 9 PM (federal baseline)
-    quietEnd = 8;    // 8 AM
+    quietEnd = 7;    // 7 AM (company policy; TCPA presumption is 8 AM)
   }
 
   const inQuietHours = localDecimalHour >= quietStart || localDecimalHour < quietEnd;
