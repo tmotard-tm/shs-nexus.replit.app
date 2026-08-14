@@ -29,6 +29,10 @@ interface SurveyRow {
   tech_name: string | null;
   cutover_status?: string | null;
   cutover_reference?: string | null;
+  district?: string | null;
+  supervisor_name?: string | null;
+  supervisor_ldap?: string | null;
+  supervisor_phone?: string | null;
   ams_status?: string | null;
   ams_in_repair?: string | null;
   ams_repair_status?: string | null;
@@ -478,6 +482,8 @@ export default function RentalSurvey() {
     atruck: (r) => r.assigned_truck_number,
     status: (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status,
     cutover: (r) => r.cutover_status ?? "",
+    district: (r) => r.district ?? "",
+    supervisor: (r) => r.supervisor_name ?? "",
     ams: (r) => (r.ams_sale_date ? "SOLD" : r.ams_status ?? ""),
     shop: (r) => r.shop_name,
     ready: (r) => r.promised_ready_date,
@@ -502,6 +508,8 @@ export default function RentalSurvey() {
       ["truck_mismatch", (r) => (r.truck_mismatch ? "YES" : "")],
       ["van_status", (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status],
       ["cutover", (r) => r.cutover_status], ["cutover_reference", (r) => r.cutover_reference],
+      ["district", (r) => r.district], ["supervisor", (r) => r.supervisor_name],
+      ["supervisor_phone", (r) => r.supervisor_phone],
       ["ams_status", (r) => r.ams_status], ["ams_sale_date", (r) => r.ams_sale_date],
       ["ams_repair_status", (r) => r.ams_repair_status],
       ["ams_location", (r) => [r.ams_loc_city, r.ams_loc_state].filter(Boolean).join(", ")],
@@ -623,6 +631,7 @@ export default function RentalSurvey() {
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
               <tr>
+                <SortHeader col="district" text="Dist" sort={sort} setSort={setSort} />
                 <SortHeader col="truck" text="Truck" sort={sort} setSort={setSort} />
                 <SortHeader col="ldap" text="LDAP" sort={sort} setSort={setSort} />
                 <SortHeader col="name" text="Technician" sort={sort} setSort={setSort} />
@@ -634,6 +643,7 @@ export default function RentalSurvey() {
                 <SortHeader col="status" text="Van status" sort={sort} setSort={setSort} />
                 <SortHeader col="ams" text="AMS says" sort={sort} setSort={setSort} />
                 <SortHeader col="cutover" text="Cutover" sort={sort} setSort={setSort} />
+                <SortHeader col="supervisor" text="Supervisor" sort={sort} setSort={setSort} />
                 <SortHeader col="shop" text="Shop" sort={sort} setSort={setSort} />
                 <SortHeader col="ready" text="Promised" sort={sort} setSort={setSort} />
                 <SortHeader col="submitted" text="Submitted" sort={sort} setSort={setSort} />
@@ -650,6 +660,7 @@ export default function RentalSurvey() {
                         ? colors.greenDeepLight
                         : r.truck_mismatch ? colors.redLight : undefined,
                     }}>
+                  <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.district || "—"}</td>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains, fontWeight: 600 }}>
                     {r._truck || "—"}
                     {r._role && <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 10.5, marginLeft: 6 }}>{r._role}</span>}
@@ -686,6 +697,15 @@ export default function RentalSurvey() {
                       ? (r.ams_status === "In Repair"
                           ? <Pill text="In Repair" fg={colors.amber} bg={colors.amberLight} />
                           : r.ams_status)
+                      : "—"}
+                  </td>
+                  <td style={tdBase} title={r.supervisor_ldap ?? ""}>
+                    {r.supervisor_name
+                      ? <span>{r.supervisor_name}<br />
+                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.inkMuted }}>
+                            {r.supervisor_phone || "no phone"}
+                          </span>
+                        </span>
                       : "—"}
                   </td>
                   <td style={tdBase} title={r.cutover_reference ? `ETD ${r.cutover_reference}` : ""}>

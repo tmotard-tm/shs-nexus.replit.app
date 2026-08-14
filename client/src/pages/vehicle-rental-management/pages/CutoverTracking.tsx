@@ -47,6 +47,10 @@ interface Row {
   route_block_live: boolean | null;
   route_block_filed_at: string | null;
   route_block_error: string | null;
+  district?: string | null;
+  supervisor_name?: string | null;
+  supervisor_ldap?: string | null;
+  supervisor_phone?: string | null;
   stage: string;
 }
 
@@ -165,6 +169,8 @@ export default function CutoverTracking() {
       ["Reservation problem", (r) => r.reservation_error ?? ""],
       ["Route block", (r) => r.route_block_status],
       ["Block day", (r) => r.route_block_date ?? ""],
+      ["District", (r) => r.district ?? ""], ["Supervisor", (r) => r.supervisor_name ?? ""],
+      ["Supervisor phone", (r) => r.supervisor_phone ?? ""],
       ["Block live", (r) => r.route_block_live == null ? "" : r.route_block_live ? "yes" : "TEST"],
       ["Block problem", (r) => r.route_block_error ?? ""],
     ];
@@ -373,7 +379,8 @@ export default function CutoverTracking() {
               {[["ldap", "LDAP"], ["tech_name", "Technician"], ["truck_number", "SHS truck"],
                 ["van_status", "Why in a rental"], ["stage", "Stage"],
                 ["etd_reference", "Reservation"], ["branch_name", "Branch"],
-                ["route_block_status", "Route block"], ["route_block_date", "Block day"]]
+                ["route_block_status", "Route block"], ["route_block_date", "Block day"],
+                ["district", "Dist"], ["supervisor_name", "Supervisor"]]
                 .map(([col, label]) => (
                 <th key={col} style={th} onClick={() => toggleSort(col)}>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -445,12 +452,22 @@ export default function CutoverTracking() {
                       ? fmtDay(r.route_block_date)
                       : <span style={{ color: colors.inkMuted }}>—</span>}
                   </td>
+                  <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.district || "\u2014"}</td>
+                  <td style={{ ...td, fontSize: 12 }} title={r.supervisor_ldap ?? ""}>
+                    {r.supervisor_name
+                      ? <span>{r.supervisor_name}<br />
+                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
+                            {r.supervisor_phone || "no phone"}
+                          </span>
+                        </span>
+                      : "\u2014"}
+                  </td>
                 </tr>
               );
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ ...td, textAlign: "center", color: colors.inkMuted,
+                <td colSpan={11} style={{ ...td, textAlign: "center", color: colors.inkMuted,
                                          padding: 30 }}>
                   {rows.length === 0
                     ? "No complete records yet. A technician appears here once their reservation is booked and their route block is filed."
