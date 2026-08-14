@@ -53,7 +53,7 @@ const CATEGORIES: Array<[string, string]> = [
   ["awaiting_parts", "Awaiting parts"],
   ["new_hire_awaiting_vehicle", "New hire, no vehicle yet"],
   ["decom_replacement", "Decommission replacement"],
-  ["scheduled_maintenance", "Scheduled maintenance (oil, tires, PM, inspection, recall)"],
+  ["scheduled_maintenance", "Scheduled maintenance (oil, tires, PM, inspection)"],
 ];
 
 const ACKS: Array<[string, string]> = [

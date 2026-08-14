@@ -45,14 +45,21 @@ export const PUBLIC_REQUEST_URL =
   (process.env.PUBLIC_BASE_URL || "https://SHS-Nexus.replit.app").replace(/\/+$/, "")
   + "/rental-request";
 
-/** Categories that are maintenance by definition. Rule 1 kills these outright. */
+/**
+ * Categories that are maintenance by definition. Rule 1 kills these outright.
+ *
+ * `recall` was removed 2026-08-13 (Tyler). A recall can hold a van for days,
+ * which is not a wait-at-the-shop, so it is no longer excluded by definition
+ * and no longer appears in the acknowledgement, the category label, or the
+ * denial script. Removing it from the script alone would have left a recall
+ * still denied here, with a message that no longer explained why.
+ */
 const MAINTENANCE = new Set([
   "scheduled_maintenance",
   "oil_change",
   "tires",
   "pm",
   "inspection",
-  "recall",
 ]);
 
 const PROBLEM_CATEGORIES = new Set([
@@ -121,8 +128,8 @@ export function evaluate(f: RequestFacts): Eligibility {
       rule: 1,
       reason: "scheduled maintenance",
       script:
-        "Rentals are not provided for oil changes, tires, preventive maintenance, " +
-        "inspections or recalls. Schedule this as a wait through routing.",
+        "Rentals are not provided for oil changes, tires, preventive maintenance " +
+        "or inspections. Schedule this as a wait through routing.",
     };
   }
 
