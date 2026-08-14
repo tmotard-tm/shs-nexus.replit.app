@@ -22,10 +22,10 @@ import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { regionForState, REGION_OWNER } from "../rental-operations/region";
 
-// Bumped 2026-08-13: three use-of-vehicle acknowledgements added. Never reuse
-// a version across a wording change — the stored version is what proves
-// which text a technician actually agreed to.
-export const POLICY_VERSION = "2026-08-13.b";
+// Bumped 2026-08-14: weekly extension acknowledgement added. Never reuse a
+// version across a wording change — the stored version is what proves which
+// text a technician actually agreed to.
+export const POLICY_VERSION = "2026-08-14.a";
 
 /**
  * The permanent front door. No token, no login.
@@ -710,6 +710,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     ack_accurate: b.ackAccurate === true,
     ack_working_hours_only: b.ackWorkingHoursOnly === true,
     ack_return_before_time_off: b.ackReturnBeforeTimeOff === true,
+    ack_extension_weekly: b.ackExtensionWeekly === true,
     ack_discipline: b.ackDiscipline === true,
   };
   if (acksRequired) {
@@ -762,7 +763,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       policy_version, policy_acknowledged_at, policy_ip,
       ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
       ack_return_one_day, ack_accurate,
-      ack_working_hours_only, ack_return_before_time_off, ack_discipline,
+      ack_working_hours_only, ack_return_before_time_off, ack_extension_weekly, ack_discipline,
       approved_vehicle_class, reason_code, region_owner,
       status, auto_decision, auto_reason, auto_rule, source
     ) VALUES (
@@ -781,7 +782,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
       ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
       ${acks.ack_return_one_day}, ${acks.ack_accurate},
-      ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_discipline},
+      ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_extension_weekly}, ${acks.ack_discipline},
       ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
       ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
     )
@@ -1168,7 +1169,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
          "missing_fields", "returned_at", "return_count", "tech_reported_branch",
-         "ack_working_hours_only", "ack_return_before_time_off", "ack_discipline",
+         "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
@@ -1444,7 +1445,8 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
             ? `\nFrom ${new Date(booked.appointment_at).toLocaleDateString("en-US")}`
               + (booked.shop_name ? `, when your van goes into ${booked.shop_name}.` : ".")
             : "")
-        + `\nReturn it within one business day of your van being ready.`,
+        + `\nReturn it within 1 working day of your van being ready. `
+        + `If your van is still in the shop after 7 days, request an extension from Fleet.`,
         "booked-notice",
       );
       res.json({ ok: true, ...booked });

@@ -286,6 +286,21 @@ export async function initFormsSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS vrm_rental_request_source_idx ON vrm_rental_request (source);
   `);
 
+  // Use-of-vehicle acknowledgements (Tyler, 2026-08-13).
+  //
+  // These three are the disciplinary half of the policy: work-hours-only use,
+  // return before any absence of three days or more, and the consequence of
+  // breaking either. They are the reason the acknowledgement block exists at
+  // all — a signed record of what the technician was told, on the day they
+  // were told it.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS ack_working_hours_only     boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS ack_return_before_time_off boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS ack_extension_weekly       boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS ack_discipline             boolean NOT NULL DEFAULT false;
+  `);
+
   // policy_complete is GENERATED, so it cannot be altered in place. Drop it only
   // when its stored expression predates the new acknowledgements, otherwise this
   // would rewrite the table on every boot. Rows signed under an older
@@ -301,6 +316,7 @@ export async function initFormsSchema(): Promise<void> {
        WHERE ad.adrelid = 'vrm_rental_request'::regclass
          AND a.attname = 'policy_complete';
       IF d IS NOT NULL AND (d NOT LIKE '%ack_discipline%'
+                            OR d NOT LIKE '%ack_extension_weekly%'
                             OR d LIKE '%ack_last_resort%') THEN
         ALTER TABLE vrm_rental_request DROP COLUMN policy_complete;
       END IF;
@@ -315,22 +331,9 @@ export async function initFormsSchema(): Promise<void> {
       GENERATED ALWAYS AS (
         ack_not_maintenance AND ack_cannot_drive_safely AND ack_has_appointment
         AND ack_return_one_day AND ack_accurate
-        AND ack_working_hours_only AND ack_return_before_time_off AND ack_discipline
+        AND ack_working_hours_only AND ack_return_before_time_off
+        AND ack_extension_weekly AND ack_discipline
       ) STORED;
-  `);
-
-  // Use-of-vehicle acknowledgements (Tyler, 2026-08-13).
-  //
-  // These three are the disciplinary half of the policy: work-hours-only use,
-  // return before any absence of three days or more, and the consequence of
-  // breaking either. They are the reason the acknowledgement block exists at
-  // all — a signed record of what the technician was told, on the day they
-  // were told it.
-  await db.execute(sql`
-    ALTER TABLE vrm_rental_request
-      ADD COLUMN IF NOT EXISTS ack_working_hours_only     boolean NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS ack_return_before_time_off boolean NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS ack_discipline             boolean NOT NULL DEFAULT false;
   `);
 
   // The Enterprise branch the TECHNICIAN says is closest to the shop.
