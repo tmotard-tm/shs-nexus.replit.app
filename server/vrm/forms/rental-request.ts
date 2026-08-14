@@ -847,19 +847,8 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
   app.post("/api/public/rental-request/open/verify", async (req, res) => {
     try {
       const ldap = String(req.body?.ldap || "").trim().toUpperCase();
-      const truck = String(req.body?.truckNumber || "").trim();
-      // A new hire has no truck number, and the category that exists for them
-      // was unreachable while the door demanded one. Identity stays
-      // two-factor: the truck is swapped for the mobile number we hold.
-      const noTruck = req.body?.noTruck === true;
-      const claimedPhone = String(req.body?.phone || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
-      if (!ldap || (!noTruck && !truck) || (noTruck && claimedPhone.length !== 10)) {
-        return res.status(400).json({
-          verified: false,
-          message: noTruck
-            ? "Please enter your LDAP and your 10-digit mobile number."
-            : "Please enter both your LDAP and your truck number.",
-        });
+      if (!ldap) {
+        return res.status(400).json({ verified: false, message: "Please enter your LDAP." });
       }
 
       const f = await factsFor(ldap);
@@ -869,39 +858,6 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           message: "We could not find that LDAP on the technician roster. Check the spelling, "
                  + "or contact Fleet if you have just started.",
         });
-      }
-
-      if (noTruck) {
-        const onFile = [f.tpms_phone, f.cell_phone, f.main_phone]
-          .map((c: any) => String(c || "").replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, ""))
-          .filter((c: string) => c.length === 10);
-        if (!onFile.length) {
-          return res.status(403).json({
-            verified: false,
-            message: "We have no phone number on file for you, so we cannot verify you this "
-                   + "way. Contact Fleet and we will set you up directly.",
-          });
-        }
-        if (!onFile.includes(claimedPhone)) {
-          return res.status(403).json({
-            verified: false,
-            message: "That mobile number does not match what we have on file for you. "
-                   + "Contact Fleet if your number has changed.",
-          });
-        }
-      } else {
-        const candidates = ((f.truck_candidates as any[]) || [])
-          .filter(Boolean).map((t: any) => normTruck(String(t)));
-        // If we hold no truck at all for someone, accept what they typed rather
-        // than locking them out of the front door over our own missing data. The
-        // value is recorded and the mismatch is visible to Fleet either way.
-        if (candidates.length && !candidates.includes(normTruck(truck))) {
-          return res.status(403).json({
-            verified: false,
-            message: "That truck number does not match our records for you. Enter the number on "
-                   + "your current van, or contact Fleet if it has just changed.",
-          });
-        }
       }
 
       // A technician who already has one in flight must not open a second.
@@ -983,10 +939,12 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         identity: {
           ldap,
           techName: f.tech_name || "",
-          truckNumber: String(f.truck_number || truck || ""),
+          truckNumber: String(f.truck_number || ""),
           district: f.district_no ?? "",
           homeState: f.home_state ?? "",
-          mobilePhone: phoneFor(f) ?? "",
+          // Masked on purpose. An LDAP-only door plus a full echo would be a
+          // phone-number lookup service for the whole roster.
+          mobilePhone: (() => { const ph = phoneFor(f); return ph ? `••• ••• ${ph.slice(-4)}` : ""; })(),
           isByov: Number(f.byov_count ?? 0) > 0,
         },
       });
@@ -1040,6 +998,10 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       }
 
       const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+      // The phone comes from OUR records, never the request body: the client
+      // only ever saw the masked form of it.
+      const body = { ...(req.body || {}) };
+      delete body.mobilePhone;
       const out = await screenAndRecord({
         tokenRow: null,
         ldap,
@@ -1051,7 +1013,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           homeState: f.home_state ?? null,
           mobilePhone: phoneFor(f),
         },
-        body: req.body || {},
+        body,
         ip,
       });
       res.status(out.code).json(out.json);
@@ -1098,12 +1060,15 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 
       const ldap = String(req.body?.ldap || "").trim().toUpperCase();
       const truck = String(req.body?.truckNumber || "").trim();
-      if (!ldap || !truck) return res.status(400).json({ verified: false, message: "Please enter both your LDAP and your truck number." });
+      // LDAP plus the link itself. The token is a possession factor, so this
+      // stays two-factor without demanding a truck number the open door no
+      // longer asks for either. A truck is only checked when one is sent.
+      if (!ldap) return res.status(400).json({ verified: false, message: "Please enter your LDAP." });
       if (row.ldap && ldap !== String(row.ldap).trim().toUpperCase()) {
         return res.status(403).json({ verified: false, message: "That LDAP does not match this link." });
       }
       const onFile = String(row.truck_number || "").trim();
-      if (onFile && normTruck(onFile) !== normTruck(truck)) {
+      if (truck && onFile && normTruck(onFile) !== normTruck(truck)) {
         return res.status(403).json({ verified: false, message: "That truck number does not match our records for you." });
       }
 
@@ -1118,7 +1083,10 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           truckNumber: onFile || truck,
           district: f?.district_no ?? "",
           homeState: f?.home_state ?? "",
-          mobilePhone: row.phone || "",
+          mobilePhone: (() => {
+            const ph = String(row.phone || "").replace(/[^0-9]/g, "");
+            return ph.length >= 4 ? `\u2022\u2022\u2022 \u2022\u2022\u2022 ${ph.slice(-4)}` : "";
+          })(),
           isByov: Number(f?.byov_count ?? 0) > 0,
         },
       });

@@ -120,8 +120,6 @@ export default function RentalRequestForm() {
     : `/api/public/rental-request/${encodeURIComponent(token)}`;
 
   const [step, setStep] = useState<"verify" | "form" | "done">("verify");
-  const [noTruck, setNoTruck] = useState(false);
-  const [phone, setPhone] = useState("");
   const [ldap, setLdap] = useState("");
   const [truckNumber, setTruckNumber] = useState("");
   const [verifyError, setVerifyError] = useState("");
@@ -160,7 +158,7 @@ export default function RentalRequestForm() {
   // Maintenance used to end the form on the spot with a denial script. It does
   // not any more: Tyler decides every request, so every request is completed and
   // submitted. Kept as a category because the denial mix still needs to count it.
-  const isNoVan = noTruck || problemCategory === "new_hire_awaiting_vehicle";
+  const isNoVan = problemCategory === "new_hire_awaiting_vehicle";
   const visibleAcks = ACKS.filter(([k]) =>
     (k !== "ackHasAppointment" || !(identity?.isByov || isNoVan))
     && (k !== "ackCannotDriveSafely" || !isNoVan));
@@ -174,7 +172,7 @@ export default function RentalRequestForm() {
   });
 
   const verifyMutation = useMutation({
-    mutationFn: () => postJson(`${api}/verify`, { ldap, truckNumber, noTruck, phone }),
+    mutationFn: () => postJson(`${api}/verify`, { ldap }),
     onSuccess: (d: any) => {
       setVerifyError("");
       setIdentity(d.identity);
@@ -260,9 +258,8 @@ export default function RentalRequestForm() {
     setSubmitError("");
     if (!validate()) return;
     submitMutation.mutate({
-      ldap, truckNumber,
+      ldap,
       district: identity?.district, homeState: identity?.homeState,
-      mobilePhone: identity?.mobilePhone,
       identityCorrected: identityOk === "no",
       identityCorrection,
       problemCategory, symptom, isDrivable, isSafeToDrive,
@@ -330,9 +327,9 @@ export default function RentalRequestForm() {
               <CardTitle className="text-lg">Rental request</CardTitle>
               <CardDescription>
                 {openMode
-                  ? "Start here if your van is down and you cannot finish your route. "
-                    + "Enter your LDAP and truck number so we know it is you."
-                  : "Enter your LDAP and truck number to start."}
+                  ? "Start here if your work van is down, or you need a rental and do not have "
+                    + "a van yet. Enter your LDAP to begin."
+                  : "Enter your LDAP to start."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -341,27 +338,7 @@ export default function RentalRequestForm() {
                 <Input id="ldap" autoCapitalize="characters" value={ldap}
                        onChange={(e) => setLdap(e.target.value)} placeholder="e.g. JSMITH1" />
               </div>
-              {!noTruck && (
-                <div className="space-y-2">
-                  <Label htmlFor="truck">Your truck number</Label>
-                  <Input id="truck" inputMode="numeric" value={truckNumber}
-                         onChange={(e) => setTruckNumber(e.target.value)} placeholder="e.g. 61843" />
-                </div>
-              )}
-              {noTruck && (
-                <div className="space-y-2">
-                  <Label htmlFor="vphone">Your mobile number</Label>
-                  <Input id="vphone" inputMode="tel" value={phone}
-                         onChange={(e) => setPhone(e.target.value)} placeholder="10 digits" />
-                  <p className="text-xs text-slate-500">
-                    The number Sears has on file for you. We use it to confirm it is you.
-                  </p>
-                </div>
-              )}
-              <label className="flex items-start gap-3 text-sm text-slate-700">
-                <Checkbox checked={noTruck} onCheckedChange={(v) => setNoTruck(v === true)} />
-                <span>I am a new hire and do not have a truck number yet</span>
-              </label>
+
               {verifyError && <p className="text-sm text-red-600">{verifyError}</p>}
               <Button className="w-full" onClick={() => verifyMutation.mutate()} disabled={verifyMutation.isPending}>
                 {verifyMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Start"}
