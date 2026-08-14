@@ -389,6 +389,14 @@ export default function RentalSurvey() {
   const [fCompany, setFCompany] = useState<string[]>([]);
   const [fState, setFState] = useState<string[]>([]);
   const [fFlag, setFFlag] = useState<string[]>([]);
+  const [fCutover, setFCutover] = useState<string[]>([]);
+
+  const cutoverLabel = (r: Row) =>
+    r.cutover_status === "complete" ? "Complete"
+      : r.cutover_status === "reserved" ? "Reserved"
+      : r.cutover_status === "failed" ? "Failed"
+      : "Not started";
+
   const [hideCompleted, setHideCompleted] = useState(true);
   const [detail, setDetail] = useState<SurveyRow | null>(null);
 
@@ -432,6 +440,7 @@ export default function RentalSurvey() {
     const needle = q.trim().toLowerCase();
     return base.filter((r) => {
       if (fStatus.length && !fStatus.includes(VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status ?? "")) return false;
+      if (fCutover.length && !fCutover.includes(cutoverLabel(r))) return false;
       if (fCompany.length && !fCompany.includes(r.rental_company ?? "")) return false;
       if (fState.length && !fState.includes(r.rental_branch_state ?? "")) return false;
       if (fFlag.length) {
@@ -447,7 +456,7 @@ export default function RentalSurvey() {
               r.shop_name, r.rental_branch_city, r.rental_company]
         .some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
-  }, [base, q, fStatus, fCompany, fState, fFlag]);
+  }, [base, q, fStatus, fCompany, fState, fFlag, fCutover]);
 
   const hiddenCompleted = useMemo(
     () => (hideCompleted ? filteredAll.filter((r) => r.cutover_status === "complete").length : 0),
@@ -568,6 +577,8 @@ export default function RentalSurvey() {
           options={counted(rows, (r) => r.rental_company)} />
         <MultiSelect label="states" values={fState} onChange={setFState}
           options={counted(rows, (r) => r.rental_branch_state)} />
+        <MultiSelect label="cutover" values={fCutover} onChange={setFCutover}
+          options={counted(rows, cutoverLabel)} />
         <MultiSelect label="flags" values={fFlag} onChange={setFFlag}
           options={[
             ["Truck mismatch", rows.filter((r) => r.truck_mismatch).length],
