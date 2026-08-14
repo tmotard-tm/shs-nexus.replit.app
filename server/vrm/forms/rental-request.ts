@@ -781,7 +781,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     INSERT INTO vrm_rental_request (
       token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
       identity_corrected, identity_correction, is_byov,
-      problem_category, symptom, is_drivable, is_safe_to_drive, is_towed, occurred_at,
+      problem_category, symptom, is_drivable, is_safe_to_drive, is_towed, accident_ok, occurred_at,
       jobs_affected, what_was_tried,
       shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
       tech_reported_branch,
@@ -799,7 +799,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${s(b.homeState, 2) || homeState},
       ${phoneFinal},
       ${corrected}, ${corrParts.length ? corrParts.join("; ").slice(0, 400) : null}, ${isByov},
-      ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)},
+      ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)}, ${bool(b.areYouOkay)},
       ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
       ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
       ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
@@ -916,7 +916,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       // not "start again". Covers both a Fleet send-back and a rule-3/4 defer.
       const { rows: prior } = await db.execute(sql`
         SELECT request_no, status, missing_fields, decision_note, problem_category, symptom,
-               is_drivable, is_safe_to_drive, is_towed, jobs_affected, what_was_tried,
+               is_drivable, is_safe_to_drive, is_towed, accident_ok, jobs_affected, what_was_tried,
                shop_name, shop_address, shop_city, shop_state, shop_phone,
                tech_reported_branch,
                has_appointment, shop_estimated_days,
@@ -944,6 +944,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
             isDrivable: p.is_drivable === true ? "yes" : p.is_drivable === false ? "no" : "",
             isSafeToDrive: p.is_safe_to_drive === true ? "yes" : p.is_safe_to_drive === false ? "no" : "",
             isTowed: p.is_towed === true ? "yes" : p.is_towed === false ? "no" : "",
+            areYouOkay: p.accident_ok === true ? "yes" : p.accident_ok === false ? "no" : "",
             jobsAffected: p.jobs_affected == null ? "" : String(p.jobs_affected),
             whatWasTried: p.what_was_tried || "",
             shopName: p.shop_name || "",
@@ -1191,7 +1192,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "accident_ok",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],

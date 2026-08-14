@@ -51,7 +51,7 @@ const STATES = [
 // into breakdown; scheduled maintenance is no longer offered as a category at
 // all, though acknowledgement 1 still has the technician attest it is not one.
 const CATEGORIES: Array<[string, string]> = [
-  ["new_hire_awaiting_vehicle", "New hire, no work van assigned to me yet"],
+  ["new_hire_awaiting_vehicle", "New hire"],
   ["breakdown", "Breakdown: my work van will not run or drive, or has been decommissioned"],
   ["accident", "Accident or collision"],
 ];
@@ -163,6 +163,7 @@ export default function RentalRequestForm() {
   const [symptom, setSymptom] = useState("");
   const [occurredAt, setOccurredAt] = useState("");
   const [isTowed, setIsTowed] = useState("");
+  const [areYouOkay, setAreYouOkay] = useState("");
 
   const [shopName, setShopName] = useState("");
   const [shopAddress, setShopAddress] = useState("");
@@ -206,6 +207,7 @@ export default function RentalRequestForm() {
         setProblemCategory(a.problemCategory || "");
         setSymptom(a.symptom || "");
         setIsTowed(a.isTowed || "");
+        setAreYouOkay(a.areYouOkay || "");
         setShopName(a.shopName || "");
         setShopAddress(a.shopAddress || "");
         setShopCity(a.shopCity || "");
@@ -242,8 +244,9 @@ export default function RentalRequestForm() {
       }
     }
     if (!problemCategory) e.problemCategory = "Please choose what is going on.";
-    if (!symptom.trim()) e.symptom = "Describe the problem in your own words.";
+    if (!isNoVan && !symptom.trim()) e.symptom = "Describe the problem in your own words.";
     if (!isNoVan) {
+      if (problemCategory === "accident" && !areYouOkay) e.areYouOkay = "Please answer.";
       if (!isTowed) e.isTowed = "Please answer.";
       if (!occurredAt) e.occurredAt = "When did the problem start?";
     }
@@ -278,7 +281,7 @@ export default function RentalRequestForm() {
       identityCorrected: identityOk === "no",
       identityCorrection,
       correctedTruck, correctedPhone,
-      problemCategory, symptom, isTowed,
+      problemCategory, symptom, isTowed, areYouOkay,
       occurredAt: occurredAt || null,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       noVehicle: isNoVan,
@@ -478,6 +481,23 @@ export default function RentalRequestForm() {
 
                 <>
                     {!isNoVan && (<>
+                    {problemCategory === "accident" && (
+                    <div className="space-y-2">
+                      <Label>Are you okay?</Label>
+                      <Select value={areYouOkay} onValueChange={(v) => { setAreYouOkay(v); clearErr("areYouOkay"); }}>
+                        <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {areYouOkay === "no" && (
+                        <p className="rounded-md bg-red-50 p-2 text-sm font-medium text-red-800">
+                          If you are hurt, call 911 first, then your supervisor. This form can wait.
+                        </p>
+                      )}
+                      {fieldErrors.areYouOkay && <p className="text-sm text-red-600">{fieldErrors.areYouOkay}</p>}
+                    </div>
+                    )}
                     <div className="space-y-2">
                       <Label>Is your van being towed?</Label>
                       <Select value={isTowed} onValueChange={(v) => { setIsTowed(v); clearErr("isTowed"); }}>
@@ -489,14 +509,14 @@ export default function RentalRequestForm() {
                       {fieldErrors.isTowed && <p className="text-sm text-red-600">{fieldErrors.isTowed}</p>}
                     </div>
                     </>)}
+                    {!isNoVan && (
                     <div className="space-y-2">
-                      <Label htmlFor="symptom">
-                        {isNoVan ? "Tell us your situation" : "Describe the issue you are experiencing, in as much detail as possible"}
-                      </Label>
+                      <Label htmlFor="symptom">Describe the issue you are experiencing, in as much detail as possible</Label>
                       <Textarea id="symptom" rows={3} value={symptom}
                                 onChange={(e) => { setSymptom(e.target.value); clearErr("symptom"); }} />
                       {fieldErrors.symptom && <p className="text-sm text-red-600">{fieldErrors.symptom}</p>}
                     </div>
+                    )}
                     {!isNoVan && (
                     <div className="space-y-2">
                       <Label htmlFor="when">Problem start date</Label>
