@@ -27,7 +27,7 @@
  *
  * Both post the same fields and produce one record with one schema.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -126,6 +126,16 @@ export default function RentalRequestForm() {
     : `/api/public/rental-request/${encodeURIComponent(token)}`;
 
   const [step, setStep] = useState<"verify" | "form" | "done">("verify");
+
+  // The admin app is class-based dark mode and sets .dark on <html>, which a
+  // technician opening this PUBLIC page then inherits: dark cards under this
+  // form's explicit light text, unreadable. The form is light, always. This
+  // also covers the Radix dropdowns, which portal to <body> outside any
+  // wrapper class.
+  useEffect(() => {
+    document.documentElement.classList.remove("dark");
+    document.documentElement.style.colorScheme = "light";
+  }, []);
   const [ldap, setLdap] = useState("");
   const [truckNumber, setTruckNumber] = useState("");
   const [verifyError, setVerifyError] = useState("");
