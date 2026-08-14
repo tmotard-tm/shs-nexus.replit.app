@@ -264,7 +264,7 @@ export default function RentalRequestForm() {
       if (!occurredAt) e.occurredAt = "When did the problem start?";
     }
     if (isNoVan) {
-      if (!appointmentDate) e.appointmentAt = "When do you need the rental from?";
+      if (!appointmentDate) e.appointmentAt = "When is your first day on the road?";
       if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
     }
     if (!identity?.isByov && !isNoVan) {
@@ -539,7 +539,7 @@ export default function RentalRequestForm() {
                 <CardContent className="space-y-4">
                   <div className="grid grid-cols-2 items-end gap-3">
                     <div className="space-y-2">
-                      <Label htmlFor="need" className="flex min-h-10 items-end">When do you need it from?</Label>
+                      <Label htmlFor="need" className="flex min-h-10 items-end">When is your first day on the road?</Label>
                       <Input id="need" type="date" value={appointmentDate}
                              onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                     </div>
