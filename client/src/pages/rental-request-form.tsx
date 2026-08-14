@@ -47,16 +47,19 @@ const STATES = [
   "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
 ];
 
+// Three, in Tyler's order (2026-08-14), new hire first. Decommission folds
+// into breakdown; scheduled maintenance is no longer offered as a category at
+// all, though acknowledgement 1 still has the technician attest it is not one.
 const CATEGORIES: Array<[string, string]> = [
-  ["breakdown", "Breakdown, my work van will not run or drive"],
-  ["accident", "Accident or collision damage"],
-  ["awaiting_parts", "My work van is in the shop waiting on parts"],
   ["new_hire_awaiting_vehicle", "New hire, no work van assigned to me yet"],
-  ["decom_replacement", "My work van is being decommissioned or turned in"],
-  ["scheduled_maintenance", "Scheduled maintenance (oil, tires, PM, inspection)"],
+  ["breakdown", "Breakdown: my work van will not run or drive, or has been decommissioned"],
+  ["accident", "Accident or collision"],
 ];
 
-const ACKS: Array<[string, string]> = [
+// The first five are one consolidated agreement: a single checkbox attests to
+// all of them, listed as bullets beneath it (Tyler, 2026-08-14). The stored
+// record still carries each statement individually.
+const CORE_ACKS: Array<[string, string]> = [
   ["ackNotMaintenance",
    "This is not scheduled maintenance. I understand rentals are not provided for oil changes, tires, preventive maintenance or inspections."],
   ["ackCannotDriveSafely", "My vehicle cannot be driven safely to complete my route."],
@@ -64,8 +67,11 @@ const ACKS: Array<[string, string]> = [
   ["ackReturnOneDay",
    "I will return the rental within 1 working day of my vehicle being ready, and I understand failing to do so is a cost to the business."],
   ["ackAccurate", "The information above is accurate and may be verified against shop records."],
-  // Use-of-vehicle terms (Tyler, 2026-08-13). These are the ones with a
-  // consequence attached, so they are worded as plainly as the rest.
+];
+
+// The four with a consequence attached stay individual: each one is its own
+// tick, so nobody agrees to a disciplinary term inside a bundle.
+const INDIVIDUAL_ACKS: Array<[string, string]> = [
   ["ackWorkingHoursOnly",
    "I understand the rental is only for use while working. Off the clock use is not allowed, "
    + "and I will not drive it outside of my working hours."],
@@ -138,8 +144,7 @@ export default function RentalRequestForm() {
   const [isDrivable, setIsDrivable] = useState("");
   const [isSafeToDrive, setIsSafeToDrive] = useState("");
   const [occurredAt, setOccurredAt] = useState("");
-  const [jobsAffected, setJobsAffected] = useState("");
-  const [whatWasTried, setWhatWasTried] = useState("");
+  const [isTowed, setIsTowed] = useState("");
 
   const [shopName, setShopName] = useState("");
   const [shopAddress, setShopAddress] = useState("");
@@ -147,10 +152,8 @@ export default function RentalRequestForm() {
   const [shopState, setShopState] = useState("");
   const [shopPhone, setShopPhone] = useState("");
   const [nearestBranch, setNearestBranch] = useState("");
-  const [hasAppointment, setHasAppointment] = useState("");
   const [appointmentDate, setAppointmentDate] = useState("");
   const [appointmentTime, setAppointmentTime] = useState("08:00");
-  const [shopEstimatedDays, setShopEstimatedDays] = useState("");
 
   const [acks, setAcks] = useState<Record<string, boolean>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -159,9 +162,10 @@ export default function RentalRequestForm() {
   // not any more: Tyler decides every request, so every request is completed and
   // submitted. Kept as a category because the denial mix still needs to count it.
   const isNoVan = problemCategory === "new_hire_awaiting_vehicle";
-  const visibleAcks = ACKS.filter(([k]) =>
+  const coreAcks = CORE_ACKS.filter(([k]) =>
     (k !== "ackHasAppointment" || !(identity?.isByov || isNoVan))
     && (k !== "ackCannotDriveSafely" || !isNoVan));
+  const coreAll = coreAcks.every(([k]) => !!acks[k]);
   const clearErr = (k: string) =>
     setFieldErrors((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
 
@@ -186,18 +190,15 @@ export default function RentalRequestForm() {
         setSymptom(a.symptom || "");
         setIsDrivable(a.isDrivable || "");
         setIsSafeToDrive(a.isSafeToDrive || "");
-        setJobsAffected(a.jobsAffected || "");
-        setWhatWasTried(a.whatWasTried || "");
+        setIsTowed(a.isTowed || "");
         setShopName(a.shopName || "");
         setShopAddress(a.shopAddress || "");
         setShopCity(a.shopCity || "");
         setShopState(a.shopState || "");
         setShopPhone(a.shopPhone || "");
         setNearestBranch(a.nearestBranch || "");
-        setHasAppointment(a.hasAppointment || "");
         setAppointmentDate(a.appointmentDate || "");
         setAppointmentTime(a.appointmentTime || "08:00");
-        setShopEstimatedDays(a.shopEstimatedDays || "");
       }
       setResume(d.resume || null);
       setStep("form");
@@ -223,33 +224,28 @@ export default function RentalRequestForm() {
     if (!isNoVan) {
       if (!isDrivable) e.isDrivable = "Please answer.";
       if (!isSafeToDrive) e.isSafeToDrive = "Please answer.";
+      if (!isTowed) e.isTowed = "Please answer.";
+      if (!occurredAt) e.occurredAt = "When did the problem start?";
     }
     if (isNoVan) {
       if (!appointmentDate) e.appointmentAt = "When do you need the rental from?";
       if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
     }
     if (!identity?.isByov && !isNoVan) {
-      if (!hasAppointment) e.hasAppointment = "Please answer.";
-      if (hasAppointment === "yes") {
-        if (!shopName.trim()) e.shopName = "Which shop?";
-        if (!shopAddress.trim()) e.shopAddress = "We need the shop's street address.";
-        if (!shopCity.trim()) e.shopCity = "Shop city?";
-        if (!shopState) e.shopState = "State?";
-        // Fleet dials this number to confirm the estimate and chase the
-        // repair. Ten digits or it is not a phone number we can call.
-        if (shopPhone.replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "").length !== 10) {
-          e.shopPhone = "Enter the shop's 10-digit phone number.";
-        }
-        if (!appointmentDate) e.appointmentAt = "When is it going in?";
-        if (!appointmentTime) e.appointmentAt = "What time are you dropping it?";
-        if (!shopEstimatedDays.trim()) e.shopEstimatedDays = "How many days did the SHOP say?";
-        if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
+      if (!shopName.trim()) e.shopName = "Which shop?";
+      if (!shopAddress.trim()) e.shopAddress = "We need the shop's street address.";
+      if (!shopCity.trim()) e.shopCity = "Shop city?";
+      if (!shopState) e.shopState = "State?";
+      // Fleet dials this number to chase the repair. Ten digits or it is not
+      // a phone number we can call.
+      if (shopPhone.replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "").length !== 10) {
+        e.shopPhone = "Enter the shop's 10-digit phone number.";
       }
+      if (!appointmentDate) e.appointmentAt = "When is it going in?";
+      if (!appointmentTime) e.appointmentAt = "What time are you dropping it?";
+      if (!nearestBranch.trim()) e.nearestBranch = "We need the Enterprise location for your reservation. Google it if you are not sure.";
     }
-    // A BYOV technician is never shown the shop section, so demanding they
-    // attest to a confirmed shop appointment puts a statement they were never
-    // asked to make into an audit trail whose only value is being true.
-    for (const [k] of visibleAcks) if (!acks[k]) e.acks = "Please tick every box.";
+    if (!coreAll || INDIVIDUAL_ACKS.some(([k]) => !acks[k])) e.acks = "Please tick every box.";
     setFieldErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -262,12 +258,11 @@ export default function RentalRequestForm() {
       district: identity?.district, homeState: identity?.homeState,
       identityCorrected: identityOk === "no",
       identityCorrection,
-      problemCategory, symptom, isDrivable, isSafeToDrive,
-      occurredAt: occurredAt || null, jobsAffected, whatWasTried,
+      problemCategory, symptom, isDrivable, isSafeToDrive, isTowed,
+      occurredAt: occurredAt || null,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       noVehicle: isNoVan,
-      hasAppointment: isNoVan ? null : hasAppointment,
-      appointmentAt: appointmentAt || null, shopEstimatedDays,
+      appointmentAt: appointmentAt || null,
       ...acks,
     });
   };
@@ -435,14 +430,6 @@ export default function RentalRequestForm() {
                 {fieldErrors.problemCategory && <p className="text-sm text-red-600">{fieldErrors.problemCategory}</p>}
 
                 <>
-                    <div className="space-y-2">
-                      <Label htmlFor="symptom">
-                        {isNoVan ? "Tell us your situation" : "What is your work van doing, or not doing?"}
-                      </Label>
-                      <Textarea id="symptom" rows={3} value={symptom}
-                                onChange={(e) => { setSymptom(e.target.value); clearErr("symptom"); }} />
-                      {fieldErrors.symptom && <p className="text-sm text-red-600">{fieldErrors.symptom}</p>}
-                    </div>
                     {!isNoVan && (<>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
@@ -471,24 +458,33 @@ export default function RentalRequestForm() {
                     </p>
                     {(fieldErrors.isDrivable || fieldErrors.isSafeToDrive) &&
                       <p className="text-sm text-red-600">Please answer both.</p>}
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="space-y-2">
-                        <Label htmlFor="when">When did the problem start?</Label>
-                        <Input id="when" type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="jobs">Service calls at risk</Label>
-                        <Input id="jobs" inputMode="numeric" value={jobsAffected}
-                               onChange={(e) => setJobsAffected(e.target.value)} />
-                        <p className="text-xs text-slate-500">How many of your booked calls you cannot get to.</p>
-                      </div>
-                    </div>
                     <div className="space-y-2">
-                      <Label htmlFor="tried">What have you already tried to get the van going?</Label>
-                      <Textarea id="tried" rows={2} value={whatWasTried}
-                                onChange={(e) => setWhatWasTried(e.target.value)} />
+                      <Label>Is your van being towed?</Label>
+                      <Select value={isTowed} onValueChange={(v) => { setIsTowed(v); clearErr("isTowed"); }}>
+                        <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      {fieldErrors.isTowed && <p className="text-sm text-red-600">{fieldErrors.isTowed}</p>}
                     </div>
                     </>)}
+                    <div className="space-y-2">
+                      <Label htmlFor="symptom">
+                        {isNoVan ? "Tell us your situation" : "Describe the issue you are experiencing, in as much detail as possible"}
+                      </Label>
+                      <Textarea id="symptom" rows={3} value={symptom}
+                                onChange={(e) => { setSymptom(e.target.value); clearErr("symptom"); }} />
+                      {fieldErrors.symptom && <p className="text-sm text-red-600">{fieldErrors.symptom}</p>}
+                    </div>
+                    {!isNoVan && (
+                    <div className="space-y-2">
+                      <Label htmlFor="when">Problem start date</Label>
+                      <Input id="when" type="date" value={occurredAt}
+                             onChange={(e) => { setOccurredAt(e.target.value); clearErr("occurredAt"); }} />
+                      {fieldErrors.occurredAt && <p className="text-sm text-red-600">{fieldErrors.occurredAt}</p>}
+                    </div>
+                    )}
                 </>
               </CardContent>
             </Card>
@@ -523,7 +519,7 @@ export default function RentalRequestForm() {
                   </div>
                   {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                   <div className="space-y-2">
-                    <Label htmlFor="branch2">Closest Enterprise Rent-A-Car branch to you</Label>
+                    <Label htmlFor="branch2">Which Enterprise location do you need the reservation to be made? (no airports, if possible)</Label>
                     <Input id="branch2" value={nearestBranch}
                            placeholder="e.g. Enterprise, 2841 Airline Blvd, Portsmouth"
                            onChange={(e) => { setNearestBranch(e.target.value); clearErr("nearestBranch"); }} />
@@ -553,25 +549,8 @@ export default function RentalRequestForm() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="space-y-2">
-                    <Label>Do you have a confirmed repair appointment for your van?</Label>
-                    <Select value={hasAppointment} onValueChange={(v) => { setHasAppointment(v); clearErr("hasAppointment"); }}>
-                      <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="yes">Yes</SelectItem><SelectItem value="no">Not yet</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    {fieldErrors.hasAppointment && <p className="text-sm text-red-600">{fieldErrors.hasAppointment}</p>}
-                  </div>
-
-                  {hasAppointment === "no" && (
-                    <p className="rounded-md bg-amber-50 p-2 text-sm text-amber-900">
-                      Book the appointment first. We will hold this request until you have a date.
-                    </p>
-                  )}
-
-                  {hasAppointment === "yes" && (
-                    <div className="space-y-4 rounded-md border border-slate-200 p-3">
+                  {(
+                    <div className="space-y-4">
                       <div className="space-y-2">
                         <Label htmlFor="sname">Name of the repair shop</Label>
                         <Input id="sname" value={shopName}
@@ -633,16 +612,7 @@ export default function RentalRequestForm() {
                       </p>
                       {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                       <div className="space-y-2">
-                        <Label htmlFor="days">How many days did the SHOP say the repair will take?</Label>
-                        <Input id="days" inputMode="numeric" value={shopEstimatedDays}
-                               onChange={(e) => { setShopEstimatedDays(e.target.value); clearErr("shopEstimatedDays"); }} />
-                        <p className="text-xs text-slate-500">
-                          The shop&apos;s estimate, not yours. This sets your return date.
-                        </p>
-                        {fieldErrors.shopEstimatedDays && <p className="text-sm text-red-600">{fieldErrors.shopEstimatedDays}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="branch">Closest Enterprise Rent-A-Car branch to the shop</Label>
+                        <Label htmlFor="branch">Which Enterprise location do you need the reservation to be made? (no airports, if possible)</Label>
                         <Input id="branch" value={nearestBranch}
                                placeholder="e.g. Enterprise, 2841 Airline Blvd, Portsmouth"
                                onChange={(e) => { setNearestBranch(e.target.value); clearErr("nearestBranch"); }} />
@@ -670,16 +640,37 @@ export default function RentalRequestForm() {
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base">Before you submit</CardTitle>
-                  <CardDescription>Tick each one. These are recorded with your request.</CardDescription>
+                  <CardDescription>
+                    The first box covers the request statements. The four terms of use
+                    are agreed to one by one. All are recorded with your request.
+                  </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-3">
-                  {visibleAcks.map(([k, text]) => (
-                    <label key={k} className="flex items-start gap-3 text-sm text-slate-700">
-                      <Checkbox checked={!!acks[k]}
-                                onCheckedChange={(v) => { setAcks((p) => ({ ...p, [k]: v === true })); clearErr("acks"); }} />
-                      <span>{text}</span>
-                    </label>
-                  ))}
+                <CardContent className="space-y-4">
+                  <label className="flex items-start gap-3 text-sm font-medium text-slate-800">
+                    <Checkbox checked={coreAll}
+                              onCheckedChange={(v) => {
+                                const on = v === true;
+                                setAcks((p) => {
+                                  const nx = { ...p };
+                                  for (const [k] of coreAcks) nx[k] = on;
+                                  return nx;
+                                });
+                                clearErr("acks");
+                              }} />
+                    <span>I acknowledge and agree to all of the following:</span>
+                  </label>
+                  <ul className="ml-10 list-disc space-y-1.5 text-sm text-slate-600">
+                    {coreAcks.map(([k, text]) => <li key={k}>{text}</li>)}
+                  </ul>
+                  <div className="space-y-3 border-t border-slate-200 pt-4">
+                    {INDIVIDUAL_ACKS.map(([k, text]) => (
+                      <label key={k} className="flex items-start gap-3 text-sm text-slate-700">
+                        <Checkbox checked={!!acks[k]}
+                                  onCheckedChange={(v) => { setAcks((p) => ({ ...p, [k]: v === true })); clearErr("acks"); }} />
+                        <span>{text}</span>
+                      </label>
+                    ))}
+                  </div>
                   {fieldErrors.acks && <p className="text-sm text-red-600">{fieldErrors.acks}</p>}
                 </CardContent>
               </Card>

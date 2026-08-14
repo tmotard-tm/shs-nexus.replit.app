@@ -348,7 +348,8 @@ export async function initFormsSchema(): Promise<void> {
   // knowing which question to ask is the whole value of collecting both.
   await db.execute(sql`
     ALTER TABLE vrm_rental_request
-      ADD COLUMN IF NOT EXISTS tech_reported_branch text;
+      ADD COLUMN IF NOT EXISTS tech_reported_branch text,
+      ADD COLUMN IF NOT EXISTS is_towed boolean;
   `);
 
   // Sent back as incomplete.

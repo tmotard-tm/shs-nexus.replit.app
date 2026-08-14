@@ -22,10 +22,11 @@ import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { regionForState, REGION_OWNER } from "../rental-operations/region";
 
-// Bumped 2026-08-14: weekly extension acknowledgement added. Never reuse a
-// version across a wording change — the stored version is what proves which
-// text a technician actually agreed to.
-export const POLICY_VERSION = "2026-08-14.a";
+// .b, 2026-08-14: the first five acknowledgements are now attested by ONE
+// checkbox listing them as bullets; the four terms of use stay individual.
+// The statements did not change, but how assent is given did, and the stored
+// version is what proves which mechanics a technician went through.
+export const POLICY_VERSION = "2026-08-14.b";
 
 /**
  * The permanent front door. No token, no login.
@@ -80,14 +81,13 @@ const PROBLEM_CATEGORIES = new Set([
  * rather than a sentence.
  */
 export const MISSING_REASONS: Record<string, string> = {
-  shop_estimate: "how many days the shop said it needs",
   shop_appointment: "a confirmed shop appointment date and drop-off time",
   shop_details: "the shop name, address and phone number",
   symptom_detail: "a clear description of what the vehicle is doing",
   what_was_tried: "what has already been tried to get it running",
   repair_order: "the shop's repair order or work order number",
   contact: "a phone number we can reach you on",
-  nearest_branch: "the closest Enterprise Rent-A-Car branch to the shop (Google it if unsure)",
+  nearest_branch: "the Enterprise location for the reservation, no airports (Google it if unsure)",
   other: "more information",
 };
 
@@ -760,7 +760,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     INSERT INTO vrm_rental_request (
       token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
       identity_corrected, identity_correction, is_byov,
-      problem_category, symptom, is_drivable, is_safe_to_drive, occurred_at,
+      problem_category, symptom, is_drivable, is_safe_to_drive, is_towed, occurred_at,
       jobs_affected, what_was_tried,
       shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
       tech_reported_branch,
@@ -778,7 +778,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${s(b.homeState, 2) || homeState},
       ${s(b.mobilePhone, 30) || ctx.identity.mobilePhone},
       ${b.identityCorrected === true}, ${s(b.identityCorrection, 400)}, ${isByov},
-      ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)},
+      ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)},
       ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
       ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
       ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
@@ -895,7 +895,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       // not "start again". Covers both a Fleet send-back and a rule-3/4 defer.
       const { rows: prior } = await db.execute(sql`
         SELECT request_no, status, missing_fields, decision_note, problem_category, symptom,
-               is_drivable, is_safe_to_drive, jobs_affected, what_was_tried,
+               is_drivable, is_safe_to_drive, is_towed, jobs_affected, what_was_tried,
                shop_name, shop_address, shop_city, shop_state, shop_phone,
                tech_reported_branch,
                has_appointment, shop_estimated_days,
@@ -922,6 +922,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
             symptom: p.symptom || "",
             isDrivable: p.is_drivable === true ? "yes" : p.is_drivable === false ? "no" : "",
             isSafeToDrive: p.is_safe_to_drive === true ? "yes" : p.is_safe_to_drive === false ? "no" : "",
+            isTowed: p.is_towed === true ? "yes" : p.is_towed === false ? "no" : "",
             jobsAffected: p.jobs_affected == null ? "" : String(p.jobs_affected),
             whatWasTried: p.what_was_tried || "",
             shopName: p.shop_name || "",
@@ -1169,7 +1170,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count", "tech_reported_branch",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
@@ -1356,7 +1357,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                r.shop_estimated_days,
                COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,
                to_char(r.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
-               to_char(r.appointment_at + ((COALESCE(r.shop_estimated_days,1) + 1) * interval '1 day'),
+               -- 7 days when there is no shop estimate: the estimate question is
+               -- gone from the form (Tyler 2026-08-14) and 7 matches the weekly
+               -- extension cadence the technician signs. Old rows with an
+               -- estimate keep estimate + 1.
+               to_char(r.appointment_at + (COALESCE(r.shop_estimated_days + 1, 7) * interval '1 day'),
                        'YYYY-MM-DD"T"HH24:MI:SS')                    AS end_dt,
                r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference,
                -- Class is decided from the roster, never asked. Tyler's cutover
