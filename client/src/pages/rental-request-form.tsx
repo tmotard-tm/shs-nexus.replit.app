@@ -161,7 +161,6 @@ export default function RentalRequestForm() {
 
   const [problemCategory, setProblemCategory] = useState("");
   const [symptom, setSymptom] = useState("");
-  const [occurredAt, setOccurredAt] = useState("");
   const [isTowed, setIsTowed] = useState("");
   const [areYouOkay, setAreYouOkay] = useState("");
 
@@ -248,7 +247,6 @@ export default function RentalRequestForm() {
     if (!isNoVan) {
       if (problemCategory === "accident" && !areYouOkay) e.areYouOkay = "Please answer.";
       if (!isTowed) e.isTowed = "Please answer.";
-      if (!occurredAt) e.occurredAt = "When did the problem start?";
     }
     if (isNoVan) {
       if (!appointmentDate) e.appointmentAt = "When is your first day on the road?";
@@ -282,7 +280,6 @@ export default function RentalRequestForm() {
       identityCorrection,
       correctedTruck, correctedPhone,
       problemCategory, symptom, isTowed, areYouOkay,
-      occurredAt: occurredAt || null,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       noVehicle: isNoVan,
       appointmentAt: appointmentAt || null,
@@ -515,14 +512,6 @@ export default function RentalRequestForm() {
                       <Textarea id="symptom" rows={3} value={symptom}
                                 onChange={(e) => { setSymptom(e.target.value); clearErr("symptom"); }} />
                       {fieldErrors.symptom && <p className="text-sm text-red-600">{fieldErrors.symptom}</p>}
-                    </div>
-                    )}
-                    {!isNoVan && (
-                    <div className="space-y-2">
-                      <Label htmlFor="when">Problem start date</Label>
-                      <Input id="when" type="date" value={occurredAt}
-                             onChange={(e) => { setOccurredAt(e.target.value); clearErr("occurredAt"); }} />
-                      {fieldErrors.occurredAt && <p className="text-sm text-red-600">{fieldErrors.occurredAt}</p>}
                     </div>
                     )}
                 </>
