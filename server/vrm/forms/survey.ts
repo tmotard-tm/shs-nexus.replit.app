@@ -299,6 +299,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                  ELSE ''
                END AS cutover_status,
                c.etd_reference AS cutover_reference,
+               sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone,
                -- What AMS says about their van, next to what they claimed.
                a.truck_status_name AS ams_status,
                a.in_repair         AS ams_in_repair,
@@ -310,6 +311,25 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         FROM vrm_rental_tech_survey r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
         LEFT JOIN vrm_rental_cutover c ON c.ldap = upper(r.ldap)
+        LEFT JOIN LATERAL (
+          SELECT NULLIF(btrim(a2.district_no::text),) AS district,
+                 ma.tech_name  AS supervisor_name,
+                 upper(tp2.tech_manager_ldap_id) AS supervisor_ldap,
+                 COALESCE(mgp.mobile_phone, ma.cell_phone, ma.main_phone) AS supervisor_phone
+          FROM (SELECT 1) one
+          LEFT JOIN LATERAL (SELECT a.district_no FROM all_techs a
+                             WHERE upper(a.tech_racfid) = upper(r.ldap)
+                             ORDER BY (a.employment_status=A) DESC LIMIT 1) a2 ON TRUE
+          LEFT JOIN LATERAL (SELECT t.tech_manager_ldap_id FROM tpms_tech_profiles t
+                             WHERE upper(t.enterprise_id) = upper(r.ldap)
+                             ORDER BY t.synced_at DESC NULLS LAST LIMIT 1) tp2 ON TRUE
+          LEFT JOIN LATERAL (SELECT a.tech_name, a.cell_phone, a.main_phone FROM all_techs a
+                             WHERE upper(a.tech_racfid) = upper(COALESCE(tp2.tech_manager_ldap_id,))
+                             ORDER BY (a.employment_status=A) DESC LIMIT 1) ma ON TRUE
+          LEFT JOIN LATERAL (SELECT t.mobile_phone FROM tpms_tech_profiles t
+                             WHERE upper(t.enterprise_id) = upper(COALESCE(tp2.tech_manager_ldap_id,))
+                             LIMIT 1) mgp ON TRUE
+        ) sup ON TRUE
         LEFT JOIN vrm_ams_status a
           ON a.truck_norm = ltrim(regexp_replace(
                COALESCE(NULLIF(btrim(r.assigned_truck_number),''), r.truck_number, ''),
@@ -1327,8 +1347,28 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                c.route_block_status,
                c.route_block_project_name, c.route_block_date, c.route_block_live,
                c.route_block_filed_at, c.route_block_error,
-               'complete' AS stage
+               'complete' AS stage,
+               sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
+        LEFT JOIN LATERAL (
+          SELECT NULLIF(btrim(a2.district_no::text),'') AS district,
+                 ma.tech_name  AS supervisor_name,
+                 upper(tp2.tech_manager_ldap_id) AS supervisor_ldap,
+                 COALESCE(mgp.mobile_phone, ma.cell_phone, ma.main_phone) AS supervisor_phone
+          FROM (SELECT 1) one
+          LEFT JOIN LATERAL (SELECT a.district_no FROM all_techs a
+                             WHERE upper(a.tech_racfid) = upper(c.ldap)
+                             ORDER BY (a.employment_status='A') DESC LIMIT 1) a2 ON TRUE
+          LEFT JOIN LATERAL (SELECT t.tech_manager_ldap_id FROM tpms_tech_profiles t
+                             WHERE upper(t.enterprise_id) = upper(c.ldap)
+                             ORDER BY t.synced_at DESC NULLS LAST LIMIT 1) tp2 ON TRUE
+          LEFT JOIN LATERAL (SELECT a.tech_name, a.cell_phone, a.main_phone FROM all_techs a
+                             WHERE upper(a.tech_racfid) = upper(COALESCE(tp2.tech_manager_ldap_id,''))
+                             ORDER BY (a.employment_status='A') DESC LIMIT 1) ma ON TRUE
+          LEFT JOIN LATERAL (SELECT t.mobile_phone FROM tpms_tech_profiles t
+                             WHERE upper(t.enterprise_id) = upper(COALESCE(tp2.tech_manager_ldap_id,''))
+                             LIMIT 1) mgp ON TRUE
+        ) sup ON TRUE
         LEFT JOIN LATERAL (
           SELECT s.rental_branch_city, s.rental_branch_state, s.created_at AS surveyed_at,
                  s.shop_name, s.shop_city, s.shop_state, s.shop_phone,
