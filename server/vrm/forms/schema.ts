@@ -300,7 +300,8 @@ export async function initFormsSchema(): Promise<void> {
         JOIN pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum
        WHERE ad.adrelid = 'vrm_rental_request'::regclass
          AND a.attname = 'policy_complete';
-      IF d IS NOT NULL AND d NOT LIKE '%ack_discipline%' THEN
+      IF d IS NOT NULL AND (d NOT LIKE '%ack_discipline%'
+                            OR d LIKE '%ack_last_resort%') THEN
         ALTER TABLE vrm_rental_request DROP COLUMN policy_complete;
       END IF;
     END $$;
@@ -313,7 +314,7 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS policy_complete boolean
       GENERATED ALWAYS AS (
         ack_not_maintenance AND ack_cannot_drive_safely AND ack_has_appointment
-        AND ack_last_resort AND ack_return_one_day AND ack_accurate
+        AND ack_return_one_day AND ack_accurate
         AND ack_working_hours_only AND ack_return_before_time_off AND ack_discipline
       ) STORED;
   `);

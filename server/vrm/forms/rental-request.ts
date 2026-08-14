@@ -25,7 +25,7 @@ import { regionForState, REGION_OWNER } from "../rental-operations/region";
 // Bumped 2026-08-13: three use-of-vehicle acknowledgements added. Never reuse
 // a version across a wording change — the stored version is what proves
 // which text a technician actually agreed to.
-export const POLICY_VERSION = "2026-08-13.a";
+export const POLICY_VERSION = "2026-08-13.b";
 
 /**
  * The permanent front door. No token, no login.
@@ -682,7 +682,6 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     ack_not_maintenance: b.ackNotMaintenance === true,
     ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
     ack_has_appointment: b.ackHasAppointment === true,
-    ack_last_resort: b.ackLastResort === true,
     ack_return_one_day: b.ackReturnOneDay === true,
     ack_accurate: b.ackAccurate === true,
     ack_working_hours_only: b.ackWorkingHoursOnly === true,
@@ -737,7 +736,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       has_appointment, appointment_at, shop_estimated_days,
       policy_version, policy_acknowledged_at, policy_ip,
       ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
-      ack_last_resort, ack_return_one_day, ack_accurate,
+      ack_return_one_day, ack_accurate,
       ack_working_hours_only, ack_return_before_time_off, ack_discipline,
       approved_vehicle_class, reason_code, region_owner,
       status, auto_decision, auto_reason, auto_rule, source
@@ -755,7 +754,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
       ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
       ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
-      ${acks.ack_last_resort}, ${acks.ack_return_one_day}, ${acks.ack_accurate},
+      ${acks.ack_return_one_day}, ${acks.ack_accurate},
       ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_discipline},
       ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
       ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
