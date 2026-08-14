@@ -48,11 +48,11 @@ const STATES = [
 ];
 
 const CATEGORIES: Array<[string, string]> = [
-  ["breakdown", "Breakdown"],
-  ["accident", "Accident"],
-  ["awaiting_parts", "Awaiting parts"],
-  ["new_hire_awaiting_vehicle", "New hire, no vehicle yet"],
-  ["decom_replacement", "Decommission replacement"],
+  ["breakdown", "Breakdown, my work van will not run or drive"],
+  ["accident", "Accident or collision damage"],
+  ["awaiting_parts", "My work van is in the shop waiting on parts"],
+  ["new_hire_awaiting_vehicle", "New hire, no work van assigned to me yet"],
+  ["decom_replacement", "My work van is being decommissioned or turned in"],
   ["scheduled_maintenance", "Scheduled maintenance (oil, tires, PM, inspection)"],
 ];
 
@@ -396,7 +396,12 @@ export default function RentalRequestForm() {
 
             {/* Section B — the problem */}
             <Card>
-              <CardHeader><CardTitle className="text-base">What is going on?</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-base">What is wrong with your work van?</CardTitle>
+                <CardDescription>
+                  Pick the closest match, then tell us what happened in your own words.
+                </CardDescription>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <Select value={problemCategory} onValueChange={(v) => { setProblemCategory(v); clearErr("problemCategory"); }}>
                   <SelectTrigger><SelectValue placeholder="Select one" /></SelectTrigger>
@@ -408,14 +413,14 @@ export default function RentalRequestForm() {
 
                 <>
                     <div className="space-y-2">
-                      <Label htmlFor="symptom">In your own words, what is it doing?</Label>
+                      <Label htmlFor="symptom">What is your work van doing, or not doing?</Label>
                       <Textarea id="symptom" rows={3} value={symptom}
                                 onChange={(e) => { setSymptom(e.target.value); clearErr("symptom"); }} />
                       {fieldErrors.symptom && <p className="text-sm text-red-600">{fieldErrors.symptom}</p>}
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label>Can it be driven?</Label>
+                        <Label>Can your van still be driven?</Label>
                         <Select value={isDrivable} onValueChange={(v) => { setIsDrivable(v); clearErr("isDrivable"); }}>
                           <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                           <SelectContent>
@@ -433,21 +438,27 @@ export default function RentalRequestForm() {
                         </Select>
                       </div>
                     </div>
+                    <p className="text-xs text-slate-500">
+                      These are two different questions. A van can still move and
+                      not be safe to drive, and a van can be safe to sit in and
+                      not move at all.
+                    </p>
                     {(fieldErrors.isDrivable || fieldErrors.isSafeToDrive) &&
                       <p className="text-sm text-red-600">Please answer both.</p>}
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-2">
-                        <Label htmlFor="when">When did it start?</Label>
+                        <Label htmlFor="when">When did the problem start?</Label>
                         <Input id="when" type="date" value={occurredAt} onChange={(e) => setOccurredAt(e.target.value)} />
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="jobs">Calls at risk</Label>
+                        <Label htmlFor="jobs">Service calls at risk</Label>
                         <Input id="jobs" inputMode="numeric" value={jobsAffected}
                                onChange={(e) => setJobsAffected(e.target.value)} />
+                        <p className="text-xs text-slate-500">How many of your booked calls you cannot get to.</p>
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="tried">What have you already tried?</Label>
+                      <Label htmlFor="tried">What have you already tried to get the van going?</Label>
                       <Textarea id="tried" rows={2} value={whatWasTried}
                                 onChange={(e) => setWhatWasTried(e.target.value)} />
                     </div>
@@ -459,14 +470,15 @@ export default function RentalRequestForm() {
             {!identity?.isByov && (
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Where is it going?</CardTitle>
+                  <CardTitle className="text-base">Where is your work van being repaired?</CardTitle>
                   <CardDescription>
-                    A rental starts when the van goes in, so we need the appointment.
+                    Your rental starts on the day your van goes into the shop, not today,
+                    so we need the shop and the appointment before we can book anything.
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="space-y-2">
-                    <Label>Do you have a confirmed shop appointment?</Label>
+                    <Label>Do you have a confirmed repair appointment for your van?</Label>
                     <Select value={hasAppointment} onValueChange={(v) => { setHasAppointment(v); clearErr("hasAppointment"); }}>
                       <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
                       <SelectContent>
@@ -485,13 +497,13 @@ export default function RentalRequestForm() {
                   {hasAppointment === "yes" && (
                     <div className="space-y-4 rounded-md border border-slate-200 p-3">
                       <div className="space-y-2">
-                        <Label htmlFor="sname">Shop name</Label>
+                        <Label htmlFor="sname">Name of the repair shop</Label>
                         <Input id="sname" value={shopName}
                                onChange={(e) => { setShopName(e.target.value); clearErr("shopName"); }} />
                         {fieldErrors.shopName && <p className="text-sm text-red-600">{fieldErrors.shopName}</p>}
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="saddr">Shop address</Label>
+                        <Label htmlFor="saddr">Street address of the shop</Label>
                         <Input id="saddr" value={shopAddress} onChange={(e) => setShopAddress(e.target.value)} />
                       </div>
                       <div className="grid grid-cols-3 gap-3">
@@ -512,12 +524,15 @@ export default function RentalRequestForm() {
                         </div>
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="sphone">Shop phone</Label>
+                        <Label htmlFor="sphone">Phone number for the shop</Label>
                         <Input id="sphone" inputMode="tel" value={shopPhone} onChange={(e) => setShopPhone(e.target.value)} />
+                        <p className="text-xs text-slate-500">
+                          Fleet calls the shop to check on your van, so this one needs to be right.
+                        </p>
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2">
-                          <Label htmlFor="appt">Date it goes in</Label>
+                          <Label htmlFor="appt">Date your van goes into the shop</Label>
                           <Input id="appt" type="date" value={appointmentDate}
                                  onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                         </div>
@@ -538,7 +553,7 @@ export default function RentalRequestForm() {
                       </p>
                       {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                       <div className="space-y-2">
-                        <Label htmlFor="days">How many days did the SHOP say it needs?</Label>
+                        <Label htmlFor="days">How many days did the SHOP say the repair will take?</Label>
                         <Input id="days" inputMode="numeric" value={shopEstimatedDays}
                                onChange={(e) => { setShopEstimatedDays(e.target.value); clearErr("shopEstimatedDays"); }} />
                         <p className="text-xs text-slate-500">
