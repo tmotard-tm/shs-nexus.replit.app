@@ -349,6 +349,7 @@ export async function initFormsSchema(): Promise<void> {
   await db.execute(sql`
     ALTER TABLE vrm_rental_request
       ADD COLUMN IF NOT EXISTS tech_reported_branch text,
+      ADD COLUMN IF NOT EXISTS pickup_at timestamptz,
       ADD COLUMN IF NOT EXISTS is_towed boolean;
   `);
 

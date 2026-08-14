@@ -193,6 +193,8 @@ export default function RentalRequests() {
   const [fStatus, setFStatus] = useState<string[]>([]);
   const [detail, setDetail] = useState<Req | null>(null);
   const [note, setNote] = useState("");
+  const [pickupDate, setPickupDate] = useState("");
+  const [pickupTime, setPickupTime] = useState("08:00");
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
 
@@ -210,17 +212,17 @@ export default function RentalRequests() {
   const REASONS = reasonData?.reasons ?? {};
 
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[] }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [] }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.message || "decision failed");
       return j;
     },
     onSuccess: () => {
-      setActionErr(""); setNote(""); setMissing([]); setDetail(null);
+      setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00"); setDetail(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/stats"] });
     },
@@ -437,12 +439,24 @@ export default function RentalRequests() {
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
                         placeholder="Note (required if you overrule the engine)"
                         style={{ ...ctrl, width: "100%", resize: "vertical", marginBottom: 8 }} />
+              {/* Fleet controls when the rental actually starts. Blank = the
+                  technician's own date. */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Pickup date
+                </span>
+                <input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)}
+                       style={{ ...ctrl, flex: 1 }} />
+                <input type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}
+                       style={{ ...ctrl, width: 110 }} />
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
                   return (
                     <button key={d} type="button" disabled={decide.isPending}
-                            onClick={() => decide.mutate({ requestNo: detail.request_no, decision: d, note })}
+                            onClick={() => decide.mutate({ requestNo: detail.request_no, decision: d, note,
+                              pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null })}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
                       {d}
                     </button>

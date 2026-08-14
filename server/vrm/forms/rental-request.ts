@@ -1191,7 +1191,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
@@ -1367,7 +1367,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         UPDATE vrm_rental_request
         SET claimed_at = now(), claimed_by = ${runner}
         WHERE status = 'approved' AND etd_booked_at IS NULL
-          AND appointment_at IS NOT NULL
+          AND COALESCE(pickup_at, appointment_at) IS NOT NULL
           AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
       `);
       const { rows } = await db.execute(sql`
@@ -1377,12 +1377,13 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                r.appointment_at,
                r.shop_estimated_days,
                COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,
-               to_char(r.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
+               to_char(COALESCE(r.pickup_at, r.appointment_at), 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
                -- 7 days when there is no shop estimate: the estimate question is
                -- gone from the form (Tyler 2026-08-14) and 7 matches the weekly
                -- extension cadence the technician signs. Old rows with an
                -- estimate keep estimate + 1.
-               to_char(r.appointment_at + (COALESCE(r.shop_estimated_days + 1, 7) * interval '1 day'),
+               to_char(COALESCE(r.pickup_at, r.appointment_at)
+                         + (COALESCE(r.shop_estimated_days + 1, 7) * interval '1 day'),
                        'YYYY-MM-DD"T"HH24:MI:SS')                    AS end_dt,
                r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference,
                -- Class is decided from the roster, never asked. Tyler's cutover
@@ -1394,7 +1395,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         LEFT JOIN all_techs a ON upper(a.tech_racfid) = upper(r.ldap)
         WHERE r.status = 'approved'
           AND r.etd_booked_at IS NULL
-          AND r.appointment_at IS NOT NULL
+          AND COALESCE(r.pickup_at, r.appointment_at) IS NOT NULL
           AND r.claimed_by = ${runner}
         ORDER BY r.appointment_at
       `);
@@ -1445,7 +1446,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
             etd_booked_at = now(), etd_error = NULL,
             status = 'booked', claimed_at = NULL, updated_at = now()
         WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
-        RETURNING request_no, status, appointment_at, shop_name
+        RETURNING request_no, status, COALESCE(pickup_at, appointment_at) AS appointment_at, shop_name
       `);
       if (!(rows as any[]).length) {
         const { rows: cur } = await db.execute(sql`
@@ -1491,6 +1492,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         return res.status(400).json({ message: "decision must be APPROVE, DENY, DEFER or RETURN" });
       }
       const note = String(req.body?.note || "").trim();
+      // Fleet's pickup override. Only meaningful on APPROVE: the reservation
+      // starts on this date instead of the technician's own.
+      const pickupAt = decision === "APPROVE"
+        ? String(req.body?.pickupAt || "").trim().slice(0, 40) || null : null;
 
       // RETURN is "you have not given us enough to book this", which is a
       // different fact from "no". It must name what is missing, because a
@@ -1528,6 +1533,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const { rows: upd } = await db.execute(sql`
         UPDATE vrm_rental_request
         SET status = ${nextStatus},
+            pickup_at = COALESCE(${pickupAt}::timestamptz, pickup_at),
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
               // string_to_array, not a bound JS array. Interpolating an array into
