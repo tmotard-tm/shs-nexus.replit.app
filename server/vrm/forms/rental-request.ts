@@ -610,8 +610,24 @@ async function notifyTech(requestNo: number, body: string, why: string): Promise
 // ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
-/** How many requests one technician may file in a day before we make them talk to a person. */
-const SELF_SERVE_DAILY_CAP = 5;
+/**
+ * One request per technician per day (Tyler, 2026-08-13).
+ *
+ * Counted on the EASTERN calendar day, not a rolling 24 hours. "Per day" means
+ * a day to the person filing it; a rolling window would tell a technician who
+ * filed at 4pm yesterday that they had already filed today, which is not a
+ * sentence anyone can act on. Eastern because that is the day Fleet works.
+ *
+ * ⚠ A request Fleet SENT BACK does not count. Those are the ones the technician
+ * was explicitly told to come back and finish, and counting them would mean the
+ * send-back path could never be completed on the day it was issued: Fleet asks
+ * for the shop's estimate, the technician gets it an hour later, and the cap
+ * refuses them. Two requirements that cancel each other out. So the count
+ * excludes `returned` rows, and finishing a returned request is a continuation
+ * rather than a new request.
+ */
+const SELF_SERVE_DAILY_CAP = 1;
+
 
 interface SubmitContext {
   /** The token row, or null on the open front door. */
@@ -867,13 +883,16 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 
       const { rows: recent } = await db.execute(sql`
         SELECT count(*)::int AS n FROM vrm_rental_request
-        WHERE ldap = ${ldap} AND created_at > now() - interval '24 hours'
+        WHERE ldap = ${ldap}
+          AND status <> 'returned'
+          AND (created_at AT TIME ZONE 'America/New_York')::date
+            = (now()      AT TIME ZONE 'America/New_York')::date
       `);
       if (Number((recent as any[])[0]?.n ?? 0) >= SELF_SERVE_DAILY_CAP) {
         return res.status(429).json({
           verified: false,
-          message: "You have filed several requests today already. Please contact Fleet directly "
-                 + "so a person can help you.",
+          message: "You have already filed a rental request today and Fleet is working it. "
+                 + "Contact Fleet directly if something has changed.",
         });
       }
 
@@ -961,6 +980,21 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           success: false,
           requestNo: open.request_no,
           message: `You already have rental request #${open.request_no} with us (${open.status}).`,
+        });
+      }
+
+      const { rows: today } = await db.execute(sql`
+        SELECT count(*)::int AS n FROM vrm_rental_request
+        WHERE ldap = ${ldap}
+          AND status <> 'returned'
+          AND (created_at AT TIME ZONE 'America/New_York')::date
+            = (now()      AT TIME ZONE 'America/New_York')::date
+      `);
+      if (Number((today as any[])[0]?.n ?? 0) >= SELF_SERVE_DAILY_CAP) {
+        return res.status(429).json({
+          success: false,
+          message: "You have already filed a rental request today and Fleet is working it. "
+                 + "Contact Fleet directly if something has changed.",
         });
       }
 
