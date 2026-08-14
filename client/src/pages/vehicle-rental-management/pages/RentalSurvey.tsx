@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X, Send, Loader2,
+  ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X, Send, Loader2, EyeOff,
 } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
 
@@ -389,6 +389,7 @@ export default function RentalSurvey() {
   const [fCompany, setFCompany] = useState<string[]>([]);
   const [fState, setFState] = useState<string[]>([]);
   const [fFlag, setFFlag] = useState<string[]>([]);
+  const [hideCompleted, setHideCompleted] = useState(true);
   const [detail, setDetail] = useState<SurveyRow | null>(null);
 
   const { data, isLoading, error } = useQuery<{ responses: SurveyRow[] }>({
@@ -425,7 +426,9 @@ export default function RentalSurvey() {
     return out;
   }, [rows, view]);
 
-  const filtered = useMemo(() => {
+  // All filters EXCEPT the hide-completed toggle, so the "N completed hidden"
+  // note can count exactly the rows the toggle removed from the current view.
+  const filteredAll = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return base.filter((r) => {
       if (fStatus.length && !fStatus.includes(VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status ?? "")) return false;
@@ -445,6 +448,15 @@ export default function RentalSurvey() {
         .some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
   }, [base, q, fStatus, fCompany, fState, fFlag]);
+
+  const hiddenCompleted = useMemo(
+    () => (hideCompleted ? filteredAll.filter((r) => r.cutover_status === "complete").length : 0),
+    [filteredAll, hideCompleted],
+  );
+  const filtered = useMemo(
+    () => (hideCompleted ? filteredAll.filter((r) => r.cutover_status !== "complete") : filteredAll),
+    [filteredAll, hideCompleted],
+  );
 
   const accessors: Record<string, (r: Row) => unknown> = {
     truck: (r) => r._truck,
@@ -564,8 +576,22 @@ export default function RentalSurvey() {
             ["Out of rental", rows.filter((r) => r.has_rental === false).length],
           ].filter((o) => (o[1] as number) > 0) as Array<[string, number]>} />
 
+        <button type="button" onClick={() => setHideCompleted((v) => !v)}
+          title="Hide rows whose cutover is complete (the green rows)"
+          style={{ ...ctrl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+                   background: hideCompleted ? colors.greenDeepLight : colors.surface,
+                   color: hideCompleted ? colors.greenDeep : colors.ink,
+                   fontWeight: hideCompleted ? 700 : 400 }}>
+          <EyeOff size={13} /> Hide completed
+        </button>
+
         <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
           {sorted.length} shown of {base.length}
+          {hiddenCompleted > 0 && (
+            <span style={{ color: colors.greenDeep }}>
+              {"  ·  "}{hiddenCompleted} completed hidden
+            </span>
+          )}
         </span>
 
         <button type="button" onClick={exportCsv}
@@ -576,7 +602,10 @@ export default function RentalSurvey() {
 
       {sorted.length === 0 ? (
         <div style={{ fontFamily: fonts.dmSans, color: colors.inkMuted, padding: "40px 0" }}>
-          {rows.length === 0 ? "No survey responses yet." : "No rows match the current filters."}
+          {rows.length === 0 ? "No survey responses yet."
+            : hiddenCompleted > 0 && filtered.length === 0
+            ? `All ${hiddenCompleted} matching rows are completed and hidden — turn off "Hide completed" to see them.`
+            : "No rows match the current filters."}
         </div>
       ) : (
         <div style={{ overflow: "auto", maxHeight: "calc(100vh - 300px)", border: `1px solid ${colors.rule}`, borderRadius: 12, background: colors.surface }}>
