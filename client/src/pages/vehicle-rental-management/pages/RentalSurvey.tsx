@@ -391,7 +391,7 @@ export default function RentalSurvey() {
   const [fFlag, setFFlag] = useState<string[]>([]);
   const [fCutover, setFCutover] = useState<string[]>([]);
 
-  const cutoverLabel = (r: Row) =>
+  const cutoverLabel = (r: SurveyRow) =>
     r.cutover_status === "complete" ? "Complete"
       : r.cutover_status === "reserved" ? "Reserved"
       : r.cutover_status === "failed" ? "Failed"
