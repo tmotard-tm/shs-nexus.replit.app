@@ -74,6 +74,7 @@ const VAN_STATUS_LABEL: Record<string, string> = {
   in_shop: "In a repair shop",
   decommissioned: "Turned in / decommissioned",
   totaled: "Totaled",
+  new_hire_no_van: "New hire — no van yet",
   with_me: "Still has it",
   unknown_escalate: "UNKNOWN — escalated",
 };

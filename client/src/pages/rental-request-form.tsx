@@ -72,6 +72,9 @@ const ACKS: Array<[string, string]> = [
   ["ackReturnBeforeTimeOff",
    "I understand I must turn the rental in before any time off of more than 3 days, "
    + "including vacation or a leave of absence."],
+  ["ackExtensionWeekly",
+   "I understand I must request a rental extension from Fleet every 7 days for as long as "
+   + "I keep the rental."],
   ["ackDiscipline",
    "I understand any violation of these terms can result in disciplinary action, up to and "
    + "including termination."],

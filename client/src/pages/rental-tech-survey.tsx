@@ -331,6 +331,7 @@ export default function RentalTechSurvey() {
                         <SelectItem value="in_shop">Still in a repair shop</SelectItem>
                         <SelectItem value="decommissioned">Turned in / decommissioned</SelectItem>
                         <SelectItem value="totaled">Totaled in an accident</SelectItem>
+                        <SelectItem value="new_hire_no_van">I&apos;m a new hire &mdash; no van assigned to me yet</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -434,6 +435,7 @@ export default function RentalTechSurvey() {
                         <SelectItem value="in_shop">In a repair shop</SelectItem>
                         <SelectItem value="decommissioned">Turned in / decommissioned</SelectItem>
                         <SelectItem value="totaled">Totaled in an accident</SelectItem>
+                        <SelectItem value="new_hire_no_van">I&apos;m a new hire &mdash; no van assigned to me yet</SelectItem>
                         <SelectItem value="with_me">I still have it</SelectItem>
                       </SelectContent>
                     </Select>
