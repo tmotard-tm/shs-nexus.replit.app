@@ -730,15 +730,61 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // fs_trucks. If FS init failed on an existing DB the tables are still there;
     // on a truly fresh DB the reconcile's readiness guard defers and the lazy
     // queue-GET retry (failure does not consume the throttle) heals it.
+    // RETRY, do not just log. initVrmSchema() is a long SEQUENTIAL chain of
+    // idempotent DDL and initFormsSchema() runs LAST in it, so a single
+    // transient Neon connection timeout part-way through silently skips every
+    // migration after the failure point — the deploy still reports healthy and
+    // the gap only surfaces when a technician hits the route that needs the
+    // column. That is exactly what took the rental-request front door down on
+    // 2026-08-14: a boot-time `connect ETIMEDOUT` killed the chain before the
+    // ALTER that adds pickup_at / accident_ok, and every LDAP verify 500'd.
+    // Every step is CREATE/ALTER ... IF NOT EXISTS and the one-time seeds are
+    // flag-guarded and swallow their own errors, so re-running is safe.
+    const initVrmSchemaWithRetry = async () => {
+      const delaysMs = [15_000, 60_000, 180_000];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await initVrmSchema();
+          if (attempt > 0) console.log(`[VRM] schema init succeeded on retry ${attempt}`);
+          return;
+        } catch (e: any) {
+          if (attempt >= delaysMs.length) throw e;
+          console.error(
+            `[VRM] schema init attempt ${attempt + 1} failed (${e?.message || e}); `
+            + `retrying in ${delaysMs[attempt] / 1000}s — migrations after the failure point have NOT been applied`,
+          );
+          // unref'd: a pending backoff must never be the reason an otherwise
+          // idle instance stays alive.
+          await new Promise((r) => { const t = setTimeout(r, delaysMs[attempt]); t.unref?.(); });
+        }
+      }
+    };
+    // Separate failure reporting on purpose. Folding both into one catch made a
+    // failed BACKFILL print "migrations are missing", sending whoever reads it
+    // to diagnose a schema gap that does not exist.
+    let vrmSchemaInitFailed = false;
     fleetScopeInitSettled
-      .then(() => initVrmSchema())
+      .then(() => initVrmSchemaWithRetry())
+      .catch((e: any) => {
+        vrmSchemaInitFailed = true;
+        console.error(
+          "[VRM] background schema init FAILED after all retries — migrations after the failure point are MISSING "
+          + "and routes depending on them will 500; check /api/vrm/forms/schema-health:",
+          e?.message || e,
+        );
+        throw e; // do not run the backfill against a half-migrated schema
+      })
       .then(() =>
         // Executive Summary one-time trend backfill — flag-guarded, idempotent,
         // must run AFTER the schema init that creates vrm_exec_daily_metrics.
         import("./vrm/executive-summary/backfill").then((m) => m.runExecBackfillOnce()),
       )
       .catch((e: any) => {
-        console.error("[VRM] background schema init failed (non-fatal; tables expected to already exist):", e?.message || e);
+        // The schema-init failure was already reported above in full; anything
+        // else reaching here is the backfill's own problem.
+        if (!vrmSchemaInitFailed) {
+          console.error("[VRM] executive-summary backfill failed (non-fatal; schema init itself succeeded):", e?.message || e);
+        }
       });
     // Twilio status-callback webhook MUST be registered BEFORE the
     // session-gated /api/vrm router below, because Twilio cannot present

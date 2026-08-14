@@ -269,11 +269,36 @@ export async function initFormsSchema(): Promise<void> {
       AND a.created_at < b.created_at
       AND a.etd_booked_at IS NULL;
   `);
+  // REBUILD ONLY WHEN THE DEFINITION ACTUALLY CHANGED. An unconditional
+  // DROP + CREATE ran on every boot of every instance, and between those two
+  // statements the front door is live with NO duplicate guard — exactly the
+  // double-submit window this index exists to close. It is also the difference
+  // between a boot-DDL chain that is safe to re-run after a transient failure
+  // and one that is not. Missing → create; present and correct → leave alone;
+  // present with a stale predicate → rebuild.
   await db.execute(sql`
-    DROP INDEX IF EXISTS vrm_rental_request_open_live_uniq;
-    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_open_live_uniq
-      ON vrm_rental_request (ldap)
-      WHERE token_id IS NULL AND status IN ('pending','approved','booked');
+    DO $$
+    DECLARE d text;
+    BEGIN
+      SELECT indexdef INTO d FROM pg_indexes
+       WHERE schemaname = 'public' AND indexname = 'vrm_rental_request_open_live_uniq';
+
+      IF d IS NOT NULL
+         AND d LIKE '%UNIQUE%'
+         AND d LIKE '%(ldap)%'
+         AND d LIKE '%token_id IS NULL%'
+         AND d LIKE '%pending%' AND d LIKE '%approved%' AND d LIKE '%booked%' THEN
+        RETURN;
+      END IF;
+
+      IF d IS NOT NULL THEN
+        DROP INDEX vrm_rental_request_open_live_uniq;
+      END IF;
+
+      CREATE UNIQUE INDEX vrm_rental_request_open_live_uniq
+        ON vrm_rental_request (ldap)
+        WHERE token_id IS NULL AND status IN ('pending','approved','booked');
+    END $$;
   `);
 
   // Where a request came from. A survey-originated request has no token and no
