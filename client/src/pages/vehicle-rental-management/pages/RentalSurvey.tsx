@@ -85,6 +85,22 @@ const NO_RENTAL_LABEL: Record<string, string> = {
   back_in_my_van: "Back in own van",
 };
 
+/**
+ * Self-resolved: the technician says the rental is gone AND their own van is
+ * back with them and running. There is nothing left for Fleet to chase, so
+ * these are hideable the same way completed cutovers are (Tyler 2026-08-15).
+ *
+ * Deliberately narrow. "never_had_one" is excluded because that answer means
+ * the roster was wrong, not that a rental was closed out. Any van_status other
+ * than with_me is excluded because "I returned the rental but my van is still
+ * in a shop" leaves the technician with nothing to drive — the exact row that
+ * must stay visible.
+ */
+const isBackInOwnVan = (r: { has_rental: boolean | null; no_rental_reason: string | null; van_status: string | null }) =>
+  r.has_rental === false &&
+  (r.no_rental_reason === "returned_it" || r.no_rental_reason === "back_in_my_van") &&
+  r.van_status === "with_me";
+
 function makeSortComparator<T>(accessor: (r: T) => unknown, dir: SortDir) {
   if (dir == null) return null;
   const sign = dir === "asc" ? 1 : -1;
@@ -403,6 +419,7 @@ export default function RentalSurvey() {
       : "Not started";
 
   const [hideCompleted, setHideCompleted] = useState(true);
+  const [hideBackInVan, setHideBackInVan] = useState(true);
   const [detail, setDetail] = useState<SurveyRow | null>(null);
 
   const { data, isLoading, error } = useQuery<{ responses: SurveyRow[] }>({
@@ -439,8 +456,8 @@ export default function RentalSurvey() {
     return out;
   }, [rows, view]);
 
-  // All filters EXCEPT the hide-completed toggle, so the "N completed hidden"
-  // note can count exactly the rows the toggle removed from the current view.
+  // All filters EXCEPT the hide toggles, so each "N hidden" note can count
+  // exactly the rows its own toggle removed from the current view.
   const filteredAll = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return base.filter((r) => {
@@ -467,9 +484,21 @@ export default function RentalSurvey() {
     () => (hideCompleted ? filteredAll.filter((r) => r.cutover_status === "complete").length : 0),
     [filteredAll, hideCompleted],
   );
+  // Counted after the completed toggle so a row that is both never lands in
+  // both tallies and the two counts always add up to what was removed.
+  const hiddenBackInVan = useMemo(
+    () => (hideBackInVan
+      ? filteredAll.filter((r) => isBackInOwnVan(r) && !(hideCompleted && r.cutover_status === "complete")).length
+      : 0),
+    [filteredAll, hideBackInVan, hideCompleted],
+  );
   const filtered = useMemo(
-    () => (hideCompleted ? filteredAll.filter((r) => r.cutover_status !== "complete") : filteredAll),
-    [filteredAll, hideCompleted],
+    () => filteredAll.filter((r) => {
+      if (hideCompleted && r.cutover_status === "complete") return false;
+      if (hideBackInVan && isBackInOwnVan(r)) return false;
+      return true;
+    }),
+    [filteredAll, hideCompleted, hideBackInVan],
   );
 
   const accessors: Record<string, (r: Row) => unknown> = {
@@ -605,11 +634,25 @@ export default function RentalSurvey() {
           <EyeOff size={13} /> Hide completed
         </button>
 
+        <button type="button" onClick={() => setHideBackInVan((v) => !v)}
+          title="Hide rows where the tech says they are out of the rental and back in their own working van"
+          style={{ ...ctrl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+                   background: hideBackInVan ? colors.greenLight : colors.surface,
+                   color: hideBackInVan ? colors.green : colors.ink,
+                   fontWeight: hideBackInVan ? 700 : 400 }}>
+          <EyeOff size={13} /> Hide back in own van
+        </button>
+
         <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
           {sorted.length} shown of {base.length}
           {hiddenCompleted > 0 && (
             <span style={{ color: colors.greenDeep }}>
               {"  ·  "}{hiddenCompleted} completed hidden
+            </span>
+          )}
+          {hiddenBackInVan > 0 && (
+            <span style={{ color: colors.green }}>
+              {"  ·  "}{hiddenBackInVan} back in own van hidden
             </span>
           )}
         </span>
@@ -623,8 +666,8 @@ export default function RentalSurvey() {
       {sorted.length === 0 ? (
         <div style={{ fontFamily: fonts.dmSans, color: colors.inkMuted, padding: "40px 0" }}>
           {rows.length === 0 ? "No survey responses yet."
-            : hiddenCompleted > 0 && filtered.length === 0
-            ? `All ${hiddenCompleted} matching rows are completed and hidden — turn off "Hide completed" to see them.`
+            : hiddenCompleted + hiddenBackInVan > 0 && filtered.length === 0
+            ? `All ${hiddenCompleted + hiddenBackInVan} matching rows are hidden by the hide toggles — turn them off to see them.`
             : "No rows match the current filters."}
         </div>
       ) : (
