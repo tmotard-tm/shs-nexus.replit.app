@@ -577,5 +577,33 @@ export async function initFormsSchema(): Promise<void> {
     );
   `);
 
+  /**
+   * The shared ETD bearer token. Exactly one row.
+   *
+   * ETD has no service account and no client-credentials flow. A token is minted
+   * by driving a real Chromium through Azure AD B2C with typed keystrokes (~21 s),
+   * and MSAL keeps it in sessionStorage, so it cannot be recovered from a dead
+   * browser process. It is valid for 59 minutes.
+   *
+   * This deployment is autoscale, so the container scales to zero between
+   * requests and any process-local or filesystem cache dies with it. Without this
+   * table every wake-up pays 21 s of B2C for a token that was still perfectly
+   * valid. Minting is single-flighted by the runner with pg_advisory_lock, so two
+   * runners waking together never both drive a login.
+   *
+   * Written and read only by the Python booking runner (ETD/etd/token_store.py).
+   * The secret is a tenant-wide bearer credential: never select it into an API
+   * response, a log line, or a rendered page.
+   */
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_etd_token (
+      id          smallint    PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+      secret      text        NOT NULL,
+      expires_at  timestamptz NOT NULL,
+      minted_at   timestamptz NOT NULL DEFAULT now(),
+      minted_by   text
+    );
+  `);
+
   console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover)");
 }
