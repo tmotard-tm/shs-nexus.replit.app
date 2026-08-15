@@ -191,6 +191,41 @@ export const RENTAL_RETURN_ACTIVITY_TYPE = "46";
 /** Two hours, matching what Eddie described on the 2026-07-27 call. */
 export const RENTAL_RETURN_DURATION_MIN = 120;
 
+/**
+ * Start of the block, HH:MM 24-hour.
+ *
+ * Tyler, 2026-08-14: rental pickups / vehicle changes go in for 8:00 AM every
+ * time. This is also the only spec-legal way to send the row — the API
+ * reference lists StartTime as a REQUIRED field in HH:MM (its own examples
+ * send "08:00").
+ *
+ * History worth keeping: the original build sent StartTime "" with
+ * StartTimeRequest "Start of Day", a value the reference does not list, on the
+ * theory that the receiving system would resolve the technician's day start
+ * itself. It did for some technicians and rejected others with
+ * "Logistics override rows with 'Start of Day' require a resolved StartTime"
+ * (3 of 4 live filings failed on 2026-08-13/14). Every TEST-prefixed filing
+ * was accepted, so the dark launch never exercised that resolution path —
+ * do not read TEST 201s as proof a payload works live.
+ */
+export const ROUTE_BLOCK_START_TIME = "08:00";
+
+/** The only three values the API reference documents for StartTimeRequest. */
+export type StartTimeRequest = "Anytime" | "Exact" | "AsSoonAsPossible";
+
+/**
+ * Default scheduling intent: "Exact" — 8:00 AM is the ask for a rental pickup
+ * / vehicle change, not a preference (Tyler, 2026-08-14).
+ *
+ * Callers whose own instructions promise the technician a movable slot must
+ * pass "Anytime" instead (the reference's own example pairs "Anytime" with an
+ * 08:00 StartTime). The Enterprise contract-change block does exactly that.
+ */
+export const ROUTE_BLOCK_START_TIME_REQUEST: StartTimeRequest = "Exact";
+
+/** HH:MM, 00:00–23:59. Anything else is not put on the wire. */
+const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 function defaultSubmittedBy(): string {
   return (process.env.EVENT_REQUEST_SUBMITTED_BY ?? "TMORGAN (tyler.morgan@transformco.com)").trim();
 }
@@ -215,6 +250,13 @@ export interface StandardActivityArgs {
    */
   locationZip?: string | null;
   durationMinutes?: number;
+  /**
+   * HH:MM 24-hour. Defaults to ROUTE_BLOCK_START_TIME (8:00 AM); anything that
+   * is not a real HH:MM falls back to it rather than reaching the API.
+   */
+  startTime?: string;
+  /** Scheduling intent. Defaults to ROUTE_BLOCK_START_TIME_REQUEST ("Exact"). */
+  startTimeRequest?: StartTimeRequest;
   /**
    * What this block IS. Becomes the project name prefix and therefore the
    * 409 duplicate key. Defaults to "Rental Return" so existing callers are
@@ -294,7 +336,12 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
     submittedBy: args.submittedBy ?? defaultSubmittedBy(),
     submitterEmail: args.submitterEmail ?? defaultSubmitterEmail(),
     projectName,
-    rowCount: "1", // string, per the guide
+    // The reference's field table types rowCount as a number (its example
+    // sends one). We send the string "1" and have never had a row rejected
+    // for it across every TEST and live filing, and the API echoes rowCount
+    // back as a string in its own 201 body — so this stays as-is rather than
+    // being "corrected" alongside the StartTime fix. One variable at a time.
+    rowCount: "1",
     projectNotes: args.projectNotes
       ?? "Fleet rental return. Repair complete, van awaiting pickup.",
     exportData: [
@@ -302,10 +349,10 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
         TechnicianId: args.techLdap,
         ActivityType: RENTAL_RETURN_ACTIVITY_TYPE,
         Date: args.date,
-        // Must be empty when StartTimeRequest is "Start of Day". The guide's
-        // prose says so even though its own example pairs them. Verify on the
-        // first live submission.
-        StartTime: "",
+        // REQUIRED, HH:MM. Never send "" — see ROUTE_BLOCK_START_TIME.
+        StartTime: HHMM.test((args.startTime ?? "").trim())
+          ? (args.startTime as string).trim()
+          : ROUTE_BLOCK_START_TIME,
         Duration: duration,
         LocationType: args.locationZip ? "Supplied" : "None",
         LocationValue: args.locationZip ?? "",
@@ -322,7 +369,7 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
         RequestedCompletionDate: args.date,
         endDateFixed: true,
         RepeatOnDays: "",
-        StartTimeRequest: "Start of Day",
+        StartTimeRequest: args.startTimeRequest ?? ROUTE_BLOCK_START_TIME_REQUEST,
         Unit: args.unit,
       },
     ],

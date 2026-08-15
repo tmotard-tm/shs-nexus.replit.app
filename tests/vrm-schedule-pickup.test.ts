@@ -25,7 +25,11 @@ import {
   isRouteBlockLive,
   SCHEDULE_PICKUP_ACTION_TYPE,
 } from "../server/vrm/rental-operations/schedule-pickup";
-import { buildStandardActivityPayload } from "../server/vrm/dca-task-client";
+import {
+  buildStandardActivityPayload,
+  ROUTE_BLOCK_START_TIME,
+  ROUTE_BLOCK_START_TIME_REQUEST,
+} from "../server/vrm/dca-task-client";
 
 function addDaysISO(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number);
@@ -110,6 +114,59 @@ describe("buildStandardActivityPayload dark-launch contract (offline)", () => {
     assert.equal(rows[0].TechnicianId, "TESTID1");
     assert.equal(body.rowCount, "1"); // string, per the API guide
     assert.equal(typeof rows[0].ActivityType, "string");
+  });
+
+  /*
+   * Start time. Empty StartTime + StartTimeRequest "Start of Day" was rejected
+   * live on 2026-08-13/14 ("Logistics override rows with 'Start of Day'
+   * require a resolved StartTime") while TEST filings of the same payload were
+   * accepted, so the dark launch never exercised it. The API reference lists
+   * StartTime as REQUIRED in HH:MM and StartTimeRequest as one of exactly
+   * three values. Tyler 2026-08-14: every rental pickup / vehicle change block
+   * goes in for 8:00 AM.
+   */
+  test("every row carries an explicit 08:00 start, never an empty StartTime", () => {
+    for (const live of [false, true]) {
+      const { body } = buildStandardActivityPayload({ ...args, live });
+      const row = (body.exportData as Array<Record<string, unknown>>)[0];
+      assert.equal(row.StartTime, ROUTE_BLOCK_START_TIME);
+      assert.match(String(row.StartTime), /^\d{2}:\d{2}$/, "StartTime must be HH:MM 24-hour");
+    }
+  });
+
+  test("pickup blocks pin the slot: StartTimeRequest defaults to Exact", () => {
+    const row = (buildStandardActivityPayload(args).body.exportData as any[])[0];
+    assert.equal(row.StartTimeRequest, "Exact");
+    assert.equal(ROUTE_BLOCK_START_TIME_REQUEST, "Exact");
+    assert.ok(
+      ["Anytime", "Exact", "AsSoonAsPossible"].includes(String(row.StartTimeRequest)),
+      "StartTimeRequest must stay inside the documented enum",
+    );
+  });
+
+  /*
+   * The Enterprise contract-change caller (server/vrm/forms/survey.ts) tells
+   * the tech the 8:00 slot can move if Enterprise has a conflict, so it asks
+   * with "Anytime". Same 8:00 start either way.
+   */
+  test("a caller that promises a movable slot can ask Anytime, still at 08:00", () => {
+    const row = (buildStandardActivityPayload({ ...args, startTimeRequest: "Anytime" })
+      .body.exportData as any[])[0];
+    assert.equal(row.StartTimeRequest, "Anytime");
+    assert.equal(row.StartTime, "08:00");
+  });
+
+  test("a caller may override the start time, and the default stays 8:00 AM", () => {
+    assert.equal(ROUTE_BLOCK_START_TIME, "08:00");
+    const row = (buildStandardActivityPayload({ ...args, startTime: "13:30" }).body.exportData as any[])[0];
+    assert.equal(row.StartTime, "13:30");
+  });
+
+  test("a malformed start time never reaches the wire — it falls back to 08:00", () => {
+    for (const bad of ["", "  ", "8:00", "0800", "24:00", "08:60", "8am", "Start of Day"]) {
+      const row = (buildStandardActivityPayload({ ...args, startTime: bad }).body.exportData as any[])[0];
+      assert.equal(row.StartTime, "08:00", `"${bad}" must fall back to the default`);
+    }
   });
 });
 

@@ -751,6 +751,11 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           date,
           durationMinutes: 30,
           locationZip: zipMatch ? zipMatch[1] : null,
+          // 8:00 AM like every other block, but this one's own note promises
+          // the technician the time can move if Enterprise has a conflict, so
+          // it asks for the slot rather than pinning it (pickup blocks use the
+          // "Exact" default).
+          startTimeRequest: "Anytime",
           live,
           projectLabel: "Enterprise Contract Change",
           // Tyler 2026-08-13: short and labeled. The long instructions go in
