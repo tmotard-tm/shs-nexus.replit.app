@@ -233,7 +233,15 @@ WHERE s.has_rental
   AND tp.tpms_van IS NOT NULL
   -- The technician's answer must not contradict TPMS. Silence is fine;
   -- disagreement is not, because one of the two names the wrong asset.
-  AND (NULLIF(btrim(s.assigned_truck_number),'') IS NULL
+  --
+  -- 2026-08-16: normalise BEFORE the null test. btrim() only catches an empty
+  -- string, so '0', '0000', '00000000' and 'n/a' all read as a competing truck
+  -- number and hard-failed the equality test. That held 14 technicians out of
+  -- the 8/17 wave, $963/day, and on every one of them TPMS agreed EXACTLY with
+  -- the truck their rental is written against. A string of zeros is silence,
+  -- not a second answer.
+  AND (NULLIF(ltrim(regexp_replace(COALESCE(s.assigned_truck_number, ''),
+                                   '\\D', '', 'g'), '0'), '') IS NULL
        OR ltrim(regexp_replace(s.assigned_truck_number, '\\D', '', 'g'), '0')
         = ltrim(regexp_replace(tp.tpms_van,            '\\D', '', 'g'), '0'))
 ORDER BY upper(s.ldap), s.created_at DESC
