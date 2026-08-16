@@ -256,6 +256,7 @@ TOOL_AUDIT_TEST_EMAIL = "stephen.wong@transformco.com"
 WMS_ENGINE_BASE_URL = "https://hspsc-api-gateway.prod.nextgen.shs.com/v1/api"
 BYOV_DASHBOARD_URL = "https://byovdashboard.replit.app"
 COMMS_PUBLIC_BASE_URL = "https://SHS-Nexus.replit.app"
+ETD_CHROMIUM_PATH = "/nix/store/zi4f80l169xlmivz8vja8wlphq74qqk0-chromium-125.0.6422.141/bin/chromium"
 
 [userenv.development]
 NEXUS_EXTERNAL_FLEET_READ_API_ENABLED = "true"
