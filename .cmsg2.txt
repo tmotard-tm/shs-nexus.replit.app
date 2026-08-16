@@ -1,0 +1,25 @@
+feat(etd): add etd-runner, server-side ETD reservation booking
+
+Moves the ETD call off Tyler's desktop. Nexus already owned the request,
+the decision and the queue (booking-queue + :requestNo/booked); only the
+call itself was ever local.
+
+Contains the etd package (auth, client, token_store), the booking path
+(book_request, book_cutover, vehicle_class), the token CLI, and the two
+reference files a booking cannot start without. Every path in this set is
+relative, so it ports unchanged; the six absolute paths in the ETD tree
+are all in the roster and SMS scripts, which are not shipped here.
+
+No forever loop. This deployment is autoscale and scales to zero between
+requests, so --watch cannot survive. The token lives in vrm_etd_token
+(added in 8ebf06e2) and any wake-up reuses a live one instead of paying
+~21s of Azure B2C. Minting is single-flighted with pg_advisory_lock.
+
+book_approved.py is deliberately absent: it books in the wrong driver's
+name, at the wrong branch, in a Mirage, with no confirmation number.
+
+Requires ETD_USER, ETD_PASS, ETD_TOKEN_DSN, ETD_CHROMIUM_PATH in Secrets.
+Nothing runs and nothing books until those are set; preflight reports
+exactly which are missing and makes no network calls.
+
+Co-Authored-By: Claude <noreply@anthropic.com>

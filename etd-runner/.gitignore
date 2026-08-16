@@ -1,0 +1,14 @@
+# The venv is ~200 MB of wheels and is rebuilt from requirements.txt.
+.venv/
+__pycache__/
+*.pyc
+
+# Per-booking payloads and responses. These carry technician name, phone and
+# email for every reservation. Never commit them (Fleet CLAUDE.md rule 5).
+reference/savedr_requests_sent/
+reference/savedr_responses/
+
+# Local token cache, if anything ever falls back to it. The secret is a
+# tenant-wide bearer credential.
+*token*.json
+!reference/etd_user_mapping.json
