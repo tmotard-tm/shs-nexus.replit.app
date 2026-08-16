@@ -32,6 +32,7 @@ import argparse
 import copy
 import io
 import json
+import os
 import re
 import sys
 import urllib.error
@@ -101,6 +102,17 @@ RECORD_URL = f"{NEXUS_HOST}/api/vrm/forms/rental-survey/record-booking"
 
 
 def nexus_dsn() -> str:
+    # On the Replit box the DSN is already in the environment; the desktop env
+    # file is the fallback, not the source. The session is opened readonly
+    # either way, so a read-write credential here cannot write.
+    for key in ("NEXUS_PROD_DB_URL", "PROD_DATABASE_URL"):
+        val = (os.environ.get(key) or "").strip()
+        if "postgres" in val:
+            return val
+    if not NEXUS_ENV.exists():
+        raise SystemExit(
+            "no Postgres DSN: set NEXUS_PROD_DB_URL or PROD_DATABASE_URL, "
+            f"or create {NEXUS_ENV}")
     for line in NEXUS_ENV.read_text(encoding="utf-8").splitlines():
         m = re.match(r"\s*(?:export\s+)?([A-Z_]+)\s*=\s*(.+)", line.strip())
         if m and "postgres" in m.group(2):
@@ -114,6 +126,9 @@ def cron_secret() -> str:
     NOT the copy inside nexus-prod.env — that snapshot is from the 2026-07-21
     golive and its value no longer matches the box.
     """
+    env = (os.environ.get("NEXUS_CRON_SECRET") or "").strip()
+    if env:
+        return env
     if not CRON_ENV.exists():
         return ""
     for line in CRON_ENV.read_text(encoding="utf-8").splitlines():

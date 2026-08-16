@@ -12,3 +12,5 @@ description: Verified-working facts and operational traps for the ETD (etd.ehi.c
   **How to apply:** when `ensure`/`verify` stack-trace on `_require_table`, the fix is publish-the-app (boot DDL creates the table), never runner-side DDL.
 
 - **Prod `vrm_etd_token` is created ONLY by app boot (publish).** The runner's own DDL is gated `ETD_TOKEN_ALLOW_DDL=1` and documented dev-only — respect it; don't create the prod table out-of-band.
+
+- **Some etd-runner helpers live ONLY on Tyler's desktop, not in the repo:** `tech_schedule.py` (ServicePower working-day lookup behind `book_cutover --schedule-gated`) and `reconcile_roster.py` (regenerates `reference/etd_user_mapping.json` for SHS- username collisions). If a script references them on the box, ask Tyler for the files — they cannot be reconstructed here. The captured reservation template `reference/savedr_request.json` IS committed and cannot be reconstructed either; never regenerate it, only re-capture from a real browser booking.
