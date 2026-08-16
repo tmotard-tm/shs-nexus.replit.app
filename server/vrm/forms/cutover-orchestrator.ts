@@ -1,0 +1,2761 @@
+/**
+ * Cutover workflow orchestrator — every external effect of the Rental Survey
+ * cutover buttons (and the rental-request sibling lane) is owned here by an
+ * immutable INTENT row (vrm_rental_workflow_intents), persisted BEFORE it is
+ * attempted, and verified by named readbacks.
+ *
+ * Plan of record: .local/tasks/cutover-workflow-survey-buttons.md (3rd pass,
+ * approved 2026-08-16). Binding rules implemented here:
+ *
+ *   - Intent identity controls every action. After creation, ALL mutations
+ *     address :intentId. No :ldap mutation routes.
+ *   - 8-condition server-side eligibility gate re-run at Queue, at Confirm,
+ *     and immediately before booking. The client can never override.
+ *   - ServicePower schedule gate is REQUIRED (working day + <=26h watermark).
+ *     Never default an unchecked tech to tomorrow.
+ *   - Preview is persisted and immutable (version/hash/expiry). Confirm is a
+ *     CAS on the exact submitted preview_version.
+ *   - ETD ops are persisted before the call. Timeout/ambiguous => booking_unknown
+ *     (NONTERMINAL, holds the live lock, never auto-retried).
+ *   - ART block: flag VRM_CONTRACT_BLOCK_ENABLED (NOT LUCA_ROUTE_BLOCK_ENABLED).
+ *     409 => block_conflict_pending_readback; readback only from a snapshot
+ *     loaded AFTER block_submitted_at.
+ *   - Msg1 releases only on reservation_verified + real-2xx block_accepted.
+ *     Msg2 is HELD (undrainable queue status) until block_verified.
+ *   - Quiet hours: existing getNextAllowedSendTime, never force-bypassed.
+ *   - DARK BUILD: execution_mode defaults to dry_run; live intents require the
+ *     (unarmed) flag; TEST/dry intents never advance live state.
+ *
+ * Pure classification/rendering functions are exported for unit tests.
+ */
+
+import crypto from "crypto";
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
+import {
+  sendStandardActivity,
+  buildStandardActivityPayload,
+  type StandardActivityArgs,
+} from "../dca-task-client";
+import { sendMessage } from "../../fleet-comms/outbound";
+import { getNextAllowedSendTime } from "../../fleet-scope-reg-messaging";
+import {
+  initializeSnowflakeService,
+  getSnowflakeService,
+  isSnowflakeConfigured,
+} from "../../snowflake-service";
+
+// ---------------------------------------------------------------------------
+// Constants & flag
+// ---------------------------------------------------------------------------
+
+export const WORKFLOW_CUTOVER = "cutover_survey";
+export const WORKFLOW_REQUEST = "rental_request";
+
+export const EXECUTION_MODES = new Set(["dry_run", "test", "live"]);
+export const TERMINAL_STATUSES = new Set(["completed", "cancelled", "abandoned"]);
+
+/** Statuses a booking-queue claim may pick up for the BOOK lane. */
+const BOOKABLE_STATUSES = new Set(["confirmed", "booking"]);
+
+export const COMMS_CATEGORY = "rental_management";
+
+/**
+ * Dedicated arming flag for THIS workflow's live ART filings. Deliberately not
+ * LUCA_ROUTE_BLOCK_ENABLED — that flag stays owned by the LUCA scheduling lane
+ * (plan §ART). Default (unset/anything but a truthy literal) = NOT live.
+ */
+export function isContractBlockLive(): boolean {
+  const raw = String(process.env.VRM_CONTRACT_BLOCK_ENABLED ?? "").trim().toLowerCase();
+  return /^(1|true|yes|on)$/.test(raw);
+}
+
+/**
+ * 14-item absence list, derived from the LIVE 21-day ACTIVITY_TYPE_DESCRIPTION
+ * enumeration run against PRD_SERVICEPOWER.BATCH_TBLS.SCH_ACTIVITIES_PROD on
+ * 2026-08-16 (47 distinct values observed; these are the ones that mean the
+ * tech is NOT working that day). Everything else observed — huddles, part
+ * pickups, D2C/B2B routing, trainings, Vehicle-* blocks, Standby — is a
+ * working-day activity. Compared case-insensitively on collapsed whitespace.
+ */
+export const ABSENCE_ACTIVITIES: ReadonlySet<string> = new Set(
+  [
+    "Vacation",
+    "Personal Holiday",
+    "Unpaid Time Off",
+    "Sickness",
+    "WD Sick Time",
+    "Intermittent LOA",
+    "No Call No show",
+    "Day Off In Lieu Of Holiday",
+    "Policy Time Off",
+    "Accident/Drug Test Impact",
+    "Weather",
+    "Swap Day",
+    "VRS Flex Day",
+    "Demand-Driven Adjustment",
+  ].map((s) => normalizeActivity(s)),
+);
+
+const SCHEDULE_TABLE = "PRD_SERVICEPOWER.BATCH_TBLS.SCH_ACTIVITIES_PROD";
+export const WATERMARK_MAX_AGE_HOURS = 26;
+
+/** Verified block-readback tokens (plan §ART): exact normalized matches. */
+export const BLOCK_ACTIVITY_TOKEN = "vehicle - change";
+export const BLOCK_START_TIME_TOKEN = "08:00:00";
+
+/**
+ * Quiet-hours EXCEPTION states for preview display flags (verified at HEAD in
+ * fleet-scope-reg-messaging: FL/CT/MD/OK/WA block until 08:00 local, TX until
+ * 09:00 / Sun 12:00; general states allow 07:00). Actual send times ALWAYS
+ * come from getNextAllowedSendTime at send/release time — this map is only the
+ * preview annotation Tyler asked for.
+ */
+export const QUIET_EXCEPTION_STATES: Record<string, string> = {
+  FL: "08:00",
+  CT: "08:00",
+  MD: "08:00",
+  OK: "08:00",
+  WA: "08:00",
+  TX: "09:00 (Sun 12:00)",
+};
+
+// ---------------------------------------------------------------------------
+// Small pure helpers
+// ---------------------------------------------------------------------------
+
+export function normalizeActivity(v: unknown): string {
+  return String(v ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+export function zip5(v: unknown): string {
+  const m = String(v ?? "").match(/\d{5}/);
+  return m ? m[0] : "";
+}
+
+export function digitsOnly(v: unknown): string {
+  return String(v ?? "").replace(/[^0-9]/g, "");
+}
+
+/** Truck numbers compared on digits with leading zeros stripped. */
+export function normTruck(v: unknown): string {
+  const digits = digitsOnly(v).replace(/^0+/, "");
+  return digits || String(v ?? "").trim().toUpperCase();
+}
+
+/** Survey truck values that are SILENCE, not contradiction (plan gate #5). */
+export function isTruckSilence(v: unknown): boolean {
+  const raw = String(v ?? "").trim().toLowerCase();
+  if (!raw || raw === "n/a" || raw === "na" || raw === "none" || raw === "unknown") return true;
+  const digits = digitsOnly(raw);
+  if (digits && /^0+$/.test(digits)) return true;
+  return false;
+}
+
+/** Stable stringify (sorted keys) so the preview hash is deterministic. */
+export function stableStringify(value: unknown): string {
+  const seen = new WeakSet();
+  const norm = (v: any): any => {
+    if (v === null || typeof v !== "object") return v;
+    if (seen.has(v)) return "[circular]";
+    seen.add(v);
+    if (Array.isArray(v)) return v.map(norm);
+    const out: Record<string, any> = {};
+    for (const k of Object.keys(v).sort()) out[k] = norm(v[k]);
+    return out;
+  };
+  return JSON.stringify(norm(value));
+}
+
+export function previewHash(preview: unknown): string {
+  return crypto.createHash("sha256").update(stableStringify(preview)).digest("hex");
+}
+
+/** Calendar date (YYYY-MM-DD) in ET — schedule/event dates are ET calendar days. */
+export function etTodayISO(now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/New_York",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+export function addDaysISO(iso: string, days: number): string {
+  const d = new Date(`${iso}T12:00:00Z`); // noon UTC avoids DST edge underflow
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+// ---------------------------------------------------------------------------
+// Schedule gate (pure classification over fetched rows)
+// ---------------------------------------------------------------------------
+
+export type ScheduleDayRow = {
+  day: string; // YYYY-MM-DD
+  maxAvail: number | null;
+  activities: string[]; // raw descriptions (already deduped per day)
+  snapshotTs: string; // CREATED_TS_DW of the newest load carrying this day
+};
+
+export type ScheduleDay = {
+  date: string;
+  hasShift: boolean;
+  absences: string[];
+  working: boolean;
+  snapshotTs: string;
+};
+
+export function classifyScheduleDays(rows: ScheduleDayRow[]): ScheduleDay[] {
+  return rows
+    .map((r) => {
+      const absences = r.activities.filter((a) => ABSENCE_ACTIVITIES.has(normalizeActivity(a)));
+      const hasShift = typeof r.maxAvail === "number" && r.maxAvail > 0;
+      return {
+        date: r.day,
+        hasShift,
+        absences,
+        working: hasShift && absences.length === 0,
+        snapshotTs: r.snapshotTs,
+      };
+    })
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** First working day ON OR AFTER minDateISO; null when none in the window. */
+export function firstWorkingDay(days: ScheduleDay[], minDateISO: string): string | null {
+  for (const d of days) {
+    if (d.date >= minDateISO && d.working) return d.date;
+  }
+  return null;
+}
+
+export function watermarkAgeHours(watermarkUtc: string | Date | null, now: Date = new Date()): number | null {
+  if (!watermarkUtc) return null;
+  const ts = new Date(watermarkUtc).getTime();
+  if (!Number.isFinite(ts)) return null;
+  return (now.getTime() - ts) / 3_600_000;
+}
+
+// ---------------------------------------------------------------------------
+// Readback classifiers (pure)
+// ---------------------------------------------------------------------------
+
+export type JourneyMatch = {
+  confirmation?: string | null;
+  reference?: string | null; // renter/reference field carrying the LDAP
+  branchCode?: string | null;
+  date?: string | null; // pickup date YYYY-MM-DD
+  sipp?: string | null;
+};
+
+export type JourneyExpected = {
+  confirmation: string;
+  ldap: string;
+  branchCode?: string | null;
+  date?: string | null;
+  sipp?: string | null;
+};
+
+export function classifyJourneyReadback(
+  expected: JourneyExpected,
+  matches: JourneyMatch[],
+): { verdict: "verified" | "none" | "multiple" | "mismatch"; reason: string } {
+  if (!Array.isArray(matches) || matches.length === 0) {
+    return { verdict: "none", reason: "journey search returned no matching reservation" };
+  }
+  if (matches.length > 1) {
+    return { verdict: "multiple", reason: `journey search returned ${matches.length} matches; exactly one required` };
+  }
+  const m = matches[0];
+  const diffs: string[] = [];
+  const norm = (v: unknown) => String(v ?? "").trim().toUpperCase();
+  if (norm(m.confirmation) !== norm(expected.confirmation)) {
+    diffs.push(`confirmation ${m.confirmation ?? "?"} != ${expected.confirmation}`);
+  }
+  const ref = norm(m.reference);
+  if (expected.ldap && ref && !ref.includes(norm(expected.ldap))) {
+    diffs.push(`reference '${m.reference}' does not carry LDAP ${expected.ldap}`);
+  }
+  if (expected.branchCode && m.branchCode && norm(m.branchCode) !== norm(expected.branchCode)) {
+    diffs.push(`branch ${m.branchCode} != ${expected.branchCode}`);
+  }
+  if (expected.date && m.date && String(m.date).slice(0, 10) !== expected.date) {
+    diffs.push(`date ${m.date} != ${expected.date}`);
+  }
+  if (expected.sipp && m.sipp && norm(m.sipp) !== norm(expected.sipp)) {
+    diffs.push(`class ${m.sipp} != ${expected.sipp}`);
+  }
+  if (diffs.length) return { verdict: "mismatch", reason: diffs.join("; ") };
+  return { verdict: "verified", reason: "exactly one reservation matched all expected fields" };
+}
+
+export type BlockReadbackRow = {
+  activity: string | null;
+  startTime: string | null; // HH:MM:SS
+  postcode: string | null;
+  snapshotTs: string; // CREATED_TS_DW
+};
+
+/**
+ * Plan §ART readback: only a snapshot loaded AFTER block_submitted_at can
+ * verify or fail a block; an older snapshot is verification_pending, never
+ * failed. Exact normalized matches on activity token, 08:00:00 and ZIP5.
+ */
+export function classifyBlockReadback(params: {
+  rows: BlockReadbackRow[];
+  blockSubmittedAt: string | Date;
+  expectedZip5: string;
+  globalWatermark: string | Date | null;
+}): { verdict: "block_verified" | "verification_pending" | "manual_repair"; reason: string } {
+  const submitted = new Date(params.blockSubmittedAt).getTime();
+  const wm = params.globalWatermark ? new Date(params.globalWatermark).getTime() : null;
+
+  const fresh = (ts: string) => new Date(ts).getTime() > submitted;
+
+  const candidates = params.rows.filter(
+    (r) =>
+      normalizeActivity(r.activity) === BLOCK_ACTIVITY_TOKEN &&
+      String(r.startTime ?? "").trim() === BLOCK_START_TIME_TOKEN &&
+      zip5(r.postcode) === params.expectedZip5,
+  );
+
+  if (candidates.some((r) => fresh(r.snapshotTs))) {
+    return { verdict: "block_verified", reason: "matching Vehicle - Change 08:00:00 block present in a post-submission snapshot" };
+  }
+  if (candidates.length > 0) {
+    // Matched, but only in a snapshot loaded before we filed — cannot verify from it.
+    return { verdict: "verification_pending", reason: "match exists only in a pre-submission snapshot; awaiting next load" };
+  }
+
+  const anyFreshRows = params.rows.some((r) => fresh(r.snapshotTs));
+  const watermarkFresh = wm !== null && wm > submitted;
+  if (!anyFreshRows && !watermarkFresh) {
+    return { verdict: "verification_pending", reason: "no snapshot loaded after block submission yet" };
+  }
+
+  // A fresh snapshot exists (rows for the day, or the load ran) and the block
+  // is absent/mismatched in it.
+  const near = params.rows
+    .filter((r) => fresh(r.snapshotTs))
+    .map((r) => `${r.activity ?? "-"}@${r.startTime ?? "-"}/${zip5(r.postcode) || "-"}`)
+    .slice(0, 6);
+  return {
+    verdict: "manual_repair",
+    reason: `fresh snapshot has no matching block (saw: ${near.join(", ") || "no rows for the day"})`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Rendering (pure) — exact skeletons from the approved plan
+// ---------------------------------------------------------------------------
+
+export function renderSpecialNotes(f: {
+  tpmsTruck: string;
+  ecars: string;
+  claim?: string | null;
+  rentalStartDate?: string | null;
+  year?: string | null;
+  make?: string | null;
+  model?: string | null;
+  sipp: string;
+  ldap: string;
+}): string {
+  const claimClause = f.claim && String(f.claim).trim() ? ` (Holman/ARI claim ${String(f.claim).trim()})` : "";
+  const opened = f.rentalStartDate ? `, opened ${f.rentalStartDate},` : ",";
+  const vehicle = [f.year, f.make, f.model].filter(Boolean).join(" ") || "vehicle";
+  return (
+    `SHS TRUCK ${f.tpmsTruck}. SHS FLEET - DIRECT BILLING CHANGEOVER. ` +
+    `This reservation REPLACES the rental this technician is already in. ` +
+    `CLOSE Enterprise ticket ${f.ecars}${claimClause}${opened} and re-sign the technician ` +
+    `under TransformCo direct billing. NO VEHICLE CHANGE: the technician keeps the ${vehicle} ` +
+    `they are already driving. Reserved ${f.sipp} to match. Technician LDAP ${f.ldap}. ` +
+    `Questions: SHS Fleet.`
+  );
+}
+
+/** Draft bodies (plan §Messages). EXACT rendered text appears in Preview; live arming requires Tyler's approval. */
+export function renderMsg1(f: { conf: string; branchName: string; branchAddress: string }): string {
+  return (
+    `SHS Fleet: Your replacement Enterprise rental is booked — confirmation ${f.conf}. ` +
+    `Tomorrow you have a 30-minute 8:00 AM route block to stop at Enterprise ${f.branchName}, ${f.branchAddress}. ` +
+    `You KEEP the vehicle you are driving — this is a billing changeover only: the branch will close your ` +
+    `current agreement and re-sign it under Sears direct billing. Questions? Reply here.`
+  );
+}
+
+export function renderMsg2(f: { conf: string; branchName: string; branchAddress: string }): string {
+  return (
+    `SHS Fleet reminder: today's 8:00 AM block — Enterprise ${f.branchName}, ${f.branchAddress}, ` +
+    `confirmation ${f.conf}. You keep your current vehicle; billing-only change (old agreement closed ` +
+    `and re-signed under Sears direct billing). Reply here with questions.`
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Display phase + completion (pure)
+// ---------------------------------------------------------------------------
+
+export function deriveDisplayPhase(row: {
+  status: string;
+  reservation_state?: string | null;
+  block_state?: string | null;
+  msg1_state?: string | null;
+  msg2_state?: string | null;
+}): string {
+  const s = row.status;
+  if (TERMINAL_STATUSES.has(s)) return s;
+  if (s === "manual_review" || s === "preview_required" || s === "booking_unknown" || s === "block_conflict_pending_readback") {
+    return s;
+  }
+  if (row.block_state === "manual_repair") return "block_manual_repair";
+  if (row.reservation_state === "verified") {
+    if (row.block_state === "verified") return row.msg2_state === "released" || row.msg2_state === "sent" ? "wrapping_up" : "awaiting_msg2_release";
+    if (row.block_state === "accepted" || row.block_state === "verification_pending") return "awaiting_block_verification";
+    return "filing_block";
+  }
+  return s;
+}
+
+export function completionSatisfied(row: {
+  reservation_state?: string | null;
+  block_state?: string | null;
+  msg1_state?: string | null;
+  msg2_state?: string | null;
+}): boolean {
+  return (
+    row.reservation_state === "verified" &&
+    row.block_state === "verified" &&
+    (row.msg1_state === "sent" || row.msg1_state === "queued" || row.msg1_state === "released") &&
+    (row.msg2_state === "released" || row.msg2_state === "sent")
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Eligibility gate — facts fetch (impure) + evaluation (pure)
+// ---------------------------------------------------------------------------
+
+export type EligibilityFacts = {
+  workflowType: string;
+  sourceId: string;
+  ldap: string;
+  techName: string | null;
+  // survey / request source
+  sourceRow: any | null;
+  newerResponseExists: boolean;
+  surveyEligible: boolean; // has_rental + van_status rules (cutover)
+  // consumption
+  otherNonterminalIntentId: number | null;
+  cutoverAlreadyBooked: boolean;
+  // roster
+  roster: { employmentStatus: string | null; dropped: boolean; districtNo: string | null; employeeId: string | null; techName: string | null } | null;
+  // tpms
+  tpmsTruck: string | null;
+  truckContradiction: string | null; // description when survey contradicts TPMS
+  // enterprise case (cutover only)
+  openCaseCount: number;
+  caseKey: string | null;
+  caseFacts: {
+    vehicleNumber: string | null;
+    rentingBranch: string | null;
+    rentingCity: string | null;
+    rentingState: string | null;
+    ecars: string | null;
+    claim: string | null;
+    year: string | null;
+    make: string | null;
+    model: string | null;
+    rentalStartDate: string | null;
+    vendor: string | null;
+  } | null;
+  // contact
+  contactPhone: string | null;
+  contactState: string | null;
+  requestFallbackPhone: string | null; // request path only
+};
+
+export type EligibilityFailure = { code: string; detail: string };
+
+export function evaluateEligibility(f: EligibilityFacts): { ok: boolean; failures: EligibilityFailure[] } {
+  const failures: EligibilityFailure[] = [];
+  const isCutover = f.workflowType === WORKFLOW_CUTOVER;
+
+  if (!f.sourceRow) failures.push({ code: "source_missing", detail: "bound source record no longer exists" });
+
+  // 1. response still current
+  if (isCutover && f.newerResponseExists) {
+    failures.push({ code: "response_superseded", detail: "a newer survey response exists for this technician" });
+  }
+  // 2. still open / unconsumed
+  if (f.otherNonterminalIntentId) {
+    failures.push({ code: "intent_conflict", detail: `another nonterminal intent #${f.otherNonterminalIntentId} exists for this LDAP` });
+  }
+  if (isCutover && f.cutoverAlreadyBooked) {
+    failures.push({ code: "already_booked", detail: "cutover tracking row already carries reservation evidence" });
+  }
+  // 3. survey conditions still hold
+  if (isCutover && !f.surveyEligible) {
+    failures.push({ code: "survey_conditions", detail: "survey no longer cutover-eligible (has_rental / van_status)" });
+  }
+  // Request path: the request must still be approved and unconsumed.
+  if (!isCutover && f.sourceRow) {
+    if (String(f.sourceRow.status ?? "") !== "approved") {
+      failures.push({ code: "request_not_approved", detail: `request status is ${f.sourceRow.status ?? "?"}` });
+    }
+    if (f.sourceRow.etd_booked_at != null) {
+      failures.push({ code: "request_already_booked", detail: "request already carries etd_booked_at" });
+    }
+  }
+  if (String(f.ldap ?? "").trim().toUpperCase() === "ZZTEST") {
+    failures.push({ code: "test_ldap", detail: "ZZTEST is never bookable" });
+  }
+  // 4. roster
+  if (!f.roster) {
+    failures.push({ code: "roster_missing", detail: "no all_techs roster row" });
+  } else {
+    if (f.roster.employmentStatus !== "A") failures.push({ code: "roster_inactive", detail: `employment_status=${f.roster.employmentStatus ?? "?"}` });
+    if (f.roster.dropped) failures.push({ code: "roster_dropped", detail: "dropped_from_source_at is set" });
+    if (!f.roster.districtNo) failures.push({ code: "district_missing", detail: "no district_no on roster" });
+  }
+  // 5. TPMS truck
+  if (!f.tpmsTruck) {
+    failures.push({ code: "tpms_truck_missing", detail: "no tpms_tech_profiles.truck_no" });
+  } else if (f.truckContradiction) {
+    failures.push({ code: "tpms_truck_contradiction", detail: f.truckContradiction });
+  }
+  // 6. exactly one open Enterprise case (cutover)
+  if (isCutover) {
+    if (f.openCaseCount !== 1) {
+      failures.push({ code: "case_cardinality", detail: `${f.openCaseCount} open Enterprise cases resolve to this tech; exactly 1 required` });
+    } else {
+      if (!f.caseFacts?.ecars) failures.push({ code: "ecars_missing", detail: "ECARS_2_0_TKT_NBR absent (no renter-name fallback in this workflow)" });
+      if (!f.caseFacts?.rentingBranch) failures.push({ code: "renting_branch_missing", detail: "RENTING_BRANCH absent; branch pin impossible" });
+    }
+  }
+  // 8. contact phone (7 — class/branch/schedule — is enforced at preview time)
+  if (isCutover) {
+    if (!f.contactPhone) failures.push({ code: "contact_phone_missing", detail: "no fs_comms_contacts phone; cutover has no fallback" });
+  } else if (!f.contactPhone && !f.requestFallbackPhone) {
+    failures.push({ code: "contact_phone_missing", detail: "no fs_comms_contacts phone and no request mobile_phone fallback" });
+  }
+
+  return { ok: failures.length === 0, failures };
+}
+
+export async function fetchEligibilityFacts(params: {
+  workflowType: string;
+  sourceId: string;
+  excludeIntentId?: number | null;
+}): Promise<EligibilityFacts> {
+  const isCutover = params.workflowType === WORKFLOW_CUTOVER;
+
+  // --- source row -----------------------------------------------------------
+  let sourceRow: any | null = null;
+  if (isCutover) {
+    const { rows } = await db.execute(sql`
+      SELECT * FROM vrm_rental_tech_survey WHERE id = ${params.sourceId}::uuid LIMIT 1
+    `);
+    sourceRow = (rows as any[])[0] ?? null;
+  } else {
+    // The request lane is keyed by request_no — that is what the UI carries
+    // and what the by-source endpoint documents. A UUID id is accepted too so
+    // fixtures and direct-id callers keep working.
+    const key = String(params.sourceId).trim();
+    const { rows } = /^\d+$/.test(key)
+      ? await db.execute(sql`
+          SELECT * FROM vrm_rental_request WHERE request_no = ${Number(key)} LIMIT 1
+        `)
+      : await db.execute(sql`
+          SELECT * FROM vrm_rental_request WHERE id = ${key}::uuid LIMIT 1
+        `);
+    sourceRow = (rows as any[])[0] ?? null;
+  }
+
+  const ldap = String(sourceRow?.ldap ?? "").trim().toUpperCase();
+
+  // --- newer response check (cutover) ---------------------------------------
+  let newerResponseExists = false;
+  if (isCutover && sourceRow) {
+    const { rows } = await db.execute(sql`
+      SELECT 1 FROM vrm_rental_tech_survey
+      WHERE upper(ldap) = ${ldap} AND created_at > ${sourceRow.created_at} LIMIT 1
+    `);
+    newerResponseExists = (rows as any[]).length > 0;
+  }
+
+  const surveyEligible =
+    !isCutover ||
+    (sourceRow?.has_rental === true &&
+      ["in_shop", "decommissioned", "totaled"].includes(String(sourceRow?.van_status ?? "").toLowerCase()));
+
+  // --- other nonterminal intents for this LDAP -------------------------------
+  let otherNonterminalIntentId: number | null = null;
+  if (ldap) {
+    const { rows } = await db.execute(sql`
+      SELECT id FROM vrm_rental_workflow_intents
+      WHERE upper(ldap) = ${ldap}
+        AND execution_mode = 'live'
+        AND status NOT IN ('completed','cancelled','abandoned')
+        AND (${params.excludeIntentId ?? null}::integer IS NULL OR id <> ${params.excludeIntentId ?? null}::integer)
+      LIMIT 1
+    `);
+    otherNonterminalIntentId = (rows as any[])[0]?.id ?? null;
+  }
+
+  // --- cutover tracking row consumed? ----------------------------------------
+  let cutoverAlreadyBooked = false;
+  if (isCutover && ldap) {
+    const { rows } = await db.execute(sql`
+      SELECT 1 FROM vrm_rental_cutover
+      WHERE upper(ldap) = ${ldap}
+        AND (reservation_status = 'booked' OR reservation_confirmation IS NOT NULL)
+      LIMIT 1
+    `);
+    cutoverAlreadyBooked = (rows as any[]).length > 0;
+  }
+
+  // --- roster (candidate-SQL ordering: prefer active, newest effective/sync) --
+  let roster: EligibilityFacts["roster"] = null;
+  if (ldap) {
+    const { rows } = await db.execute(sql`
+      SELECT employment_status, dropped_from_source_at, district_no, employee_id, tech_name
+      FROM all_techs
+      WHERE upper(tech_racfid) = ${ldap}
+      ORDER BY (employment_status = 'A') DESC,
+               effective_date DESC NULLS LAST,
+               synced_at DESC NULLS LAST
+      LIMIT 1
+    `);
+    const r = (rows as any[])[0];
+    if (r) {
+      roster = {
+        employmentStatus: r.employment_status ?? null,
+        dropped: r.dropped_from_source_at != null,
+        districtNo: r.district_no != null && String(r.district_no).trim() !== "" ? String(r.district_no).trim() : null,
+        employeeId: r.employee_id ?? null,
+        techName: r.tech_name ?? null,
+      };
+    }
+  }
+
+  // --- TPMS truck -------------------------------------------------------------
+  let tpmsTruck: string | null = null;
+  if (ldap) {
+    const { rows } = await db.execute(sql`
+      SELECT truck_no FROM tpms_tech_profiles
+      WHERE upper(enterprise_id) = ${ldap}
+      ORDER BY synced_at DESC NULLS LAST
+      LIMIT 1
+    `);
+    const t = (rows as any[])[0]?.truck_no;
+    tpmsTruck = t != null && String(t).trim() !== "" ? String(t).trim() : null;
+  }
+
+  let truckContradiction: string | null = null;
+  if (isCutover && tpmsTruck && sourceRow) {
+    const surveyTruck = sourceRow.assigned_truck_number;
+    if (!isTruckSilence(surveyTruck) && normTruck(surveyTruck) !== normTruck(tpmsTruck)) {
+      truckContradiction = `survey says truck ${surveyTruck}, TPMS says ${tpmsTruck}`;
+    }
+  }
+
+  // --- exactly one open Enterprise case (cutover) ------------------------------
+  let openCaseCount = 0;
+  let caseKey: string | null = null;
+  let caseFacts: EligibilityFacts["caseFacts"] = null;
+  if (isCutover && roster?.employeeId) {
+    const empDigits = digitsOnly(roster.employeeId);
+    const { rows } = await db.execute(sql`
+      SELECT c.case_key, c.vehicle_number, c.feed_json, c.rental_vendor
+      FROM vrm_rental_operations_cases c
+      JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
+      WHERE c.present_in_latest = true
+        AND upper(coalesce(c.ticket_status, '')) = 'OPEN'
+        AND regexp_replace(coalesce(nullif(trim(ir.override_employee_id), ''), nullif(trim(ir.resolved_employee_id), ''), ''), '[^0-9]', '', 'g') = ${empDigits}
+      ORDER BY c.case_key
+    `);
+    const list = rows as any[];
+    openCaseCount = list.length;
+    if (list.length === 1) {
+      const c = list[0];
+      caseKey = c.case_key;
+      const fj = typeof c.feed_json === "string" ? safeJson(c.feed_json) : (c.feed_json ?? {});
+      caseFacts = {
+        vehicleNumber: strOrNull(c.vehicle_number),
+        rentingBranch: strOrNull(fj?.RENTING_BRANCH),
+        rentingCity: strOrNull(fj?.RENTING_CITY_NAME),
+        rentingState: strOrNull(fj?.RENTING_STATE),
+        ecars: strOrNull(fj?.ECARS_2_0_TKT_NBR),
+        claim: strOrNull(fj?.CLAIM_NUMBER),
+        year: strOrNull(fj?.RENTED_VEH_YEAR),
+        make: strOrNull(fj?.RENTED_VEH_MAKE),
+        model: strOrNull(fj?.RENTED_VEH_MODEL),
+        rentalStartDate: strOrNull(fj?.RENTAL_START_DATE),
+        vendor: strOrNull(c.rental_vendor),
+      };
+    }
+  }
+
+  // --- contact phone ------------------------------------------------------------
+  let contactPhone: string | null = null;
+  let contactState: string | null = null;
+  if (ldap) {
+    const { rows } = await db.execute(sql`
+      SELECT phone, primary_state FROM fs_comms_contacts WHERE upper(ldap) = ${ldap} LIMIT 1
+    `);
+    const c = (rows as any[])[0];
+    contactPhone = c?.phone && String(c.phone).trim() ? String(c.phone).trim() : null;
+    contactState = c?.primary_state ?? null;
+  }
+
+  const requestFallbackPhone =
+    !isCutover && sourceRow?.mobile_phone && String(sourceRow.mobile_phone).trim()
+      ? String(sourceRow.mobile_phone).trim()
+      : null;
+
+  return {
+    workflowType: params.workflowType,
+    sourceId: params.sourceId,
+    ldap,
+    techName: sourceRow?.tech_name ?? roster?.techName ?? null,
+    sourceRow,
+    newerResponseExists,
+    surveyEligible,
+    otherNonterminalIntentId,
+    cutoverAlreadyBooked,
+    roster,
+    tpmsTruck,
+    truckContradiction,
+    openCaseCount,
+    caseKey,
+    caseFacts,
+    contactPhone,
+    contactState,
+    requestFallbackPhone,
+  };
+}
+
+function safeJson(s: string): any {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return {};
+  }
+}
+
+function strOrNull(v: unknown): string | null {
+  const s = String(v ?? "").trim();
+  return s ? s : null;
+}
+
+// ---------------------------------------------------------------------------
+// Snowflake schedule access (bounded per-LDAP reads)
+// ---------------------------------------------------------------------------
+//
+// MIRROR-LOCK EXEMPTION: the fleet-wide Snowflake advisory lock
+// ('fleetscope-mirror-sync') serializes HEAVY roster-mirror sweeps. These
+// queries are bounded per-LDAP point reads (one tech, <=~30 day window,
+// pruned by EMPLOYEE_REF + EXPECTED_START_DATE) — joining the lock would
+// serialize an interactive gate behind multi-minute mirror rebuilds for no
+// safety gain. Approved by the plan of record.
+
+async function ensureSnowflake(): Promise<void> {
+  if (isSnowflakeConfigured()) return;
+  const account = process.env.SNOWFLAKE_ACCOUNT;
+  const username = process.env.SNOWFLAKE_USER;
+  let privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+  if (!privateKey) {
+    try {
+      const { loadKeyFromFile } = await import("../../snowflake-key-loader");
+      const fileKey = loadKeyFromFile();
+      if (fileKey) privateKey = fileKey;
+    } catch {
+      /* no key file */
+    }
+  }
+  if (!account || !username || !privateKey) {
+    throw new Error("Snowflake is not configured (SNOWFLAKE_ACCOUNT/USER/PRIVATE_KEY)");
+  }
+  initializeSnowflakeService({
+    account,
+    username,
+    privateKey,
+    database: process.env.SNOWFLAKE_DATABASE,
+    schema: process.env.SNOWFLAKE_SCHEMA,
+    warehouse: process.env.SNOWFLAKE_WAREHOUSE,
+    role: process.env.SNOWFLAKE_ROLE,
+  });
+}
+
+export type ScheduleWindow = {
+  ldap: string;
+  watermarkUtc: string | null;
+  watermarkAgeHours: number | null;
+  fresh: boolean;
+  days: ScheduleDay[];
+};
+
+/**
+ * Working-day window for one LDAP. Snapshot filter is plan-exact: retain ALL
+ * rows of the newest load per employee-day (QUALIFY on CREATED_TS_DW max over
+ * the employee-day partition), then aggregate per day.
+ */
+export async function fetchScheduleWindow(ldap: string, fromISO: string, horizonDays: number): Promise<ScheduleWindow> {
+  await ensureSnowflake();
+  const sf = getSnowflakeService();
+  const upper = ldap.trim().toUpperCase();
+
+  const wmRows = await sf.executeQuery(`SELECT MAX(CREATED_TS_DW) AS TS FROM ${SCHEDULE_TABLE}`);
+  const watermarkUtc: string | null = wmRows?.[0]?.TS ? new Date(wmRows[0].TS + "Z").toISOString() : null;
+  const age = watermarkAgeHours(watermarkUtc);
+  const fresh = age !== null && age <= WATERMARK_MAX_AGE_HOURS;
+
+  const rows = await sf.executeQuery(
+    `SELECT DAY,
+            MAX(AVAIL) AS MAX_AVAIL,
+            LISTAGG(DISTINCT ACT, '|') AS ACTS,
+            TO_CHAR(MAX(SNAP), 'YYYY-MM-DD HH24:MI:SS.FF3') AS SNAP_TS
+     FROM (
+       SELECT TO_CHAR(EXPECTED_START_DATE, 'YYYY-MM-DD') AS DAY,
+              AVAILABLE_TIME AS AVAIL,
+              COALESCE(ACTIVITY_TYPE_DESCRIPTION, '') AS ACT,
+              CREATED_TS_DW AS SNAP
+       FROM ${SCHEDULE_TABLE}
+       WHERE UPPER(TRIM(EMPLOYEE_REF)) = ?
+         AND EXPECTED_START_DATE BETWEEN TO_DATE(?) AND DATEADD(day, ?, TO_DATE(?))
+       QUALIFY CREATED_TS_DW = MAX(CREATED_TS_DW)
+                 OVER (PARTITION BY UPPER(TRIM(EMPLOYEE_REF)), EXPECTED_START_DATE)
+     )
+     GROUP BY DAY
+     ORDER BY DAY`,
+    [upper, fromISO, horizonDays, fromISO],
+  );
+
+  const dayRows: ScheduleDayRow[] = (rows ?? []).map((r: any) => ({
+    day: String(r.DAY),
+    maxAvail: r.MAX_AVAIL == null ? null : Number(r.MAX_AVAIL),
+    activities: String(r.ACTS ?? "")
+      .split("|")
+      .map((s: string) => s.trim())
+      .filter(Boolean),
+    snapshotTs: String(r.SNAP_TS ?? ""),
+  }));
+
+  return { ldap: upper, watermarkUtc, watermarkAgeHours: age, fresh, days: classifyScheduleDays(dayRows) };
+}
+
+/** Rows for the block readback: the event day only, newest employee-day load. */
+export async function fetchBlockReadbackRows(ldap: string, dateISO: string): Promise<{ rows: BlockReadbackRow[]; watermarkUtc: string | null }> {
+  await ensureSnowflake();
+  const sf = getSnowflakeService();
+  const upper = ldap.trim().toUpperCase();
+
+  const wmRows = await sf.executeQuery(`SELECT MAX(CREATED_TS_DW) AS TS FROM ${SCHEDULE_TABLE}`);
+  const watermarkUtc: string | null = wmRows?.[0]?.TS ? new Date(wmRows[0].TS + "Z").toISOString() : null;
+
+  const rows = await sf.executeQuery(
+    `SELECT ACTIVITY_TYPE_DESCRIPTION AS ACT,
+            EXPECTED_START_TIME AS ST,
+            POSTCODE AS PC,
+            TO_CHAR(CREATED_TS_DW, 'YYYY-MM-DD HH24:MI:SS.FF3') AS SNAP_TS
+     FROM ${SCHEDULE_TABLE}
+     WHERE UPPER(TRIM(EMPLOYEE_REF)) = ?
+       AND EXPECTED_START_DATE = TO_DATE(?)
+     QUALIFY CREATED_TS_DW = MAX(CREATED_TS_DW)
+               OVER (PARTITION BY UPPER(TRIM(EMPLOYEE_REF)), EXPECTED_START_DATE)`,
+    [upper, dateISO],
+  );
+
+  return {
+    watermarkUtc,
+    rows: (rows ?? []).map((r: any) => ({
+      activity: r.ACT ?? null,
+      startTime: r.ST == null ? null : String(r.ST).trim(),
+      postcode: r.PC == null ? null : String(r.PC),
+      snapshotTs: String(r.SNAP_TS ?? "") + "Z",
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Intent lifecycle
+// ---------------------------------------------------------------------------
+
+export class OrchestratorError extends Error {
+  code: string;
+  httpStatus: number;
+  extra?: Record<string, unknown>;
+  constructor(code: string, message: string, httpStatus = 400, extra?: Record<string, unknown>) {
+    super(message);
+    this.code = code;
+    this.httpStatus = httpStatus;
+    this.extra = extra;
+  }
+}
+
+async function loadIntent(intentId: number): Promise<any> {
+  const { rows } = await db.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents WHERE id = ${intentId} LIMIT 1
+  `);
+  const row = (rows as any[])[0];
+  if (!row) throw new OrchestratorError("intent_not_found", `intent ${intentId} not found`, 404);
+  return row;
+}
+
+async function touchIntent(intentId: number, patch: Record<string, unknown>): Promise<void> {
+  // Narrow, whitelisted dynamic update — build SET clauses explicitly.
+  const sets: any[] = [];
+  const push = (fragment: any) => sets.push(fragment);
+  for (const [k, v] of Object.entries(patch)) {
+    switch (k) {
+      case "status": push(sql`status = ${v}`); break;
+      case "reservation_state": push(sql`reservation_state = ${v}`); break;
+      case "block_state": push(sql`block_state = ${v}`); break;
+      case "msg1_state": push(sql`msg1_state = ${v}`); break;
+      case "msg2_state": push(sql`msg2_state = ${v}`); break;
+      case "eligibility": push(sql`eligibility = ${JSON.stringify(v)}::jsonb`); break;
+      case "preview": push(sql`preview = ${JSON.stringify(v)}::jsonb`); break;
+      case "preview_version": push(sql`preview_version = ${v}`); break;
+      case "preview_hash": push(sql`preview_hash = ${v}`); break;
+      case "preview_built_at": push(sql`preview_built_at = ${v}`); break;
+      case "preview_expires_at": push(sql`preview_expires_at = ${v}`); break;
+      case "reservation_evidence": push(sql`reservation_evidence = ${JSON.stringify(v)}::jsonb`); break;
+      case "block_evidence": push(sql`block_evidence = ${JSON.stringify(v)}::jsonb`); break;
+      case "block_submitted_at": push(sql`block_submitted_at = ${v}`); break;
+      case "claimed_by": push(sql`claimed_by = ${v}`); break;
+      case "lease_expires_at": push(sql`lease_expires_at = ${v}`); break;
+      case "heartbeat_at": push(sql`heartbeat_at = ${v}`); break;
+      case "next_retry_at": push(sql`next_retry_at = ${v}`); break;
+      case "hard_deadline_at": push(sql`hard_deadline_at = ${v}`); break;
+      case "last_error": push(sql`last_error = ${v}`); break;
+      case "event_date": push(sql`event_date = ${v}`); break;
+      case "enterprise_case_id": push(sql`enterprise_case_id = ${v}`); break;
+      case "truck_number": push(sql`truck_number = ${v}`); break;
+      default:
+        throw new Error(`touchIntent: unknown column ${k}`);
+    }
+  }
+  push(sql`updated_at = now()`);
+  const setSql = sets.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
+  await db.execute(sql`UPDATE vrm_rental_workflow_intents SET ${setSql} WHERE id = ${intentId}`);
+}
+
+/**
+ * Mirror the owning intent into vrm_rental_cutover (tracking summary). LIVE
+ * intents only — TEST/dry-run intents never advance live state (plan). The
+ * tracking row is display-only; it never completes anything.
+ */
+async function mirrorCutoverSummary(intentId: number): Promise<void> {
+  const intent = await loadIntent(intentId);
+  if (intent.workflow_type !== WORKFLOW_CUTOVER) return;
+  if (intent.execution_mode !== "live") return;
+  const substates = {
+    reservation: intent.reservation_state,
+    block: intent.block_state,
+    msg1: intent.msg1_state,
+    msg2: intent.msg2_state,
+  };
+  await db.execute(sql`
+    INSERT INTO vrm_rental_cutover (ldap, intent_id, workflow_status, workflow_substates, workflow_mode, workflow_updated_at)
+    VALUES (${String(intent.ldap).toUpperCase()}, ${intentId}, ${intent.status}, ${JSON.stringify(substates)}::jsonb, ${intent.execution_mode}, now())
+    ON CONFLICT (ldap) DO UPDATE SET
+      intent_id = EXCLUDED.intent_id,
+      workflow_status = EXCLUDED.workflow_status,
+      workflow_substates = EXCLUDED.workflow_substates,
+      workflow_mode = EXCLUDED.workflow_mode,
+      workflow_updated_at = now()
+  `);
+}
+
+export async function createIntent(params: {
+  workflowType: string;
+  sourceId: string;
+  executionMode?: string;
+  createdBy?: string | null;
+}): Promise<{ intent: any; created: boolean; failures?: EligibilityFailure[] }> {
+  const mode = params.executionMode ?? "dry_run";
+  if (!EXECUTION_MODES.has(mode)) {
+    throw new OrchestratorError("bad_mode", `execution_mode must be one of dry_run|test|live`, 400);
+  }
+  if (mode === "live" && !isContractBlockLive()) {
+    // DARK BUILD: live intents cannot exist until Tyler arms the flag.
+    throw new OrchestratorError("live_disarmed", "VRM_CONTRACT_BLOCK_ENABLED is not armed; live intents are disabled", 403);
+  }
+  if (params.workflowType !== WORKFLOW_CUTOVER && params.workflowType !== WORKFLOW_REQUEST) {
+    throw new OrchestratorError("bad_workflow", "unknown workflow_type", 400);
+  }
+
+  const facts = await fetchEligibilityFacts({ workflowType: params.workflowType, sourceId: params.sourceId });
+  if (!facts.sourceRow) throw new OrchestratorError("source_missing", "source record not found", 404);
+  const gate = evaluateEligibility(facts);
+  if (!gate.ok) {
+    throw new OrchestratorError("eligibility_failed", "eligibility gate failed", 422, { failures: gate.failures });
+  }
+
+  // Revision: reuse an existing nonterminal intent for this identity, or bump
+  // past the highest terminal revision.
+  const { rows: existing } = await db.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents
+    WHERE workflow_type = ${params.workflowType}
+      AND source_id = ${params.sourceId}
+      AND execution_mode = ${mode}
+    ORDER BY source_revision DESC
+    LIMIT 1
+  `);
+  const prior = (existing as any[])[0];
+  if (prior && !TERMINAL_STATUSES.has(prior.status)) {
+    return { intent: prior, created: false };
+  }
+  const revision = prior ? Number(prior.source_revision) + 1 : 0;
+
+  try {
+    const { rows } = await db.execute(sql`
+      INSERT INTO vrm_rental_workflow_intents
+        (workflow_type, source_id, source_revision, execution_mode, ldap, tech_name,
+         truck_number, enterprise_case_id, status, eligibility, created_by)
+      VALUES
+        (${params.workflowType}, ${params.sourceId}, ${revision}, ${mode}, ${facts.ldap},
+         ${facts.techName}, ${facts.tpmsTruck}, ${facts.caseKey},
+         'created', ${JSON.stringify({ facts: publicFacts(facts), checkedAt: new Date().toISOString(), failures: [] })}::jsonb,
+         ${params.createdBy ?? null})
+      ON CONFLICT (workflow_type, source_id, source_revision, execution_mode) DO NOTHING
+      RETURNING *
+    `);
+    const inserted = (rows as any[])[0];
+    if (!inserted) {
+      // Raced another creator — return whatever won.
+      const again = await db.execute(sql`
+        SELECT * FROM vrm_rental_workflow_intents
+        WHERE workflow_type = ${params.workflowType} AND source_id = ${params.sourceId}
+          AND source_revision = ${revision} AND execution_mode = ${mode}
+        LIMIT 1
+      `);
+      return { intent: (again.rows as any[])[0], created: false };
+    }
+    if (mode === "live") await mirrorCutoverSummary(inserted.id);
+    return { intent: inserted, created: true };
+  } catch (e: any) {
+    if (String(e?.message ?? "").includes("vrm_workflow_intents_live_nonterminal_uq")) {
+      throw new OrchestratorError("live_lock_held", "another live nonterminal intent already exists for this LDAP", 409);
+    }
+    throw e;
+  }
+}
+
+/** Trim the facts snapshot persisted on the intent (no giant source rows). */
+function publicFacts(f: EligibilityFacts): Record<string, unknown> {
+  return {
+    ldap: f.ldap,
+    techName: f.techName,
+    roster: f.roster,
+    tpmsTruck: f.tpmsTruck,
+    openCaseCount: f.openCaseCount,
+    caseKey: f.caseKey,
+    caseFacts: f.caseFacts,
+    contactPhoneOnFile: !!f.contactPhone,
+    contactState: f.contactState,
+    newerResponseExists: f.newerResponseExists,
+    surveyEligible: f.surveyEligible,
+    // Address seeds the runner quotes from (never secrets, never phones).
+    surveyBranch:
+      f.workflowType === WORKFLOW_CUTOVER && f.sourceRow
+        ? {
+            name: strOrNull(f.sourceRow.rental_branch_name),
+            city: strOrNull(f.sourceRow.rental_branch_city),
+            state: strOrNull(f.sourceRow.rental_branch_state),
+          }
+        : null,
+    surveyVehicleDesc:
+      f.workflowType === WORKFLOW_CUTOVER && f.sourceRow ? strOrNull(f.sourceRow.rental_vehicle_desc) : null,
+    requestSeed:
+      f.workflowType === WORKFLOW_REQUEST && f.sourceRow
+        ? {
+            shopAddress: strOrNull(f.sourceRow.shop_address),
+            shopCity: strOrNull(f.sourceRow.shop_city),
+            shopState: strOrNull(f.sourceRow.shop_state),
+            shopPostal: strOrNull(f.sourceRow.shop_postal),
+            reportedBranch: strOrNull(f.sourceRow.tech_reported_branch),
+            approvedVehicleClass: strOrNull(f.sourceRow.approved_vehicle_class),
+            pickupAt: f.sourceRow.pickup_at ?? null,
+            appointmentAt: f.sourceRow.appointment_at ?? null,
+          }
+        : null,
+  };
+}
+
+export async function requestPreview(intentId: number): Promise<any> {
+  const intent = await loadIntent(intentId);
+  if (TERMINAL_STATUSES.has(intent.status)) {
+    throw new OrchestratorError("terminal", "intent is terminal", 409);
+  }
+  if (!["created", "preview_ready", "preview_required", "preview_pending"].includes(intent.status)) {
+    throw new OrchestratorError("bad_state", `cannot request preview from status ${intent.status}`, 409);
+  }
+  await touchIntent(intentId, { status: "preview_pending", next_retry_at: null, last_error: null });
+  return loadIntent(intentId);
+}
+
+// ---------------------------------------------------------------------------
+// Booking-queue claims (lease + fencing)
+// ---------------------------------------------------------------------------
+
+const LEASE_MINUTES = 30;
+
+export type QueueItem = {
+  intentId: number;
+  kind: "preview" | "book";
+  fencingToken: number;
+  workflowType: string;
+  executionMode: string;
+  ldap: string;
+  requiresReconcile: boolean;
+  facts: Record<string, unknown>;
+  preview: any | null;
+};
+
+/**
+ * Atomically claim work for the Python runner. CAS per intent: free/expired
+ * lease only, fencing token incremented on every (re)claim, RETURNING the
+ * claimed rows. booking_unknown is NEVER claimable here — reconciliation for
+ * it is staff-initiated (/retry).
+ */
+export async function claimBookingWork(params: {
+  runnerId: string;
+  limit?: number;
+  workflowType?: string;
+}): Promise<QueueItem[]> {
+  const limit = Math.max(1, Math.min(params.limit ?? 5, 20));
+  const items: QueueItem[] = [];
+  const typeFilter = params.workflowType ? sql`AND workflow_type = ${params.workflowType}` : sql``;
+  // Master kill switch: while the flag is disarmed, live intents are invisible
+  // to the runner. Re-arming resumes them exactly where they stood.
+  const liveArmed = isContractBlockLive();
+
+  // Lane order: recover booked-but-unverified intents FIRST (an external
+  // reservation already exists — its readback beats any new work), then
+  // previews, then bookings. The 'verify' lane exists because a runner dying
+  // between op_result(booked) and its readback would otherwise strand a real
+  // reservation at awaiting_verification forever.
+  for (const lane of ["verify", "preview", "book"] as const) {
+    const statusPredicate =
+      lane === "verify"
+        ? sql`status = 'awaiting_verification' AND reservation_state = 'booked_unverified'`
+        : lane === "preview"
+          ? sql`status = 'preview_pending'`
+          : sql`status IN ('confirmed', 'booking')`;
+    const { rows } = await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET claimed_by = ${params.runnerId},
+          lease_expires_at = now() + make_interval(mins => ${LEASE_MINUTES}),
+          heartbeat_at = now(),
+          fencing_token = fencing_token + 1,
+          status = CASE WHEN status = 'confirmed' THEN 'booking' ELSE status END,
+          updated_at = now()
+      WHERE id IN (
+        SELECT id FROM vrm_rental_workflow_intents
+        WHERE ${statusPredicate}
+          ${typeFilter}
+          AND (execution_mode <> 'live' OR ${liveArmed}::boolean)
+          AND (claimed_by IS NULL OR lease_expires_at IS NULL OR lease_expires_at < now())
+          AND (next_retry_at IS NULL OR next_retry_at <= now())
+        ORDER BY id
+        LIMIT ${limit}
+        FOR UPDATE SKIP LOCKED
+      )
+      RETURNING *
+    `);
+
+    for (const r of rows as any[]) {
+      const facts = await fetchEligibilityFacts({
+        workflowType: r.workflow_type,
+        sourceId: r.source_id,
+        excludeIntentId: r.id,
+      });
+      const { rows: openAttempts } = await db.execute(sql`
+        SELECT 1 FROM vrm_workflow_attempts
+        WHERE intent_id = ${r.id} AND phase = 'etd_booking' AND outcome IS NULL
+        LIMIT 1
+      `);
+      const kind = lane === "preview" ? "preview" : "book";
+      items.push({
+        intentId: r.id,
+        kind,
+        fencingToken: r.fencing_token,
+        workflowType: r.workflow_type,
+        executionMode: r.execution_mode,
+        ldap: r.ldap,
+        // Readback-first whenever external state MAY exist: an open attempt, a
+        // reclaimed booked-unverified intent, or a reconcile-directed retry of
+        // an ambiguous outcome. The last matters because op_result closes the
+        // attempt row even for 'unknown' — without this flag the runner would
+        // book AGAIN over a possibly-existing reservation.
+        requiresReconcile:
+          kind === "book" &&
+          ((openAttempts as any[]).length > 0 ||
+            lane === "verify" ||
+            ["unknown", "booked_unverified"].includes(String(r.reservation_state ?? ""))),
+        facts: publicFacts(facts),
+        preview: r.preview ?? null,
+      });
+    }
+  }
+  return items;
+}
+
+async function verifyClaim(
+  intentId: number,
+  runnerId: string,
+  fencingToken: number,
+  opts?: { requireActiveLease?: boolean },
+): Promise<any> {
+  const intent = await loadIntent(intentId);
+  if (intent.claimed_by !== runnerId) {
+    throw new OrchestratorError("not_claim_holder", `intent claimed by ${intent.claimed_by ?? "nobody"}`, 409);
+  }
+  if (Number(intent.fencing_token) !== Number(fencingToken)) {
+    throw new OrchestratorError("stale_fencing_token", `token ${fencingToken} is stale (current ${intent.fencing_token})`, 409);
+  }
+  if (opts?.requireActiveLease && (!intent.lease_expires_at || new Date(intent.lease_expires_at) <= new Date())) {
+    throw new OrchestratorError("lease_expired", "claim lease expired; re-claim before opening an external operation", 409);
+  }
+  return intent;
+}
+
+/**
+ * Authorize + open a booking attempt ATOMICALLY. verifyClaim() is only a fast
+ * pre-check: between its read and a plain INSERT the lease can lapse and a
+ * rival can reclaim (fencing token moves on) — and because attempt_no is
+ * MAX+1, two interleaved opens would get DISTINCT numbers and both proceed to
+ * the external call. Two layers close that:
+ *   1. The CTE gate makes the active-claim predicate (runner + token +
+ *      unexpired lease) part of the same statement that creates the attempt
+ *      row, and renews the lease so the automation has a full window for the
+ *      external call. This fences RIVAL holders. No gate pass → no row → 409.
+ *   2. vrm_workflow_attempts_one_open_uq (partial unique on (intent, phase)
+ *      WHERE outcome IS NULL) fences the SAME holder firing twice: the
+ *      open-attempt pre-check below is snapshot-racy by itself (a NOT EXISTS
+ *      inside the gate would be too, under READ COMMITTED), so the index is
+ *      the authoritative invariant — the loser's insert 23505s and maps to
+ *      unfinished_attempt below.
+ * Exported for tests.
+ */
+export async function openBookingAttempt(
+  intentId: number,
+  runnerId: string,
+  fencingToken: number,
+  payload?: { requestHash?: unknown; request?: unknown },
+): Promise<{ attemptNo: number }> {
+  const { rows: open } = await db.execute(sql`
+    SELECT attempt_no FROM vrm_workflow_attempts
+    WHERE intent_id = ${intentId} AND phase = 'etd_booking' AND outcome IS NULL
+    LIMIT 1
+  `);
+  if ((open as any[]).length) {
+    throw new OrchestratorError("unfinished_attempt", "an unfinished booking attempt exists; reconcile via readback first", 409);
+  }
+  let inserted: any[];
+  try {
+    const { rows } = await db.execute(sql`
+      WITH gate AS (
+        UPDATE vrm_rental_workflow_intents
+        SET lease_expires_at = now() + make_interval(mins => ${LEASE_MINUTES}),
+            heartbeat_at = now(),
+            updated_at = now()
+        WHERE id = ${intentId} AND claimed_by = ${runnerId}
+          AND fencing_token = ${fencingToken}
+          AND lease_expires_at IS NOT NULL AND lease_expires_at > now()
+        RETURNING id
+      )
+      INSERT INTO vrm_workflow_attempts (intent_id, phase, attempt_no, fencing_token, request_hash, request)
+      SELECT ${intentId}, 'etd_booking',
+             COALESCE((SELECT MAX(attempt_no) FROM vrm_workflow_attempts
+                       WHERE intent_id = ${intentId} AND phase = 'etd_booking'), 0) + 1,
+             ${fencingToken},
+             ${strOrNull(payload?.requestHash)},
+             ${JSON.stringify(payload?.request ?? {})}::jsonb
+      WHERE EXISTS (SELECT 1 FROM gate)
+      RETURNING attempt_no
+    `);
+    inserted = rows as any[];
+  } catch (e: any) {
+    if (e?.code === "23505" || /duplicate key value/i.test(String(e?.message ?? ""))) {
+      // A concurrent op_open won — either the attempt_no key (rival) or the
+      // one-open partial index (same holder double-fire). Same discipline as
+      // an unfinished attempt: reconcile via readback before booking again.
+      throw new OrchestratorError("unfinished_attempt", "a concurrent booking attempt was just opened; reconcile via readback first", 409);
+    }
+    throw e;
+  }
+  if (!inserted.length) {
+    // Gate lost between the pre-check and the insert — re-derive the precise
+    // reason (claim stolen / stale token / expired lease) for the caller.
+    await verifyClaim(intentId, runnerId, fencingToken, { requireActiveLease: true });
+    throw new OrchestratorError("claim_lost", "claim changed while authorizing the operation; re-claim and retry", 409);
+  }
+  return { attemptNo: Number(inserted[0].attempt_no) };
+}
+
+// ---------------------------------------------------------------------------
+// Preview persistence (runner posts quote + class decision)
+// ---------------------------------------------------------------------------
+
+export type RunnerQuote = {
+  journeyId?: string | null;
+  reference?: string | null;
+  branchCode: string | null;
+  branchName: string | null;
+  branchAddress: string | null;
+  branchZip: string | null;
+  branchPinned: boolean;
+  pickupDate: string; // YYYY-MM-DD (runner's schedule-gated choice)
+  pickupTime?: string | null;
+  returnDate?: string | null;
+  returnTime?: string | null;
+  offeredClasses?: string[];
+  warnings?: string[];
+  scheduleEvidence?: { watermarkUtc?: string | null; checkedAt?: string | null } | null;
+};
+
+export type RunnerClassDecision = {
+  chosenSipp: string | null;
+  mapped: boolean;
+  mode: string; // 'same_vehicle' | 'approved_class'
+  detail?: string | null;
+};
+
+export async function persistPreviewFromRunner(params: {
+  intentId: number;
+  runnerId: string;
+  fencingToken: number;
+  quote: RunnerQuote;
+  classDecision: RunnerClassDecision;
+}): Promise<{ status: string; failures?: EligibilityFailure[]; preview?: any; previewVersion?: number }> {
+  const intent = await verifyClaim(params.intentId, params.runnerId, params.fencingToken);
+  if (intent.status !== "preview_pending") {
+    throw new OrchestratorError("bad_state", `preview postback in status ${intent.status}`, 409);
+  }
+  const isCutover = intent.workflow_type === WORKFLOW_CUTOVER;
+
+  const releaseClaim = { claimed_by: null as any, lease_expires_at: null as any };
+
+  // 1. Full eligibility gate re-run (Queue-time evaluation).
+  const facts = await fetchEligibilityFacts({
+    workflowType: intent.workflow_type,
+    sourceId: intent.source_id,
+    excludeIntentId: intent.id,
+  });
+  const gate = evaluateEligibility(facts);
+  const failures: EligibilityFailure[] = [...gate.failures];
+
+  // 2. Branch pin + class mapping (gate #7 parts the runner owns).
+  if (!params.quote.branchPinned) {
+    failures.push({ code: "branch_not_pinned", detail: "ETD quote could not pin the required branch" });
+  }
+  if (isCutover) {
+    if (facts.caseFacts?.rentingBranch && params.quote.branchCode &&
+        params.quote.branchCode.trim().toUpperCase() !== facts.caseFacts.rentingBranch.trim().toUpperCase()) {
+      failures.push({ code: "branch_pin_drift", detail: `pinned ${params.quote.branchCode} != case RENTING_BRANCH ${facts.caseFacts.rentingBranch}` });
+    }
+  }
+  if (!params.classDecision.mapped || !params.classDecision.chosenSipp) {
+    failures.push({ code: "class_unmapped", detail: params.classDecision.detail ?? "vehicle class could not be mapped (no sedan fallback in this workflow)" });
+  }
+  if (!zip5(params.quote.branchZip)) {
+    failures.push({ code: "branch_zip_missing", detail: "pinned branch has no usable ZIP for the block location" });
+  }
+
+  // 3. Schedule gate — authoritative server-side re-check of the runner's date.
+  // The window is fetched even when the runner sent NO date, so a "no date"
+  // preview failure still tells the staffer WHY (stale watermark vs genuinely
+  // no working day in the horizon) instead of a bare no_date.
+  let schedule: ScheduleWindow | null = null;
+  let scheduleFailure: { code: string; detail: string } | null = null;
+  try {
+    schedule = await fetchScheduleWindow(intent.ldap, etTodayISO(), 21);
+    if (!schedule.fresh) {
+      scheduleFailure = {
+        code: "schedule_stale",
+        detail: `schedule watermark ${schedule.watermarkUtc ?? "missing"} is ${schedule.watermarkAgeHours?.toFixed(1) ?? "?"}h old (limit ${WATERMARK_MAX_AGE_HOURS}h)`,
+      };
+    }
+  } catch (e: any) {
+    scheduleFailure = { code: "schedule_unavailable", detail: `schedule check failed: ${e?.message ?? e}` };
+  }
+  const requestedDate = String(params.quote.pickupDate ?? "").slice(0, 10);
+  if (!requestedDate) {
+    const suggestion = schedule?.fresh ? firstWorkingDay(schedule.days, addDaysISO(etTodayISO(), 1)) : null;
+    failures.push({
+      code: "no_date",
+      detail: scheduleFailure
+        ? "runner supplied no pickup date"
+        : `runner supplied no pickup date; ${suggestion ? `next working day would be ${suggestion}` : "no working day in the 21-day window"}`,
+    });
+    if (scheduleFailure) failures.push(scheduleFailure);
+  } else if (scheduleFailure) {
+    failures.push(scheduleFailure);
+  } else if (schedule) {
+    const day = schedule.days.find((d) => d.date === requestedDate);
+    if (!day?.working) {
+      const suggestion = firstWorkingDay(schedule.days, addDaysISO(etTodayISO(), 1));
+      failures.push({
+        code: "not_working_day",
+        detail: `${requestedDate} is not a verified working day${day?.absences?.length ? ` (${day.absences.join(", ")})` : ""}; next working day: ${suggestion ?? "none in window"}`,
+      });
+    }
+  }
+
+  if (failures.length) {
+    await touchIntent(intent.id, {
+      status: "preview_required",
+      eligibility: { facts: publicFacts(facts), failures, checkedAt: new Date().toISOString() },
+      last_error: failures.map((f) => f.code).join(","),
+      ...releaseClaim,
+    });
+    await mirrorCutoverSummary(intent.id);
+    return { status: "preview_required", failures };
+  }
+
+  // 4. Assemble the immutable preview (the ENTIRE actual reservation).
+  const sipp = params.classDecision.chosenSipp!;
+  const conf = "(assigned at booking)";
+  const specialNotes = isCutover
+    ? renderSpecialNotes({
+        tpmsTruck: facts.tpmsTruck!,
+        ecars: facts.caseFacts!.ecars!,
+        claim: facts.caseFacts!.claim,
+        rentalStartDate: facts.caseFacts!.rentalStartDate,
+        year: facts.caseFacts!.year,
+        make: facts.caseFacts!.make,
+        model: facts.caseFacts!.model,
+        sipp,
+        ldap: intent.ldap,
+      })
+    : null;
+  const bookingReferences = isCutover
+    ? [intent.ldap, `CLOSE Enterprise Ticket = ${facts.caseFacts!.ecars}`, `Holman ARI Claim = ${facts.caseFacts!.claim ?? "n/a"}`]
+    : [intent.ldap];
+
+  const state = String(facts.contactState ?? "").toUpperCase();
+  const quietException = QUIET_EXCEPTION_STATES[state] ?? null;
+  const branchName = params.quote.branchName ?? params.quote.branchCode ?? "branch";
+  const branchAddress = params.quote.branchAddress ?? "";
+  const msg1Body = renderMsg1({ conf, branchName, branchAddress });
+  const msg2Body = renderMsg2({ conf, branchName, branchAddress });
+  const recipientPhone = facts.contactPhone ?? facts.requestFallbackPhone;
+
+  const preview = {
+    workflowType: intent.workflow_type,
+    executionMode: intent.execution_mode,
+    ldap: intent.ldap,
+    techName: facts.techName,
+    tpmsTruck: facts.tpmsTruck,
+    reservation: {
+      pickupDate: requestedDate,
+      pickupTime: params.quote.pickupTime ?? null,
+      returnDate: params.quote.returnDate ?? null,
+      returnTime: params.quote.returnTime ?? null,
+      branchCode: params.quote.branchCode,
+      branchName: params.quote.branchName,
+      branchAddress: params.quote.branchAddress,
+      branchZip: params.quote.branchZip,
+      branchZip5: zip5(params.quote.branchZip),
+      branchPinned: params.quote.branchPinned,
+      sipp,
+      classDecision: params.classDecision,
+      offeredClasses: params.quote.offeredClasses ?? [],
+      vehicle: isCutover
+        ? { year: facts.caseFacts!.year, make: facts.caseFacts!.make, model: facts.caseFacts!.model, noVehicleChange: true }
+        : null,
+      bookingReferences,
+      specialNotes,
+      quote: {
+        journeyId: params.quote.journeyId ?? null,
+        reference: params.quote.reference ?? null,
+        warnings: params.quote.warnings ?? [],
+      },
+    },
+    enterpriseCase: isCutover
+      ? { caseKey: facts.caseKey, ecars: facts.caseFacts!.ecars, claim: facts.caseFacts!.claim, rentalStartDate: facts.caseFacts!.rentalStartDate, vendor: facts.caseFacts!.vendor }
+      : null,
+    artBlock: {
+      date: requestedDate,
+      startTime: "08:00",
+      startTimeRequest: "Exact",
+      durationMinutesRequested: 30,
+      unit: facts.roster!.districtNo,
+      locationZip5: zip5(params.quote.branchZip),
+      activityReadbackToken: "Vehicle - Change",
+      flag: "VRM_CONTRACT_BLOCK_ENABLED",
+      live: intent.execution_mode === "live" && isContractBlockLive(),
+    },
+    messages: {
+      recipientPhoneOnFile: !!recipientPhone,
+      recipientState: state || null,
+      quietHoursException: quietException,
+      msg1: {
+        moment: "evening_after_verification",
+        body: msg1Body,
+        releaseRule: "reservation_verified AND real-2xx block_accepted",
+      },
+      msg2: {
+        moment: "morning_of_event",
+        body: msg2Body,
+        releaseRule: "HELD until block_verified (morning sweep releases with compliant scheduled_for)",
+      },
+    },
+    schedule: {
+      watermarkUtc: schedule!.watermarkUtc,
+      watermarkAgeHours: schedule!.watermarkAgeHours,
+      requestedDateWorking: true,
+      runnerEvidence: params.quote.scheduleEvidence ?? null,
+    },
+    builtAt: new Date().toISOString(),
+  };
+
+  const version = Number(intent.preview_version) + 1;
+  const hash = previewHash(preview);
+  const expires = new Date(Date.now() + 20 * 3600 * 1000); // bounded by next schedule load + slack
+
+  await touchIntent(intent.id, {
+    status: "preview_ready",
+    preview,
+    preview_version: version,
+    preview_hash: hash,
+    preview_built_at: new Date(),
+    preview_expires_at: expires,
+    event_date: requestedDate,
+    eligibility: { facts: publicFacts(facts), failures: [], checkedAt: new Date().toISOString() },
+    last_error: null,
+    ...releaseClaim,
+  });
+  await mirrorCutoverSummary(intent.id);
+  return { status: "preview_ready", preview, previewVersion: version };
+}
+
+// ---------------------------------------------------------------------------
+// Confirm (CAS on preview_version, full gate re-run)
+// ---------------------------------------------------------------------------
+
+export async function confirmIntent(params: {
+  intentId: number;
+  previewVersion: number;
+  confirmedBy: string;
+}): Promise<{ status: string; failures?: EligibilityFailure[] }> {
+  const intent = await loadIntent(params.intentId);
+  if (intent.status !== "preview_ready") {
+    throw new OrchestratorError("bad_state", `confirm in status ${intent.status}`, 409);
+  }
+  // Master kill switch: a live intent created while armed cannot advance once
+  // the flag is disarmed. Creation-time checking alone is not enough.
+  if (intent.execution_mode === "live" && !isContractBlockLive()) {
+    throw new OrchestratorError("live_disarmed", "VRM_CONTRACT_BLOCK_ENABLED is not armed; live confirms are blocked", 409);
+  }
+
+  // Full gate re-run at Confirm — drift = preview_required, no CAS attempt.
+  const facts = await fetchEligibilityFacts({
+    workflowType: intent.workflow_type,
+    sourceId: intent.source_id,
+    excludeIntentId: intent.id,
+  });
+  const gate = evaluateEligibility(facts);
+  if (!gate.ok) {
+    await touchIntent(intent.id, {
+      status: "preview_required",
+      eligibility: { facts: publicFacts(facts), failures: gate.failures, checkedAt: new Date().toISOString() },
+      last_error: "eligibility drift at confirm",
+    });
+    await mirrorCutoverSummary(intent.id);
+    return { status: "preview_required", failures: gate.failures };
+  }
+
+  const { rows } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET status = 'confirmed',
+        confirmed_at = now(),
+        confirmed_by = ${params.confirmedBy},
+        confirmed_preview_version = ${params.previewVersion},
+        updated_at = now()
+    WHERE id = ${params.intentId}
+      AND status = 'preview_ready'
+      AND preview_version = ${params.previewVersion}
+      AND preview_expires_at > now()
+    RETURNING id
+  `);
+  if ((rows as any[]).length === 0) {
+    const now = await loadIntent(params.intentId);
+    const reason =
+      Number(now.preview_version) !== Number(params.previewVersion)
+        ? "preview_version mismatch (preview changed since you loaded it)"
+        : now.preview_expires_at && new Date(now.preview_expires_at) <= new Date()
+          ? "preview expired"
+          : `status ${now.status}`;
+    await touchIntent(params.intentId, { status: "preview_required", last_error: `confirm rejected: ${reason}` });
+    await mirrorCutoverSummary(params.intentId);
+    return { status: "preview_required", failures: [{ code: "confirm_cas_failed", detail: reason }] };
+  }
+  await mirrorCutoverSummary(params.intentId);
+  return { status: "confirmed" };
+}
+
+// ---------------------------------------------------------------------------
+// Booking postbacks (op_open / op_result / readback)
+// ---------------------------------------------------------------------------
+
+export async function recordBookingPostback(params: {
+  intentId: number;
+  runnerId: string;
+  fencingToken: number;
+  phase: "op_open" | "op_result" | "readback";
+  payload: any;
+}): Promise<any> {
+  const intent = await verifyClaim(params.intentId, params.runnerId, params.fencingToken, {
+    // op_open authorizes a NEW external call — the lease must still be live.
+    // op_result/readback record evidence of an already-opened attempt, so they
+    // stay accepted late (the fencing token still rejects superseded claimants).
+    requireActiveLease: params.phase === "op_open",
+  });
+
+  if (params.phase === "op_open") {
+    if (intent.status !== "booking") {
+      throw new OrchestratorError("bad_state", `op_open in status ${intent.status}`, 409);
+    }
+    if (intent.execution_mode === "live" && !isContractBlockLive()) {
+      throw new OrchestratorError("live_disarmed", "VRM_CONTRACT_BLOCK_ENABLED is not armed; live external operations are blocked", 409);
+    }
+    // Immediately-before-booking gate re-run (plan): any drift = preview_required.
+    const facts = await fetchEligibilityFacts({
+      workflowType: intent.workflow_type,
+      sourceId: intent.source_id,
+      excludeIntentId: intent.id,
+    });
+    const gate = evaluateEligibility(facts);
+    if (!gate.ok) {
+      await touchIntent(intent.id, {
+        status: "preview_required",
+        eligibility: { facts: publicFacts(facts), failures: gate.failures, checkedAt: new Date().toISOString() },
+        last_error: "eligibility drift immediately before booking",
+        claimed_by: null,
+        lease_expires_at: null,
+      });
+      await mirrorCutoverSummary(intent.id);
+      return { accepted: false, status: "preview_required", failures: gate.failures };
+    }
+    const { attemptNo } = await openBookingAttempt(intent.id, params.runnerId, params.fencingToken, params.payload);
+    return { accepted: true, attemptNo };
+  }
+
+  if (params.phase === "op_result") {
+    const outcome = String(params.payload?.outcome ?? "");
+
+    // Runner aborted BEFORE op_open side effects (fresh quote no longer matches
+    // the confirmed preview: branch/class/date drift). Nothing external
+    // happened and no attempt row exists — back to preview so a human re-reviews.
+    if (outcome === "aborted_before_open") {
+      await touchIntent(intent.id, {
+        status: "preview_required",
+        last_error: `runner abort: ${strOrNull(params.payload?.evidence?.reason) ?? "fresh quote diverged from confirmed preview"}`,
+        claimed_by: null,
+        lease_expires_at: null,
+      });
+      await mirrorCutoverSummary(intent.id);
+      return { accepted: true, status: "preview_required" };
+    }
+
+    const attemptNo = Number(params.payload?.attemptNo);
+    if (!attemptNo) throw new OrchestratorError("bad_payload", "attemptNo required", 400);
+    await db.execute(sql`
+      UPDATE vrm_workflow_attempts
+      SET outcome = ${outcome}, finished_at = now(), evidence = ${JSON.stringify(params.payload?.evidence ?? {})}::jsonb
+      WHERE intent_id = ${intent.id} AND phase = 'etd_booking' AND attempt_no = ${attemptNo} AND outcome IS NULL
+    `);
+
+    if (outcome === "dry_run_validated") {
+      // Dark modes only: the runner ran every non-mutating gate (quote,
+      // validateLocAddInfo, validate) and STOPPED before the commit. There is
+      // no reservation, so the intent parks at awaiting_verification with a
+      // dark reservation_state — readbacks skip it, completion never fires.
+      // Block filing still proceeds: dry_run records would_file; test files a
+      // real TEST-prefixed block.
+      if (intent.execution_mode === "live") {
+        throw new OrchestratorError("bad_payload", "dry_run_validated is not a live outcome", 400);
+      }
+      await touchIntent(intent.id, {
+        reservation_state: "dry_run_validated",
+        status: "awaiting_verification",
+        reservation_evidence: {
+          dryRunValidated: true,
+          gates: params.payload?.evidence?.gates ?? null,
+          attemptNo,
+          at: new Date().toISOString(),
+        },
+        last_error: null,
+        claimed_by: null,
+        lease_expires_at: null,
+      });
+      await mirrorCutoverSummary(intent.id);
+      await fileContractBlock(intent.id);
+      await releaseMessagesIfEligible(intent.id);
+      return { accepted: true, status: (await loadIntent(intent.id)).status };
+    }
+
+    if (outcome === "booked") {
+      await touchIntent(intent.id, {
+        reservation_state: "booked_unverified",
+        status: "awaiting_verification",
+        reservation_evidence: {
+          confirmation: strOrNull(params.payload?.evidence?.confirmation),
+          bookedAt: new Date().toISOString(),
+          attemptNo,
+          raw: params.payload?.evidence ?? null,
+        },
+        last_error: null,
+      });
+    } else if (outcome === "failed_clean") {
+      // Proven no reservation was created (validation-gate failure before the
+      // confirm call). No auto-retry for bookings — a human decides.
+      await touchIntent(intent.id, {
+        status: "manual_review",
+        reservation_state: "failed",
+        last_error: `booking failed clean: ${strOrNull(params.payload?.evidence?.error) ?? "unknown"}`,
+        claimed_by: null,
+        lease_expires_at: null,
+      });
+    } else {
+      // timeout / ambiguous / unparsed — we may or may not have booked.
+      await touchIntent(intent.id, {
+        status: "booking_unknown",
+        reservation_state: "unknown",
+        last_error: `booking outcome ${outcome}: ${strOrNull(params.payload?.evidence?.error) ?? "ambiguous"}`,
+        claimed_by: null,
+        lease_expires_at: null,
+      });
+    }
+    await mirrorCutoverSummary(intent.id);
+    return { accepted: true, status: (await loadIntent(intent.id)).status };
+  }
+
+  // phase === 'readback'
+  const matches: JourneyMatch[] = Array.isArray(params.payload?.matches) ? params.payload.matches : [];
+  const expected: JourneyExpected = {
+    confirmation: strOrNull(params.payload?.expected?.confirmation) ?? strOrNull(intent.reservation_evidence?.confirmation) ?? "",
+    ldap: intent.ldap,
+    branchCode: intent.preview?.reservation?.branchCode ?? null,
+    date: intent.event_date ? String(intent.event_date).slice(0, 10) : null,
+    sipp: intent.preview?.reservation?.sipp ?? null,
+  };
+  const verdict = classifyJourneyReadback(expected, matches);
+
+  // Close any dangling attempt with what the readback proved.
+  const { rows: open } = await db.execute(sql`
+    SELECT attempt_no FROM vrm_workflow_attempts
+    WHERE intent_id = ${intent.id} AND phase = 'etd_booking' AND outcome IS NULL
+    ORDER BY attempt_no DESC LIMIT 1
+  `);
+  const openAttempt = (open as any[])[0]?.attempt_no ?? null;
+  if (openAttempt != null) {
+    await db.execute(sql`
+      UPDATE vrm_workflow_attempts
+      SET outcome = ${verdict.verdict === "verified" ? "booked_via_readback" : verdict.verdict === "none" ? "no_reservation_found" : "readback_" + verdict.verdict},
+          finished_at = now(),
+          evidence = ${JSON.stringify({ readback: verdict, matches })}::jsonb
+      WHERE intent_id = ${intent.id} AND phase = 'etd_booking' AND attempt_no = ${openAttempt}
+    `);
+  }
+
+  if (verdict.verdict === "verified") {
+    await touchIntent(intent.id, {
+      reservation_state: "verified",
+      status: "reservation_verified",
+      reservation_evidence: {
+        ...(intent.reservation_evidence ?? {}),
+        confirmation: expected.confirmation || strOrNull(matches[0]?.confirmation),
+        verifiedAt: new Date().toISOString(),
+        readback: verdict,
+        match: matches[0] ?? null,
+      },
+      last_error: null,
+    });
+    await mirrorCutoverSummary(intent.id);
+    // Reservation verified → file the block, then evaluate message releases.
+    await fileContractBlock(intent.id);
+    await releaseMessagesIfEligible(intent.id);
+    return { accepted: true, status: (await loadIntent(intent.id)).status, readback: verdict };
+  }
+
+  // Clean-none applies to a parked unknown AND to a reconcile-directed retry
+  // (status already back at 'booking' with reservation_state 'unknown').
+  const reconcilableNone =
+    intent.status === "booking_unknown" ||
+    (intent.status === "booking" && intent.reservation_state === "unknown");
+  if (verdict.verdict === "none" && reconcilableNone) {
+    // Clean reconcile: nothing was booked. Safe to make bookable again — retry
+    // still requires the normal claim + op_open discipline (never automatic).
+    await touchIntent(intent.id, {
+      status: "confirmed",
+      reservation_state: "pending",
+      last_error: "readback found no reservation; reconciled clean",
+      claimed_by: null,
+      lease_expires_at: null,
+    });
+    await mirrorCutoverSummary(intent.id);
+    return { accepted: true, status: "confirmed", readback: verdict };
+  }
+
+  await touchIntent(intent.id, {
+    status: "manual_review",
+    last_error: `journey readback ${verdict.verdict}: ${verdict.reason}`,
+    claimed_by: null,
+    lease_expires_at: null,
+  });
+  await mirrorCutoverSummary(intent.id);
+  return { accepted: true, status: "manual_review", readback: verdict };
+}
+
+// ---------------------------------------------------------------------------
+// ART block filing
+// ---------------------------------------------------------------------------
+
+export type BlockReconcileDeps = {
+  /** Injectable readback source (tests); defaults to the live ART snapshot. */
+  fetchRows?: typeof fetchBlockReadbackRows;
+};
+
+export type BlockReconcileOutcome = "none" | "recovered" | "cleared" | "ambiguous" | "manual";
+
+/**
+ * Crash recovery for ART filing. An OPEN art_block attempt (outcome IS NULL)
+ * means a previous fileContractBlock died between the ledger INSERT and the
+ * outcome UPDATE — the POST may or may not have reached ART. Readback decides:
+ *  - "none"      — no open attempt; the caller may file fresh.
+ *  - "recovered" — a matching block exists in a post-open snapshot: adopt it
+ *                  (attempt closed accepted_reconciled, block_state=accepted,
+ *                  block_submitted_at=attempt open time) — the sweep verifies
+ *                  and releases via its normal lane next run.
+ *  - "cleared"   — a fresh snapshot has NO block-token row for the day: the
+ *                  POST provably never landed. Attempt closed
+ *                  abandoned_no_trace; block_state=retry (refiles next sweep).
+ *  - "manual"    — a fresh snapshot has block-like rows that don't match the
+ *                  spec (a mangled filing may own them): human decides.
+ *  - "ambiguous" — no post-open snapshot yet, or the readback errored: the
+ *                  attempt STAYS OPEN, so filing remains fenced; retried on
+ *                  the next sweep.
+ */
+export async function reconcileOpenBlockAttempt(
+  intentId: number,
+  deps?: BlockReconcileDeps,
+): Promise<BlockReconcileOutcome> {
+  const fetchRows = deps?.fetchRows ?? fetchBlockReadbackRows;
+  const intent = await loadIntent(intentId);
+  const { rows: open } = await db.execute(sql`
+    SELECT attempt_no, started_at FROM vrm_workflow_attempts
+    WHERE intent_id = ${intentId} AND phase = 'art_block' AND outcome IS NULL
+    ORDER BY attempt_no DESC LIMIT 1
+  `);
+  const att = (open as any[])[0];
+  if (!att) return "none";
+
+  // Grace: a very fresh open attempt is almost certainly an in-flight filing,
+  // not a strand — judging it here would race the owner's finalize (e.g. a
+  // snapshot load landing mid-POST could mis-clear it). Leave it fenced.
+  if (Date.now() - new Date(att.started_at).getTime() < 10 * 60 * 1000) {
+    return "ambiguous";
+  }
+
+  // Reconcile claim: exactly ONE reconciler may judge this strand at a time.
+  // Overlapping sweeps (cron + admin trigger + a postback-driven filing's
+  // pre-check) can otherwise read snapshots that advance mid-flight, reach
+  // DIVERGENT verdicts, and interleave parent writes (A adopts a landed
+  // block, B no-trace-clears → refile → double-file). Lease-style: a crashed
+  // claimant self-heals after 10 minutes.
+  const { rows: rClaim } = await db.execute(sql`
+    UPDATE vrm_workflow_attempts
+    SET reconcile_claimed_at = now()
+    WHERE intent_id = ${intentId} AND phase = 'art_block' AND attempt_no = ${att.attempt_no}
+      AND outcome IS NULL
+      AND (reconcile_claimed_at IS NULL OR reconcile_claimed_at < now() - interval '10 minutes')
+    RETURNING attempt_no
+  `);
+  if ((rClaim as any[]).length === 0) return "ambiguous";
+
+  const releaseReconcileClaim = async () => {
+    await db.execute(sql`
+      UPDATE vrm_workflow_attempts SET reconcile_claimed_at = NULL
+      WHERE intent_id = ${intentId} AND phase = 'art_block' AND attempt_no = ${att.attempt_no} AND outcome IS NULL
+    `);
+  };
+
+  const closeAttempt = async (outcome: string, evidence: Record<string, unknown>) => {
+    await db.execute(sql`
+      UPDATE vrm_workflow_attempts
+      SET outcome = ${outcome}, finished_at = now(), evidence = ${JSON.stringify(evidence)}::jsonb
+      WHERE intent_id = ${intentId} AND phase = 'art_block' AND attempt_no = ${att.attempt_no} AND outcome IS NULL
+    `);
+  };
+
+  // Finalize ORDER everywhere below: parent state FIRST, attempt-close LAST.
+  // A crash between the two re-presents as parent-advanced + open attempt,
+  // which this same lane re-resolves idempotently on the next pass. The
+  // reverse order (closed attempt + stale parent) would un-fence filing
+  // while the parent still looks claimable — the double-file window.
+  // Parent writes below are MONOTONIC: each is a guarded UPDATE that only
+  // lands on states a filing can still own (in-write predicate re-check).
+  // Zero rows = the parent advanced under us — our verdict is stale
+  // evidence; release the claim, leave the attempt open, re-judge later.
+  const dateISO = intent.event_date ? String(intent.event_date).slice(0, 10) : null;
+  if (!dateISO) {
+    const { rows: w } = await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET block_state = 'failed', status = 'manual_review', updated_at = now(),
+          last_error = 'open ART attempt found but intent has no event_date to read back against'
+      WHERE id = ${intentId}
+        AND block_state IN ('pending','retry','filing','manual_repair','failed')
+      RETURNING id
+    `);
+    if ((w as any[]).length === 0) {
+      await releaseReconcileClaim();
+      return "ambiguous";
+    }
+    await closeAttempt("reconcile_manual_review", { reason: "no event_date; cannot read back", at: new Date().toISOString() });
+    await mirrorCutoverSummary(intentId);
+    return "manual";
+  }
+
+  const openedAtMs = new Date(att.started_at).getTime();
+  const expectedZip = intent.preview?.artBlock?.locationZip5 ?? zip5(intent.preview?.reservation?.branchZip);
+  let rbRows: BlockReadbackRow[];
+  let watermarkUtc: string | null;
+  try {
+    ({ rows: rbRows, watermarkUtc } = await fetchRows(intent.ldap, dateISO));
+  } catch (e: any) {
+    // Transient readback failure: attempt stays open (filing stays fenced).
+    await touchIntent(intentId, { last_error: `ART reconcile readback failed: ${e?.message ?? e}` });
+    await releaseReconcileClaim();
+    return "ambiguous";
+  }
+  const verdict = classifyBlockReadback({
+    rows: rbRows,
+    blockSubmittedAt: att.started_at, // the POST (if any) happened after the ledger INSERT
+    expectedZip5: expectedZip || "",
+    globalWatermark: watermarkUtc,
+  });
+
+  if (verdict.verdict === "block_verified") {
+    const acceptedEvidence = JSON.stringify({
+      ...(intent.block_evidence ?? {}),
+      reconciled: true,
+      readback: verdict,
+      at: new Date().toISOString(),
+    });
+    // 'accepted' allowed for the idempotent re-assert of a half-finalized
+    // adoption (crash between parent write and attempt close).
+    const { rows: w } = await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET block_state = 'accepted',
+          block_submitted_at = ${new Date(att.started_at).toISOString()}::timestamptz,
+          block_evidence = ${acceptedEvidence}::jsonb,
+          last_error = NULL, updated_at = now()
+      WHERE id = ${intentId}
+        AND block_state IN ('pending','retry','filing','accepted')
+      RETURNING id
+    `);
+    if ((w as any[]).length === 0) {
+      await releaseReconcileClaim();
+      return "ambiguous";
+    }
+    await closeAttempt("accepted_reconciled", { readback: verdict, at: new Date().toISOString() });
+    await mirrorCutoverSummary(intentId);
+    return "recovered";
+  }
+  if (verdict.verdict === "verification_pending") {
+    // No snapshot loaded after the attempt opened — cannot prove either way.
+    await touchIntent(intentId, { last_error: `ART reconcile pending: ${verdict.reason}` });
+    await releaseReconcileClaim();
+    return "ambiguous";
+  }
+  // A fresh snapshot exists. If it carries ANY block-token row for the day,
+  // the interrupted POST may have landed with mangled fields — never refile
+  // over it; a human decides. If it has no block-ish row at all, the POST
+  // provably never landed: clear the ledger and refile on the next sweep.
+  const freshBlockish = rbRows.filter(
+    (r) => new Date(r.snapshotTs).getTime() > openedAtMs && normalizeActivity(r.activity) === BLOCK_ACTIVITY_TOKEN,
+  );
+  if (freshBlockish.length) {
+    const { rows: w } = await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET block_state = 'manual_repair', status = 'manual_review', updated_at = now(),
+          last_error = ${`ART reconcile: fresh snapshot has block-like rows that don't match the spec — human review (${verdict.reason})`}
+      WHERE id = ${intentId}
+        AND block_state IN ('pending','retry','filing','manual_repair','failed')
+      RETURNING id
+    `);
+    if ((w as any[]).length === 0) {
+      await releaseReconcileClaim();
+      return "ambiguous";
+    }
+    await closeAttempt("reconcile_manual_review", { readback: verdict, near: freshBlockish, at: new Date().toISOString() });
+    await mirrorCutoverSummary(intentId);
+    return "manual";
+  }
+  // No-trace → retry is the most dangerous downgrade: it re-arms filing. It
+  // may ONLY land on states that still own an unresolved filing — never over
+  // accepted/verified/conflict/manual (another writer's resolved decision).
+  const { rows: w } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET block_state = 'retry', next_retry_at = now(), updated_at = now(),
+        last_error = 'ART attempt interrupted; readback shows no trace — refiling on next sweep'
+    WHERE id = ${intentId}
+      AND block_state IN ('pending','retry','filing')
+    RETURNING id
+  `);
+  if ((w as any[]).length === 0) {
+    await releaseReconcileClaim();
+    return "ambiguous";
+  }
+  await closeAttempt("abandoned_no_trace", { readback: verdict, at: new Date().toISOString() });
+  await mirrorCutoverSummary(intentId);
+  return "cleared";
+}
+
+/** Sweep lane: reconcile every stranded open art_block attempt (crash recovery). */
+export async function reconcileOpenBlockAttempts(deps?: BlockReconcileDeps): Promise<number> {
+  const { rows } = await db.execute(sql`
+    SELECT DISTINCT i.id FROM vrm_rental_workflow_intents i
+    JOIN vrm_workflow_attempts a
+      ON a.intent_id = i.id AND a.phase = 'art_block' AND a.outcome IS NULL
+    WHERE i.status NOT IN ('completed','cancelled','abandoned')
+    ORDER BY i.id
+    LIMIT 20
+  `);
+  let n = 0;
+  for (const r of rows as any[]) {
+    try {
+      if ((await reconcileOpenBlockAttempt(r.id, deps)) !== "none") n++;
+    } catch (e: any) {
+      console.error(`[cutover] block reconcile failed for intent ${r.id}:`, e?.message ?? e);
+    }
+  }
+
+  // Pre-INSERT crash shape: a filing claim with NO open attempt means the CAS
+  // was won but the ledger INSERT never ran — provably nothing was POSTed
+  // (the POST strictly follows the INSERT). Re-park after a grace window;
+  // the retry sweep (which runs after this lane) picks it straight up.
+  const { rows: staleClaims } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents i
+    SET block_state = 'retry', next_retry_at = now(), updated_at = now(),
+        last_error = 'filing claim interrupted before any attempt was recorded; re-parked'
+    WHERE i.block_state = 'filing'
+      AND i.updated_at < now() - interval '10 minutes'
+      AND i.status NOT IN ('completed','cancelled','abandoned')
+      AND NOT EXISTS (
+        SELECT 1 FROM vrm_workflow_attempts a
+        WHERE a.intent_id = i.id AND a.phase = 'art_block' AND a.outcome IS NULL
+      )
+    RETURNING i.id
+  `);
+  n += (staleClaims as any[]).length;
+  return n;
+}
+
+export async function fileContractBlock(intentId: number, deps?: BlockReconcileDeps): Promise<void> {
+  const intent = await loadIntent(intentId);
+  // Live path requires a VERIFIED reservation. Dark modes have no reservation
+  // to verify — the runner's dry_run_validated outcome is their trigger, so
+  // the block lane (would_file / TEST filing) still gets exercised end-to-end.
+  const darkValidated = intent.execution_mode !== "live" && intent.reservation_state === "dry_run_validated";
+  if (intent.reservation_state !== "verified" && !darkValidated) return;
+  if (!["pending", "retry"].includes(intent.block_state)) return;
+
+  // Request-path ART rules (project label / 'Vehicle - Pickup' token /
+  // template) are NOT approved yet — park the block lane instead of filing a
+  // cutover-shaped block against a pickup. Messages stay pending too.
+  if (intent.workflow_type === WORKFLOW_REQUEST) {
+    await touchIntent(intentId, {
+      block_state: "skipped_pending_rules",
+      block_evidence: {
+        skipped: true,
+        reason: "request-path ART template/token not approved; filing disabled",
+        at: new Date().toISOString(),
+      },
+    });
+    await mirrorCutoverSummary(intentId);
+    return;
+  }
+
+  const preview = intent.preview ?? {};
+  const art = preview.artBlock ?? {};
+  const dateISO = intent.event_date ? String(intent.event_date).slice(0, 10) : art.date;
+  const unit = art.unit ?? null;
+  const locZip = art.locationZip5 ?? null;
+  if (!dateISO || !unit || !locZip) {
+    await touchIntent(intentId, {
+      block_state: "failed",
+      status: "manual_review",
+      last_error: "block spec incomplete (date/unit/zip missing from preview)",
+    });
+    await mirrorCutoverSummary(intentId);
+    return;
+  }
+
+  const live = intent.execution_mode === "live" && isContractBlockLive();
+  const conf = strOrNull(intent.reservation_evidence?.confirmation) ?? "n/a";
+  const ecars = preview.enterpriseCase?.ecars ?? "n/a";
+  const claim = preview.enterpriseCase?.claim ?? null;
+  const args: StandardActivityArgs = {
+    techLdap: intent.ldap,
+    unit: String(unit),
+    truckNumber: String(intent.truck_number ?? preview.tpmsTruck ?? ""),
+    date: dateISO,
+    locationZip: locZip,
+    durationMinutes: 30,
+    startTime: "08:00",
+    startTimeRequest: "Exact",
+    projectLabel: "Vehicle Change",
+    projectNotes: `Cutover intent #${intent.id}: Enterprise billing changeover; reservation ${conf}.`,
+    rowNotes: `SHS TRUCK ${intent.truck_number ?? "?"}. Enterprise ${preview.reservation?.branchName ?? ""} ${preview.reservation?.branchAddress ?? ""}. Reservation ${conf}. ECARS ${ecars}${claim ? `, ARI claim ${claim}` : ""}. Billing changeover — tech keeps current vehicle. Intent #${intent.id}.`,
+    submittedBy: "cutover-workflow",
+    live,
+  };
+  const { projectName, body } = buildStandardActivityPayload(args);
+
+  // dry_run mode: record what WOULD be filed; no external call at all.
+  if (intent.execution_mode === "dry_run") {
+    await touchIntent(intentId, {
+      block_state: "dry_run_would_file",
+      block_evidence: { wouldFile: true, projectName, payload: body, at: new Date().toISOString() },
+    });
+    await mirrorCutoverSummary(intentId);
+    return;
+  }
+
+  // Crash recovery FIRST: an open attempt means an unresolved external op.
+  // That question outranks even the kill switch — reconcile is read-only and
+  // must keep the ledger honest regardless of arming; an ambiguous strand
+  // leaves state untouched (fenced), never re-parked.
+  if ((await reconcileOpenBlockAttempt(intentId, deps)) !== "none") return;
+
+  // LIVE kill switch at the FILING boundary. sendStandardActivity POSTs
+  // whenever its config exists — `live` only shapes the payload name — so a
+  // live intent disarmed between reservation verification and filing must
+  // return here, BEFORE any attempt row or external request. 'retry' +
+  // next_retry_at keeps the lane sweep-retryable: while disarmed each sweep
+  // re-parks it here; once re-armed the next sweep files for real.
+  if (intent.execution_mode === "live" && !isContractBlockLive()) {
+    await touchIntent(intentId, {
+      block_state: "retry",
+      next_retry_at: new Date(Date.now() + 30 * 60 * 1000),
+      last_error: "VRM_CONTRACT_BLOCK_ENABLED disarmed; block filing frozen until re-armed",
+    });
+    await mirrorCutoverSummary(intentId);
+    return;
+  }
+
+  // Filing claim CAS: pending/retry → 'filing' atomically. A stale or
+  // concurrent caller — one whose gates above ran against an intent another
+  // filing has since resolved — gets zero rows here and must NOT file.
+  // Recovery if this claim later crashes: with an open attempt the reconcile
+  // lane resolves it; with no attempt the sweep re-parks it (nothing can have
+  // been POSTed before the attempt INSERT below).
+  const { rows: filingClaim } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET block_state = 'filing', updated_at = now()
+    WHERE id = ${intentId} AND block_state IN ('pending', 'retry')
+    RETURNING id
+  `);
+  if ((filingClaim as any[]).length === 0) return;
+
+  // Persist intent-to-file BEFORE the call (attempt ledger).
+  let attemptNo: number;
+  try {
+    const { rows: att } = await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts (intent_id, phase, attempt_no, fencing_token, request_hash, request)
+      SELECT ${intentId}, 'art_block', COALESCE(MAX(attempt_no), 0) + 1, ${intent.fencing_token},
+             ${previewHash(body)}, ${JSON.stringify({ projectName, body })}::jsonb
+      FROM vrm_workflow_attempts WHERE intent_id = ${intentId} AND phase = 'art_block'
+      RETURNING attempt_no
+    `);
+    attemptNo = (att as any[])[0]?.attempt_no;
+  } catch (e: any) {
+    if (e?.code === "23505" || /duplicate key value/i.test(String(e?.message ?? ""))) {
+      // one-open index refused a duplicate open. Should be unreachable behind
+      // the CAS — surrender the claim so the sweep lanes drive recovery
+      // rather than stranding 'filing'.
+      await db.execute(sql`
+        UPDATE vrm_rental_workflow_intents
+        SET block_state = 'retry', next_retry_at = now() + interval '30 minutes', updated_at = now()
+        WHERE id = ${intentId} AND block_state = 'filing'
+      `);
+      console.error(`[cutover] intent ${intentId}: concurrent art_block attempt already open; claim surrendered`);
+      return;
+    }
+    throw e;
+  }
+
+  const result = await sendStandardActivity(args);
+
+  // Finalize ORDER: parent state FIRST (branches below), attempt-close LAST.
+  // A crash between them leaves an advanced parent + an OPEN attempt — safe:
+  // filing stays fenced by the one-open index and the reconcile lane
+  // converges it. The reverse order (closed attempt + stale parent) is the
+  // double-file window: nothing fences, and the parent still looks claimable.
+  if (result.ok) {
+    await touchIntent(intentId, {
+      block_state: "accepted",
+      block_submitted_at: new Date(),
+      block_evidence: {
+        projectId: result.projectId,
+        projectName: result.projectName,
+        httpStatus: result.httpStatus,
+        payload: result.payload,
+        live,
+        acceptedAt: new Date().toISOString(),
+      },
+      last_error: null,
+    });
+  } else if (result.skipReason === "duplicate") {
+    // 409: the key already exists — an existing (possibly malformed) block may
+    // own it. NEVER re-fire; readback decides. Msg1 does NOT release.
+    await touchIntent(intentId, {
+      block_state: "conflict_pending_readback",
+      block_submitted_at: new Date(),
+      status: "block_conflict_pending_readback",
+      block_evidence: {
+        conflict: true,
+        projectName: result.projectName,
+        httpStatus: result.httpStatus,
+        payload: result.payload,
+        at: new Date().toISOString(),
+      },
+      last_error: "ART 409 duplicate; awaiting snapshot readback",
+    });
+  } else if (result.retryable) {
+    const { rows: cnt } = await db.execute(sql`
+      SELECT COUNT(*)::int AS n FROM vrm_workflow_attempts WHERE intent_id = ${intentId} AND phase = 'art_block'
+    `);
+    const n = (cnt as any[])[0]?.n ?? 1;
+    if (n >= 3) {
+      await touchIntent(intentId, {
+        block_state: "failed",
+        status: "manual_review",
+        last_error: `ART filing failed ${n}x: ${result.errorMessage ?? "unknown"}`,
+      });
+    } else {
+      await touchIntent(intentId, {
+        block_state: "retry",
+        next_retry_at: new Date(Date.now() + 10 * 60 * 1000),
+        last_error: `ART transient failure (attempt ${n}): ${result.errorMessage ?? "unknown"}`,
+      });
+    }
+  } else {
+    await touchIntent(intentId, {
+      block_state: "failed",
+      status: "manual_review",
+      last_error: `ART filing failed (non-retryable): ${result.errorMessage ?? result.skipReason ?? "unknown"}`,
+    });
+  }
+  await db.execute(sql`
+    UPDATE vrm_workflow_attempts
+    SET outcome = ${result.ok ? "accepted" : result.skipReason ?? "failed"},
+        finished_at = now(),
+        evidence = ${JSON.stringify({ httpStatus: result.httpStatus, projectId: result.projectId, projectName: result.projectName, error: result.errorMessage })}::jsonb
+    WHERE intent_id = ${intentId} AND phase = 'art_block' AND attempt_no = ${attemptNo} AND outcome IS NULL
+  `);
+  await mirrorCutoverSummary(intentId);
+}
+
+/** Retry lane for transient block failures (cron sweep calls this). */
+export async function retryPendingBlocks(): Promise<number> {
+  const { rows } = await db.execute(sql`
+    SELECT id FROM vrm_rental_workflow_intents
+    WHERE block_state = 'retry' AND next_retry_at <= now()
+      AND status NOT IN ('completed','cancelled','abandoned')
+    ORDER BY id LIMIT 10
+  `);
+  let n = 0;
+  for (const r of rows as any[]) {
+    // Lease-style push BEFORE filing: if the process dies mid-call the row is
+    // eligible again in 6h on its own (an open attempt is reconciled first);
+    // every success path rewrites block_state, making the push inert. Never
+    // NULL next_retry_at pre-flight — a crash would strand the row forever.
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents SET next_retry_at = now() + interval '6 hours' WHERE id = ${r.id}
+    `);
+    await fileContractBlock(r.id);
+    n++;
+  }
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// Messages (guarded, sequenced)
+// ---------------------------------------------------------------------------
+
+async function upsertSendGuard(params: {
+  intentId: number;
+  workflowType: string;
+  moment: "msg1_evening" | "msg2_morning";
+  executionMode: string;
+  body: string;
+  phoneDigits: string | null;
+  scheduledFor: Date | null;
+  status: string;
+}): Promise<{ created: boolean; guard: any }> {
+  const { rows } = await db.execute(sql`
+    INSERT INTO vrm_workflow_send_guards
+      (intent_id, workflow_type, message_moment, execution_mode, status, body, phone_digits, scheduled_for)
+    VALUES (${params.intentId}, ${params.workflowType}, ${params.moment}, ${params.executionMode},
+            ${params.status}, ${params.body}, ${params.phoneDigits}, ${params.scheduledFor})
+    ON CONFLICT (intent_id, workflow_type, message_moment, execution_mode) DO NOTHING
+    RETURNING *
+  `);
+  const inserted = (rows as any[])[0];
+  if (inserted) return { created: true, guard: inserted };
+  const { rows: existing } = await db.execute(sql`
+    SELECT * FROM vrm_workflow_send_guards
+    WHERE intent_id = ${params.intentId} AND workflow_type = ${params.workflowType}
+      AND message_moment = ${params.moment} AND execution_mode = ${params.executionMode}
+    LIMIT 1
+  `);
+  return { created: false, guard: (existing as any[])[0] };
+}
+
+/**
+ * Dispatch ticket for a send guard: CAS created→dispatching so exactly one
+ * concurrent releaser dispatches (the second UPDATE re-evaluates its predicate
+ * after the row lock clears and matches nothing). A guard stuck in
+ * 'dispatching' for 15+ minutes — crash between dispatch and the outcome
+ * write — is reclaimable; that retry leans on the comms 24h duplicate gate,
+ * whose skip result is recorded as sent. Exported for tests.
+ */
+export async function claimSendGuardDispatch(
+  intentId: number,
+  moment: string,
+  executionMode: string,
+): Promise<boolean> {
+  const { rows } = await db.execute(sql`
+    UPDATE vrm_workflow_send_guards
+    SET status = 'dispatching', updated_at = now()
+    WHERE intent_id = ${intentId} AND message_moment = ${moment} AND execution_mode = ${executionMode}
+      AND (status = 'created' OR (status = 'dispatching' AND updated_at < now() - interval '15 minutes'))
+    RETURNING id
+  `);
+  return (rows as any[]).length > 0;
+}
+
+/**
+ * Message 1 releases ONLY on reservation_verified + real-2xx block_accepted.
+ * Message 2 is created HELD at the same moment (durable intent) and stays
+ * undrainable until the morning sweep confirms block_verified.
+ */
+export async function releaseMessagesIfEligible(intentId: number): Promise<void> {
+  const intent = await loadIntent(intentId);
+  if (TERMINAL_STATUSES.has(intent.status)) return;
+  // Request-path SMS wording is not approved; the whole message lane stays
+  // pending for rental_request intents until Tyler signs the request rules.
+  if (intent.workflow_type === WORKFLOW_REQUEST) return;
+  const darkValidated = intent.execution_mode !== "live" && intent.reservation_state === "dry_run_validated";
+  if (intent.reservation_state !== "verified" && !darkValidated) return;
+  const blockOk =
+    intent.block_state === "accepted" ||
+    intent.block_state === "verified" ||
+    (intent.execution_mode === "dry_run" && intent.block_state === "dry_run_would_file");
+  if (!blockOk) return;
+
+  const preview = intent.preview ?? {};
+  const conf = strOrNull(intent.reservation_evidence?.confirmation) ?? "(pending)";
+  const branchName = preview.reservation?.branchName ?? preview.reservation?.branchCode ?? "branch";
+  const branchAddress = preview.reservation?.branchAddress ?? "";
+  const msg1Body = renderMsg1({ conf, branchName, branchAddress });
+  const msg2Body = renderMsg2({ conf, branchName, branchAddress });
+
+  const facts = await fetchEligibilityFacts({
+    workflowType: intent.workflow_type,
+    sourceId: intent.source_id,
+    excludeIntentId: intent.id,
+  });
+  const phone = facts.contactPhone ?? facts.requestFallbackPhone;
+  const phoneDigits = phone ? digitsOnly(phone).slice(-10) : null;
+  const isLive = intent.execution_mode === "live";
+  // Master kill switch: disarming the flag freezes every live send path.
+  // States stay pending and release when the flag is re-armed.
+  if (isLive && !isContractBlockLive()) return;
+
+  // ---- Message 1 (evening instructions) ------------------------------------
+  if (intent.msg1_state === "pending") {
+    const g1 = await upsertSendGuard({
+      intentId,
+      workflowType: intent.workflow_type,
+      moment: "msg1_evening",
+      executionMode: intent.execution_mode,
+      body: msg1Body,
+      phoneDigits,
+      scheduledFor: null,
+      status: "created",
+    });
+    // Dispatch ticket: exactly one concurrent releaser wins the CAS; a crash
+    // between dispatch and the outcome write leaves 'dispatching', reclaimed
+    // after 15 minutes with the 24h duplicate gate making the retry safe.
+    const g1Status = g1.created ? "created" : String(g1.guard?.status ?? "");
+    if (
+      (g1Status === "created" || g1Status === "dispatching") &&
+      (await claimSendGuardDispatch(intentId, "msg1_evening", intent.execution_mode))
+    ) {
+      if (!isLive) {
+        // Dark modes: durable guard only; sendMessage dry-run records the gate outcome.
+        const dry = await sendMessage({
+          ldap: intent.ldap,
+          phone: intent.workflow_type === WORKFLOW_REQUEST ? phone : undefined,
+          category: COMMS_CATEGORY,
+          body: msg1Body,
+          sentBy: "cutover-workflow",
+          senderName: "SHS Fleet",
+          dryRun: true,
+          skipRecentDuplicate: true,
+        });
+        await db.execute(sql`
+          UPDATE vrm_workflow_send_guards SET status = ${"simulated_" + dry.status}, updated_at = now()
+          WHERE intent_id = ${intentId} AND message_moment = 'msg1_evening' AND execution_mode = ${intent.execution_mode}
+        `);
+        await touchIntent(intentId, { msg1_state: "released" });
+      } else {
+        const res = await sendMessage({
+          ldap: intent.ldap,
+          phone: intent.workflow_type === WORKFLOW_REQUEST ? phone : undefined,
+          category: COMMS_CATEGORY,
+          body: msg1Body,
+          sentBy: "cutover-workflow",
+          senderName: "SHS Fleet",
+          skipRecentDuplicate: true,
+        });
+        // A duplicate-skip means the identical body already reached this phone
+        // within 24h (e.g. crash-retry after a successful dispatch): that IS
+        // sent, never a manual_review conflict.
+        const dupSkip = res.status === "skipped" && /duplicate/i.test(res.reason ?? "");
+        await db.execute(sql`
+          UPDATE vrm_workflow_send_guards
+          SET status = ${dupSkip ? "sent_duplicate" : res.status}, queue_id = ${res.queueId ?? null}, message_id = ${res.messageId ?? null}, updated_at = now()
+          WHERE intent_id = ${intentId} AND message_moment = 'msg1_evening' AND execution_mode = ${intent.execution_mode}
+        `);
+        if (res.status === "sent" || res.status === "queued" || dupSkip) {
+          await touchIntent(intentId, { msg1_state: dupSkip ? "sent" : res.status });
+        } else {
+          await touchIntent(intentId, {
+            msg1_state: "blocked",
+            status: "manual_review",
+            last_error: `msg1 ${res.status}: ${res.reason ?? ""}`,
+          });
+        }
+      }
+    }
+  }
+
+  // ---- Message 2 (morning reminder) — durable HELD intent --------------------
+  const i2 = await loadIntent(intentId);
+  if (i2.msg2_state === "pending" && (i2.msg1_state === "sent" || i2.msg1_state === "queued" || i2.msg1_state === "released")) {
+    // Target: morning of the event date; the sweep re-computes the compliant
+    // time at release. Placeholder scheduled_for = event date 06:45 ET.
+    const eventISO = i2.event_date ? String(i2.event_date).slice(0, 10) : etTodayISO();
+    const placeholder = new Date(`${eventISO}T06:45:00-04:00`);
+    const g2 = await upsertSendGuard({
+      intentId,
+      workflowType: i2.workflow_type,
+      moment: "msg2_morning",
+      executionMode: i2.execution_mode,
+      body: msg2Body,
+      phoneDigits,
+      scheduledFor: placeholder,
+      status: "held",
+    });
+    const g2Status = g2.created ? "held" : String(g2.guard?.status ?? "");
+    if (isLive && phone) {
+      // Enqueue ticket: CAS held→enqueueing (queue_id still NULL) so exactly
+      // one caller creates the held queue row. A crash mid-enqueue leaves
+      // 'enqueueing'; after 15 minutes the recovery pass ADOPTS the orphan
+      // held row if the crashed attempt got that far, else enqueues fresh.
+      if (g2Status === "held" || g2Status === "enqueueing") {
+        const { rows: ticket } = await db.execute(sql`
+          UPDATE vrm_workflow_send_guards
+          SET status = 'enqueueing', updated_at = now()
+          WHERE intent_id = ${intentId} AND message_moment = 'msg2_morning' AND execution_mode = ${i2.execution_mode}
+            AND queue_id IS NULL
+            AND (status = 'held' OR (status = 'enqueueing' AND updated_at < now() - interval '15 minutes'))
+          RETURNING id
+        `);
+        if ((ticket as any[]).length) {
+          const { rows: orphans } = await db.execute(sql`
+            SELECT id FROM fs_comms_send_queue
+            WHERE status = 'held' AND phone_digits = ${phoneDigits} AND body = ${msg2Body}
+            ORDER BY id DESC LIMIT 1
+          `);
+          let queueId: any = (orphans as any[])[0]?.id ?? null;
+          if (!queueId) {
+            const held = await sendMessage({
+              ldap: i2.ldap,
+              phone: i2.workflow_type === WORKFLOW_REQUEST ? phone : undefined,
+              category: COMMS_CATEGORY,
+              body: msg2Body,
+              sentBy: "cutover-workflow",
+              senderName: "SHS Fleet",
+              skipRecentDuplicate: true,
+              hold: true,
+              scheduledFor: placeholder,
+            });
+            queueId = held.queueId ?? null;
+          }
+          await db.execute(sql`
+            UPDATE vrm_workflow_send_guards
+            SET status = 'held', queue_id = ${queueId}, updated_at = now()
+            WHERE intent_id = ${intentId} AND message_moment = 'msg2_morning' AND execution_mode = ${i2.execution_mode}
+          `);
+        }
+      }
+      await touchIntent(intentId, { msg2_state: "held" });
+    } else if (g2.created || g2Status === "held") {
+      await touchIntent(intentId, { msg2_state: "held" });
+    }
+  }
+  await mirrorCutoverSummary(intentId);
+}
+
+// ---------------------------------------------------------------------------
+// Morning sweep — block readback, msg2 release, completion
+// ---------------------------------------------------------------------------
+
+export async function morningSweep(): Promise<{
+  checked: number;
+  verified: number;
+  pending: number;
+  repairs: number;
+  released: number;
+  completed: number;
+  blockRetries: number;
+  blockReconciles: number;
+}> {
+  const summary = { checked: 0, verified: 0, pending: 0, repairs: 0, released: 0, completed: 0, blockRetries: 0, blockReconciles: 0 };
+
+  // Crash recovery FIRST: resolve stranded open art_block attempts so the
+  // retry lane below never files over an ambiguous ledger.
+  summary.blockReconciles = await reconcileOpenBlockAttempts();
+  summary.blockRetries = await retryPendingBlocks();
+
+  const { rows } = await db.execute(sql`
+    SELECT id FROM vrm_rental_workflow_intents
+    WHERE status NOT IN ('completed','cancelled','abandoned')
+      AND block_state IN ('accepted','conflict_pending_readback','verification_pending')
+      AND block_submitted_at IS NOT NULL
+      AND event_date IS NOT NULL
+    ORDER BY id
+  `);
+
+  for (const r of rows as any[]) {
+    const intent = await loadIntent(r.id);
+    summary.checked++;
+    const dateISO = String(intent.event_date).slice(0, 10);
+    const expectedZip = intent.preview?.artBlock?.locationZip5 ?? zip5(intent.preview?.reservation?.branchZip);
+    let verdict: ReturnType<typeof classifyBlockReadback>;
+    try {
+      const { rows: rbRows, watermarkUtc } = await fetchBlockReadbackRows(intent.ldap, dateISO);
+      verdict = classifyBlockReadback({
+        rows: rbRows,
+        blockSubmittedAt: intent.block_submitted_at,
+        expectedZip5: expectedZip ?? "",
+        globalWatermark: watermarkUtc,
+      });
+    } catch (e: any) {
+      console.error(`[cutover] block readback failed for intent ${intent.id}:`, e?.message ?? e);
+      continue;
+    }
+
+    if (verdict.verdict === "block_verified") {
+      summary.verified++;
+      const wasConflict = intent.status === "block_conflict_pending_readback";
+      await touchIntent(intent.id, {
+        block_state: "verified",
+        ...(wasConflict ? { status: "reservation_verified" } : {}),
+        block_evidence: { ...(intent.block_evidence ?? {}), readback: verdict, verifiedAt: new Date().toISOString() },
+        last_error: null,
+      });
+      // A conflict that verifies releases msg1 now (block proven present+correct).
+      await releaseMessagesIfEligible(intent.id);
+
+      // Release msg2: flip the held queue row to pending with a compliant time.
+      // Kill switch: a disarmed flag freezes live msg2 releases (rows stay held).
+      const fresh = await loadIntent(intent.id);
+      const msg2Armed = fresh.execution_mode !== "live" || isContractBlockLive();
+      if (fresh.msg2_state === "held" && msg2Armed) {
+        const { rows: guards } = await db.execute(sql`
+          SELECT * FROM vrm_workflow_send_guards
+          WHERE intent_id = ${intent.id} AND message_moment = 'msg2_morning' AND execution_mode = ${fresh.execution_mode}
+          LIMIT 1
+        `);
+        const guard = (guards as any[])[0];
+        const facts = await fetchEligibilityFacts({
+          workflowType: fresh.workflow_type,
+          sourceId: fresh.source_id,
+          excludeIntentId: fresh.id,
+        });
+        const compliant = getNextAllowedSendTime(String(facts.contactState ?? "")) ?? new Date();
+        if (guard?.queue_id) {
+          const { rows: flipped } = await db.execute(sql`
+            UPDATE fs_comms_send_queue
+            SET status = 'pending', scheduled_for = ${compliant}, updated_at = now()
+            WHERE id = ${guard.queue_id} AND status = 'held'
+            RETURNING id
+          `);
+          if ((flipped as any[]).length) summary.released++;
+        }
+        await db.execute(sql`
+          UPDATE vrm_workflow_send_guards
+          SET status = 'released', scheduled_for = ${compliant}, updated_at = now()
+          WHERE intent_id = ${intent.id} AND message_moment = 'msg2_morning' AND execution_mode = ${fresh.execution_mode}
+        `);
+        await touchIntent(intent.id, { msg2_state: "released" });
+      }
+
+      const final = await loadIntent(intent.id);
+      if (completionSatisfied(final)) {
+        await touchIntent(intent.id, { status: "completed" });
+        summary.completed++;
+      }
+      await mirrorCutoverSummary(intent.id);
+    } else if (verdict.verdict === "verification_pending") {
+      summary.pending++;
+      if (intent.block_state !== "verification_pending" && intent.block_state !== "conflict_pending_readback") {
+        await touchIntent(intent.id, { block_state: "verification_pending" });
+        await mirrorCutoverSummary(intent.id);
+      }
+    } else {
+      summary.repairs++;
+      console.error(
+        `[cutover] BLOCK MANUAL REPAIR intent=${intent.id} ldap=${intent.ldap} date=${dateISO}: ${verdict.reason}`,
+      );
+      await touchIntent(intent.id, {
+        block_state: "manual_repair",
+        status: "manual_review",
+        last_error: `block readback: ${verdict.reason}`,
+      });
+      await mirrorCutoverSummary(intent.id);
+    }
+  }
+
+  return summary;
+}
+
+// ---------------------------------------------------------------------------
+// Staff actions: retry / cancel
+// ---------------------------------------------------------------------------
+
+export async function retryIntent(intentId: number, requestedBy: string): Promise<any> {
+  const intent = await loadIntent(intentId);
+  if (TERMINAL_STATUSES.has(intent.status)) throw new OrchestratorError("terminal", "intent is terminal", 409);
+
+  switch (intent.status) {
+    case "preview_required":
+    case "manual_review": {
+      if (intent.reservation_state === "verified") {
+        // Reservation stands; retry the downstream step.
+        if (["failed", "manual_repair", "retry"].includes(intent.block_state)) {
+          await touchIntent(intentId, { status: "reservation_verified", block_state: "retry", next_retry_at: null, last_error: `retry by ${requestedBy}` });
+          await fileContractBlock(intentId);
+          await releaseMessagesIfEligible(intentId);
+        } else {
+          await touchIntent(intentId, { status: "reservation_verified", last_error: `retry by ${requestedBy}` });
+          await releaseMessagesIfEligible(intentId);
+        }
+      } else if (intent.reservation_state === "unknown" || intent.reservation_state === "booked_unverified") {
+        // Must reconcile via readback — make it claimable, op_open stays blocked
+        // by the unfinished-attempt guard until a readback resolves it.
+        await touchIntent(intentId, { status: "booking", claimed_by: null, lease_expires_at: null, next_retry_at: null, last_error: `reconcile requested by ${requestedBy}` });
+      } else {
+        await touchIntent(intentId, { status: "preview_pending", claimed_by: null, lease_expires_at: null, next_retry_at: null, last_error: `retry by ${requestedBy}` });
+      }
+      break;
+    }
+    case "booking_unknown": {
+      // Staff-initiated reconcile ONLY (never automatic): claimable for readback.
+      await touchIntent(intentId, { status: "booking", claimed_by: null, lease_expires_at: null, next_retry_at: null, last_error: `reconcile requested by ${requestedBy}` });
+      break;
+    }
+    case "awaiting_verification": {
+      if (intent.reservation_state !== "booked_unverified") {
+        throw new OrchestratorError("bad_state", "dark-parked validation intents have no reservation to verify", 409);
+      }
+      // Booked but never verified (runner died before its readback): surrender
+      // the claim so the recovery lane readbacks it on the next poll.
+      await touchIntent(intentId, { claimed_by: null, lease_expires_at: null, next_retry_at: null, last_error: `readback reconcile requested by ${requestedBy}` });
+      break;
+    }
+    case "block_conflict_pending_readback": {
+      // Nothing to do but wait for the sweep; surface that clearly.
+      throw new OrchestratorError("await_readback", "conflict is pending snapshot readback; the morning sweep resolves it", 409);
+    }
+    default:
+      throw new OrchestratorError("bad_state", `nothing to retry from status ${intent.status}`, 409);
+  }
+  await mirrorCutoverSummary(intentId);
+  return loadIntent(intentId);
+}
+
+export async function cancelIntent(intentId: number, cancelledBy: string, reason: string): Promise<any> {
+  const intent = await loadIntent(intentId);
+  if (TERMINAL_STATUSES.has(intent.status)) return intent;
+  // Cancelling after external effects exist demands eyes: allow it, but keep
+  // the evidence and say so loudly in last_error.
+  const warn =
+    intent.reservation_state === "verified" || intent.reservation_state === "booked_unverified"
+      ? " — WARNING: a reservation exists; cancel it in ETD manually"
+      : "";
+  await touchIntent(intentId, {
+    status: "cancelled",
+    last_error: `cancelled by ${cancelledBy}: ${reason}${warn}`,
+    claimed_by: null,
+    lease_expires_at: null,
+  });
+  await mirrorCutoverSummary(intentId);
+  return loadIntent(intentId);
+}
+
+// ---------------------------------------------------------------------------
+// Reads for the UI
+// ---------------------------------------------------------------------------
+
+export async function getIntentDetail(intentId: number): Promise<any> {
+  const intent = await loadIntent(intentId);
+  const { rows: attempts } = await db.execute(sql`
+    SELECT * FROM vrm_workflow_attempts WHERE intent_id = ${intentId} ORDER BY phase, attempt_no
+  `);
+  const { rows: guards } = await db.execute(sql`
+    SELECT * FROM vrm_workflow_send_guards WHERE intent_id = ${intentId} ORDER BY message_moment
+  `);
+  return { ...intent, displayPhase: deriveDisplayPhase(intent), attempts, guards };
+}
+
+export async function listIntents(filters: { status?: string; workflowType?: string; ldap?: string; limit?: number }): Promise<any[]> {
+  const limit = Math.max(1, Math.min(filters.limit ?? 100, 500));
+  const conds: any[] = [sql`1 = 1`];
+  if (filters.status) conds.push(sql`status = ${filters.status}`);
+  if (filters.workflowType) conds.push(sql`workflow_type = ${filters.workflowType}`);
+  if (filters.ldap) conds.push(sql`upper(ldap) = ${filters.ldap.toUpperCase()}`);
+  const where = conds.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc} AND ${cur}`));
+  const { rows } = await db.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents WHERE ${where} ORDER BY updated_at DESC LIMIT ${limit}
+  `);
+  return (rows as any[]).map((r) => ({ ...r, displayPhase: deriveDisplayPhase(r) }));
+}
+
+/** Survey-page helper: intent status per survey response id. */
+export async function intentsBySourceIds(workflowType: string, sourceIds: string[]): Promise<Record<string, any>> {
+  if (!sourceIds.length) return {};
+  const joined = sourceIds.map((s) => String(s)).join(",");
+  const { rows } = await db.execute(sql`
+    SELECT DISTINCT ON (source_id) *
+    FROM vrm_rental_workflow_intents
+    WHERE workflow_type = ${workflowType}
+      AND source_id = ANY(string_to_array(${joined}, ','))
+    ORDER BY source_id, source_revision DESC, id DESC
+  `);
+  const out: Record<string, any> = {};
+  for (const r of rows as any[]) {
+    out[r.source_id] = { ...r, displayPhase: deriveDisplayPhase(r) };
+  }
+  return out;
+}

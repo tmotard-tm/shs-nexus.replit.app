@@ -847,7 +847,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // block are one queryable record instead of a JSON file on one laptop.
         || (req.method === "POST" && req.path === "/forms/rental-survey/record-booking")
         || (req.method === "POST" && req.path === "/forms/rental-survey/ams-status")
-        || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")) {
+        || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")
+        // Cutover workflow intents: the same outside-the-box Python runner
+        // claims preview/booking work, posts quotes and booking outcomes back,
+        // and the platform cron fires the morning sweep. schedule-check serves
+        // the runner's tech_schedule client. This allowlist only lets the cron
+        // bearer BYPASS session auth; the router itself re-enforces the bearer
+        // (requireInternalCron in cutover-intents-routes.ts), so a session
+        // falling through to requireAuth still CANNOT claim runner work or
+        // post booking evidence — fencing tokens are concurrency, not
+        // identity. morning-sweep alone also accepts an admin session.
+        || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover/intents/booking-queue")
+        || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover/schedule-check")
+        || (req.method === "POST" && req.path === "/forms/rental-survey/cutover/morning-sweep")
+        || (req.method === "POST" && /^\/forms\/rental-survey\/cutover\/intents\/\d+\/(preview|booking-postback)$/.test(req.path))) {
         const t = req.headers["x-internal-cron"];
         if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)
                || (process.env.NEXUS_CRON_SECRET && t === process.env.NEXUS_CRON_SECRET))) {

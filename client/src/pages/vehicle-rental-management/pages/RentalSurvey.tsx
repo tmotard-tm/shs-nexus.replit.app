@@ -14,11 +14,12 @@
  * raw set. Inline styles from ../lib/constants, matching the rest of VRM.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X, Send, Loader2, EyeOff,
 } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
+import CutoverIntentPanel, { IntentPill } from "../components/CutoverIntentPanel";
 
 type SortDir = "asc" | "desc" | null;
 type SortState = { col: string | null; dir: SortDir };
@@ -433,6 +434,30 @@ export default function RentalSurvey() {
 
   const rows = data?.responses ?? [];
 
+  // Latest cutover intent per response, keyed by response id. POST, not GET:
+  // ~350 UUIDs do not fit in a query string.
+  const sourceIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  const qc = useQueryClient();
+  const intentsKey = ["cutover-intents-by-source", "survey", sourceIds.join(",")];
+  const { data: intents } = useQuery<Record<string, any>>({
+    queryKey: intentsKey,
+    enabled: sourceIds.length > 0,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const res = await fetch("/api/vrm/forms/rental-survey/cutover/intents/by-source", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: sourceIds }),
+      });
+      if (!res.ok) throw new Error(`intents by-source failed (${res.status})`);
+      return res.json();
+    },
+  });
+  const intentFor = (id: string) => intents?.[id] ?? null;
+  const refreshIntents = () => {
+    qc.invalidateQueries({ queryKey: ["cutover-intents-by-source"] });
+    qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-survey/responses"] });
+  };
+
   // "By Truck" explodes each response onto every distinct truck number it
   // references, so a mismatched pair appears under both numbers.
   type Row = SurveyRow & { _truck: string; _role?: string };
@@ -759,7 +784,14 @@ export default function RentalSurvey() {
                       ? <Pill text="Reserved" fg={colors.blue} bg={colors.blueLight} />
                       : r.cutover_status === "failed"
                       ? <Pill text="Failed" fg={colors.red} bg={colors.redLight} />
+                      : intentFor(r.id)
+                      ? null
                       : "—"}
+                    {/* Workflow pill: the intent's phase, shown until the mirror
+                        columns say complete (then the mirror pill is the story). */}
+                    {intentFor(r.id) && r.cutover_status !== "complete" && (
+                      <div style={{ marginTop: 2 }}><IntentPill intent={intentFor(r.id)} /></div>
+                    )}
                   </td>
                   <td style={tdBase} title={r.shop_name ?? ""}>{r.shop_name || "—"}</td>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{fmtDate(r.promised_ready_date)}</td>
@@ -814,6 +846,13 @@ export default function RentalSurvey() {
                   <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, flex: 1, wordBreak: "break-word" }}>{String(v)}</div>
                 </div>
               ))}
+
+            <CutoverIntentPanel
+              workflow="survey"
+              sourceId={detail.id}
+              intent={intentFor(detail.id)}
+              onChanged={refreshIntents}
+            />
           </div>
         </div>
       )}

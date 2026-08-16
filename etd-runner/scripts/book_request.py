@@ -288,7 +288,17 @@ def main() -> None:
     ap.add_argument("--watch", action="store_true",
                     help="stay running and book approvals as they land")
     ap.add_argument("--interval", type=int, default=10, help="seconds between polls in --watch")
+    ap.add_argument("--intents", action="store_true",
+                    help="serve the Nexus cutover-intent queue for RENTAL REQUESTS "
+                         "(preview quotes + confirmed bookings) instead of the legacy "
+                         "booking-queue. Shares book_cutover's intent loop.")
     args = ap.parse_args()
+
+    if args.intents:
+        from book_cutover import run_intents
+        run_intents(workflow_type="rental_request", watch=args.watch,
+                    poll=max(args.interval, 10), confirm=args.confirm, runner=RUNNER)
+        return
 
     if not TEMPLATE_PATH.exists():
         raise SystemExit(f"Missing {TEMPLATE_PATH}. It is the captured reservation model and "

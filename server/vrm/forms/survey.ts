@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { sendStandardActivity } from "../dca-task-client";
 import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
+import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
@@ -1410,4 +1411,10 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       res.status(500).json({ message: error?.message || "cutover-status failed" });
     }
   });
+
+  // End-to-end cutover workflow intents (task #646): intent-owned booking,
+  // block filing, messaging and readbacks. Registered last — the module owns
+  // everything under /forms/rental-survey/cutover/* plus the rental-request
+  // parity lane.
+  registerCutoverIntentRoutes(router);
 }

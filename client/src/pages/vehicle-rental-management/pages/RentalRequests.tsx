@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
+import CutoverIntentPanel, { IntentPill } from "../components/CutoverIntentPanel";
 
 type SortDir = "asc" | "desc" | null;
 type SortState = { col: string | null; dir: SortDir };
@@ -234,6 +235,27 @@ export default function RentalRequests() {
 
   const rows = data?.requests ?? [];
 
+  // Latest booking-workflow intent per request (keyed by request_no).
+  const sourceIds = useMemo(() => rows.map((r) => String(r.request_no)), [rows]);
+  const { data: intents } = useQuery<Record<string, any>>({
+    queryKey: ["cutover-intents-by-source", "request", sourceIds.join(",")],
+    enabled: sourceIds.length > 0,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const res = await fetch("/api/vrm/forms/rental-survey/cutover/intents/by-source", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids: sourceIds, type: "request" }),
+      });
+      if (!res.ok) throw new Error(`intents by-source failed (${res.status})`);
+      return res.json();
+    },
+  });
+  const intentFor = (requestNo: number) => intents?.[String(requestNo)] ?? null;
+  const refreshIntents = () => {
+    qc.invalidateQueries({ queryKey: ["cutover-intents-by-source"] });
+    qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
+  };
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter((r) => {
@@ -434,7 +456,12 @@ export default function RentalRequests() {
                     <td style={tdBase} title={r.auto_reason ?? ""}>
                       {r.auto_rule ? `${r.auto_rule} · ${RULE_LABEL[r.auto_rule] ?? ""}` : "—"}
                     </td>
-                    <td style={tdBase}>{r.status}{r.decided_by ? ` · ${r.decided_by}` : ""}</td>
+                    <td style={tdBase}>
+                      {r.status}{r.decided_by ? ` · ${r.decided_by}` : ""}
+                      {intentFor(r.request_no) && (
+                        <span style={{ marginLeft: 6 }}><IntentPill intent={intentFor(r.request_no)} /></span>
+                      )}
+                    </td>
                     <td style={tdBase} title={r.shop_name ?? ""}>{r.shop_name || "—"}</td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{d10(r.appointment_at)}</td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.shop_estimated_days ?? ""}</td>
@@ -526,6 +553,18 @@ export default function RentalRequests() {
                 </div>
               )}
             </div>
+
+            {/* Booking workflow: only offered once the request is APPROVED
+                (the server's eligibility gate requires it anyway), or shown
+                read-only if an intent already exists. */}
+            {(intentFor(detail.request_no) || detail.status === "approved") && (
+              <CutoverIntentPanel
+                workflow="request"
+                sourceId={String(detail.request_no)}
+                intent={intentFor(detail.request_no)}
+                onChanged={refreshIntents}
+              />
+            )}
 
             <div style={{ marginTop: 16 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>

@@ -75,6 +75,20 @@ export interface SendMessageInput {
    * repeat the same text.
    */
   skipRecentDuplicate?: boolean;
+  /**
+   * Explicit earliest send time. The message is enqueued (never sent inline)
+   * for the LATER of scheduledFor and any quiet-hours gate. The cutover
+   * workflow's morning reminder rides this.
+   */
+  scheduledFor?: Date | null;
+  /**
+   * Insert the queue row with status 'held' — processSendQueue drains only
+   * 'pending', so a held row is undrainable until its owner flips it to
+   * 'pending' (cutover msg2: held until the route block is VERIFIED in a
+   * post-submission ServicePower snapshot, then released with a compliant
+   * scheduled_for).
+   */
+  hold?: boolean;
 }
 
 export interface SendMessageResult {
@@ -125,6 +139,8 @@ async function enqueue(params: {
   scheduledFor: Date | null;
   sentBy?: string | null;
   senderName?: string | null;
+  /** Queue row status; default 'pending'. 'held' rows are undrainable. */
+  status?: string;
 }): Promise<string> {
   const [row] = await fsDb
     .insert(commsSendQueue)
@@ -139,7 +155,7 @@ async function enqueue(params: {
       managerCc: params.managerCc,
       phoneLocked: !!params.phoneLocked,
       scheduledFor: params.scheduledFor,
-      status: "pending",
+      status: params.status ?? "pending",
       createdBy: params.sentBy ?? null,
       senderName: params.senderName ?? null,
     })
@@ -303,6 +319,30 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
     await sendManagerCc(contact, input).catch((e) =>
       console.error("[Fleet-Comms] manager-CC failed:", e?.message),
     );
+  }
+
+  // Explicit-schedule / held sends ALWAYS go through the queue, never inline.
+  // Quiet hours still apply: the effective time is the later of the two.
+  if (input.hold || input.scheduledFor) {
+    const later =
+      input.scheduledFor && quietUntil
+        ? (input.scheduledFor.getTime() >= quietUntil.getTime() ? input.scheduledFor : quietUntil)
+        : (input.scheduledFor ?? quietUntil ?? new Date());
+    const queueId = await enqueue({
+      ldap: input.ldap ?? null,
+      phone,
+      phoneDigits,
+      category: input.category,
+      body: input.body,
+      mediaUrl: input.mediaUrl ?? null,
+      managerCc: false, // already handled above
+      phoneLocked: !!input.phoneLocked,
+      scheduledFor: later,
+      sentBy: input.sentBy,
+      senderName: input.senderName,
+      status: input.hold ? "held" : "pending",
+    });
+    return { status: "queued", queueId, threadId: thread.id, segments };
   }
 
   if (quietUntil) {

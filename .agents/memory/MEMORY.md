@@ -106,3 +106,4 @@
 - [Test-fixture deletion scope](test-fixture-deletion-scope.md) — Tyler's "delete test records" means PROD pollution only; dev synthetic rows are working fixtures. Capture full rows before any delete.
 - [Rental survey send audit findings](rental-survey-send-audit.md) — no vendor filter, submitted≠blocked re-issue, send never re-checks book, LDAP-in-employee_id join drops, home_phone unread, prod schema-health = deploy-liveness oracle.
 - [ETD token runner ops](etd-token-runner.md) — headless mint verified on-box (stock nix chromium); any resolved DSN makes the store mandatory pre-login (env -u to smoke-test creds); prod vrm_etd_token comes only from app-boot publish.
+- [External-op authorization fencing](external-op-authorization-fence.md) — atomic gate+insert; one-open index; parent-first finalize; serialized monotonic recovery; kill-switch at filing boundary; bearer-only evidence routes.

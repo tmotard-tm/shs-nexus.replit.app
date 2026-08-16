@@ -271,3 +271,25 @@ timeoutMs = 60000
 
 [objectStorage]
 defaultBucketID = "replit-objstore-c045591a-a89c-45b9-9118-8c388bdd00c6"
+
+[[workflows.workflow]]
+name = "cutover-orchestrator-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/cutover-orchestrator-unit.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "cutover-intents-db"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"

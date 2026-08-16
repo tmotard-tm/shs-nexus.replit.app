@@ -304,3 +304,58 @@ def choose(make: str | None, model: str | None, offered: list,
 
     return {"pick": None, "code": "", "match": "NO_SEDAN", "changes_vehicle": None,
             "note": "branch offered no sedan at or below full-size. REVIEW"}
+
+
+def choose_same_vehicle(make: str | None, model: str | None, offered: list,
+                        tech_desc: str | None = None) -> dict:
+    """Reserve the SAME vehicle they already have. No right-sizing, ever.
+
+    This is the cutover-intent rule: the workflow's Special Notes and route
+    block both promise "NO VEHICLE CHANGE", so the class must back that up.
+    Differences from `choose()`:
+
+      * no sedan fallback — an unmapped make/model is a hard stop (UNMAPPED),
+        because guessing books the wrong size for a real person;
+      * no HVAC branch — everyone keeps their size, not just HVAC;
+      * a size-up in the SAME body style is the only permitted substitution
+        (branch does not stock their exact class), and it is reported as
+        `same_body_size_up`, never as a vehicle change for the technician.
+    """
+    by_code: dict = {}
+    for c in offered or []:
+        code = str(c.get("code") or "").upper()
+        if code and code not in by_code:
+            by_code[code] = c
+    if not by_code:
+        return {"pick": None, "code": "", "match": "NONE", "changes_vehicle": None,
+                "note": "branch offered nothing"}
+
+    # Two witnesses, feed first (structured), tech's words second.
+    candidates = preferred_codes(make, model)
+    said = desc_class(tech_desc)
+    if not candidates and said:
+        candidates = [said]
+    if not candidates:
+        return {"pick": None, "code": "", "match": "UNMAPPED", "changes_vehicle": None,
+                "note": f"no class mapping for {describe(make, model) or 'unknown vehicle'}"
+                        f"{f' / tech says {tech_desc.strip()!r}' if (tech_desc or '').strip() else ''};"
+                        " same-vehicle booking needs a human"}
+
+    for code in candidates:
+        if code in by_code:
+            return {"pick": by_code[code], "code": code, "match": "same_class",
+                    "changes_vehicle": False,
+                    "note": f"kept {code} to match their {describe(make, model) or (tech_desc or '').strip() or 'vehicle'}"}
+
+    # Nearest size UP in the same body style; never smaller, never cross-body.
+    target = _rank(candidates[0])
+    same_body = sorted([(c, _rank(c)) for c in by_code if _rank(c)[0] == target[0]],
+                       key=lambda x: x[1][1])
+    up = [x for x in same_body if x[1][1] >= target[1]]
+    if up:
+        code = up[0][0]
+        return {"pick": by_code[code], "code": code, "match": "same_body_size_up",
+                "changes_vehicle": False,
+                "note": f"{candidates[0]} not offered; took {code} (same body, next size up)"}
+    return {"pick": None, "code": "", "match": "NO_MATCH", "changes_vehicle": None,
+            "note": f"branch offers no {candidates[0]}-equivalent at or above their size. REVIEW"}

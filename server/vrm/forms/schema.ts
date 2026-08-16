@@ -632,5 +632,184 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_request_events (event);
   `);
 
-  console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover)");
+  // ---------------------------------------------------------------------------
+  // Rental workflow INTENTS — the identity that owns every external effect of
+  // the survey-button cutover workflow (and its rental-request sibling).
+  //
+  // One row = one immutable intent bound to the EXACT source record revision
+  // (surveyResponseId / vrm_rental_request.id). Everything downstream — the
+  // ETD reservation, the 8:00 ART block, both Fleet Comms texts — is addressed
+  // by intent id, persisted BEFORE it is attempted, and verified by named
+  // readbacks. vrm_rental_cutover stays as the per-tech tracking summary and
+  // is updated FROM intents; it never completes anything.
+  //
+  // Constraints (the actual safety):
+  //   - UNIQUE(workflow_type, source_id, source_revision, execution_mode):
+  //     the same source revision can never spawn two intents in one mode.
+  //   - ONE live NONTERMINAL intent per LDAP (partial unique below): a second
+  //     live booking cannot start while any live intent is unresolved.
+  //     Terminal = completed/cancelled/abandoned. booking_unknown,
+  //     manual_review and block_conflict_pending_readback are NONTERMINAL on
+  //     purpose — they hold the lock until a human resolves them.
+  //   - dry_run/test intents never hold the live lock (predicate is
+  //     execution_mode = 'live').
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_workflow_intents (
+      id                        serial PRIMARY KEY,
+      workflow_type             text NOT NULL,
+      source_id                 text NOT NULL,
+      source_revision           integer NOT NULL DEFAULT 0,
+      execution_mode            text NOT NULL DEFAULT 'dry_run',
+      ldap                      text NOT NULL,
+      tech_name                 text,
+      truck_number              text,
+      enterprise_case_id        text,
+      event_date                date,
+      status                    text NOT NULL DEFAULT 'created',
+
+      -- Independent substates. Display phase is DERIVED from these; the client
+      -- can never set any of them.
+      reservation_state         text NOT NULL DEFAULT 'pending',
+      block_state               text NOT NULL DEFAULT 'pending',
+      msg1_state                text NOT NULL DEFAULT 'pending',
+      msg2_state                text NOT NULL DEFAULT 'pending',
+
+      eligibility               jsonb,
+      preview                   jsonb,
+      preview_version           integer NOT NULL DEFAULT 0,
+      preview_hash              text,
+      preview_built_at          timestamptz,
+      preview_expires_at        timestamptz,
+      confirmed_at              timestamptz,
+      confirmed_by              text,
+      confirmed_preview_version integer,
+
+      reservation_evidence      jsonb,
+      block_evidence            jsonb,
+      block_submitted_at        timestamptz,
+
+      -- Crash recovery: expiring lease + fencing token. The token increments
+      -- on every (re)claim and is stamped into every external-op row; a stale
+      -- writer's postback is rejected by compare.
+      claimed_by                text,
+      lease_expires_at          timestamptz,
+      heartbeat_at              timestamptz,
+      fencing_token             integer NOT NULL DEFAULT 0,
+      next_retry_at             timestamptz,
+      hard_deadline_at          timestamptz,
+
+      last_error                text,
+      created_by                text,
+      created_at                timestamptz NOT NULL DEFAULT now(),
+      updated_at                timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_workflow_intents_identity_uq
+      ON vrm_rental_workflow_intents (workflow_type, source_id, source_revision, execution_mode);
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_workflow_intents_live_nonterminal_uq
+      ON vrm_rental_workflow_intents (upper(ldap))
+      WHERE execution_mode = 'live'
+        AND status NOT IN ('completed','cancelled','abandoned');
+    CREATE INDEX IF NOT EXISTS vrm_workflow_intents_status_idx
+      ON vrm_rental_workflow_intents (status);
+    CREATE INDEX IF NOT EXISTS vrm_workflow_intents_ldap_idx
+      ON vrm_rental_workflow_intents (upper(ldap));
+  `);
+
+  // Attempt ledger. One row per external-operation attempt, INSERTED BEFORE
+  // the side effect fires (outcome stays NULL until it finishes). This is what
+  // makes a crashed runner reconcilable: the evidence of "we may have booked"
+  // exists even when the process died mid-call. Unique on (intent, phase,
+  // attempt_no) so two writers can never share an attempt number.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_workflow_attempts (
+      id            serial PRIMARY KEY,
+      intent_id     integer NOT NULL REFERENCES vrm_rental_workflow_intents(id) ON DELETE CASCADE,
+      phase         text NOT NULL,
+      attempt_no    integer NOT NULL,
+      fencing_token integer NOT NULL,
+      request_hash  text,
+      request       jsonb,
+      started_at    timestamptz NOT NULL DEFAULT now(),
+      finished_at   timestamptz,
+      outcome       text,
+      evidence      jsonb,
+      reconcile_claimed_at timestamptz
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_workflow_attempts_uq
+      ON vrm_workflow_attempts (intent_id, phase, attempt_no);
+    CREATE INDEX IF NOT EXISTS vrm_workflow_attempts_intent_idx
+      ON vrm_workflow_attempts (intent_id, phase);
+    -- Reconcile-claim lease (added post-rollout; guarded for existing DBs).
+    ALTER TABLE vrm_workflow_attempts ADD COLUMN IF NOT EXISTS reconcile_claimed_at timestamptz;
+    -- At most ONE open (outcome IS NULL) attempt per (intent, phase). This is
+    -- the DB-level fence against two concurrent op_opens by the SAME claim
+    -- holder: distinct attempt_no values slip past vrm_workflow_attempts_uq,
+    -- and statement-snapshot semantics make NOT EXISTS checks unreliable under
+    -- READ COMMITTED. Pre-clean first (keep the newest open attempt — the one
+    -- a runner would reconcile) so the index can always build on dirty data.
+    UPDATE vrm_workflow_attempts a
+    SET outcome = 'superseded_duplicate', finished_at = now()
+    WHERE a.outcome IS NULL
+      AND EXISTS (
+        SELECT 1 FROM vrm_workflow_attempts b
+        WHERE b.intent_id = a.intent_id AND b.phase = a.phase
+          AND b.outcome IS NULL AND b.attempt_no > a.attempt_no
+      );
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_workflow_attempts_one_open_uq
+      ON vrm_workflow_attempts (intent_id, phase)
+      WHERE outcome IS NULL;
+  `);
+
+  // Message send guard. UNIQUE(intent, workflow, moment, mode) is the
+  // idempotency key for both texts: a reclaiming worker re-running the message
+  // step hits the conflict instead of double-texting. queue_id points at the
+  // fs_comms_send_queue row (uuid) when one was created.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_workflow_send_guards (
+      id             serial PRIMARY KEY,
+      intent_id      integer NOT NULL REFERENCES vrm_rental_workflow_intents(id) ON DELETE CASCADE,
+      workflow_type  text NOT NULL,
+      message_moment text NOT NULL,
+      execution_mode text NOT NULL,
+      queue_id       text,
+      message_id     text,
+      status         text NOT NULL DEFAULT 'created',
+      body           text,
+      phone_digits   text,
+      scheduled_for  timestamptz,
+      created_at     timestamptz NOT NULL DEFAULT now(),
+      updated_at     timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_workflow_send_guards_uq
+      ON vrm_workflow_send_guards (intent_id, workflow_type, message_moment, execution_mode);
+  `);
+
+  // vrm_rental_cutover is DEMOTED to a tracking summary fed from intents.
+  // These columns mirror the owning intent so CutoverTracking keeps reading
+  // one row per tech without joining the intent table client-side.
+  // Steady state runs ZERO DDL here (catalog read only). When the columns are
+  // missing (first boot after deploy), the ALTER takes a brief
+  // access-exclusive lock — bound it so a busy table fails fast instead of
+  // stalling boot; the next boot retries.
+  const { rows: mirrorCols } = await db.execute(sql`
+    SELECT count(*)::int AS n FROM information_schema.columns
+    WHERE table_name = 'vrm_rental_cutover'
+      AND column_name IN ('intent_id','workflow_status','workflow_substates','workflow_mode','workflow_updated_at')
+  `);
+  if (Number((mirrorCols as any[])[0]?.n ?? 0) < 5) {
+    await db.execute(sql`
+      BEGIN;
+      SET LOCAL lock_timeout = '5s';
+      ALTER TABLE vrm_rental_cutover
+        ADD COLUMN IF NOT EXISTS intent_id           integer,
+        ADD COLUMN IF NOT EXISTS workflow_status     text,
+        ADD COLUMN IF NOT EXISTS workflow_substates  jsonb,
+        ADD COLUMN IF NOT EXISTS workflow_mode       text,
+        ADD COLUMN IF NOT EXISTS workflow_updated_at timestamptz;
+      COMMIT;
+    `);
+  }
+
+  console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover, vrm_rental_workflow_intents)");
 }

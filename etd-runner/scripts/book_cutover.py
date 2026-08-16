@@ -30,11 +30,13 @@ billable reservation.
 """
 import argparse
 import copy
+import hashlib
 import io
 import json
 import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
@@ -49,7 +51,8 @@ sys.path.insert(0, str(HERE))
 from etd import EtdClient  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from vehicle_class import choose as choose_class, describe as describe_vehicle  # noqa: E402
+from vehicle_class import (choose as choose_class, choose_same_vehicle,  # noqa: E402
+                           describe as describe_vehicle)
 
 
 _ZIP_STATE = [
@@ -704,7 +707,29 @@ def main() -> None:
                     help="comma separated LDAPs to exclude. Defaults to the technicians "
                          "already moved onto the new reservation by hand, who would "
                          "otherwise get a second one.")
+    # ---- intent-queue mode (task #646 cutover workflow) ----
+    ap.add_argument("--intents", action="store_true",
+                    help="serve the Nexus intent queue (preview quotes + confirmed bookings) "
+                         "instead of the legacy survey pool. The server owns eligibility, "
+                         "dates and payload text; this side owns ETD.")
+    ap.add_argument("--watch", action="store_true",
+                    help="with --intents: keep polling for work")
+    ap.add_argument("--poll", type=int, default=60,
+                    help="with --intents --watch: seconds between polls")
+    ap.add_argument("--queue-limit", type=int, default=5,
+                    help="with --intents: max intents claimed per poll")
+    ap.add_argument("--runner", default=os.environ.get("RUNNER_NAME", "book_cutover-intents"),
+                    help="claim identity; postbacks must come from the claim holder")
+    ap.add_argument("--workflow-type", default="",
+                    help="with --intents: claim only this workflow type "
+                         "(cutover_survey or rental_request; default both)")
     args = ap.parse_args()
+
+    if args.intents:
+        run_intents(workflow_type=args.workflow_type or None, watch=args.watch,
+                    poll=args.poll, days=args.days, confirm=args.confirm,
+                    limit=args.queue_limit, runner=args.runner)
+        return
 
     if not TEMPLATE_PATH.exists():
         raise SystemExit(f"Missing {TEMPLATE_PATH}. It is the captured reservation "
@@ -1020,6 +1045,502 @@ def main() -> None:
     print(f"written to {OUT_PATH}")
     if not args.confirm and ok:
         print("Nothing was created. Re-run with --limit 1 --confirm to prove the commit.")
+
+
+# ===========================================================================
+# Intent-queue mode (task #646). The Nexus orchestrator owns eligibility,
+# schedule gating, payload text and state; this side owns ETD: quote for
+# previews, commit for confirmed bookings, and the journey readback that is
+# the ONLY thing allowed to call a reservation verified.
+# ===========================================================================
+
+INTENTS_BASE = "/api/vrm/forms/rental-survey/cutover"
+
+
+def nexus_api(method: str, path: str, body=None):
+    """JSON call against Nexus with the x-internal-cron bearer."""
+    req = urllib.request.Request(
+        NEXUS_HOST + path, method=method,
+        data=json.dumps(body).encode() if body is not None else None,
+        headers={"Content-Type": "application/json", "x-internal-cron": cron_secret()})
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            ctype = r.headers.get("content-type", "")
+            raw = r.read().decode()
+            if "application/json" not in ctype:
+                # The SPA catch-all answers 200 with HTML and reads like success.
+                raise SystemExit(f"Nexus returned {ctype or 'no content-type'} for {path}. "
+                                 "Wrong host, or the cutover intent routes are not deployed.")
+            return r.status, json.loads(raw)
+    except urllib.error.HTTPError as e:
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except json.JSONDecodeError:
+            return e.code, {}
+
+
+def _branch_zip(q: dict) -> str:
+    m = re.search(r"(\d{5})(?:-\d{4})?\s*$",
+                  str((q.get("branch") or {}).get("fullAddress") or ""))
+    return m.group(1) if m else ""
+
+
+def _first_working_day(ldap: str):
+    """(YYYY-MM-DD or None, evidence dict) from the server's schedule-check."""
+    status, body = nexus_api("GET", f"{INTENTS_BASE}/schedule-check?ldap={ldap}")
+    ev = {"httpStatus": status, "fresh": bool(body.get("fresh")),
+          "watermarkUtc": body.get("watermarkUtc"),
+          "firstWorkingDay": body.get("firstWorkingDay"),
+          "note": body.get("note")}
+    if status != 200 or not body.get("fresh"):
+        return None, ev
+    return body.get("firstWorkingDay"), ev
+
+
+def _is_working_day(ldap: str, date_iso: str) -> bool:
+    status, body = nexus_api("GET", f"{INTENTS_BASE}/schedule-check?ldap={ldap}")
+    if status != 200 or not body.get("fresh"):
+        return False
+    return any(d.get("date") == date_iso and d.get("working")
+               for d in body.get("days") or [])
+
+
+def _intent_address(item: dict):
+    """(address, prefer_branch_code, want_state) from the intent's facts."""
+    facts = item.get("facts") or {}
+    cf = facts.get("caseFacts") or {}
+    if item.get("workflowType") == "cutover_survey":
+        sb = facts.get("surveyBranch") or {}
+        city = sb.get("city") or cf.get("rentingCity")
+        state = sb.get("state") or cf.get("rentingState")
+        address = ", ".join(x for x in (sb.get("name"), city, state) if x)
+        return address, (cf.get("rentingBranch") or "").strip(), (state or "").strip().upper()
+    rs = facts.get("requestSeed") or {}
+    address = ", ".join(x for x in (rs.get("shopAddress"), rs.get("shopCity"),
+                                    rs.get("shopState")) if x)
+    if not address:
+        address = str(rs.get("reportedBranch") or "").strip()
+    return address, "", str(rs.get("shopState") or "").strip().upper()
+
+
+def _guarded_quote(etd: EtdClient, address: str, code: str, want_state: str,
+                   start: str, end: str) -> dict:
+    """Quote with the same wrong-state guard the legacy pool lane uses."""
+    q = etd.quote(address=address, start=start, end=end,
+                  prefer_branch_code=code or None)
+
+    def branch_state(qq):
+        m = re.search(r",\s*([A-Z]{2})?\s*(\d{5})(?:-\d{4})?\s*$",
+                      str(qq["branch"].get("fullAddress") or ""))
+        return zip_state(m.group(2)) if m else ""
+
+    if want_state and len(want_state) == 2:
+        got = branch_state(q)
+        if got and got != want_state:
+            # Geocoder wandered (the Ventura->Niagara Falls class of failure).
+            city_state = ", ".join(address.split(",")[-2:]).strip() or address
+            q = etd.quote(address=city_state, start=start, end=end,
+                          prefer_branch_code=code or None)
+            got = branch_state(q)
+            if got and got != want_state:
+                raise RuntimeError(f"geocoder put the branch in {got}, expected "
+                                   f"{want_state} ({q.get('branch_name')})")
+    return q
+
+
+def _class_for_intent(item: dict, classes: list) -> dict:
+    """Class decision payload for the server (which persists it verbatim)."""
+    facts = item.get("facts") or {}
+    if item.get("workflowType") == "cutover_survey":
+        cf = facts.get("caseFacts") or {}
+        sel = choose_same_vehicle(cf.get("make"), cf.get("model"), classes,
+                                  facts.get("surveyVehicleDesc"))
+        mode = "same_vehicle"
+    else:
+        want = str((facts.get("requestSeed") or {}).get("approvedVehicleClass") or "").strip()
+        pick = None
+        if want:
+            wl = want.lower()
+            pick = next((c for c in classes
+                         if wl in str(c.get("description") or "").lower()
+                         or wl == str(c.get("code") or "").lower()), None)
+        sel = {"pick": pick, "code": str((pick or {}).get("code") or ""),
+               "match": "approved_label" if pick else "UNMAPPED",
+               "changes_vehicle": None,
+               "note": (f"approved class '{want}' matched {str((pick or {}).get('code'))}"
+                        if pick else
+                        f"approved class '{want or '(unset)'}' not offered at this branch")}
+        mode = "approved_class"
+    return {"chosenSipp": sel["code"] or None, "mapped": bool(sel.get("pick")),
+            "mode": mode, "match": sel.get("match"), "detail": sel.get("note"),
+            "changesVehicle": sel.get("changes_vehicle"), "_pick": sel.get("pick")}
+
+
+def _post_preview(etd: EtdClient, item: dict, days: int, runner: str) -> None:
+    iid, ldap = item["intentId"], item["ldap"]
+    label = f"#{iid} {ldap:<9}"
+    first_day, sched_ev = _first_working_day(ldap)
+    quote_payload = {"scheduleEvidence": sched_ev, "warnings": []}
+    class_decision = {"chosenSipp": None, "mapped": False, "mode": "same_vehicle",
+                      "detail": "no quote taken"}
+    if first_day:
+        try:
+            start = f"{first_day}T09:00:00"
+            end_dt = datetime.fromisoformat(start) + timedelta(days=days)
+            end = end_dt.strftime("%Y-%m-%dT%H:%M:%S")
+            address, code, want_state = _intent_address(item)
+            if not address:
+                raise RuntimeError("no branch/shop address seed on the intent facts")
+            q = _guarded_quote(etd, address, code, want_state, start, end)
+            classes = q.get("classes") or []
+            class_decision = _class_for_intent(item, classes)
+            class_decision.pop("_pick", None)
+            quote_payload.update({
+                "pickupDate": first_day,
+                "pickupTime": "09:00:00",
+                "returnDate": end[:10],
+                "returnTime": "09:00:00",
+                "branchCode": q.get("branch_code"),
+                "branchName": q.get("branch_name"),
+                "branchAddress": q.get("branch_address"),
+                "branchZip": _branch_zip(q),
+                "branchPinned": bool(q.get("branch_pinned")),
+                "journeyId": q.get("journey_id"),
+                "reference": q.get("reference"),
+                "offeredClasses": [{"code": c.get("code"), "description": c.get("description")}
+                                   for c in classes],
+            })
+        except Exception as exc:
+            quote_payload["warnings"] = [str(exc)[:300]]
+    status, body = nexus_api(
+        "POST", f"{INTENTS_BASE}/intents/{iid}/preview",
+        {"runnerId": runner, "fencingToken": item["fencingToken"],
+         "quote": quote_payload, "classDecision": class_decision})
+    out_status = body.get("status") if isinstance(body, dict) else "?"
+    fails = ",".join(f.get("code", "?") for f in (body.get("failures") or [])) \
+        if isinstance(body, dict) else ""
+    print(f"  PREV {label} -> {out_status}{f'  [{fails}]' if fails else ''}"
+          f"{'' if status == 200 else f'  (HTTP {status})'}")
+
+
+def _parse_confirmation(out: dict) -> str:
+    """data.reservationNumber.number, COUNT suffix stripped (see main())."""
+    def dig(node, keys):
+        if isinstance(node, dict):
+            for k, v in node.items():
+                kl = k.lower()
+                if any(s in kl for s in keys) and isinstance(v, (str, int)) \
+                   and str(v).strip() and str(v).strip() != "0":
+                    return str(v).strip()
+            for v in node.values():
+                got = dig(v, keys)
+                if got:
+                    return got
+        elif isinstance(node, list):
+            for v in node:
+                got = dig(v, keys)
+                if got:
+                    return got
+        return None
+
+    confirmation = str((((out or {}).get("data") or {})
+                        .get("reservationNumber") or {}).get("number") or "") \
+        or dig(out, ("confirmation",)) \
+        or dig(out, ("reservationnumber", "reservationno")) \
+        or dig((out or {}).get("data"), ("referencenumber",)) or ""
+    if confirmation and confirmation.upper().endswith("COUNT"):
+        confirmation = confirmation[:-5]
+    return confirmation
+
+
+def _journey_matches(etd: EtdClient, criteria: str, expect_conf: str = "",
+                     expect_ldap: str = "") -> list:
+    """Best-effort reservation rows from ETD's journey search.
+
+    The server classifies; this only extracts. Rows are filtered to the
+    expected confirmation when one is known, otherwise to rows whose
+    reference carries the LDAP (LDAP owns ETD's one reference field since
+    2026-08-14).
+    """
+    try:
+        res = etd.search_journeys(criteria=criteria or "", period="Last30Days")
+    except Exception as exc:
+        print(f"       journey search failed: {str(exc)[:120]}")
+        return []
+    rows: list = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            lk = {k.lower(): v for k, v in node.items()}
+            conf = lk.get("reservationnumber") or lk.get("confirmationnumber")
+            if isinstance(conf, dict):
+                conf = conf.get("number")
+            ref = lk.get("referencenumber")
+            if conf or ref:
+                conf_s = str(conf or "").strip()
+                if conf_s.upper().endswith("COUNT"):
+                    conf_s = conf_s[:-5]
+                rows.append({
+                    "confirmation": conf_s,
+                    "reference": str(ref or "").strip(),
+                    "branchCode": str(lk.get("branchcode") or lk.get("startbranchcode")
+                                      or "").strip(),
+                    "date": str(lk.get("startdatetime") or lk.get("startdate") or "")[:10],
+                    "sipp": str(lk.get("carclasscode") or lk.get("vehicleclasscode")
+                                or lk.get("carclass") or "").strip(),
+                })
+            for v in node.values():
+                walk(v)
+        elif isinstance(node, list):
+            for v in node:
+                walk(v)
+
+    walk(res)
+    seen, out = set(), []
+    for r in rows:
+        key = (r["confirmation"], r["reference"])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    if expect_conf:
+        hits = [r for r in out if r["confirmation"] == expect_conf]
+        if hits:
+            return hits
+    if expect_ldap:
+        hits = [r for r in out if expect_ldap.upper() in r["reference"].upper()]
+        if hits:
+            return hits
+    return out
+
+
+def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
+             old_j, old_r, confirm: bool, runner: str) -> None:
+    iid, ldap, mode = item["intentId"], item["ldap"], item["executionMode"]
+    label = f"#{iid} {ldap:<9}"
+    facts = item.get("facts") or {}
+    prev = item.get("preview") or {}
+    resv = prev.get("reservation") or {}
+
+    def post(phase, payload):
+        return nexus_api("POST", f"{INTENTS_BASE}/intents/{iid}/booking-postback",
+                         {"runnerId": runner, "fencingToken": item["fencingToken"],
+                          "phase": phase, "payload": payload})
+
+    # An unfinished attempt exists (crash mid-booking): readback FIRST. The
+    # server decides what the found (or not-found) journey means.
+    if item.get("requiresReconcile"):
+        matches = _journey_matches(etd, ldap, expect_ldap=ldap)
+        st, body = post("readback", {"matches": matches, "expected": {}})
+        print(f"  RECON {label} readback ({len(matches)} match) -> "
+              f"{body.get('status', st)}")
+        return
+
+    if mode == "live" and not confirm:
+        # A live intent needs an ARMED runner. Leave it claimed; the lease
+        # expires and someone runs with --confirm.
+        print(f"  SKIP {label} live intent but runner started without --confirm")
+        return
+
+    pickup = str(resv.get("pickupDate") or "")
+    sipp = str(resv.get("sipp") or "")
+    want_branch = str(resv.get("branchCode") or "")
+    if not (pickup and sipp and want_branch):
+        post("op_result", {"outcome": "aborted_before_open",
+                           "evidence": {"reason": "preview lacks pickupDate/sipp/branchCode"}})
+        print(f"  ABRT {label} preview incomplete")
+        return
+
+    # 1. The confirmed date must still be a verified working day.
+    if not _is_working_day(ldap, pickup):
+        post("op_result", {"outcome": "aborted_before_open",
+                           "evidence": {"reason": f"{pickup} no longer a verified working day"}})
+        print(f"  ABRT {label} {pickup} no longer a working day")
+        return
+
+    # 2. Fresh journey, then exact-match against the confirmed preview.
+    try:
+        address, code, want_state = _intent_address(item)
+        start = f"{pickup}T{str(resv.get('pickupTime') or '09:00:00')[:8]}"
+        ret_date = str(resv.get("returnDate") or "")[:10]
+        end = (f"{ret_date}T{str(resv.get('returnTime') or '09:00:00')[:8]}"
+               if ret_date else
+               (datetime.fromisoformat(start) + timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%S"))
+        q = _guarded_quote(etd, address, want_branch or code, want_state, start, end)
+    except Exception as exc:
+        post("op_result", {"outcome": "aborted_before_open",
+                           "evidence": {"reason": f"fresh quote failed: {str(exc)[:200]}"}})
+        print(f"  ABRT {label} fresh quote failed: {str(exc)[:120]}")
+        return
+
+    got_branch = str(q.get("branch_code") or "")
+    pick = next((c for c in (q.get("classes") or [])
+                 if str(c.get("code") or "").upper() == sipp.upper()), None)
+    if got_branch != want_branch or not pick:
+        reason = (f"branch drift {want_branch}->{got_branch}" if got_branch != want_branch
+                  else f"class {sipp} no longer offered")
+        post("op_result", {"outcome": "aborted_before_open", "evidence": {"reason": reason}})
+        print(f"  ABRT {label} {reason}")
+        return
+
+    # 3. Build the exact model with the proven payload surgery.
+    username = mapping.get(ldap, ldap)
+    user = etd.find_user_by_username(username)
+    if not user:
+        post("op_result", {"outcome": "aborted_before_open",
+                           "evidence": {"reason": f"no ETD user for {username}"}})
+        print(f"  ABRT {label} no ETD user for {username}")
+        return
+    truck = str(facts.get("tpmsTruck") or prev.get("tpmsTruck") or "")
+    start_dt = datetime.fromisoformat(start)
+    end_dt = datetime.fromisoformat(end)
+    model = copy.deepcopy(template)
+    retarget(model, q["journey_id"], q["reference"], old_j, old_r, start, end,
+             template.get("startDateTime"), template.get("endDateTime"))
+    redate(model, start_dt, end_dt)
+    relocate(model, q["branch"], q["place"])
+    set_class(model, pick)
+    model["boboId"] = user.get("userId")
+    model["isBOBOToggleEnabled"] = True
+    model["isBOBOBooking"] = True
+    set_driver(model, user, ldap, facts.get("techName") or ldap, truck)
+    # Server-rendered text is the single source; nothing is composed here.
+    note = str(resv.get("specialNotes") or "").strip()
+    if note:
+        model["notes"] = note
+        model["notesViewModel"] = {"reservationNote": note}
+    refs = resv.get("bookingReferences") or []
+    if refs:
+        model["bookingReferences"] = [str(x) for x in refs]
+
+    req_hash = hashlib.sha256(json.dumps(
+        {"branch": got_branch, "sipp": sipp, "date": pickup, "ldap": ldap},
+        sort_keys=True).encode()).hexdigest()[:32]
+
+    # 4. Open the attempt BEFORE any call that could create a reservation.
+    st, body = post("op_open", {"requestHash": req_hash,
+                                "request": {"branchCode": got_branch, "sipp": sipp,
+                                            "pickupDate": pickup, "journeyId": q["journey_id"]}})
+    if st != 200 or not body.get("accepted"):
+        print(f"  HOLD {label} op_open -> {body.get('status', st)} "
+              f"{','.join(f.get('code', '?') for f in body.get('failures') or [])}")
+        return
+    attempt_no = body.get("attemptNo")
+
+    # 5. Validation gates (non-mutating).
+    try:
+        for gate in ("/api/dailyrental/validateLocAddInfo", "/api/dailyrental/validate"):
+            gr = etd.post(gate, model, mutating=False)
+            if not (gr.get("success") or gr.get("succecss")):
+                post("op_result", {"outcome": "failed_clean", "attemptNo": attempt_no,
+                                   "evidence": {"error": f"{gate}: {json.dumps(gr)[:300]}"}})
+                print(f"  FAIL {label} {gate} rejected")
+                return
+    except Exception as exc:
+        post("op_result", {"outcome": "failed_clean", "attemptNo": attempt_no,
+                           "evidence": {"error": f"validation gate: {str(exc)[:200]}"}})
+        print(f"  FAIL {label} validation gate: {str(exc)[:120]}")
+        return
+
+    # 6. Dark modes STOP here — everything proven except the commit.
+    if mode != "live":
+        post("op_result", {"outcome": "dry_run_validated", "attemptNo": attempt_no,
+                           "evidence": {"gates": "validateLocAddInfo+validate passed",
+                                        "branch": q.get("branch_name"), "sipp": sipp}})
+        print(f"  DARK {label} {mode}: gates passed, no commit "
+              f"({sipp} at {str(q.get('branch_name') or '')[:28]} {pickup})")
+        return
+
+    # 7. LIVE commit.
+    req_dir = REF / "savedr_requests_sent"
+    req_dir.mkdir(exist_ok=True)
+    (req_dir / f"intent{iid}_{ldap}.json").write_text(
+        json.dumps(model, indent=1, default=str), encoding="utf-8")
+    try:
+        out = etd.confirm_reservation(model, dry_run=False)
+    except Exception as exc:
+        post("op_result", {"outcome": "exception", "attemptNo": attempt_no,
+                           "evidence": {"error": str(exc)[:300]}})
+        print(f"  ???? {label} confirm raised: {str(exc)[:120]} (readback will decide)")
+        return
+    raw_dir = REF / "savedr_responses"
+    raw_dir.mkdir(exist_ok=True)
+    (raw_dir / f"intent{iid}_{ldap}.json").write_text(
+        json.dumps(out, indent=1, default=str), encoding="utf-8")
+    confirmation = _parse_confirmation(out)
+    if confirmation:
+        post("op_result", {"outcome": "booked", "attemptNo": attempt_no,
+                           "evidence": {"confirmation": confirmation,
+                                        "quoteReference": q.get("reference")}})
+        print(f"  BOOK {label} conf {confirmation}  {q.get('branch_name')}")
+    else:
+        post("op_result", {"outcome": "unparsed", "attemptNo": attempt_no,
+                           "evidence": {"error": f"no confirmation parsed; see "
+                                                 f"savedr_responses/intent{iid}_{ldap}.json"}})
+        print(f"  ???? {label} booked but confirmation UNPARSED (readback will decide)")
+
+    # 8. Journey readback — the only path to reservation_verified.
+    matches = _journey_matches(etd, confirmation or ldap,
+                               expect_conf=confirmation, expect_ldap=ldap)
+    st, body = post("readback", {"matches": matches,
+                                 "expected": {"confirmation": confirmation}})
+    print(f"       readback ({len(matches)} match) -> {body.get('status', st)}")
+
+
+def run_intents(workflow_type=None, watch=False, poll=60, days=7,
+                confirm=False, limit=5, runner="book_cutover-intents") -> None:
+    """Claim and serve intent work until the queue is empty (or forever)."""
+    if not TEMPLATE_PATH.exists():
+        raise SystemExit(f"Missing {TEMPLATE_PATH}. It is the captured reservation "
+                         "model and cannot be reconstructed; re-capture it.")
+    mapping = json.loads(MAPPING_PATH.read_text(encoding="utf-8")) if MAPPING_PATH.exists() else {}
+    if not mapping:
+        raise SystemExit("etd_user_mapping.json is missing. Run reconcile_roster.py first.")
+    template = json.loads(TEMPLATE_PATH.read_text(encoding="utf-8"))
+    old_j = template.get("journeyUId") or template.get("journeyViewModel", {}).get("journeyProfilerUId")
+    old_r = template.get("journeyViewModel", {}).get("referenceNumber")
+    if not cron_secret():
+        raise SystemExit(f"no NEXUS_CRON_SECRET (env or {CRON_ENV}); postbacks would 401")
+
+    etd = EtdClient(dry_run=False)  # per-intent darkness, not client-wide
+    etd._auth()
+    print(f"intent runner '{runner}' against {NEXUS_HOST}"
+          f"{f'  (only {workflow_type})' if workflow_type else ''}")
+    print("MODE:", "ARMED — live intents WILL be committed" if confirm
+          else "unarmed — live intents are skipped; dark intents validated only")
+
+    while True:
+        try:
+            etd._auth()  # keep the token warm between polls
+            qs = f"?runner={runner}&limit={limit}"
+            if workflow_type:
+                qs += f"&workflowType={workflow_type}"
+            status, body = nexus_api("GET", f"{INTENTS_BASE}/intents/booking-queue{qs}")
+            if status != 200:
+                print(f"  booking-queue HTTP {status}: {str(body)[:160]}")
+            else:
+                items = body.get("items") or []
+                if items:
+                    print(f"{len(items)} intent(s) claimed "
+                          f"({sum(1 for i in items if i.get('kind') == 'preview')} preview, "
+                          f"{sum(1 for i in items if i.get('kind') == 'book')} book)")
+                for item in items:
+                    try:
+                        if item.get("kind") == "preview":
+                            _post_preview(etd, item, days, runner)
+                        else:
+                            _do_book(etd, item, template, mapping, old_j, old_r,
+                                     confirm, runner)
+                    except Exception as exc:
+                        print(f"  ERR  #{item.get('intentId')} {str(exc)[:200]}")
+        except KeyboardInterrupt:
+            print("\nstopped")
+            return
+        except Exception as exc:
+            print(f"  poll error: {str(exc)[:200]}")
+        if not watch:
+            return
+        time.sleep(poll)
 
 
 if __name__ == "__main__":
