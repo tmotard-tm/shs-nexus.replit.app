@@ -117,6 +117,8 @@ Polls the LIVHR / fleet-agents app for LUCA's rental-recovery shop-call results 
 
 ## User preferences
 
+- Flowchart deliverables: always include a plain as-built diagram first, drawn in the same style as the existing Nexus flowchart pages; gap/annotation overlays and proposed-design variants go on separate pages *after* it, never merged into the baseline diagram.
+
 Preferred communication style: Simple, everyday language.
 
 Do not create agent skills, AGENTS.md, or similar agent-config scaffolding unprompted — the user will add their own skills to `.agents/skills/` if and when they want them.

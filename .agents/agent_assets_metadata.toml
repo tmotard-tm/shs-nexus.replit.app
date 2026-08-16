@@ -144,3 +144,24 @@ uri = "file://attached_assets/training/vrm-transition-training.mp4"
 type = "video"
 title = "From FleetScope to VRM — Rental Recovery Training"
 description = "4:41 walkthrough video: the FleetScope → VRM transition story, the three rules of the new workflow, and a narrated tour of every VRM page (Executive Summary, New Rental Full Log, Denial Tracker, Rental Operations, Ops Queue, Cases by Region, Rightsize Tracker, Inbound Calls & LUCA)."
+
+[[outputs]]
+id = "5wvx_m4EUig-AfoJrdPJv"
+uri = "file://exports/Nexus_Flowcharts.vsdx"
+type = "unspecified"
+title = "Nexus Flowcharts (16 pages)"
+description = "Visio workbook, now 16 pages. New order: createVehicle (the full as-built workflow, drawn plain like the other pages), createVehicleGaps (the identical flow with every duplicate-leak path marked in red), createVehicleRetryPaths, createVehicleProposed. The original twelve pages are unchanged."
+
+[[outputs]]
+id = "xYGF2qDsBr83GP60VVKCL"
+uri = "file://docs/create-vehicle-flowcharts.md"
+type = "text"
+title = "Create Vehicle - Flowcharts, Data Sources & Review Questions"
+description = "Markdown companion, restructured to match: section 1.1 is now the plain as-built flowchart, 1.2 the same flow with the failure branches marked, then retry routes, the proposed design, the AMS note, and the assumptions / open questions for the reviewer."
+
+[[outputs]]
+id = "XGHd7wUJo1I-6PBc0Wib8"
+uri = "file://screenshots/create-vehicle-clean-tab.png"
+type = "image"
+title = "New createVehicle tab (plain as-built flow)"
+description = "The in-app flowcharts page showing the new createVehicle tab: the full Create Vehicle workflow drawn plain, in the same style as the other twelve pages - no gap markers. The annotated, retry and proposed pages follow it as separate tabs."

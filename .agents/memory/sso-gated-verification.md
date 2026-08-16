@@ -10,6 +10,15 @@ The app's UI and every `/api/*` route (except a few token-gated feeds) require a
 page just show the "Sign In with Enterprise SSO" card, so UI-level manual
 verification is not possible from the agent environment.
 
+**Screenshots ARE possible** — the Screenshot tool cannot set cookies, but a
+headless browser can. `playwright-core` is installed and a stock Chromium lives
+in the nix store (`which chromium`; `HOLMAN_CHROMIUM_PATH` also points at one).
+Mint the session as below, then
+`ctx.addCookies([{ name: "sessionId", value: sid, domain: "127.0.0.1", path: "/" }])`
+and `page.goto("http://127.0.0.1:5000/...")`. This gives real rendered DOM, so
+you can assert on rendered elements (counts, tab labels, text) instead of only
+on the API payload. Use it whenever "verify it renders in the app" is required.
+
 **Working technique** (client-side filter/display changes especially):
 1. Mint a session directly: insert into `sessions` (`id` = random hex,
    `user_id`/`username` from an admin row in `users`, `expires_at` = now()+1h).
