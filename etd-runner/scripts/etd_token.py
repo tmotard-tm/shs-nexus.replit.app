@@ -9,7 +9,8 @@
 WHERE THE TOKEN LIVES
 ---------------------
 If a Postgres DSN is configured (ETD_TOKEN_DSN, or NEXUS_PROD_DB_URL /
-NEXUS_DATABASE_URL) the token lives in one row of `vrm_etd_token` and every
+NEXUS_DATABASE_URL / PROD_DATABASE_URL) the token lives in one row of
+`vrm_etd_token` and every
 runner shares it. That is what lets an autoscale container that scales to zero
 wake up and book without paying 21 s of B2C each time. Without a DSN it falls
 back to the local file cache, which is correct on a laptop.

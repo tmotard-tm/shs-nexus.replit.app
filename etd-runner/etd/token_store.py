@@ -66,7 +66,7 @@ def dsn_from_env() -> str:
     and silently writing a token there would look like the store simply never
     persisting anything.
     """
-    for key in ("ETD_TOKEN_DSN", "NEXUS_PROD_DB_URL", "NEXUS_DATABASE_URL"):
+    for key in ("ETD_TOKEN_DSN", "NEXUS_PROD_DB_URL", "NEXUS_DATABASE_URL", "PROD_DATABASE_URL"):
         val = os.environ.get(key)
         if val and val.startswith("postgres"):
             return val

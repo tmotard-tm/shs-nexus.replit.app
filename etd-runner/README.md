@@ -38,6 +38,8 @@ safe to run before any credential exists.
     ETD_TOKEN_DSN          read-WRITE Nexus Postgres. NOT DATABASE_URL, which on
                            this box is a local helium throwaway with none of our
                            data. A read-only credential cannot write the token row.
+                           Optional on the Nexus box: falls back to
+                           PROD_DATABASE_URL, which is already a Secret there.
     ETD_CHROMIUM_PATH      the nix-store chromium. It is a nix hash and changes
                            when Replit updates the package; re-resolve with
                            `which chromium` if minting starts failing.
