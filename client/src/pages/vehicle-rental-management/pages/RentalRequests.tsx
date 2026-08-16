@@ -204,6 +204,9 @@ export default function RentalRequests() {
   const { data: stats } = useQuery<Record<string, any>>({
     queryKey: ["/api/vrm/forms/rental-request/stats"], refetchInterval: 60_000,
   });
+  const { data: funnel } = useQuery<Record<string, any>>({
+    queryKey: ["/api/vrm/forms/rental-request/funnel"], refetchInterval: 60_000,
+  });
   // Served rather than duplicated: the checkbox label here and the sentence the
   // technician receives are the same string, so they can never drift.
   const { data: reasonData } = useQuery<{ reasons: Record<string, string> }>({
@@ -284,9 +287,72 @@ export default function RentalRequests() {
 
   const s = stats ?? {};
   const pct = Number(s.pct_resolved_without_rental ?? 0);
+  const fn = funnel ?? {};
+  const fnStarts = Number(fn.starts ?? 0);
+  const fnVerifies = Number(fn.verifies ?? 0);
+  const fnSubmits = Number(fn.submits ?? 0);
+  const fnFails = Number(fn.verify_fails ?? 0);
+  const fnFailRoster = Number(fn.fail_not_on_roster ?? 0);
+  const fnFailOpen = Number(fn.fail_open_request ?? 0);
+  const fnFailCap = Number(fn.fail_daily_cap ?? 0);
+  const pctVerify = fnStarts > 0 ? Math.round(100 * fnVerifies / fnStarts) : null;
+  const pctSubmit = fnVerifies > 0 ? Math.round(100 * fnSubmits / fnVerifies) : null;
+  const hasAnyActivity = fnStarts > 0 || fnVerifies > 0 || fnSubmits > 0;
 
   return (
     <div style={{ padding: "18px 22px 40px" }}>
+
+      {/* ── Form funnel ──────────────────────────────────────────────── */}
+      <div style={{ marginBottom: 14, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "12px 16px" }}>
+        <div style={{ fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 8 }}>
+          Form funnel — open front door
+        </div>
+        {hasAnyActivity ? (
+          <>
+            <div style={{ display: "flex", alignItems: "stretch", gap: 0, marginBottom: 8 }}>
+              {/* Opened */}
+              <div style={{ flex: fnStarts || 1, background: colors.accentLight, borderRadius: "8px 0 0 8px", padding: "10px 14px", minWidth: 80 }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, color: colors.accent }}>{fnStarts}</div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.accent }}>Opened form</div>
+                {fn.last_start_et && <div style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>last {fn.last_start_et} ET</div>}
+              </div>
+              {/* Drop arrow */}
+              <div style={{ display: "flex", alignItems: "center", padding: "0 6px", color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 11, flexShrink: 0 }}>
+                {pctVerify != null ? `${pctVerify}% →` : "→"}
+              </div>
+              {/* Verified */}
+              <div style={{ flex: Math.max(fnVerifies, 1), background: "#e8f5e9", padding: "10px 14px", minWidth: 80 }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, color: colors.green }}>{fnVerifies}</div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.green }}>Passed identity</div>
+                {fn.last_verify_et && <div style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>last {fn.last_verify_et} ET</div>}
+              </div>
+              {/* Drop arrow */}
+              <div style={{ display: "flex", alignItems: "center", padding: "0 6px", color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 11, flexShrink: 0 }}>
+                {pctSubmit != null ? `${pctSubmit}% →` : "→"}
+              </div>
+              {/* Submitted */}
+              <div style={{ flex: Math.max(fnSubmits, 1), background: colors.greenLight, borderRadius: "0 8px 8px 0", padding: "10px 14px", minWidth: 80 }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, color: colors.green }}>{fnSubmits}</div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.green }}>Submitted</div>
+                {fn.last_submit_et && <div style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>last {fn.last_submit_et} ET</div>}
+              </div>
+            </div>
+            {fnFails > 0 && (
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, paddingTop: 6, borderTop: `1px solid ${colors.rule}` }}>
+                <span style={{ color: colors.red, fontWeight: 600 }}>{fnFails} failed identity check</span>
+                {fnFailRoster > 0 && <span> · {fnFailRoster} not on roster</span>}
+                {fnFailOpen > 0 && <span> · {fnFailOpen} already has open request</span>}
+                {fnFailCap > 0 && <span> · {fnFailCap} hit daily cap</span>}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+            No form activity recorded yet — events are logged from this deployment forward.
+          </div>
+        )}
+      </div>
+
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 6 }}>
         <Card label="Resolved WITHOUT a rental" value={`${pct}%`}
               hint="the number that justifies this build" fg={colors.green} />

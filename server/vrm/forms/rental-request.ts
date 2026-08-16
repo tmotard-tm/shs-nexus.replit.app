@@ -252,6 +252,41 @@ export function evaluate(f: RequestFacts): Eligibility {
 }
 
 // ---------------------------------------------------------------------------
+// Form-funnel event log.
+//
+// Three steps sit between "a technician heard about the form" and "Fleet has a
+// request to review": open the form (start), pass the roster check (verify_ok),
+// and submit. Only the last step creates a vrm_rental_request row, so the
+// earlier two are invisible to the admin page without this log.
+//
+// Every write is fire-and-forget. A DB hiccup must never strand a technician
+// standing next to a dead van. Failures are logged loudly and swallowed.
+// ---------------------------------------------------------------------------
+
+/**
+ * Fire-and-forget: record one step in the rental-request form funnel.
+ *
+ * event:   'start'       – form page loaded; no LDAP yet.
+ *          'verify_ok'   – roster check passed.
+ *          'verify_fail' – roster check rejected; outcome says why.
+ *          'submit'      – form submitted (vrm_rental_request row also written).
+ *
+ * outcome (verify_fail only):
+ *   'not_on_roster' | 'open_request' | 'daily_cap'
+ */
+function logEvent(
+  event: "start" | "verify_ok" | "verify_fail" | "submit",
+  opts: { ldap?: string; outcome?: string; ip?: string } = {},
+): void {
+  db.execute(sql`
+    INSERT INTO vrm_rental_request_events (event, ldap, outcome, ip)
+    VALUES (${event}, ${opts.ldap ?? null}, ${opts.outcome ?? null}, ${opts.ip ?? null})
+  `).catch((e: any) =>
+    console.error("[rental-request-events] log failed:", e?.message || e),
+  );
+}
+
+// ---------------------------------------------------------------------------
 
 function normTruck(v: string): string {
   const d = String(v || "").replace(/\D/g, "").replace(/^0+/, "");
@@ -853,7 +888,9 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
   // "/open/..." can never be captured as a :token value.
   // -------------------------------------------------------------------------
 
-  app.get("/api/public/rental-request/open/start", async (_req, res) => {
+  app.get("/api/public/rental-request/open/start", async (req, res) => {
+    const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+    logEvent("start", { ip });
     res.json({ valid: true, open: true, policyVersion: POLICY_VERSION });
   });
 
@@ -868,12 +905,14 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
   app.post("/api/public/rental-request/open/verify", async (req, res) => {
     try {
       const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
       if (!ldap) {
         return res.status(400).json({ verified: false, message: "Please enter your LDAP." });
       }
 
       const f = await factsFor(ldap);
       if (!f) {
+        logEvent("verify_fail", { ldap, outcome: "not_on_roster", ip });
         return res.status(403).json({
           verified: false,
           message: "We could not find that LDAP on the technician roster. Check the spelling, "
@@ -890,6 +929,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       `);
       const open = (live as any[])[0];
       if (open) {
+        logEvent("verify_fail", { ldap, outcome: "open_request", ip });
         return res.status(409).json({
           verified: false,
           message: `You already have rental request #${open.request_no} with us (${open.status}). `
@@ -905,6 +945,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
             = (now()      AT TIME ZONE 'America/New_York')::date
       `);
       if (Number((recent as any[])[0]?.n ?? 0) >= SELF_SERVE_DAILY_CAP) {
+        logEvent("verify_fail", { ldap, outcome: "daily_cap", ip });
         return res.status(429).json({
           verified: false,
           message: "You have already filed a rental request today and Fleet is working it. "
@@ -972,6 +1013,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
           isByov: Number(f.byov_count ?? 0) > 0,
         },
       });
+      logEvent("verify_ok", { ldap, ip });
     } catch (e: any) {
       console.error("[rental-request] open verify failed:", e?.message || e);
       res.status(500).json({ verified: false, message: "Something went wrong. Please try again." });
@@ -981,6 +1023,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
   app.post("/api/public/rental-request/open/submit", async (req, res) => {
     try {
       const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
       if (!ldap) return res.status(400).json({ success: false, message: "Missing LDAP." });
 
       const f = await factsFor(ldap);
@@ -1021,7 +1064,6 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         });
       }
 
-      const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
       // The phone comes from OUR records, never the request body: the client
       // only ever saw the masked form of it.
       const body = { ...(req.body || {}) };
@@ -1040,6 +1082,9 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         body,
         ip,
       });
+      if (out.code === 200) {
+        logEvent("submit", { ldap, ip });
+      }
       res.status(out.code).json(out.json);
     } catch (e: any) {
       // The unique index firing here means a genuine race, not a bug.
@@ -1333,6 +1378,41 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       res.json({ requests: rows });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to load requests." });
+    }
+  });
+
+  /**
+   * Form-open funnel: how many people opened, passed identity, and submitted.
+   * Also surfaces failed-verify reason buckets so Fleet can spot a stuck tech.
+   */
+  router.get("/forms/rental-request/funnel", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT
+          count(*) FILTER (WHERE event = 'start')                         AS starts,
+          count(*) FILTER (WHERE event = 'verify_ok')                     AS verifies,
+          count(*) FILTER (WHERE event = 'submit')                        AS submits,
+          count(*) FILTER (WHERE event = 'verify_fail')                   AS verify_fails,
+          count(*) FILTER (WHERE event = 'verify_fail'
+                              AND outcome = 'not_on_roster')              AS fail_not_on_roster,
+          count(*) FILTER (WHERE event = 'verify_fail'
+                              AND outcome = 'open_request')               AS fail_open_request,
+          count(*) FILTER (WHERE event = 'verify_fail'
+                              AND outcome = 'daily_cap')                  AS fail_daily_cap,
+          to_char(max(occurred_at) FILTER (WHERE event = 'start')
+                    AT TIME ZONE 'America/New_York',
+                  'MM/DD HH12:MI AM')                                     AS last_start_et,
+          to_char(max(occurred_at) FILTER (WHERE event = 'verify_ok')
+                    AT TIME ZONE 'America/New_York',
+                  'MM/DD HH12:MI AM')                                     AS last_verify_et,
+          to_char(max(occurred_at) FILTER (WHERE event = 'submit')
+                    AT TIME ZONE 'America/New_York',
+                  'MM/DD HH12:MI AM')                                     AS last_submit_et
+        FROM vrm_rental_request_events
+      `);
+      res.json(rows[0] || {});
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "Failed to load funnel." });
     }
   });
 

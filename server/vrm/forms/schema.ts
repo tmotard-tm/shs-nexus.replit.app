@@ -605,5 +605,32 @@ export async function initFormsSchema(): Promise<void> {
     );
   `);
 
+  // ---------------------------------------------------------------------------
+  // Rental-request form funnel.
+  //
+  // The open front door has three steps — open the form, prove identity, submit
+  // — and only the last one creates a row in vrm_rental_request. Without this
+  // table the admin page can only answer "how many submitted", not "how many
+  // opened the form and never finished" or "how many failed the roster check
+  // and why". Deployment logs are ephemeral; this is the permanent record.
+  //
+  // No PII beyond LDAP. start events carry no LDAP at all. Writes are
+  // fire-and-forget: a logging failure must never block a technician.
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_request_events (
+      id          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+      occurred_at timestamptz NOT NULL DEFAULT now(),
+      event       text        NOT NULL,
+      ldap        text,
+      outcome     text,
+      ip          text
+    );
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_events_occurred_idx
+      ON vrm_rental_request_events (occurred_at DESC);
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_events_event_idx
+      ON vrm_rental_request_events (event);
+  `);
+
   console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover)");
 }
