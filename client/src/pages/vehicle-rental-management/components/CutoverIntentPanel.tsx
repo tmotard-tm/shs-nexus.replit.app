@@ -210,8 +210,11 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
       `${attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ""}`
     : "";
 
-  const canConfirm = status === "preview_ready";
-  const canRepreview = ["preview_ready", "preview_required", "preview_failed", "eligibility_failed"].includes(status);
+  // Cutover only. A request is advanced by the server the moment it is approved, so
+  // offering Confirm or Re-run preview here just invites a second approval of a
+  // decision already made.
+  const canConfirm = !isRequest && status === "preview_ready";
+  const canRepreview = !isRequest && ["preview_ready", "preview_required", "preview_failed", "eligibility_failed"].includes(status);
   const canRetry = ["manual_review", "booking_unknown", "block_conflict_pending_readback"].includes(status);
   const canCancel = !!intent && !TERMINAL.has(status) && !IN_FLIGHT.has(status);
 
@@ -241,6 +244,12 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
       </div>
 
       {!intent ? (
+        isRequest ? (
+          <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: 0 }}>
+            Approving this request books the reservation and texts the technician. Nothing to
+            start here.
+          </p>
+        ) : (
         <>
           <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: "0 0 8px" }}>
             No workflow yet. Starting one runs the server-side eligibility gate and, if it passes,
@@ -258,11 +267,12 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                           : "Start a LIVE cutover? After Confirm, the runner books a REAL Enterprise reservation, then the route block and technician texts follow.")
                         && create("live")}
                       style={{ ...btn, color: colors.red, borderColor: colors.red, fontWeight: 700 }}>
-                {busy === "create-live" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start LIVE booking" : "Start LIVE cutover"}
+                {busy === "create-live" ? <Loader2 size={13} className="animate-spin" /> : "Start LIVE cutover"}
               </button>
             )}
           </div>
         </>
+        )
       ) : (
         <>
           {([
@@ -425,7 +435,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                 {busy === "evidence" ? <Loader2 size={13} className="animate-spin" /> : "Record ETD cancellation evidence"}
               </button>
             )}
-            {ENGINE_RUNNABLE.has(status) && (
+            {!isRequest && ENGINE_RUNNABLE.has(status) && (
               <button type="button" disabled={!!busy}
                       title="Claims this intent's queued work and drives Enterprise to completion. Safe to press again — a claim already in flight is skipped, and nothing is booked twice."
                       onClick={() => run("engine", () => Promise.resolve({ status }), () => engine(intent.id))}
@@ -437,7 +447,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                   : "Run booking engine"}
               </button>
             )}
-            {ENGINE_RUNNABLE.has(status) && (
+            {!isRequest && ENGINE_RUNNABLE.has(status) && (
               <span style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, alignSelf: "center" }}>
                 Work is queued — it runs automatically; press if you want it now.
               </span>
