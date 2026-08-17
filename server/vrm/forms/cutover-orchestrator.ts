@@ -297,16 +297,26 @@ export type JourneyExpected = {
  * expected side and the reservation side AND match. A missing value on either
  * side is a named mismatch, never a silent pass: a sparse ETD row (or a
  * sparse expected object) must not be able to "verify" a reservation.
+ *
+ * `matches` is the runner's POSITIVELY IDENTIFIED set — rows carrying this
+ * intent's SHS reference or a confirmation known to be its own — never "every
+ * row the search returned". That is what keeps `multiple` meaningful: it means
+ * two reservations both claim to be this intent's, which a human must resolve.
+ * An empty set is `none` ("nothing identifiable was found"), and whether that
+ * none is authoritative is decided by the caller from the search meta.
  */
 export function classifyJourneyReadback(
   expected: JourneyExpected,
   matches: JourneyMatch[],
 ): { verdict: "verified" | "none" | "multiple" | "mismatch"; reason: string } {
   if (!Array.isArray(matches) || matches.length === 0) {
-    return { verdict: "none", reason: "journey search returned no matching reservation" };
+    return { verdict: "none", reason: "journey search identified no reservation belonging to this intent" };
   }
   if (matches.length > 1) {
-    return { verdict: "multiple", reason: `journey search returned ${matches.length} matches; exactly one required` };
+    return {
+      verdict: "multiple",
+      reason: `${matches.length} reservations identify as this intent's; exactly one required`,
+    };
   }
   const m = matches[0];
   const diffs: string[] = [];
@@ -1402,7 +1412,18 @@ export async function requestPreview(intentId: number): Promise<any> {
   if (!["created", "preview_ready", "preview_required", "preview_pending"].includes(intent.status)) {
     throw new OrchestratorError("bad_state", `cannot request preview from status ${intent.status}`, 409);
   }
-  await touchIntent(intentId, { status: "preview_pending", next_retry_at: null, last_error: null });
+  // Clearing last_error alone was not enough: the PREVIOUS run's coded failures
+  // stay on `eligibility` and the panel renders that list whatever the status,
+  // so a re-queued preview showed "Quoting…" next to the red failures of the run
+  // before it. The facts snapshot is kept (it is the eligibility evidence a
+  // staffer reads); only the verdict is reset, and the next postback rewrites it.
+  const prior = (intent.eligibility ?? null) as Record<string, unknown> | null;
+  await touchIntent(intentId, {
+    status: "preview_pending",
+    next_retry_at: null,
+    last_error: null,
+    ...(prior ? { eligibility: { ...prior, failures: [], checkedAt: new Date().toISOString() } } : {}),
+  });
   return loadIntent(intentId);
 }
 
@@ -1714,20 +1735,44 @@ export async function persistPreviewFromRunner(params: {
   const failures: EligibilityFailure[] = [...gate.failures];
 
   // 2. Branch pin + class mapping (gate #7 parts the runner owns).
-  if (!params.quote.branchPinned) {
-    failures.push({ code: "branch_not_pinned", detail: "ETD quote could not pin the required branch" });
-  }
+  //
+  // The pin is a CUTOVER requirement and only a cutover requirement. A swap has
+  // a contract branch — the case's RENTING_BRANCH — that the replacement
+  // reservation must return to, so the runner passes it as a preferred code and
+  // the quote reports whether the pin took; the drift check just below then
+  // cross-checks the pinned code against the case. A rental request has no
+  // contract branch: the correct answer for a NEW rental is the branch nearest
+  // the shop address, so the request lane deliberately pins nothing and the
+  // quote therefore ALWAYS reports branchPinned:false. Applying the pin check
+  // to both lanes made every request preview fail with branch_not_pinned, so no
+  // request could ever reach Awaiting Confirm and none could ever be booked.
   if (isCutover) {
+    if (!params.quote.branchPinned) {
+      failures.push({ code: "branch_not_pinned", detail: "ETD quote could not pin the case's renting branch" });
+    }
     if (facts.caseFacts?.rentingBranch && params.quote.branchCode &&
         params.quote.branchCode.trim().toUpperCase() !== facts.caseFacts.rentingBranch.trim().toUpperCase()) {
       failures.push({ code: "branch_pin_drift", detail: `pinned ${params.quote.branchCode} != case RENTING_BRANCH ${facts.caseFacts.rentingBranch}` });
     }
   }
+  // A preview with no branch at all did not come from a completed quote. The pin
+  // check used to catch that case incidentally on both lanes; now that it is
+  // cutover-only, an unquoted request must still be refused by a code that names
+  // the real cause instead of leaving a staffer to infer it from no_date.
+  if (!strOrNull(params.quote.branchCode)) {
+    const warning = strOrNull((params.quote.warnings ?? [])[0]);
+    failures.push({
+      code: "quote_failed",
+      detail: warning
+        ? `ETD quote did not complete: ${warning}`
+        : "ETD quote returned no branch — no quote was taken for this preview",
+    });
+  }
   if (!params.classDecision.mapped || !params.classDecision.chosenSipp) {
     failures.push({ code: "class_unmapped", detail: params.classDecision.detail ?? "vehicle class could not be mapped (no sedan fallback in this workflow)" });
   }
   if (!zip5(params.quote.branchZip)) {
-    failures.push({ code: "branch_zip_missing", detail: "pinned branch has no usable ZIP for the block location" });
+    failures.push({ code: "branch_zip_missing", detail: "quoted branch has no usable ZIP for the block location" });
   }
 
   // 3. Schedule gate — authoritative server-side re-check of the runner's date.
@@ -1850,6 +1895,12 @@ export async function persistPreviewFromRunner(params: {
       branchZip: params.quote.branchZip,
       branchZip5: zip5(params.quote.branchZip),
       branchPinned: params.quote.branchPinned,
+      // What the technician said was nearest, carried beside what the quote
+      // actually resolved. A cutover has no such answer to compare (it returns
+      // to the contract branch, cross-checked against the case above); on a
+      // request the two are independent and a disagreement is worth catching
+      // BEFORE Confirm, not after a reservation exists at the wrong branch.
+      reportedBranch: isCutover ? null : strOrNull(facts.sourceRow?.tech_reported_branch),
       sipp,
       classDecision: params.classDecision,
       offeredClasses: params.quote.offeredClasses ?? [],
@@ -2250,6 +2301,25 @@ export async function recordBookingPostback(params: {
       );
     });
 
+  // What the search ACTUALLY saw, recorded verbatim. `rowsReturned` is every
+  // journey ETD handed back for the criteria; `matches.length` is how many of
+  // them positively identified as this intent's reservation. A bare match count
+  // cannot tell a later reader whether a "none" meant an empty answer or dozens
+  // of unrelated quote journeys, and that distinction is exactly what a phantom
+  // duplicate looks like in the ledger.
+  const rowsReturnedRaw = Number(searchMeta?.rowsReturned);
+  const searchSummary = {
+    status: searchOk ? "ok" : String(searchMeta?.status ?? "missing"),
+    criteria: criteriaList,
+    rowsReturned: Number.isFinite(rowsReturnedRaw) ? rowsReturnedRaw : null,
+    identified: matches.length,
+    authoritative: criteriaAuthoritative,
+    error: strOrNull(searchMeta?.error),
+  };
+  const searchNote =
+    `search: ${searchSummary.identified} identified of ${searchSummary.rowsReturned ?? "?"} row(s)` +
+    ` on [${criteriaList.join(", ") || "no criteria"}]`;
+
   const expected: JourneyExpected = {
     confirmation: confExpected,
     ldap: intent.ldap,
@@ -2267,8 +2337,8 @@ export async function recordBookingPostback(params: {
   if (verdict.verdict === "none" && !criteriaAuthoritative) {
     await touchIntent(intent.id, {
       last_error: searchOk
-        ? "readback inconclusive: search criteria did not cover this intent's reference identifiers"
-        : `readback inconclusive: journey search did not succeed (${strOrNull(searchMeta?.error) ?? "no search status posted"})`,
+        ? `readback inconclusive: search criteria did not cover this intent's reference identifiers (${searchNote})`
+        : `readback inconclusive: journey search did not succeed (${strOrNull(searchMeta?.error) ?? "no search status posted"}; ${searchNote})`,
     });
     return {
       accepted: true,
@@ -2289,7 +2359,7 @@ export async function recordBookingPostback(params: {
       UPDATE vrm_workflow_attempts
       SET outcome = ${verdict.verdict === "verified" ? "booked_via_readback" : verdict.verdict === "none" ? "no_reservation_found" : "readback_" + verdict.verdict},
           finished_at = now(),
-          evidence = ${JSON.stringify({ readback: verdict, matches })}::jsonb
+          evidence = ${JSON.stringify({ readback: verdict, matches, search: searchSummary })}::jsonb
       WHERE intent_id = ${intent.id} AND phase = 'etd_booking' AND attempt_no = ${openAttempt}
     `);
   }
@@ -2317,7 +2387,7 @@ export async function recordBookingPostback(params: {
     }
     await touchIntent(intent.id, {
       status: "manual_review",
-      last_error: `cancel blocked: readback ${verdict.verdict} — an active reservation may exist; cancel it in ETD manually, then record cancellation evidence (${verdict.reason})`,
+      last_error: `cancel blocked: readback ${verdict.verdict} — an active reservation may exist; cancel it in ETD manually, then record cancellation evidence (${verdict.reason}; ${searchNote})`,
       claimed_by: null,
       lease_expires_at: null,
     }, { statusIn: ["cancel_pending_readback"] });
@@ -2389,7 +2459,7 @@ export async function recordBookingPostback(params: {
 
   await touchIntent(intent.id, {
     status: "manual_review",
-    last_error: `journey readback ${verdict.verdict}: ${verdict.reason}`,
+    last_error: `journey readback ${verdict.verdict}: ${verdict.reason} (${searchNote})`,
     claimed_by: null,
     lease_expires_at: null,
   });

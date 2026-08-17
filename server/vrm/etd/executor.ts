@@ -521,36 +521,92 @@ export function extractJourneyRows(res: unknown): JourneyRow[] {
   return out;
 }
 
-/** Filter to the expected confirmation when known, else to rows whose reference carries the LDAP. */
-export function filterJourneyRows(
-  rows: JourneyRow[],
-  expectConf: string,
-  expectLdap: string,
-): JourneyRow[] {
-  if (expectConf) {
-    const hits = rows.filter((r) => r.confirmation === expectConf);
-    if (hits.length) return hits;
-  }
-  if (expectLdap) {
-    const hits = rows.filter((r) => r.reference.toUpperCase().includes(expectLdap.toUpperCase()));
-    if (hits.length) return hits;
-  }
-  return rows;
+/** What may positively identify a journey as ONE intent's reservation. */
+export type JourneyIdentity = {
+  /** A confirmation number already known to belong to this intent. */
+  confirmation?: string | null;
+  /** The intent's unique SHS reference — it rides ETD's one reference field. */
+  intentRef?: string | null;
+};
+
+/**
+ * Rows that POSITIVELY identify as this intent's reservation.
+ *
+ * Identification is the intent's unique SHS reference carried in ETD's reference
+ * field, or a confirmation number already known to belong to the intent. Nothing
+ * else counts — and in particular "the search returned rows" does not: ETD's
+ * Last30Days journey list carries every QUOTE the engine has ever taken, not just
+ * reservations, so a criteria search routinely answers with dozens of unrelated
+ * journeys. This used to end in `return rows`, which reported all of them as this
+ * intent's reservations and parked first-ever bookings in MANUAL REVIEW as phantom
+ * duplicates.
+ *
+ * The LDAP is deliberately NOT an identifier: one technician can own many
+ * journeys, so an LDAP-carrying reference says "this tech", never "this intent".
+ * When nothing identifies, the answer is an EMPTY list — "no reservation of ours
+ * is visible" — never "here is everything the search returned".
+ */
+export function identifyJourneyRows(rows: JourneyRow[], identity: JourneyIdentity): JourneyRow[] {
+  const conf = String(identity.confirmation ?? "").trim().toUpperCase();
+  const ref = String(identity.intentRef ?? "").trim().toUpperCase();
+  if (!conf && !ref) return [];
+  return rows.filter(
+    (r) =>
+      (!!conf && r.confirmation.trim().toUpperCase() === conf) ||
+      (!!ref && r.reference.toUpperCase().includes(ref)),
+  );
 }
+
+export type JourneySearch = {
+  /** Rows that positively identify as this intent's reservation. */
+  matches: JourneyRow[];
+  /** Every distinct journey row the search produced, identified or not. */
+  rowsReturned: number;
+  /** The criteria handed to ETD, in the order they were tried. */
+  criteria: string[];
+  error: string | null;
+};
 
 async function journeyMatches(
   etd: EtdClient,
   criteria: string,
-  expectConf = "",
-  expectLdap = "",
-): Promise<{ matches: JourneyRow[]; error: string | null }> {
+  identity: JourneyIdentity,
+): Promise<JourneySearch> {
   let res: unknown;
   try {
     res = await etd.searchJourneys({ criteria: criteria || "", period: "Last30Days" });
   } catch (err) {
-    return { matches: [], error: clip(errText(err)) };
+    return { matches: [], rowsReturned: 0, criteria: [criteria], error: clip(errText(err)) };
   }
-  return { matches: filterJourneyRows(extractJourneyRows(res), expectConf, expectLdap), error: null };
+  const rows = extractJourneyRows(res);
+  return {
+    matches: identifyJourneyRows(rows, identity),
+    rowsReturned: rows.length,
+    criteria: [criteria],
+    error: null,
+  };
+}
+
+/**
+ * The `search` block posted with every readback.
+ *
+ * `rowsReturned` vs `identified` is what makes a later misfire diagnosable from
+ * the ledger: "0 identified of 65 rows" says the search was noisy and none of it
+ * was ours; "0 of 0" says ETD answered empty. A bare match count says neither.
+ */
+function searchEvidence(s: {
+  criteria: string[];
+  rowsReturned: number;
+  matches: JourneyRow[];
+  error: string | null;
+}): Record<string, unknown> {
+  return {
+    status: s.error ? "error" : "ok",
+    criteria: s.criteria,
+    rowsReturned: s.rowsReturned,
+    identified: s.matches.length,
+    error: s.error,
+  };
 }
 
 /**
@@ -656,27 +712,31 @@ async function runBook(
   const intentRef = String(resv.intentReference || `SHSNX-${intentId}`);
 
   // An unfinished attempt exists (crash mid-booking), a reconcile was ordered, or this
-  // is a cancel-lane claim: readback FIRST/ONLY. Search on the intent reference (unique
-  // to THIS intent — it rides the ETD reference field and the special notes), with the
-  // LDAP as a second witness. The server decides what a found (or not-found) journey
-  // means; the search meta tells it whether a "none" is authoritative.
+  // is a cancel-lane claim: readback FIRST/ONLY. The criteria widen (intent reference or
+  // known confirmation, then the LDAP) because they are only ETD's server-side filter —
+  // what a row MEANS is decided by identifyJourneyRows, which never widens. The server
+  // decides what a found (or not-found) journey means; the search meta tells it whether
+  // a "none" is authoritative.
   if (item.requiresReconcile || item.kind === "cancel") {
     const knownConf = String((item as any).reservationEvidence?.confirmation ?? "");
-    const tried = [knownConf || intentRef];
-    let { matches, error } = await journeyMatches(etd, tried[0], knownConf, ldap);
-    if (!matches.length && !error) {
-      tried.push(ldap);
-      ({ matches, error } = await journeyMatches(etd, ldap, knownConf, ldap));
+    const identity: JourneyIdentity = { confirmation: knownConf, intentRef };
+    const criteria = [knownConf || intentRef];
+    let search = await journeyMatches(etd, criteria[0], identity);
+    let rowsReturned = search.rowsReturned;
+    if (!search.matches.length && !search.error) {
+      criteria.push(ldap);
+      search = await journeyMatches(etd, ldap, identity);
+      rowsReturned += search.rowsReturned;
     }
     const body = await post("readback", {
-      matches,
+      matches: search.matches,
       expected: knownConf ? { confirmation: knownConf } : {},
-      search: { status: error ? "error" : "ok", criteria: tried, error },
+      search: searchEvidence({ ...search, criteria, rowsReturned }),
     });
     return result(
       "RECON",
       String(body?.status ?? "readback"),
-      `${item.kind === "cancel" ? "cancel-" : ""}readback (${matches.length} match)`,
+      `${item.kind === "cancel" ? "cancel-" : ""}readback (${search.matches.length} identified of ${rowsReturned} row(s))`,
     );
   }
 
@@ -792,9 +852,11 @@ async function runBook(
 
   // 3.5 Pre-commit duplicate search: before opening an attempt, ask ETD whether THIS
   // intent already has a reservation (a crash after a commit but before op_result, a
-  // double claim, ...). Found -> post the readback and stop; the server settles the true
-  // state. Search error -> do NOT proceed to booking on a blind spot.
-  const dup = await journeyMatches(etd, intentRef, "", ldap);
+  // double claim, ...). Only a row that POSITIVELY identifies as this intent's counts —
+  // the search itself returns every journey ETD will hand over for the criteria, most of
+  // them unrelated quotes. Identified -> post the readback and stop; the server settles
+  // the true state. Search error -> do NOT proceed to booking on a blind spot.
+  const dup = await journeyMatches(etd, intentRef, { intentRef });
   if (dup.error) {
     return result("HOLD", "search_failed", `pre-commit duplicate search failed: ${clip(dup.error, 120)}`);
   }
@@ -802,12 +864,12 @@ async function runBook(
     const body = await post("readback", {
       matches: dup.matches,
       expected: {},
-      search: { status: "ok", criteria: [intentRef], error: null },
+      search: searchEvidence(dup),
     });
     return result(
       "DUPE",
       String(body?.status ?? "readback"),
-      `pre-commit search found ${dup.matches.length} journey(s); no new booking`,
+      `pre-commit search identified ${dup.matches.length} existing reservation(s) for this intent (of ${dup.rowsReturned} row(s)); no new booking`,
     );
   }
 
@@ -913,17 +975,17 @@ async function runBook(
 
   // 8. Journey readback — the only path to reservation_verified.
   const rbCriteria = confirmation || intentRef;
-  const rb = await journeyMatches(etd, rbCriteria, confirmation, ldap);
+  const rb = await journeyMatches(etd, rbCriteria, { confirmation, intentRef });
   const rbBody = await post("readback", {
     matches: rb.matches,
     expected: { confirmation },
-    search: { status: rb.error ? "error" : "ok", criteria: [rbCriteria], error: rb.error },
+    search: searchEvidence(rb),
   });
   const readbackStatus = String(rbBody?.status ?? "readback");
   return result(
     bookAction,
     bookStatus,
-    `${bookDetail} | readback (${rb.matches.length} match) -> ${readbackStatus}`,
+    `${bookDetail} | readback (${rb.matches.length} identified of ${rb.rowsReturned} row(s)) -> ${readbackStatus}`,
   );
 }
 

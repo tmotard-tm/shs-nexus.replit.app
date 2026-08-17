@@ -42,7 +42,7 @@ import {
   runBookingExecutor,
   bookingRequestHash,
   extractJourneyRows,
-  filterJourneyRows,
+  identifyJourneyRows,
   parseConfirmation,
   intentAddress,
   classForIntent,
@@ -176,14 +176,19 @@ async function seedEligibility(ldap: string) {
 }
 
 /**
- * Gate codes the RUNNER owns — the ones that say something about the quote it just
- * took, as opposed to roster/approval facts. A synthetic LDAP has no Snowflake
- * schedule, so the orchestrator's own server-side re-check always adds
- * `not_working_day` and these fixtures can never reach preview_ready. What the
- * executor is responsible for is that these four codes clear on a good quote and
- * appear on a bad one.
+ * Gate codes the RUNNER owns on the REQUEST lane — the ones that say something
+ * about the quote it just took, as opposed to roster/approval facts. A synthetic
+ * LDAP has no Snowflake schedule, so the orchestrator's own server-side re-check
+ * always adds `not_working_day` and these fixtures can never reach preview_ready.
+ * What the executor is responsible for is that these four codes clear on a good
+ * quote and appear on a bad one.
+ *
+ * `branch_not_pinned` is deliberately ABSENT: a request pins no branch (the
+ * nearest one to the shop is the right answer for a new rental), so the quote
+ * always reports branchPinned:false and the gate is cutover-only. `quote_failed`
+ * is what now carries "there was no usable quote" on this lane.
  */
-const RUNNER_OWNED = ["branch_not_pinned", "class_unmapped", "branch_zip_missing", "no_date"] as const;
+const RUNNER_OWNED = ["quote_failed", "class_unmapped", "branch_zip_missing", "no_date"] as const;
 
 /** A request row + an intent pointing at it, in the given lane. */
 async function makeRequestIntent(over: {
@@ -261,15 +266,36 @@ describe("journey readback parsing", () => {
     assert.equal(extractJourneyRows({ a: dup, b: { ...dup } }).length, 1);
   });
 
-  test("filters to the expected confirmation, else to references carrying the LDAP", () => {
+  test("identifies a journey only by this intent's confirmation or SHS reference", () => {
     const rows = [
-      { confirmation: "AAA111", reference: "SHS ZZEXEC1", branchCode: "", date: "", sipp: "" },
+      { confirmation: "AAA111", reference: "SHS ZZEXEC1 SHSNX-42", branchCode: "", date: "", sipp: "" },
       { confirmation: "BBB222", reference: "SHS OTHER", branchCode: "", date: "", sipp: "" },
     ];
-    assert.deepEqual(filterJourneyRows(rows, "BBB222", "ZZEXEC1").map((r) => r.confirmation), ["BBB222"]);
-    assert.deepEqual(filterJourneyRows(rows, "", "zzexec1").map((r) => r.confirmation), ["AAA111"]);
-    // Neither witness matches: hand back everything rather than silently claiming none.
-    assert.equal(filterJourneyRows(rows, "ZZZ", "NOBODY").length, 2);
+    assert.deepEqual(
+      identifyJourneyRows(rows, { confirmation: "BBB222" }).map((r) => r.confirmation),
+      ["BBB222"],
+    );
+    assert.deepEqual(
+      identifyJourneyRows(rows, { intentRef: "shsnx-42" }).map((r) => r.confirmation),
+      ["AAA111"],
+    );
+  });
+
+  test("returns NOTHING rather than everything when no row identifies", () => {
+    // ETD's Last30Days list is every QUOTE the engine ever took, so a criteria
+    // search routinely answers with dozens of unrelated journeys. Handing them
+    // back as "matches" reported them all as this intent's reservations, which
+    // parked first-ever bookings in manual review as phantom duplicates.
+    const rows = Array.from({ length: 65 }, (_, i) => ({
+      confirmation: `J${i}`, reference: `SHS SOMEONE-${i}`, branchCode: "", date: "", sipp: "",
+    }));
+    assert.equal(identifyJourneyRows(rows, { confirmation: "ZZZ", intentRef: "SHSNX-42" }).length, 0);
+    // The LDAP is NOT an identifier: one tech owns many journeys, so a reference
+    // carrying it says "this tech", never "this intent".
+    const mine = [{ confirmation: "AAA111", reference: "SHS ZZEXEC1", branchCode: "", date: "", sipp: "" }];
+    assert.equal(identifyJourneyRows(mine, { intentRef: "SHSNX-42" }).length, 0);
+    // And with no witness at all there is nothing to identify against.
+    assert.equal(identifyJourneyRows(mine, {}).length, 0);
   });
 });
 
@@ -419,7 +445,7 @@ describe("preview lane", () => {
     // Nothing was quoted, so every runner-owned gate code is unsatisfied — the preview
     // is explicitly unbookable rather than dated by guesswork.
     assert.match(run.results[0].detail ?? "", /no_date/);
-    assert.match(run.results[0].detail ?? "", /branch_not_pinned/);
+    assert.match(run.results[0].detail ?? "", /quote_failed/, "and the missing quote is named as such");
   });
 
   test("a quote failure lands in the preview warnings, not in an exception", async () => {
@@ -433,7 +459,32 @@ describe("preview lane", () => {
     const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
     assert.equal(run.results[0].action, "PREV", "a failed quote is a reported preview, not a crashed pass");
     assert.match(run.results[0].detail ?? "", /geocoder exploded/, "the staffer has to be told WHY there is no preview");
-    assert.match(run.results[0].detail ?? "", /branch_not_pinned/, "and the gate records it as unbookable");
+    // The pin check is cutover-only now, so this is the gate that keeps an
+    // unquoted request unbookable — and it names the real cause.
+    assert.match(run.results[0].detail ?? "", /quote_failed/, "and the gate records it as unbookable");
+    assert.equal((await loadIntentRow(intentId)).status, "preview_required");
+  });
+
+  test("a request is NEVER failed for an unpinned branch — nearest-to-the-shop is the right answer", async () => {
+    // The request lane passes no preferred branch code (a NEW rental has no
+    // contract branch to return to), so ETD always answers branch_pinned:false.
+    // Gating both lanes on the pin made every request preview fail and no
+    // request could ever reach Awaiting Confirm.
+    const ldap = `${LDAP_PREFIX}NOPIN`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client, calls } = fakeEtd();
+    (client as any).quote = async (p: any) => {
+      calls.push(`quote:${p.preferBranchCode ?? ""}`);
+      const q = await fakeEtd().client.quote(p as any);
+      return { ...(q as any), branch_pinned: false };
+    };
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.ok(calls.includes("quote:"), "the request lane pins nothing");
+    const detail = run.results[0].detail ?? "";
+    assert.ok(!detail.includes("branch_not_pinned"), `an unpinned request must not be gated (detail: ${detail})`);
+    assert.ok(!detail.includes("quote_failed"), `and a good unpinned quote is not a failed quote (detail: ${detail})`);
   });
 });
 
@@ -544,9 +595,42 @@ describe("booking lane", () => {
     const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
 
     assert.equal(run.results[0].action, "DUPE");
+    assert.match(run.results[0].detail ?? "", /identified 1 existing reservation/);
     assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0);
     assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "a found reservation must never be booked again");
     assert.equal((await attemptsFor(intentId)).length, 0, "no attempt is opened when the work is already done");
+  });
+
+  test("unrelated quote journeys are NOT duplicates — a first booking is never parked by them", async () => {
+    // ETD's Last30Days list carries every QUOTE the engine has ever taken, and the
+    // row filter used to hand ALL of them back when nothing matched. That reported
+    // 65 unrelated journeys as this intent's reservations, and the orchestrator's
+    // (correct) refusal to book against "multiple" parked the very first booking in
+    // MANUAL REVIEW before an attempt was ever opened.
+    const ldap = `${LDAP_PREFIX}NOISE`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    const { client, calls } = fakeEtd({
+      journeys: {
+        data: Array.from({ length: 65 }, (_, i) => ({
+          reservationNumber: { number: `J${i}` },
+          referenceNumber: `SHS SOMEONE-${i}`,
+        })),
+      },
+    });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.ok(calls.includes("search"), "the duplicate search still runs");
+    assert.notEqual(run.results[0].action, "DUPE", "none of those journeys identifies as this intent's");
+    // It goes on to ask the server to authorize the attempt — which a synthetic
+    // technician's missing schedule then refuses. The point is that the duplicate
+    // search is no longer what stops it.
+    assert.equal(run.results[0].action, "HOLD");
+    assert.equal(run.results[0].status, "preview_required");
+    assert.equal(
+      String((await loadIntentRow(intentId)).status), "preview_required",
+      "and the intent is recoverable, not parked in manual_review",
+    );
   });
 
   test("a pre-commit search FAILURE holds instead of booking on a blind spot", async () => {

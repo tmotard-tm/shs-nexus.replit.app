@@ -248,6 +248,12 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             ["Event date", intent.event_date],
             ["SHS reference", resv?.intentReference],
             ["Branch", resv ? [resv.branchName, resv.branchAddress].filter(Boolean).join(" — ") : ""],
+            // A request pins nothing — the quote resolves the branch nearest the
+            // shop. Showing what the technician said was nearest right beside it
+            // lets the approver catch a disagreement BEFORE Confirm, instead of
+            // after a reservation exists at the wrong branch. (Cutovers carry no
+            // reported branch: they return to the contract branch on the case.)
+            ["Branch (tech reported)", resv?.reportedBranch],
             ["Branch ZIP", resv?.branchZip],
             ["Pickup", resv?.pickupDate ? `${resv.pickupDate} ${String(resv.pickupTime ?? "").slice(0, 5)}` : ""],
             ["Return", resv?.returnDate ? `${resv.returnDate} ${String(resv.returnTime ?? "").slice(0, 5)}` : ""],
@@ -273,7 +279,11 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
               </div>
             ))}
 
-          {failures.length > 0 && (
+          {/* Only the failures of the CURRENT attempt. While work is in flight the
+              previous run's verdict is history, not a live complaint — rendering it
+              regardless of status is why a re-queued preview showed "Quoting…" next
+              to a red failure box from the run before it. */}
+          {failures.length > 0 && !IN_FLIGHT.has(status) && (
             <div style={{ marginTop: 8, padding: 8, background: colors.redLight, borderRadius: 8 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.red, marginBottom: 4 }}>
                 Server-reported failures

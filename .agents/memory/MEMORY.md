@@ -113,4 +113,5 @@
 - [Request booking vs cutover split](request-booking-vs-cutover.md) — request workflow never files a route block (cutover-only); born not_applicable, completes on verified reservation; branch intent surfaces on workflow_type.
 - [Cutover prod→dev pull](rental-cutover-prod-pull.md) — additive-upsert script only; intents tables are dev-only; copiers must skip GENERATED cols; refreshDevFromProd would wipe the fixtures.
 - [ETD dual-runner parity](etd-dual-runner-parity.md) — in-server engine + Python runner share one queue/ledger/token; hash + lock key + evidence spellings must match exactly. Synthetic LDAPs can never reach an authorized booking — don't fake it.
+- [ETD journey search is not an answer](etd-journey-search-identity.md) — Last30Days returns every QUOTE ever taken; a row counts only on positive ID (SHS ref/known conf), never "return all rows"; LDAP identifies a tech, not an intent.
 - [Cutover arming semantics](cutover-arming-semantics.md) — armed flag ⇒ live default + dark-RBAC stand-down (runner routes stay cron-bearer); prod-only, dev-dark is test-enforced; armed ≠ autonomous (runner/sweep are operator-run).

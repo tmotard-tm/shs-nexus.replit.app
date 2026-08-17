@@ -1272,24 +1272,71 @@ def _parse_confirmation(out: dict) -> str:
     return confirmation
 
 
-def _journey_matches(etd: EtdClient, criteria: str, expect_conf: str = "",
-                     expect_ldap: str = "") -> tuple:
+def _identify_journey_rows(rows: list, confirmation: str = "",
+                           intent_ref: str = "") -> list:
+    """Rows that POSITIVELY identify as ONE intent's reservation.
+
+    MUST stay byte-for-byte equivalent to identifyJourneyRows() in
+    server/vrm/etd/executor.ts: both runners share one queue and one attempt
+    ledger, so a drift here silently breaks cross-runner dedupe on a real
+    technician's reservation.
+
+    Identification is the intent's unique SHS reference carried in ETD's
+    reference field, or a confirmation number already known to belong to the
+    intent. Nothing else counts — and in particular "the search returned rows"
+    does not: ETD's Last30Days journey list carries every QUOTE the engine has
+    ever taken, not just reservations, so a criteria search routinely answers
+    with dozens of unrelated journeys. This used to fall back to returning ALL
+    of them, which reported every one as this intent's reservation and parked
+    first-ever bookings in MANUAL REVIEW as phantom duplicates.
+
+    The LDAP is deliberately NOT an identifier: one technician can own many
+    journeys, so an LDAP-carrying reference says "this tech", never "this
+    intent". When nothing identifies, the answer is an EMPTY list.
+    """
+    conf = str(confirmation or "").strip().upper()
+    ref = str(intent_ref or "").strip().upper()
+    if not conf and not ref:
+        return []
+    return [r for r in rows
+            if (conf and r["confirmation"].strip().upper() == conf)
+            or (ref and ref in r["reference"].upper())]
+
+
+def _search_evidence(search: dict) -> dict:
+    """The `search` block posted with every readback.
+
+    Mirrors searchEvidence() in server/vrm/etd/executor.ts, key for key:
+    rowsReturned vs identified is what makes a later misfire diagnosable from
+    the ledger ("0 identified of 65 rows" = noisy search, none of it ours;
+    "0 of 0" = ETD answered empty). A bare match count says neither.
+    """
+    return {"status": "error" if search["error"] else "ok",
+            "criteria": search["criteria"],
+            "rowsReturned": search["rowsReturned"],
+            "identified": len(search["matches"]),
+            "error": search["error"]}
+
+
+def _journey_matches(etd: EtdClient, criteria: str, confirmation: str = "",
+                     intent_ref: str = "") -> dict:
     """Best-effort reservation rows from ETD's journey search.
 
-    Returns (rows, error). A search FAILURE is ([], "reason") — callers must
-    post it as search.status="error" so the server never mistakes a broken
-    search for an authoritative "no reservation exists" (repair spec §3).
+    Returns {matches, rowsReturned, criteria, error}. `matches` is the
+    positively identified subset (see _identify_journey_rows); `rowsReturned`
+    is every distinct row the search produced, identified or not.
 
-    The server classifies; this only extracts. Rows are filtered to the
-    expected confirmation when one is known, otherwise to rows whose
-    reference carries the LDAP (LDAP owns ETD's one reference field since
-    2026-08-14).
+    A search FAILURE returns an error — callers must post it as
+    search.status="error" so the server never mistakes a broken search for an
+    authoritative "no reservation exists" (repair spec §3). The server
+    classifies; this only extracts and identifies.
     """
     try:
         res = etd.search_journeys(criteria=criteria or "", period="Last30Days")
     except Exception as exc:
         print(f"       journey search failed: {str(exc)[:120]}")
-        return [], str(exc)[:300]
+        return {"matches": [], "rowsReturned": 0, "criteria": [criteria],
+                "error": str(exc)[:300]}
     rows: list = []
 
     def walk(node):
@@ -1326,15 +1373,10 @@ def _journey_matches(etd: EtdClient, criteria: str, expect_conf: str = "",
             continue
         seen.add(key)
         out.append(r)
-    if expect_conf:
-        hits = [r for r in out if r["confirmation"] == expect_conf]
-        if hits:
-            return hits, None
-    if expect_ldap:
-        hits = [r for r in out if expect_ldap.upper() in r["reference"].upper()]
-        if hits:
-            return hits, None
-    return out, None
+    return {"matches": _identify_journey_rows(out, confirmation, intent_ref),
+            "rowsReturned": len(out),
+            "criteria": [criteria],
+            "error": None}
 
 
 def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
@@ -1353,29 +1395,32 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
     intent_ref = str(resv.get("intentReference") or f"SHSNX-{iid}")
 
     # An unfinished attempt exists (crash mid-booking), a reconcile was
-    # ordered, or this is a cancel-lane claim: readback FIRST/ONLY. Search on
-    # the intent reference (unique to THIS intent — it rides the ETD reference
-    # field and the special notes), with the LDAP as a second witness. The
-    # server decides what the found (or not-found) journey means; the search
-    # meta tells it whether a "none" is authoritative (repair spec §3/§4).
+    # ordered, or this is a cancel-lane claim: readback FIRST/ONLY. The
+    # criteria widen (intent reference or known confirmation, then the LDAP)
+    # because they are only ETD's server-side filter — what a row MEANS is
+    # decided by _identify_journey_rows, which never widens. The server decides
+    # what the found (or not-found) journey means; the search meta tells it
+    # whether a "none" is authoritative (repair spec §3/§4).
     if item.get("requiresReconcile") or item.get("kind") == "cancel":
         known_conf = str(((item.get("reservationEvidence") or {}).get("confirmation")) or "")
-        tried = [known_conf or intent_ref]
-        matches, search_err = _journey_matches(etd, tried[0], expect_conf=known_conf,
-                                               expect_ldap=ldap)
-        if not matches and not search_err:
-            tried.append(ldap)
-            matches, search_err = _journey_matches(etd, ldap, expect_conf=known_conf,
-                                                   expect_ldap=ldap)
+        criteria = [known_conf or intent_ref]
+        search = _journey_matches(etd, criteria[0], confirmation=known_conf,
+                                  intent_ref=intent_ref)
+        rows_returned = search["rowsReturned"]
+        if not search["matches"] and not search["error"]:
+            criteria.append(ldap)
+            search = _journey_matches(etd, ldap, confirmation=known_conf,
+                                      intent_ref=intent_ref)
+            rows_returned += search["rowsReturned"]
         st, body = post("readback", {
-            "matches": matches,
+            "matches": search["matches"],
             "expected": {"confirmation": known_conf} if known_conf else {},
-            "search": {"status": "error" if search_err else "ok",
-                       "criteria": tried,
-                       "error": search_err},
+            "search": _search_evidence({**search, "criteria": criteria,
+                                        "rowsReturned": rows_returned}),
         })
         print(f"  RECON {label} {'cancel-' if item.get('kind') == 'cancel' else ''}readback "
-              f"({len(matches)} match) -> {body.get('status', st)}")
+              f"({len(search['matches'])} identified of {rows_returned} row(s)) "
+              f"-> {body.get('status', st)}")
         return
 
     if mode == "live" and not confirm:
@@ -1468,19 +1513,22 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
 
     # 3.5 Pre-commit duplicate search (repair spec §3): before opening an
     # attempt, ask ETD whether THIS intent already has a reservation (crash
-    # after a commit but before op_result, a double claim, …). Found → post
-    # the readback and stop; the server settles the true state. Search error
-    # → do NOT proceed to booking on a blind spot.
-    dup_matches, dup_err = _journey_matches(etd, intent_ref, expect_ldap=ldap)
-    if dup_err:
-        print(f"  HOLD {label} pre-commit duplicate search failed: {dup_err[:120]}")
+    # after a commit but before op_result, a double claim, …). Only a row that
+    # POSITIVELY identifies as this intent's counts — the search itself returns
+    # every journey ETD will hand over for the criteria, most of them unrelated
+    # quotes. Identified → post the readback and stop; the server settles the
+    # true state. Search error → do NOT proceed to booking on a blind spot.
+    dup = _journey_matches(etd, intent_ref, intent_ref=intent_ref)
+    if dup["error"]:
+        print(f"  HOLD {label} pre-commit duplicate search failed: {dup['error'][:120]}")
         return
-    if dup_matches:
+    if dup["matches"]:
         st, body = post("readback", {
-            "matches": dup_matches, "expected": {},
-            "search": {"status": "ok", "criteria": [intent_ref], "error": None},
+            "matches": dup["matches"], "expected": {},
+            "search": _search_evidence(dup),
         })
-        print(f"  DUPE {label} pre-commit search found {len(dup_matches)} journey(s) "
+        print(f"  DUPE {label} pre-commit search identified {len(dup['matches'])} existing "
+              f"reservation(s) for this intent (of {dup['rowsReturned']} row(s)) "
               f"-> {body.get('status', st)} (no new booking)")
         return
 
@@ -1548,14 +1596,13 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
 
     # 8. Journey readback — the only path to reservation_verified.
     rb_criteria = confirmation or intent_ref
-    matches, search_err = _journey_matches(etd, rb_criteria,
-                                           expect_conf=confirmation, expect_ldap=ldap)
-    st, body = post("readback", {"matches": matches,
+    rb = _journey_matches(etd, rb_criteria, confirmation=confirmation,
+                          intent_ref=intent_ref)
+    st, body = post("readback", {"matches": rb["matches"],
                                  "expected": {"confirmation": confirmation},
-                                 "search": {"status": "error" if search_err else "ok",
-                                            "criteria": [rb_criteria],
-                                            "error": search_err}})
-    print(f"       readback ({len(matches)} match) -> {body.get('status', st)}")
+                                 "search": _search_evidence(rb)})
+    print(f"       readback ({len(rb['matches'])} identified of {rb['rowsReturned']} "
+          f"row(s)) -> {body.get('status', st)}")
 
 
 def run_intents(workflow_type=None, watch=False, poll=60, days=7,
