@@ -9,10 +9,11 @@
  *   1. Never ask for something we already know. Section A is CONFIRMED, not
  *      typed. A correction raises a data-quality flag instead of silently
  *      overwriting the roster.
- *   2. The default answer is NO, and the technician should find that out as
- *      early as possible. Choosing scheduled maintenance ends the form on the
- *      spot rather than letting someone fill in four sections before being told
- *      no.
+ *   2. The default answer is NO — but a person says it, not the form. Choosing
+ *      scheduled maintenance used to end the form on the spot; since 2026-08-16
+ *      it submits like anything else, so Fleet SEES it and denies it with the
+ *      standard response (maintenance is scheduled and waited on) instead of
+ *      the attempt vanishing into a closed door and becoming a phone call.
  *
  * TWO DOORS, ONE FORM:
  *
@@ -47,13 +48,16 @@ const STATES = [
   "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
 ];
 
-// Three, in Tyler's order (2026-08-14), new hire first. Decommission folds
-// into breakdown; scheduled maintenance is no longer offered as a category at
-// all, though acknowledgement 1 still has the technician attest it is not one.
+// In Tyler's order (2026-08-14), new hire first; decommission folds into
+// breakdown. Scheduled maintenance came BACK on 2026-08-16 — not because it
+// ever qualifies (it does not), but because a category the form refuses to
+// offer becomes a phone call to Fleet. It submits like anything else and
+// Fleet denies it with the standard wait-through-routing response.
 const CATEGORIES: Array<[string, string]> = [
   ["new_hire_awaiting_vehicle", "New hire"],
   ["breakdown", "Breakdown: my work van will not run or drive, or has been decommissioned"],
   ["accident", "Accident or collision"],
+  ["scheduled_maintenance", "Scheduled maintenance: oil change, tires, preventive maintenance or inspection"],
 ];
 
 // The first five are one consolidated agreement: a single checkbox attests to
@@ -179,9 +183,15 @@ export default function RentalRequestForm() {
   // not any more: Tyler decides every request, so every request is completed and
   // submitted. Kept as a category because the denial mix still needs to count it.
   const isNoVan = problemCategory === "new_hire_awaiting_vehicle";
+  // A maintenance submission cannot be bought with false attestations:
+  // "this is not scheduled maintenance" and "my vehicle cannot be driven
+  // safely" are both untrue when the category IS maintenance and the van is
+  // fine. The server skips requiring them on this path; the form hides them.
+  const isMaint = problemCategory === "scheduled_maintenance";
   const coreAcks = CORE_ACKS.filter(([k]) =>
     (k !== "ackHasAppointment" || !(identity?.isByov || isNoVan))
-    && (k !== "ackCannotDriveSafely" || !isNoVan));
+    && (k !== "ackCannotDriveSafely" || !(isNoVan || isMaint))
+    && (k !== "ackNotMaintenance" || !isMaint));
   const coreAll = coreAcks.every(([k]) => !!acks[k]);
   const clearErr = (k: string) =>
     setFieldErrors((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
@@ -283,7 +293,11 @@ export default function RentalRequestForm() {
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       noVehicle: isNoVan,
       appointmentAt: appointmentAt || null,
-      ...acks,
+      // Only the acknowledgements the form actually showed. A stale true left
+      // over from before a category switch would land in the audit trail as a
+      // statement the technician never made.
+      ...Object.fromEntries(Object.entries(acks).filter(([k]) =>
+        coreAcks.some(([c]) => c === k) || INDIVIDUAL_ACKS.some(([c]) => c === k))),
     });
   };
 

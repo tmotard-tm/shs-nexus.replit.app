@@ -38,8 +38,11 @@ import {
   confirmIntent,
   fetchEligibilityFacts,
   fileContractBlock,
+  invalidateRequestPreviews,
   isContractBlockLive,
   openBookingAttempt,
+  persistPreviewFromRunner,
+  requestBookingInFlight,
   recordBookingPostback,
   reconcileOpenBlockAttempt,
   reconcileOpenBlockAttempts,
@@ -929,5 +932,96 @@ describe("ART filing: kill-switch freeze + crash reconcile", () => {
     const row = await intentRow(id);
     assert.equal(row.block_state, "accepted", "resolved state survives — no retry re-arm, no second POST possible");
     assert.equal((await artAttempts(id))[0].outcome, null, "attempt stays open pending evidence that matches the state");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("request-lane input edits (vehicle class adjust)", () => {
+  test("invalidateRequestPreviews knocks built-but-unconfirmed previews back; confirmed and terminal survive", async () => {
+    const src = crypto.randomUUID();
+    const mk = (rev: number, status: string) =>
+      insertIntent({ workflow_type: WORKFLOW_REQUEST, source_id: src, source_revision: rev,
+                     ldap: `${LDAP_PREFIX}CLS1`, status });
+    const a = await mk(0, "preview_ready");
+    const b = await mk(1, "preview_pending");
+    const c = await mk(2, "confirmed");
+    const d = await mk(3, "cancelled");
+
+    const n = await invalidateRequestPreviews(src, "vehicle class set to 'suv' by test");
+    assert.equal(n, 2, "exactly the two pre-confirm previews");
+
+    for (const [id, want] of [[a, "preview_required"], [b, "preview_required"],
+                              [c, "confirmed"], [d, "cancelled"]] as Array<[number, string]>) {
+      const { rows } = await db.execute(sql`
+        SELECT status, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+      `);
+      assert.equal((rows as any[])[0].status, want, `intent ${id}`);
+    }
+    // The reason lands on the knocked-back rows so Preview explains itself.
+    const { rows: ra } = await db.execute(sql`
+      SELECT last_error FROM vrm_rental_workflow_intents WHERE id = ${a}
+    `);
+    assert.match(String((ra as any[])[0].last_error), /vehicle class set to 'suv'/);
+  });
+
+  test("requestBookingInFlight sees only post-confirm statuses, only for the SAME request source", async () => {
+    const src = crypto.randomUUID();
+    assert.equal(await requestBookingInFlight(src), null, "no intents at all");
+
+    const pre = await insertIntent({ workflow_type: WORKFLOW_REQUEST, source_id: src,
+                                     ldap: `${LDAP_PREFIX}CLS2`, status: "preview_ready" });
+    assert.equal(await requestBookingInFlight(src), null, "a pre-confirm preview is not in flight");
+
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET status = 'awaiting_verification' WHERE id = ${pre}`);
+    const hit = await requestBookingInFlight(src);
+    assert.equal(hit?.status, "awaiting_verification", "post-confirm blocks the edit");
+
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET status = 'completed' WHERE id = ${pre}`);
+    assert.equal(await requestBookingInFlight(src), null, "terminal releases the edit lock");
+
+    // A cutover intent sharing the same source id never counts against a request edit.
+    await insertIntent({ workflow_type: WORKFLOW_CUTOVER, source_id: src,
+                         ldap: `${LDAP_PREFIX}CLS2`, status: "booking" });
+    assert.equal(await requestBookingInFlight(src), null, "workflow_type filter holds");
+  });
+
+  test("a stale runner preview postback can never resurrect an invalidated intent", async () => {
+    // Real interleaving, not a mock: the runner passes the entry status check,
+    // spends the build window on gate re-runs, and a vehicle-class edit
+    // invalidates the intent just before the runner's terminal write.
+    const { rows } = await db.execute(sql`
+      INSERT INTO vrm_rental_request (ldap, tech_name, mobile_phone, home_state)
+      VALUES (${LDAP_PREFIX + "STALE"}, 'ZZ Stale Runner', '5555550199', 'PA')
+      RETURNING id, request_no
+    `);
+    const src = String((rows as any[])[0].request_no);
+    const id = await insertIntent({ workflow_type: WORKFLOW_REQUEST, source_id: src,
+                                    ldap: `${LDAP_PREFIX}STALE`, status: "preview_pending" });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET claimed_by = 'stale-runner', lease_expires_at = now() + interval '10 minutes', fencing_token = 7
+      WHERE id = ${id}
+    `);
+
+    await assert.rejects(
+      persistPreviewFromRunner(
+        { intentId: id, runnerId: "stale-runner", fencingToken: 7,
+          quote: { branchPinned: false } as any, classDecision: { mapped: false } as any },
+        { beforeFinalWrite: async () => {
+            await invalidateRequestPreviews(src, "vehicle class set to 'suv' mid-build");
+        } },
+      ),
+      (e: any) => e?.code === "stale_postback" || /stale preview discarded/.test(String(e?.message)),
+      "the guarded terminal write must refuse and surface the discard",
+    );
+
+    const row = ((await db.execute(sql`
+      SELECT status, last_error, preview FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.status, "preview_required", "invalidation outcome survives the stale postback");
+    assert.match(String(row.last_error), /vehicle class set to 'suv' mid-build/,
+      "the edit's reason is not clobbered by the runner's failure codes");
+    assert.equal(row.preview, null, "no stale preview lands");
   });
 });

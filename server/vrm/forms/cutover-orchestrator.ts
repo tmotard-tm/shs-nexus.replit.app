@@ -374,6 +374,22 @@ export function renderSpecialNotes(f: {
   );
 }
 
+/**
+ * Request-lane special notes (Tyler, 2026-08-16): the truck number rides in
+ * the reservation's special notes, and the LDAP rides in the additional
+ * billing field (set_driver fills the template's isBillingRef "LDAP"
+ * additional-information field; this note is the branch-visible copy). A NEW
+ * rental, so none of the cutover's CHANGEOVER language: there is no prior
+ * Enterprise ticket to close and no vehicle to keep.
+ */
+export function renderRequestSpecialNotes(f: { truck: string | null; ldap: string }): string {
+  return (
+    `SHS TRUCK ${String(f.truck ?? "").trim() || "n/a"}. SHS FLEET - DIRECT BILLING. ` +
+    `New rental approved by SHS Fleet for a technician whose assigned vehicle is off the road. ` +
+    `Technician LDAP ${f.ldap}. Bill direct to TransformCo. Questions: SHS Fleet.`
+  );
+}
+
 /** Draft bodies (plan §Messages). EXACT rendered text appears in Preview; live arming requires Tyler's approval. */
 export function renderMsg1(f: { conf: string; branchName: string; branchAddress: string }): string {
   return (
@@ -917,7 +933,11 @@ async function loadIntent(intentId: number): Promise<any> {
   return row;
 }
 
-async function touchIntent(intentId: number, patch: Record<string, unknown>): Promise<void> {
+async function touchIntent(
+  intentId: number,
+  patch: Record<string, unknown>,
+  guard?: { statusIn?: string[]; claimedBy?: string; fencingToken?: number },
+): Promise<number> {
   // Narrow, whitelisted dynamic update — build SET clauses explicitly.
   const sets: any[] = [];
   const push = (fragment: any) => sets.push(fragment);
@@ -952,7 +972,20 @@ async function touchIntent(intentId: number, patch: Record<string, unknown>): Pr
   }
   push(sql`updated_at = now()`);
   const setSql = sets.reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
-  await db.execute(sql`UPDATE vrm_rental_workflow_intents SET ${setSql} WHERE id = ${intentId}`);
+  // Optional CAS guard: re-assert the caller's WHOLE predicate in the write
+  // itself (status + claim + fence), because a check at function entry says
+  // nothing about the row by the time a slow builder finally writes.
+  let where = sql`id = ${intentId}`;
+  if (guard?.statusIn?.length) {
+    const inList = guard.statusIn
+      .map((s) => sql`${s}`)
+      .reduce((acc, cur, i) => (i === 0 ? cur : sql`${acc}, ${cur}`));
+    where = sql`${where} AND status IN (${inList})`;
+  }
+  if (guard?.claimedBy !== undefined) where = sql`${where} AND claimed_by = ${guard.claimedBy}`;
+  if (guard?.fencingToken !== undefined) where = sql`${where} AND fencing_token = ${guard.fencingToken}`;
+  const res = await db.execute(sql`UPDATE vrm_rental_workflow_intents SET ${setSql} WHERE ${where}`);
+  return (res as any).rowCount ?? 0;
 }
 
 /**
@@ -1092,6 +1125,7 @@ function publicFacts(f: EligibilityFacts): Record<string, unknown> {
             shopPostal: strOrNull(f.sourceRow.shop_postal),
             reportedBranch: strOrNull(f.sourceRow.tech_reported_branch),
             approvedVehicleClass: strOrNull(f.sourceRow.approved_vehicle_class),
+            truckNumber: strOrNull(f.sourceRow.truck_number),
             pickupAt: f.sourceRow.pickup_at ?? null,
             appointmentAt: f.sourceRow.appointment_at ?? null,
           }
@@ -1345,6 +1379,9 @@ export async function persistPreviewFromRunner(params: {
   fencingToken: number;
   quote: RunnerQuote;
   classDecision: RunnerClassDecision;
+}, deps?: {
+  /** Test seam: runs just before the terminal write, where the TOCTOU lives. */
+  beforeFinalWrite?: () => Promise<void>;
 }): Promise<{ status: string; failures?: EligibilityFailure[]; preview?: any; previewVersion?: number }> {
   const intent = await verifyClaim(params.intentId, params.runnerId, params.fencingToken);
   if (intent.status !== "preview_pending") {
@@ -1353,6 +1390,23 @@ export async function persistPreviewFromRunner(params: {
   const isCutover = intent.workflow_type === WORKFLOW_CUTOVER;
 
   const releaseClaim = { claimed_by: null as any, lease_expires_at: null as any };
+  // The entry check above is only a fast reject. Minutes of gate re-runs and
+  // schedule fetches sit between it and the write, and a vehicle-class edit
+  // (invalidateRequestPreviews), a cancel, or a rival reclaim can move the
+  // intent in that window. Every terminal write below re-asserts the whole
+  // claim predicate, so a stale runner postback is DISCARDED instead of
+  // resurrecting an old-input preview as fresh preview_ready.
+  const postbackGuard = {
+    statusIn: ["preview_pending"],
+    claimedBy: params.runnerId,
+    fencingToken: params.fencingToken,
+  };
+  const staleDiscard = () =>
+    new OrchestratorError(
+      "stale_postback",
+      "intent left preview_pending while the preview was building (input edit, cancel, or rival reclaim) — stale preview discarded",
+      409,
+    );
 
   // 1. Full eligibility gate re-run (Queue-time evaluation).
   const facts = await fetchEligibilityFacts({
@@ -1421,12 +1475,14 @@ export async function persistPreviewFromRunner(params: {
   }
 
   if (failures.length) {
-    await touchIntent(intent.id, {
+    if (deps?.beforeFinalWrite) await deps.beforeFinalWrite();
+    const stamped = await touchIntent(intent.id, {
       status: "preview_required",
       eligibility: { facts: publicFacts(facts), failures, checkedAt: new Date().toISOString() },
       last_error: failures.map((f) => f.code).join(","),
       ...releaseClaim,
-    });
+    }, postbackGuard);
+    if (!stamped) throw staleDiscard();
     await mirrorCutoverSummary(intent.id);
     return { status: "preview_required", failures };
   }
@@ -1446,7 +1502,12 @@ export async function persistPreviewFromRunner(params: {
         sipp,
         ldap: intent.ldap,
       })
-    : null;
+    : renderRequestSpecialNotes({
+        // The request's truck of record (the technician may have corrected it
+        // on the form) beats the roster's answer.
+        truck: strOrNull(facts.sourceRow?.truck_number) ?? facts.tpmsTruck,
+        ldap: intent.ldap,
+      });
   const bookingReferences = isCutover
     ? [intent.ldap, `CLOSE Enterprise Ticket = ${facts.caseFacts!.ecars}`, `Holman ARI Claim = ${facts.caseFacts!.claim ?? "n/a"}`]
     : [intent.ldap];
@@ -1532,7 +1593,8 @@ export async function persistPreviewFromRunner(params: {
   const hash = previewHash(preview);
   const expires = new Date(Date.now() + 20 * 3600 * 1000); // bounded by next schedule load + slack
 
-  await touchIntent(intent.id, {
+  if (deps?.beforeFinalWrite) await deps.beforeFinalWrite();
+  const stamped = await touchIntent(intent.id, {
     status: "preview_ready",
     preview,
     preview_version: version,
@@ -1543,7 +1605,8 @@ export async function persistPreviewFromRunner(params: {
     eligibility: { facts: publicFacts(facts), failures: [], checkedAt: new Date().toISOString() },
     last_error: null,
     ...releaseClaim,
-  });
+  }, postbackGuard);
+  if (!stamped) throw staleDiscard();
   await mirrorCutoverSummary(intent.id);
   return { status: "preview_ready", preview, previewVersion: version };
 }
@@ -1611,6 +1674,50 @@ export async function confirmIntent(params: {
   }
   await mirrorCutoverSummary(params.intentId);
   return { status: "confirmed" };
+}
+
+// ---------------------------------------------------------------------------
+// Request-lane input edits. approved_vehicle_class lives on the REQUEST row,
+// outside any intent, so the request routes call these two before and after
+// changing it — an edit must never slide under a booking already past
+// Confirm, and a built preview must never survive an input it no longer
+// reflects. (Confirm's gate re-run checks eligibility, not input equality,
+// so without the explicit knock-back a stale preview_ready would still
+// confirm and book the old class.)
+// ---------------------------------------------------------------------------
+
+/**
+ * Statuses where something external may already exist or is authorized to:
+ * a confirmed preview, an open ETD attempt, an unverified or verified
+ * reservation, or an attempt parked for a human. Pre-confirm statuses are
+ * deliberately absent (previews rebuild); so are the terminal three (nothing
+ * a terminal intent did can be un-decided by an input edit).
+ */
+export async function requestBookingInFlight(
+  sourceId: string,
+): Promise<{ id: number; status: string } | null> {
+  const { rows } = await db.execute(sql`
+    SELECT id, status FROM vrm_rental_workflow_intents
+    WHERE workflow_type = ${WORKFLOW_REQUEST} AND source_id = ${sourceId}
+      AND status IN ('confirmed', 'booking', 'awaiting_verification', 'booking_unknown',
+                     'block_conflict_pending_readback', 'manual_review', 'reservation_verified')
+    ORDER BY id DESC LIMIT 1
+  `);
+  const r = (rows as any[])[0];
+  return r ? { id: Number(r.id), status: String(r.status) } : null;
+}
+
+/** Knock built-but-unconfirmed previews back so they re-quote under the new inputs. */
+export async function invalidateRequestPreviews(sourceId: string, reason: string): Promise<number> {
+  const { rows } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET status = 'preview_required', last_error = ${reason}, updated_at = now()
+    WHERE workflow_type = ${WORKFLOW_REQUEST} AND source_id = ${sourceId}
+      AND status IN ('preview_pending', 'preview_ready')
+    RETURNING id
+  `);
+  for (const r of rows as any[]) await mirrorCutoverSummary(Number(r.id));
+  return (rows as any[]).length;
 }
 
 // ---------------------------------------------------------------------------

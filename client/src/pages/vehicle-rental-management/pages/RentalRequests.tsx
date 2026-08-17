@@ -49,6 +49,13 @@ const CATEGORY_LABEL: Record<string, string> = {
   scheduled_maintenance: "Scheduled maintenance",
 };
 
+// Mirrors the server's MAINTENANCE set. Only scheduled_maintenance is offered
+// on today's form; the rest appear on historical rows.
+const MAINT_CATS = new Set(["scheduled_maintenance", "oil_change", "tires", "pm", "inspection"]);
+
+// Rules 2-7 are the RETIRED eight-rule engine's labels, kept so historical
+// rows still read correctly. Today's engine emits only 1 (maintenance gate)
+// and 8 (cleared — decide on profitability).
 const RULE_LABEL: Record<number, string> = {
   1: "scheduled maintenance",
   2: "drivable and safe",
@@ -185,6 +192,11 @@ const counted = (rows: Req[], get: (r: Req) => string | null | undefined): Array
 
 const d10 = (v: string | null) => (v ? String(v).slice(0, 10) : "");
 
+// One normal form for class text everywhere ("cargo_van" -> "cargo van"), so
+// UI comparisons agree with what the server stores and the bookers match.
+const normCls = (s: string | null | undefined) =>
+  String(s ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+
 export default function RentalRequests() {
   const qc = useQueryClient();
   const [sort, setSort] = useState<SortState>({ col: null, dir: null });
@@ -198,6 +210,7 @@ export default function RentalRequests() {
   const [pickupTime, setPickupTime] = useState("08:00");
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
+  const [classDraft, setClassDraft] = useState("sedan");
 
   const { data, isLoading, error } = useQuery<{ requests: Req[] }>({
     queryKey: ["/api/vrm/forms/rental-request/list"], refetchInterval: 60_000,
@@ -210,10 +223,11 @@ export default function RentalRequests() {
   });
   // Served rather than duplicated: the checkbox label here and the sentence the
   // technician receives are the same string, so they can never drift.
-  const { data: reasonData } = useQuery<{ reasons: Record<string, string> }>({
+  const { data: reasonData } = useQuery<{ reasons: Record<string, string>; maintenanceDenyScript?: string }>({
     queryKey: ["/api/vrm/forms/rental-request/missing-reasons"],
   });
   const REASONS = reasonData?.reasons ?? {};
+  const MAINT_SCRIPT = reasonData?.maintenanceDenyScript ?? "";
 
   const decide = useMutation({
     mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null }) => {
@@ -229,6 +243,29 @@ export default function RentalRequests() {
       setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00"); setDetail(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/stats"] });
+    },
+    onError: (e: any) => setActionErr(e.message),
+  });
+
+  // Adjust the class the booking will reserve. The server refuses once the
+  // booking workflow is past Confirm, and knocks a waiting preview back so
+  // it re-quotes under the new class — the refresh below makes that visible.
+  const classMut = useMutation({
+    mutationFn: async (v: { requestNo: number; vehicleClass: string }) => {
+      const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/vehicle-class`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ vehicleClass: v.vehicleClass }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.message || "class update failed");
+      return j;
+    },
+    onSuccess: (j: any) => {
+      setActionErr("");
+      setClassDraft(j.vehicleClass);
+      setDetail((d) => (d ? { ...d, approved_vehicle_class: j.vehicleClass } : d));
+      qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
+      refreshIntents();
     },
     onError: (e: any) => setActionErr(e.message),
   });
@@ -273,6 +310,7 @@ export default function RentalRequests() {
     truck: (r) => r.truck_number,
     category: (r) => CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category,
     decision: (r) => r.auto_decision, rule: (r) => r.auto_rule, status: (r) => r.status,
+    net: (r) => ((r as any).prof_net_with == null ? null : Number((r as any).prof_net_with)),
     shop: (r) => r.shop_name, appt: (r) => r.appointment_at, days: (r) => r.shop_estimated_days,
     created: (r) => r.created_at,
   };
@@ -292,6 +330,8 @@ export default function RentalRequests() {
       ["appointment", (r) => d10(r.appointment_at)], ["shop_days", (r) => r.shop_estimated_days],
       ["auto_decision", (r) => r.auto_decision], ["auto_rule", (r) => r.auto_rule],
       ["auto_reason", (r) => r.auto_reason], ["status", (r) => r.status],
+      ["net_with_rental", (r) => (r as any).prof_net_with ?? ""],
+      ["vehicle_class", (r) => normCls(r.approved_vehicle_class) || "sedan"],
       ["decided_by", (r) => r.decided_by], ["decision_note", (r) => r.decision_note],
       ["actual_days_down", (r) => r.actual_days_down], ["claim_variance_days", (r) => r.claim_variance_days],
       ["created_at", (r) => r.created_at],
@@ -424,6 +464,7 @@ export default function RentalRequests() {
               <SortHeader col="truck" text="Truck" sort={sort} setSort={setSort} />
               <SortHeader col="category" text="Reason" sort={sort} setSort={setSort} />
               <SortHeader col="decision" text="Engine" sort={sort} setSort={setSort} />
+              <SortHeader col="net" text="Net/day" sort={sort} setSort={setSort} />
               <SortHeader col="rule" text="Rule" sort={sort} setSort={setSort} />
               <SortHeader col="status" text="Status" sort={sort} setSort={setSort} />
               <SortHeader col="shop" text="Shop" sort={sort} setSort={setSort} />
@@ -435,7 +476,15 @@ export default function RentalRequests() {
               {sorted.map((r) => {
                 const [fg, bg] = DECISION_TONE[r.auto_decision ?? ""] ?? [colors.inkMuted, colors.surface];
                 return (
-                  <tr key={r.request_no} onClick={() => { setDetail(r); setNote(""); setActionErr(""); }}
+                  <tr key={r.request_no} onClick={() => {
+                        setDetail(r);
+                        // Maintenance arrives pre-denied: the standard response
+                        // is already in the note box, so DENY is one click and
+                        // the technician receives the exact script.
+                        setNote(MAINT_CATS.has(r.problem_category ?? "") && r.status === "pending" ? MAINT_SCRIPT : "");
+                        setClassDraft(normCls(r.approved_vehicle_class) || "sedan");
+                        setActionErr("");
+                      }}
                       style={{ cursor: "pointer" }}>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.request_no}</td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.ldap}</td>
@@ -453,6 +502,13 @@ export default function RentalRequests() {
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.truck_number || "—"}</td>
                     <td style={tdBase}>{CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "—"}</td>
                     <td style={tdBase}>{r.auto_decision ? <Pill text={r.auto_decision} fg={fg} bg={bg} /> : "—"}</td>
+                    {/* The number the decision now turns on, visible without
+                        opening the drawer. */}
+                    <td style={{ ...tdBase, fontFamily: fonts.jetbrains,
+                                 color: (r as any).prof_net_with == null ? colors.inkMuted
+                                   : Number((r as any).prof_net_with) >= 0 ? colors.green : colors.red }}>
+                      {(r as any).prof_net_with == null ? "—" : `$${Number((r as any).prof_net_with).toFixed(0)}`}
+                    </td>
                     <td style={tdBase} title={r.auto_reason ?? ""}>
                       {r.auto_rule ? `${r.auto_rule} · ${RULE_LABEL[r.auto_rule] ?? ""}` : "—"}
                     </td>
@@ -489,6 +545,22 @@ export default function RentalRequests() {
               </button>
             </div>
 
+            {/* Maintenance is the one answer that is already decided. Say it
+                before anything else in the drawer gets a chance to look like
+                a reason to approve. */}
+            {MAINT_CATS.has(detail.problem_category ?? "") && (
+              <div style={{ background: colors.redLight, border: `1px solid ${colors.red}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.red }}>
+                  MAINTENANCE — NO RENTAL
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                  A service visit is scheduled and waited on, not rented around.
+                  The standard response is pre-filled in the note — DENY sends it
+                  to the technician.
+                </div>
+              </div>
+            )}
+
             <div style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                 Engine said
@@ -497,6 +569,37 @@ export default function RentalRequests() {
                 {detail.auto_decision} · rule {detail.auto_rule}
               </div>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>{detail.auto_reason}</div>
+            </div>
+
+            {/* Profitability factors — the decision inputs, shown BEFORE the
+                request's own story (same factors the new-rentals check uses).
+                Green when the tech is profitable WITH the rental. */}
+            <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 10,
+                          background: (detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0
+                            ? colors.greenLight : colors.redLight,
+                          border: `1px solid ${(detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0 ? colors.green : colors.red}` }}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                Profitability factors
+              </div>
+              {(detail as any).prof_synced_at ? (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, display: "grid", gap: 3 }}>
+                  <div><b>{(detail as any).prof_recommendation || "no recommendation"}</b></div>
+                  <div>Daily net with rental: <b>${Number((detail as any).prof_net_with ?? 0).toFixed(0)}</b>
+                       &nbsp;·&nbsp; without: ${Number((detail as any).prof_net_before ?? 0).toFixed(0)}
+                       {(detail as any).prof_ppt != null && <> &nbsp;·&nbsp; PPT ${Number((detail as any).prof_ppt).toFixed(0)}/day</>}</div>
+                  <div>Revenue ${Number((detail as any).prof_daily_revenue ?? 0).toFixed(0)}/day
+                       &nbsp;·&nbsp; costs ${Number((detail as any).prof_daily_costs ?? 0).toFixed(0)}/day
+                       &nbsp;·&nbsp; scorecard {(detail as any).prof_scorecard_exempt ? "exempt" : ((detail as any).prof_scorecard ?? "n/a")}
+                       &nbsp;·&nbsp; tenure {(detail as any).prof_tenure_months ?? "?"} mo
+                       {(detail as any).prof_new_hire_exempt ? " · new-hire exempt" : ""}</div>
+                  <div style={{ fontSize: 11, color: colors.inkMuted }}>
+                    as of {String((detail as any).prof_synced_at).slice(0, 10)}</div>
+                </div>
+              ) : (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
+                  No profitability snapshot for this technician. Evaluate by hand before deciding.
+                </div>
+              )}
             </div>
 
             {([["Truck", detail.truck_number], ["BYOV", detail.is_byov ? "yes" : ""],
@@ -525,31 +628,40 @@ export default function RentalRequests() {
                 </div>
               ))}
 
-            {/* The Holman-workflow evaluation: profitability in view before the
-                decision. Green when the tech is profitable WITH the rental. */}
-            <div style={{ marginTop: 16, padding: "10px 12px", borderRadius: 6,
-                          background: (detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0
-                            ? colors.greenLight : colors.redLight,
-                          border: `1px solid ${(detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0 ? colors.green : colors.red}` }}>
+            {/* The class the booking will reserve. The engine wrote sedan
+                (cargo van for the HVAC carve-out) at submit; this is Fleet's
+                when-necessary override. The bookers match this text against
+                ETD's offered classes; the server locks it once a booking is
+                past Confirm and knocks waiting previews back to re-quote. */}
+            <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                Profitability
+                Vehicle class for the booking
               </div>
-              {(detail as any).prof_synced_at ? (
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, display: "grid", gap: 3 }}>
-                  <div><b>{(detail as any).prof_recommendation || "no recommendation"}</b></div>
-                  <div>Daily net with rental: <b>${Number((detail as any).prof_net_with ?? 0).toFixed(0)}</b>
-                       &nbsp;·&nbsp; without: ${Number((detail as any).prof_net_before ?? 0).toFixed(0)}</div>
-                  <div>Revenue ${Number((detail as any).prof_daily_revenue ?? 0).toFixed(0)}/day
-                       &nbsp;·&nbsp; costs ${Number((detail as any).prof_daily_costs ?? 0).toFixed(0)}/day
-                       &nbsp;·&nbsp; scorecard {(detail as any).prof_scorecard ?? "n/a"}
-                       &nbsp;·&nbsp; tenure {(detail as any).prof_tenure_months ?? "?"} mo
-                       {(detail as any).prof_new_hire_exempt ? " · new-hire exempt" : ""}</div>
-                  <div style={{ fontSize: 11, color: colors.inkMuted }}>
-                    as of {String((detail as any).prof_synced_at).slice(0, 10)}</div>
-                </div>
+              {["pending", "approved"].includes(detail.status) ? (
+                <>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input list="vrm-class-options" value={classDraft}
+                           onChange={(e) => setClassDraft(e.target.value)}
+                           placeholder="sedan" style={{ ...ctrl, flex: 1 }} />
+                    <datalist id="vrm-class-options">
+                      {["sedan", "suv", "minivan", "cargo van", "pickup truck"].map((c) => <option key={c} value={c} />)}
+                    </datalist>
+                    <button type="button"
+                            disabled={classMut.isPending || !classDraft.trim()
+                              || normCls(classDraft) === (normCls(detail.approved_vehicle_class) || "sedan")}
+                            onClick={() => classMut.mutate({ requestNo: detail.request_no, vehicleClass: classDraft })}
+                            style={{ ...ctrl, cursor: "pointer", fontWeight: 600 }}>
+                      {classMut.isPending ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                  <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "6px 0 0" }}>
+                    Books as written — sedan unless there is a reason to go bigger.
+                  </p>
+                </>
               ) : (
                 <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
-                  No profitability snapshot for this technician. Evaluate by hand before deciding.
+                  {normCls(detail.approved_vehicle_class) || "sedan"}
+                  <span style={{ color: colors.inkMuted, fontSize: 11 }}> — fixed (status {detail.status})</span>
                 </div>
               )}
             </div>

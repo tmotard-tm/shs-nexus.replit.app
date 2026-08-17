@@ -1157,19 +1157,34 @@ def _class_for_intent(item: dict, classes: list) -> dict:
                                   facts.get("surveyVehicleDesc"))
         mode = "same_vehicle"
     else:
-        want = str((facts.get("requestSeed") or {}).get("approvedVehicleClass") or "").strip()
-        pick = None
-        if want:
-            wl = want.lower()
-            pick = next((c for c in classes
-                         if wl in str(c.get("description") or "").lower()
-                         or wl == str(c.get("code") or "").lower()), None)
+        # The server now normalises to lowercase words ("cargo van"), but
+        # legacy rows still carry "cargo_van" — and an underscore can never
+        # substring-match an ETD description, which is how the HVAC carve-out
+        # would silently go UNMAPPED. Normalise BOTH sides the same way, and
+        # treat unset as the engine default: sedan (Tyler, 2026-08-16).
+        def _norm(s) -> str:
+            return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", str(s or ""))).strip().lower()
+        want = _norm((facts.get("requestSeed") or {}).get("approvedVehicleClass")) or "sedan"
+        pick = next((c for c in classes
+                     if want in _norm(c.get("description"))
+                     or want == _norm(c.get("code"))), None)
+        match = "approved_label" if pick else "UNMAPPED"
+        note = (f"approved class '{want}' matched {str((pick or {}).get('code'))}"
+                if pick else f"approved class '{want}' not offered at this branch")
+        if not pick and want == "sedan":
+            # ETD class descriptions rarely contain the literal word "sedan",
+            # so the default would park EVERY plain request for a human. The
+            # sedan ladder (no job title — the class is already decided) picks
+            # a real offered code instead. Named classes ('suv', 'cargo van')
+            # still require a literal match or a person.
+            lad = choose_class(None, None, classes, None)
+            if lad.get("pick"):
+                pick, match = lad["pick"], "sedan_ladder"
+                note = f"sedan via ladder: {lad.get('note')}"
         sel = {"pick": pick, "code": str((pick or {}).get("code") or ""),
-               "match": "approved_label" if pick else "UNMAPPED",
+               "match": match,
                "changes_vehicle": None,
-               "note": (f"approved class '{want}' matched {str((pick or {}).get('code'))}"
-                        if pick else
-                        f"approved class '{want or '(unset)'}' not offered at this branch")}
+               "note": note}
         mode = "approved_class"
     return {"chosenSipp": sel["code"] or None, "mapped": bool(sel.get("pick")),
             "mode": mode, "match": sel.get("match"), "detail": sel.get("note"),

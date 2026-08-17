@@ -4,23 +4,21 @@
  * Spec: Fleet/ETD/REQUEST_FORM.md. This is the front door that replaces the
  * technician's call to Holman.
  *
- * THE DEFAULT ANSWER IS NO. A rental is what remains when nothing else resolves
- * the problem. Rules are evaluated cheapest-disqualifier-first so most requests
- * end on question one, and the denials are the number worth reporting: nobody
- * can say today what Holman talked people out of, because Holman never told us.
- *
- * The rules key on FACTS, never on the technician's assessment. Within two weeks
- * of launch every van will be undrivable and every repair three days long, so
- * the inputs that decide are the roster, the existing rental book, and the
- * shop's own ETA. The technician's account is captured and audited, not trusted.
- * Same lesson as vehicle class: a technician saying "I'm in a sedan" was never
- * evidence; only the model table decided.
+ * THE GATE IS MAINTENANCE (Tyler, 2026-08-16). The engine's only hard "no" is
+ * scheduled maintenance: a van with a booked service visit is scheduled and
+ * waited on, never rented around. Everything else is cleared to a person who
+ * decides with the technician's profitability factors in view. The roster,
+ * the rental book, BYOV state and the shop's ETA are still captured on the
+ * row — as context for that decision, not as gates. The denials remain the
+ * number worth reporting: nobody can say today what Holman talked people out
+ * of, because Holman never told us.
  */
 import type { Express, Router } from "express";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { regionForState, REGION_OWNER } from "../rental-operations/region";
+import { requestBookingInFlight, invalidateRequestPreviews } from "./cutover-orchestrator";
 
 // .b, 2026-08-14: the first five acknowledgements are now attested by ONE
 // checkbox listing them as bullets; the four terms of use stay individual.
@@ -104,150 +102,49 @@ export interface Eligibility {
 }
 
 export interface RequestFacts {
-  ldap: string;
-  isByov: boolean;
-  employmentStatus: string | null;
-  openRentalCount: number;
   problemCategory: string;
-  /** null = the BYOV mirror is missing or stale, so we genuinely do not know. */
-  isByovKnown?: boolean;
-  isDrivable: boolean | null;
-  isSafeToDrive: boolean | null;
-  hasAppointment: boolean | null;
-  shopEstimatedDays: number | null;
   hvacCarveOut?: boolean;
 }
 
 /**
- * The eight rules, in the spec's order. Returns the FIRST disqualifier, so the
- * reason a technician sees is the cheapest true one rather than a list.
+ * The exact maintenance denial wording. Exported and served to the review UI
+ * (see /missing-reasons) so the note Fleet pre-fills and the script the
+ * engine records are one string that cannot drift apart.
+ */
+export const MAINTENANCE_DENY_SCRIPT =
+  "Rentals are not provided for oil changes, tires, preventive maintenance " +
+  "or inspections. Schedule this as a wait through routing.";
+
+/**
+ * The maintenance gate. Simplified from the original eight rules (Tyler,
+ * 2026-08-16): maintenance is the only disqualifier the engine still calls,
+ * because it is the only one that is true by definition rather than by
+ * circumstance. Everything else — roster state, open rentals, BYOV, shop
+ * timing — is context Fleet weighs against the profitability factors, and
+ * the engine pre-judging those was answering a question nobody asked it.
+ *
+ * Rule numbers are kept sparse ON PURPOSE: 1 = maintenance, 8 = cleared.
+ * Historical rows were decided under the eight-rule engine, and the review
+ * UI labels rules 2-7 with their old meanings. Reusing 2 for "cleared" would
+ * relabel every old "drivable and safe" denial as something it never was.
  */
 export function evaluate(f: RequestFacts): Eligibility {
-  // 1 — maintenance is never a rental.
+  // 1 — maintenance is never a rental. The van is scheduled and waited on.
   if (MAINTENANCE.has(f.problemCategory)) {
     return {
       decision: "DENY",
       rule: 1,
       reason: "scheduled maintenance",
-      script:
-        "Rentals are not provided for oil changes, tires, preventive maintenance " +
-        "or inspections. Schedule this as a wait through routing.",
+      script: MAINTENANCE_DENY_SCRIPT,
     };
   }
 
-  // 2 — if it drives and it is safe, drive it.
-  if (f.isDrivable === true && f.isSafeToDrive === true) {
-    return {
-      decision: "DENY",
-      rule: 2,
-      reason: "vehicle is drivable and safe",
-      script:
-        "Your van is drivable and safe, so drive it to the shop or keep running " +
-        "your route until the parts arrive.",
-    };
-  }
-
-  // 6 — roster check runs before anything that costs money to verify.
-  //     Deliberately out of numeric order: it is cheap and absolute.
-  if ((f.employmentStatus ?? "").toUpperCase() !== "A") {
-    return {
-      decision: "REVIEW",
-      rule: 6,
-      reason: `technician is not ACTIVE on the roster (status ${f.employmentStatus ?? "unknown"})`,
-      script: "We need to confirm your roster status before we can set up a rental. Fleet will contact you.",
-    };
-  }
-
-  // 7 — never stack rentals on one technician.
-  if (f.openRentalCount > 0) {
-    return {
-      decision: "REVIEW",
-      rule: 7,
-      reason: `technician already holds ${f.openRentalCount} open rental(s)`,
-      script:
-        "Our records show you already have an open rental. Fleet will contact you " +
-        "rather than issuing a second one.",
-    };
-  }
-
-  // 5 — BYOV runs BEFORE the shop questions, and that ordering is load-bearing.
-  //
-  // A BYOV technician has no company van going to a shop, so the form never
-  // asks them for an appointment. Evaluating rule 3 first therefore returned
-  // "book the appointment first, then come back and finish this request" to a
-  // form that will never show that question — an instruction they cannot
-  // follow, on a link a DEFER deliberately leaves live. Every BYOV technician
-  // looped there forever. The shop questions cannot gate someone the shop
-  // questions were never asked of.
-  //
-  // Spare-unit availability (the other half of rule 5) is still not automatable
-  // here: the spares feed is not wired into this path and guessing "no spare"
-  // would quietly approve rentals the pool could have covered.
-  if (f.isByovKnown === false) {
-    // Never assume "not BYOV". Nexus's own byov_enrollments table was four
-    // months stale and would have said exactly that for 113+ enrolled
-    // technicians.
-    return {
-      decision: "REVIEW",
-      rule: 5,
-      reason: "BYOV status unknown — mirror missing or stale; refusing to assume",
-      script: "We need to check your vehicle programme before approving this. Fleet will contact you.",
-    };
-  }
-  if (f.isByov) {
-    return {
-      decision: "REVIEW",
-      rule: 5,
-      reason: "BYOV technician — no company vehicle, policy not defined",
-      script:
-        "You are enrolled in BYOV, so this needs a person to look at it. Fleet " +
-        "will contact you.",
-    };
-  }
-
-  // 3 — the rental starts when the truck goes in, not when the problem appears.
-  if (f.hasAppointment !== true) {
-    return {
-      decision: "DEFER",
-      rule: 3,
-      reason: "no confirmed shop appointment",
-      script:
-        "A rental starts when your van actually goes into the shop. Book the " +
-        "appointment first, then come back and finish this request.",
-    };
-  }
-
-  // 4 — a same-day job is a wait, not a rental.
-  //
-  // Absent is NOT the same as zero. Denying a missing estimate with "the shop
-  // expects this back the same day" puts words in the shop's mouth and refuses
-  // a technician on a fact nobody established.
-  if (f.shopEstimatedDays == null) {
-    return {
-      decision: "DEFER",
-      rule: 4,
-      reason: "no shop estimate supplied; cannot set a return date",
-      script:
-        "We need the shop's estimate of how many days it will take. Ask them, " +
-        "then finish this request.",
-    };
-  }
-  const days = Number(f.shopEstimatedDays);
-  if (!Number.isFinite(days) || days <= 0) {
-    return {
-      decision: "DENY",
-      rule: 4,
-      reason: "shop ETA is same-day or wait-on-it",
-      script: "The shop expects this back the same day, so plan to wait on it.",
-    };
-  }
-
-  // 8 — what remains.
+  // 8 — everything else goes to a person, profitability factors in view.
   return {
     decision: "APPROVE",
     rule: 8,
-    reason: "no disqualifier; spare availability still to be confirmed by Fleet",
-    vehicleClass: f.hvacCarveOut ? "cargo_van" : "sedan",
+    reason: "no maintenance disqualifier — decide on profitability",
+    vehicleClass: f.hvacCarveOut ? "cargo van" : "sedan",
   };
 }
 
@@ -701,47 +598,30 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     return { code: 400, json: { success: false, message: "Please choose what is wrong with the vehicle." } };
   }
 
-  // Refresh before reading, not after failing. Rule 5 is about to make a
-  // decision out of this mirror.
+  // The engine no longer reads the BYOV mirror, but the ROW still records
+  // is_byov: the reviewer sees the pill and weighs it. Refresh before reading
+  // so what they see is today's enrollment, not a four-month-old table.
   await ensureByovFresh();
 
   const facts = await factsFor(ldap);
   const isByov = Number(facts?.byov_count ?? 0) > 0;
-  // A mirror older than a day cannot be trusted to say someone is NOT byov.
-  const syncedAt = facts?.byov_synced_at ? new Date(facts.byov_synced_at).getTime() : 0;
-  const mirrorFresh = syncedAt > 0 && Date.now() - syncedAt < 36 * 3600 * 1000;
-  // A fresh mirror that simply has no row for this person does NOT mean
-  // "not BYOV". The roster endpoint joins to the active roster, so a new
-  // hire can be enrolled and still absent. Global freshness alone would
-  // re-create exactly the false negative the stale table caused.
-  const byovFresh = mirrorFresh && Number(facts?.byov_row_present ?? 0) > 0;
 
   const verdict = evaluate({
-    ldap,
-    isByov,
-    isByovKnown: byovFresh,
-    employmentStatus: facts?.employment_status ?? null,
-    openRentalCount: Number(facts?.open_rentals ?? 0),
     problemCategory: category,
-    isDrivable: bool(b.isDrivable),
-    isSafeToDrive: bool(b.isSafeToDrive),
-    hasAppointment: bool(b.hasAppointment),
-    shopEstimatedDays: num(b.shopEstimatedDays),
     hvacCarveOut: b.hvacCarveOut === true,
   });
 
-  // Maintenance ends the form immediately, so the acknowledgements are not
-  // required on a path the technician never reached. Neither is the shop
-  // appointment acknowledgement on a path that never asked for a shop: a
-  // BYOV technician was previously made to attest to an appointment the form
-  // deliberately hid from them, which is a false attestation in an audit
-  // trail whose entire purpose is being true.
+  // Acknowledgements are required, but never as false attestations: the shop
+  // appointment acknowledgement is skipped on a path that never asked for a
+  // shop, the van attestations are skipped for someone with no van, and a
+  // MAINTENANCE submission skips "this is not scheduled maintenance" and
+  // "cannot be driven safely" — it is maintenance, the van is fine, and the
+  // whole point of letting it submit is that Fleet sees it and denies it with
+  // the standard response instead of the form silently eating it.
   const acksRequired = true;
   const appointmentAsked = bool(b.hasAppointment) === true;
-  // No van, no van attestations. Requiring "my vehicle cannot be driven
-  // safely" from someone whose category is "no work van assigned to me yet"
-  // is demanding a false statement as the price of entry.
   const noVehicle = category === "new_hire_awaiting_vehicle" || b.noVehicle === true;
+  const isMaintenance = MAINTENANCE.has(category);
   const acks = {
     ack_not_maintenance: b.ackNotMaintenance === true,
     ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
@@ -756,7 +636,8 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   if (acksRequired) {
     const required = Object.entries(acks)
       .filter(([k]) => appointmentAsked || k !== "ack_has_appointment")
-      .filter(([k]) => !noVehicle || k !== "ack_cannot_drive_safely");
+      .filter(([k]) => !noVehicle || k !== "ack_cannot_drive_safely")
+      .filter(([k]) => !isMaintenance || (k !== "ack_not_maintenance" && k !== "ack_cannot_drive_safely"));
     if (!required.every(([, v]) => v)) {
       return { code: 400, json: { success: false, message: "Please tick every acknowledgement before submitting." } };
     }
@@ -1347,7 +1228,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
   });
 
   router.get("/forms/rental-request/missing-reasons", async (_req, res) => {
-    res.json({ reasons: MISSING_REASONS });
+    // The deny script rides along for the same reason the reasons do: the
+    // review UI pre-fills it, the technician receives it, and served-not-
+    // duplicated is what keeps those two sentences the same sentence.
+    res.json({ reasons: MISSING_REASONS, maintenanceDenyScript: MAINTENANCE_DENY_SCRIPT });
   });
 
   router.get("/forms/rental-request/list", async (_req, res) => {
@@ -1363,6 +1247,8 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                pf.daily_net_with_rental   AS prof_net_with,
                pf.recommendation       AS prof_recommendation,
                pf.scorecard_score      AS prof_scorecard,
+               pf.scorecard_exempt     AS prof_scorecard_exempt,
+               pf.daily_ppt_profit     AS prof_ppt,
                pf.tenure_months        AS prof_tenure_months,
                pf.new_hire_exempt      AS prof_new_hire_exempt,
                pf.synced_at            AS prof_synced_at
@@ -1475,6 +1361,12 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                r.appointment_at,
                r.shop_estimated_days,
                COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,
+               -- Provenance matters: an EXPLICIT Fleet pick of 'sedan' must be
+               -- distinguishable from the untouched default, or the booker's
+               -- job-title ladder silently overrides a human (e.g. Fleet sizing
+               -- an HVAC tech DOWN to a sedan would bounce back to a van).
+               CASE WHEN r.approved_vehicle_class IS NOT NULL
+                    THEN 'fleet' ELSE 'engine' END                  AS vehicle_class_source,
                to_char(COALESCE(r.pickup_at, r.appointment_at), 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
                -- 7 days when there is no shop estimate: the estimate question is
                -- gone from the form (Tyler 2026-08-14) and 7 matches the weekly
@@ -1579,6 +1471,88 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     } catch (e: any) {
       console.error("[rental-request] booked failed:", e?.message || e);
       res.status(500).json({ message: e?.message || "Failed to record booking." });
+    }
+  });
+
+  /**
+   * Fleet adjusts the class the booking will reserve. The engine writes sedan
+   * (cargo van for the HVAC carve-out) at submit; this is the when-necessary
+   * override — a branch with no sedans, parts that must ride along.
+   *
+   * Only while nothing external can exist: past Confirm a reservation may be
+   * in flight, and changing the class here would book something nobody
+   * previewed. A merely-built preview is knocked back to preview_required so
+   * the next preview re-quotes under the new class, and Confirm's version CAS
+   * refuses the stale one.
+   */
+  router.post("/forms/rental-request/:requestNo/vehicle-class", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      if (!Number.isInteger(no)) return res.status(400).json({ message: "bad request number" });
+      // Normalised to what the bookers match against ETD's offered classes:
+      // lowercase words, no underscores ("cargo van", never "cargo_van" —
+      // the underscore form can never substring-match a description).
+      const cls = String(req.body?.vehicleClass ?? "")
+        .trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").slice(0, 40);
+      if (!cls) return res.status(400).json({ message: "vehicleClass is required" });
+      const actor = (req as any).user?.username || (req as any).user?.email || "unknown";
+
+      const inFlight = await requestBookingInFlight(String(no));
+      if (inFlight) {
+        return res.status(409).json({
+          message: `The booking workflow is already ${inFlight.status}. Cancel it first — `
+                 + "a reservation may exist under the current class.",
+        });
+      }
+
+      // old.prev rides back so the late-confirm revert below restores the
+      // exact value, not a guess.
+      const { rows } = await db.execute(sql`
+        UPDATE vrm_rental_request r
+        SET approved_vehicle_class = ${cls}, updated_at = now()
+        FROM (SELECT request_no, approved_vehicle_class AS prev
+              FROM vrm_rental_request WHERE request_no = ${no}) old
+        WHERE r.request_no = old.request_no
+          AND r.status IN ('pending','approved')
+          AND r.etd_booked_at IS NULL
+        RETURNING old.prev
+      `);
+      if (!(rows as any[]).length) {
+        const { rows: cur } = await db.execute(sql`
+          SELECT status FROM vrm_rental_request WHERE request_no = ${no}
+        `);
+        if (!(cur as any[]).length) return res.status(404).json({ message: "request not found" });
+        return res.status(409).json({
+          message: `Class is fixed once the request is ${(cur as any[])[0].status}. `
+                 + "It must be pending or approved, and not booked.",
+        });
+      }
+      const prev = (rows as any[])[0].prev ?? null;
+
+      // Any built preview now shows a class this request no longer wants.
+      const previewsInvalidated = await invalidateRequestPreviews(
+        String(no), `vehicle class set to '${cls}' by ${actor}`);
+
+      // Close the race this whole dance exists for: Confirm CAS'd
+      // preview_ready -> confirmed between our first check and the
+      // invalidation, so the booking would proceed on the OLD class. The
+      // adjustment must not stand. CAS on the value we wrote, so a later
+      // legitimate edit is never clobbered by this revert.
+      const late = await requestBookingInFlight(String(no));
+      if (late) {
+        await db.execute(sql`
+          UPDATE vrm_rental_request SET approved_vehicle_class = ${prev}, updated_at = now()
+          WHERE request_no = ${no} AND approved_vehicle_class = ${cls}
+        `);
+        return res.status(409).json({
+          message: `The booking confirmed while you were editing — class change reverted. `
+                 + `Cancel the ${late.status} workflow first if the class is wrong.`,
+        });
+      }
+
+      res.json({ ok: true, vehicleClass: cls, previewsInvalidated });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "class update failed" });
     }
   });
 

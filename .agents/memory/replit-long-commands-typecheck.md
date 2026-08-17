@@ -36,6 +36,21 @@ bash timeout) via a workflow, not bash backgrounding:**
   this repo's tsconfig target trips it on direct `for…of` over a Map/Set or `[...set]` spread.
   Use `Array.from(x)` instead — that's the codebase convention.
 
+## Workflow cap can force the foreground path (2026-08-16)
+The platform enforces a 10-workflow cap at configure time; this repl already has 15
+(grandfathered), so `configureWorkflow` for ANY new workflow now fails with
+"Workflow limit exceeded (15/10)". Fallbacks that verified fine:
+- Full tsc: single foreground bash call `timeout 280 npm run check > /tmp/typecheck.log 2>&1; echo EXIT=$?`
+  completed within one 295s tool-call budget on this repo. Grep the log for your own files.
+- New node:test suites: run via foreground `npx tsx --test --test-force-exit tests/<file> | tail`
+  instead of registering a per-suite workflow (the old convention). Don't delete Tyler's
+  existing suite workflows to make room without asking.
+
+## PTC (CodeExecution) sandbox quirks
+`setTimeout` is NOT defined in the durable runtime — a poll/sleep loop must use
+`await shellExec({ command: "sleep 7" })` instead. Also loop on an iteration counter,
+never on `Date.now()` deltas (time is frozen within a block, elapsed reads 0).
+
 ## node:test suites that hang at exit
 `npx tsx --test` integration suites touching the Neon pool can pass every test
 then hang forever (pool/WS keeps the event loop alive) — a piped `| tail` then

@@ -42,6 +42,7 @@ import {
   classifyJourneyReadback,
   classifyBlockReadback,
   renderSpecialNotes,
+  renderRequestSpecialNotes,
   renderMsg1,
   renderMsg2,
   deriveDisplayPhase,
@@ -297,6 +298,21 @@ describe("renderers (plan skeletons, verbatim)", () => {
       assert.match(m, /Dallas Main/);
       assert.match(m, /1 Main St/);
     }
+  });
+
+  test("request specialNotes: truck and LDAP ride the note; no cutover language", () => {
+    const s = renderRequestSpecialNotes({ truck: "61385", ldap: "abc123" });
+    assert.match(s, /^SHS TRUCK 61385\. SHS FLEET - DIRECT BILLING\./);
+    assert.match(s, /Technician LDAP abc123\./);
+    assert.match(s, /Bill direct to TransformCo/);
+    // A NEW rental: nothing about closing a prior Enterprise ticket.
+    assert.doesNotMatch(s, /CHANGEOVER|CLOSE Enterprise ticket|re-sign|keeps the/);
+  });
+
+  test("request specialNotes: missing truck renders n/a, never 'null'", () => {
+    const s = renderRequestSpecialNotes({ truck: null, ldap: "abc123" });
+    assert.match(s, /^SHS TRUCK n\/a\./);
+    assert.doesNotMatch(s, /null|undefined/);
   });
 });
 

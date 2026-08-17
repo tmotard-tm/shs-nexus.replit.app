@@ -30,6 +30,7 @@ import copy
 
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -156,7 +157,35 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     # easiest mistake to re-introduce. There is no current vehicle on a NEW
     # request, so an HVAC technician correctly falls out to a human rather than
     # being dropped into a sedan.
-    sel = choose_class(None, None, classes, r.get("job_title"))
+    #
+    # One voice outranks the ladder: Fleet can adjust the class on the request
+    # before approval (2026-08-16), and when they did, THAT is the decision.
+    # The queue says WHO chose via vehicle_class_source ('fleet' = a human set
+    # it, 'engine' = untouched default), because the value alone cannot: an
+    # explicit Fleet 'sedan' (sizing an HVAC tech DOWN) must not fall through
+    # to the job-title ladder, which would bounce them back into a van. Older
+    # queue payloads without the field keep the old rule (non-sedan = human).
+    # No match at this branch raises for a person — never a silent downgrade
+    # to whatever ETD happened to offer.
+    def _norm(s) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", str(s or ""))).strip().lower()
+    wanted = _norm(r.get("vehicle_class"))
+    fleet_chose = str(r.get("vehicle_class_source") or "").strip().lower() == "fleet"
+    if wanted and wanted != "sedan":
+        pick0 = next((c for c in classes
+                      if wanted in _norm(c.get("description"))
+                      or wanted == _norm(c.get("code"))), None)
+        sel = {"pick": pick0,
+               "note": (f"fleet-adjusted class '{wanted}' matched {str((pick0 or {}).get('code'))}"
+                        if pick0 else
+                        f"fleet-adjusted class '{wanted}' not offered at this branch")}
+    elif wanted == "sedan" and fleet_chose:
+        # Explicit sedan: job title must NOT re-enter the decision. choose()
+        # with no title takes the plain sedan ladder over the offered codes.
+        sel = choose_class(None, None, classes, None)
+        sel["note"] = f"fleet-adjusted class 'sedan': {sel.get('note')}"
+    else:
+        sel = choose_class(None, None, classes, r.get("job_title"))
     pick = sel.get("pick")
     if not pick:
         raise RuntimeError(f"class selection needs a person: {sel.get('note')}")
