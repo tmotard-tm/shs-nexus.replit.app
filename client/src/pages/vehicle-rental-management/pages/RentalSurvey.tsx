@@ -793,15 +793,6 @@ export default function RentalSurvey() {
                           : r.ams_status)
                       : "—"}
                   </td>
-                  <td style={tdBase} title={r.supervisor_ldap ?? ""}>
-                    {r.supervisor_name
-                      ? <span>{r.supervisor_name}<br />
-                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.inkMuted }}>
-                            {r.supervisor_phone || "no phone"}
-                          </span>
-                        </span>
-                      : "—"}
-                  </td>
                   <td style={tdBase} title={r.cutover_reference ? `ETD ${r.cutover_reference}` : ""}>
                     {r.cutover_status === "complete"
                       ? <Pill text="Complete" fg={colors.greenDeep} bg={colors.greenDeepLight} />
@@ -817,6 +808,15 @@ export default function RentalSurvey() {
                     {intentFor(r.id) && r.cutover_status !== "complete" && (
                       <div style={{ marginTop: 2 }}><IntentPill intent={intentFor(r.id)} /></div>
                     )}
+                  </td>
+                  <td style={tdBase} title={r.supervisor_ldap ?? ""}>
+                    {r.supervisor_name
+                      ? <span>{r.supervisor_name}<br />
+                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.inkMuted }}>
+                            {r.supervisor_phone || "no phone"}
+                          </span>
+                        </span>
+                      : "—"}
                   </td>
                   <td style={tdBase} title={r.shop_name ?? ""}>{r.shop_name || "—"}</td>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{fmtDate(r.promised_ready_date)}</td>
