@@ -308,7 +308,11 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                a.sale_date         AS ams_sale_date,
                a.cur_loc_city      AS ams_loc_city,
                a.cur_loc_state     AS ams_loc_state,
-               a.ams_synced_at
+               a.ams_synced_at,
+               -- TPMS-verified current assignment (Tyler 2026-08-16): the page
+               -- shows THIS as the assigned truck regardless of what the tech
+               -- typed; their entered number stays as the rental-under number.
+               tpt.tpms_truck_number
         FROM vrm_rental_tech_survey r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
         LEFT JOIN vrm_rental_cutover c ON c.ldap = upper(r.ldap)
@@ -331,10 +335,27 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                              WHERE upper(t.enterprise_id) = upper(COALESCE(tp2.tech_manager_ldap_id,''))
                              LIMIT 1) mgp ON TRUE
         ) sup ON TRUE
+        -- Current TPMS assignment, keyed on enterprise_id (tech_id is NOT
+        -- unique). truck_no arrives zero-padded; normalize to bare digits.
+        LEFT JOIN LATERAL (
+          SELECT NULLIF(ltrim(regexp_replace(COALESCE(t.truck_no, ''), '[^0-9]', '', 'g'), '0'), '')
+                   AS tpms_truck_number
+          FROM tpms_tech_profiles t
+          WHERE upper(t.enterprise_id) = upper(r.ldap)
+            AND NULLIF(ltrim(regexp_replace(COALESCE(t.truck_no, ''), '[^0-9]', '', 'g'), '0'), '') IS NOT NULL
+          ORDER BY t.synced_at DESC NULLS LAST LIMIT 1
+        ) tpt ON TRUE
+        -- AMS status keyed on the TPMS-verified truck (Tyler 2026-08-16); the
+        -- tech-entered / on-file number is only consulted when TPMS has no
+        -- assignment at all.
         LEFT JOIN vrm_ams_status a
-          ON a.truck_norm = ltrim(regexp_replace(
-               COALESCE(NULLIF(btrim(r.assigned_truck_number),''), r.truck_number, ''),
-               '\D', '', 'g'), '0')
+          ON a.truck_norm = COALESCE(
+               tpt.tpms_truck_number,
+               -- Normalize EACH candidate before falling through: entered
+               -- placeholder text ("unknown") must yield NULL here, not
+               -- suppress a perfectly good on-file truck number.
+               NULLIF(ltrim(regexp_replace(COALESCE(r.assigned_truck_number, ''), '[^0-9]', '', 'g'), '0'), ''),
+               NULLIF(ltrim(regexp_replace(COALESCE(r.truck_number, ''), '[^0-9]', '', 'g'), '0'), ''))
         ORDER BY r.created_at DESC
       `);
       res.json({ responses: rows });

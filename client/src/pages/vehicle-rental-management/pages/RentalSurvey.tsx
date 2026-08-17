@@ -52,6 +52,8 @@ interface SurveyRow {
   rental_vehicle_desc: string | null;
   rental_truck_number: string | null;
   assigned_truck_number: string | null;
+  /** Current TPMS-verified assignment — what the page displays as "assigned". */
+  tpms_truck_number?: string | null;
   truck_mismatch: boolean | null;
   record_mismatch: boolean | null;
   van_status: string | null;
@@ -101,6 +103,11 @@ const isBackInOwnVan = (r: { has_rental: boolean | null; no_rental_reason: strin
   r.has_rental === false &&
   (r.no_rental_reason === "returned_it" || r.no_rental_reason === "back_in_my_van") &&
   r.van_status === "with_me";
+
+/** Canonical truck key: digits only, leading zeros stripped. Placeholder text
+ *  like "unknown" canonicalizes to "" and is never treated as a truck. */
+const canonTruck = (v: string | null | undefined) =>
+  String(v ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
 
 function makeSortComparator<T>(accessor: (r: T) => unknown, dir: SortDir) {
   if (dir == null) return null;
@@ -463,20 +470,35 @@ export default function RentalSurvey() {
   type Row = SurveyRow & { _truck: string; _role?: string };
   const base: Row[] = useMemo(() => {
     if (view === "renter") {
-      return rows.map((r) => ({ ...r, _truck: r.assigned_truck_number || r.truck_number || "" }));
+      // First candidate that is a REAL number wins — placeholder text like
+      // "unknown" must not beat a known on-file truck.
+      return rows.map((r) => {
+        const pick = [r.tpms_truck_number, r.assigned_truck_number, r.truck_number]
+          .find((v) => canonTruck(v)) ?? "";
+        return { ...r, _truck: String(pick).trim() };
+      });
     }
     const out: Row[] = [];
     for (const r of rows) {
-      const a = (r.assigned_truck_number || "").trim();
-      const b = (r.rental_truck_number || "").trim();
+      // "assigned" = TPMS-verified; the tech-entered number is the rental-under
+      // number (Tyler 2026-08-16). Dedupe on canonical digits so TPMS 61668 and
+      // entered 061668 collapse into one row; entries with no digits at all
+      // ("unknown") never become truck rows, so such a response falls through
+      // to its on-file number.
+      const a = (r.tpms_truck_number || "").trim();
+      const b = (r.rental_truck_number || r.assigned_truck_number || "").trim();
       const fallback = (r.truck_number || "").trim();
       const seen = new Set<string>();
-      for (const [t, role] of [[a, "assigned"], [b, "rental"], [!a && !b ? fallback : "", "on file"]] as const) {
-        const key = String(t).trim();
-        if (!key || seen.has(key)) continue;
+      const push = (t: string, role: Row["_role"]) => {
+        const key = canonTruck(t);
+        if (!key || seen.has(key)) return false;
         seen.add(key);
-        out.push({ ...r, _truck: key, _role: role });
-      }
+        out.push({ ...r, _truck: t, _role: role });
+        return true;
+      };
+      const gotA = push(a, "assigned");
+      const gotB = push(b, "rental");
+      if (!gotA && !gotB) push(fallback, "on file");
     }
     return out;
   }, [rows, view]);
@@ -500,7 +522,7 @@ export default function RentalSurvey() {
       }
       if (!needle) return true;
       return [r.ldap, r.tech_name, r._truck, r.rental_truck_number, r.assigned_truck_number,
-              r.shop_name, r.rental_branch_city, r.rental_company]
+              r.tpms_truck_number, r.shop_name, r.rental_branch_city, r.rental_company]
         .some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
   }, [base, q, fStatus, fCompany, fState, fFlag, fCutover]);
@@ -533,8 +555,8 @@ export default function RentalSurvey() {
     rental: (r) => (r.has_rental == null ? "" : r.has_rental ? "Yes" : "No"),
     company: (r) => r.rental_company,
     branch: (r) => `${r.rental_branch_city ?? ""} ${r.rental_branch_state ?? ""}`.trim(),
-    rtruck: (r) => r.rental_truck_number,
-    atruck: (r) => r.assigned_truck_number,
+    rtruck: (r) => r.rental_truck_number || r.assigned_truck_number,
+    atruck: (r) => r.tpms_truck_number,
     status: (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status,
     cutover: (r) => r.cutover_status ?? "",
     district: (r) => r.district ?? "",
@@ -559,7 +581,9 @@ export default function RentalSurvey() {
       ["branch_city", (r) => r.rental_branch_city], ["branch_state", (r) => r.rental_branch_state],
       ["branch_name", (r) => r.rental_branch_name], ["branch_phone", (r) => r.rental_branch_phone],
       ["rental_vehicle", (r) => r.rental_vehicle_desc],
-      ["rental_truck", (r) => r.rental_truck_number], ["assigned_truck", (r) => r.assigned_truck_number],
+      ["rental_truck", (r) => r.rental_truck_number || r.assigned_truck_number],
+      ["assigned_truck_tpms", (r) => r.tpms_truck_number],
+      ["entered_truck", (r) => r.assigned_truck_number],
       ["truck_mismatch", (r) => (r.truck_mismatch ? "YES" : "")],
       ["van_status", (r) => VAN_STATUS_LABEL[r.van_status ?? ""] ?? r.van_status],
       ["cutover", (r) => r.cutover_status], ["cutover_reference", (r) => r.cutover_reference],
@@ -723,11 +747,12 @@ export default function RentalSurvey() {
                 <tr key={`${r.id}-${r._truck}-${i}`} onClick={() => setDetail(r)}
                     style={{
                       cursor: "pointer",
-                      // Cutover complete wins: once booked + route block filed live,
+                      // Cutover complete: once booked + route block filed live,
                       // the tech is done — green whole-row highlight (Tyler 2026-08-13).
+                      // No red mismatch rows (Tyler 2026-08-16).
                       background: r.cutover_status === "complete"
                         ? colors.greenDeepLight
-                        : r.truck_mismatch ? colors.redLight : undefined,
+                        : undefined,
                     }}>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.district || "—"}</td>
                   <td style={{ ...tdBase, fontFamily: fonts.jetbrains, fontWeight: 600 }}>
@@ -745,10 +770,10 @@ export default function RentalSurvey() {
                   <td style={tdBase} title={r.rental_branch_name ?? ""}>
                     {r.rental_branch_city ? `${r.rental_branch_city}, ${r.rental_branch_state ?? ""}` : "—"}
                   </td>
-                  <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.rental_truck_number || "—"}</td>
-                  <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>
-                    {r.assigned_truck_number || "—"}
-                    {r.truck_mismatch && <span style={{ marginLeft: 6 }}><Pill text="mismatch" fg={colors.red} bg={colors.redLight} /></span>}
+                  <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.rental_truck_number || r.assigned_truck_number || "—"}</td>
+                  <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}
+                      title={r.assigned_truck_number ? `Entered on form: ${r.assigned_truck_number}` : "No TPMS assignment on file"}>
+                    {r.tpms_truck_number || "—"}
                   </td>
                   <td style={tdBase}>
                     {r.van_status === "unknown_escalate"
@@ -824,8 +849,9 @@ export default function RentalSurvey() {
               ["Pickup branch", [detail.rental_branch_name, detail.rental_branch_city, detail.rental_branch_state].filter(Boolean).join(", ")],
               ["Branch phone", detail.rental_branch_phone],
               ["Driving", detail.rental_vehicle_desc],
-              ["Rental truck #", detail.rental_truck_number],
-              ["Assigned truck #", detail.assigned_truck_number],
+              ["Rental truck #", detail.rental_truck_number || detail.assigned_truck_number],
+              ["Assigned truck # (TPMS)", detail.tpms_truck_number],
+              ["Entered on form", detail.assigned_truck_number],
               ["Truck mismatch", detail.truck_mismatch ? "YES" : "no"],
               ["Van status", VAN_STATUS_LABEL[detail.van_status ?? ""] ?? detail.van_status],
               ["Shop", [detail.shop_name, detail.shop_city, detail.shop_state].filter(Boolean).join(", ")],
