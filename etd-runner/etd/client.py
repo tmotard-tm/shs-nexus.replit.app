@@ -11,6 +11,7 @@ unless the caller explicitly opts out.
 """
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -63,7 +64,19 @@ def _messages(payload: Any) -> str:
     msgs = payload.get("messages") or payload.get("errorMessage") or ""
     if isinstance(msgs, list):
         msgs = " | ".join(str(m) for m in msgs)
-    return str(msgs).replace("\xa0", " ")
+    text = str(msgs).replace("\xa0", " ").strip()
+    if text:
+        return text
+    # ETD does not always put the reason under `messages`. A rejection with no
+    # readable reason is the worst evidence there is, so fall back to the other
+    # keys it is known to use, then to the whole payload. An over-long dump
+    # beats "rejected: " with nothing after the colon.
+    for key in ("errors", "errorMessages", "errorDescription", "validationErrors",
+                "modelState", "message", "detail", "title", "reason", "status"):
+        val = payload.get(key)
+        if val:
+            return f"{key}={json.dumps(val, default=str)}"[:1500]
+    return json.dumps(payload, default=str)[:1500]
 
 
 @dataclass
