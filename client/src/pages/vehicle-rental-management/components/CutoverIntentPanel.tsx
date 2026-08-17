@@ -20,10 +20,17 @@
  *   block_conflict_pending_readback   -> Retry (staff-approved) / Cancel
  *   preview_pending|confirmed|booking|
  *   awaiting_verification             -> nothing (work is in flight; cancel would race the runner)
+ *   cancel_pending_readback           -> Record ETD cancellation evidence (or wait for the runner's readback proof)
  *   terminal                          -> nothing
+ *
+ * LIVE lane (repair spec): starting a LIVE intent is admin/developer-only —
+ * the server enforces the same rule (403 admin_required_live), this button is
+ * just honest UI. While the build is dark the server ALSO rejects live
+ * creation with live_disarmed; that error surfacing here is correct.
  */
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "@/hooks/use-auth";
 import { colors, fonts } from "../lib/constants";
 
 const BASE = "/api/vrm/forms/rental-survey/cutover";
@@ -41,6 +48,7 @@ const PHASE_TONE: Record<string, Tone> = {
   confirmed: { label: "Confirmed — queued", fg: colors.accent, bg: colors.accentLight },
   booking: { label: "Booking…", fg: colors.accent, bg: colors.accentLight },
   booking_unknown: { label: "Booking UNKNOWN", fg: colors.red, bg: colors.redLight },
+  cancel_pending_readback: { label: "Cancel — awaiting ETD proof", fg: colors.red, bg: colors.redLight },
   awaiting_verification: { label: "Verifying reservation", fg: colors.accent, bg: colors.accentLight },
   filing_block: { label: "Filing route block", fg: colors.accent, bg: colors.accentLight },
   awaiting_block_verification: { label: "Verifying block", fg: colors.accent, bg: colors.accentLight },
@@ -109,6 +117,8 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const [err, setErr] = useState<string>("");
   const [info, setInfo] = useState<string>("");
   const isRequest = workflow === "request";
+  const { user } = useAuth();
+  const isAdmin = ["admin", "developer"].includes(String(user?.role ?? ""));
 
   const run = async (label: string, fn: () => Promise<any>) => {
     setBusy(label); setErr(""); setInfo("");
@@ -124,10 +134,10 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
     }
   };
 
-  const create = () => run("create", () =>
+  const create = (mode?: "live") => run(mode === "live" ? "create-live" : "create", () =>
     workflow === "survey"
-      ? post(`${BASE}/intents`, { surveyResponseId: sourceId })
-      : post(`/api/vrm/forms/rental-request/${sourceId}/booking-intent`, {}));
+      ? post(`${BASE}/intents`, { surveyResponseId: sourceId, ...(mode === "live" ? { executionMode: "live" } : {}) })
+      : post(`/api/vrm/forms/rental-request/${sourceId}/booking-intent`, mode === "live" ? { executionMode: "live" } : {}));
 
   const status = String(intent?.status ?? "");
   const tone = intent ? phaseTone(intent) : null;
@@ -166,18 +176,35 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             No workflow yet. Starting one runs the server-side eligibility gate and, if it passes,
             queues a schedule-verified Enterprise quote for review. Nothing external happens before Confirm.
           </p>
-          <button type="button" disabled={!!busy} onClick={create} style={btn}>
-            {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start booking workflow" : "Start cutover workflow"}
-          </button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" disabled={!!busy} onClick={() => create()} style={btn}>
+              {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start booking workflow (dry run)" : "Start cutover workflow (dry run)"}
+            </button>
+            {isAdmin && (
+              <button type="button" disabled={!!busy}
+                      onClick={() => window.confirm(
+                        isRequest
+                          ? "Start a LIVE booking workflow? After Confirm, the runner books a REAL Enterprise reservation."
+                          : "Start a LIVE cutover? After Confirm, the runner books a REAL Enterprise reservation, then the route block and technician texts follow.")
+                        && create("live")}
+                      style={{ ...btn, color: colors.red, borderColor: colors.red, fontWeight: 700 }}>
+                {busy === "create-live" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start LIVE booking" : "Start LIVE cutover"}
+              </button>
+            )}
+          </div>
         </>
       ) : (
         <>
           {([
             ["Mode", intent.execution_mode + (live ? "" : " (no external writes)")],
             ["Event date", intent.event_date],
+            ["SHS reference", resv?.intentReference],
             ["Branch", resv ? [resv.branchName, resv.branchAddress].filter(Boolean).join(" — ") : ""],
+            ["Branch ZIP", resv?.branchZip],
             ["Pickup", resv?.pickupDate ? `${resv.pickupDate} ${String(resv.pickupTime ?? "").slice(0, 5)}` : ""],
+            ["Return", resv?.returnDate ? `${resv.returnDate} ${String(resv.returnTime ?? "").slice(0, 5)}` : ""],
             ["Class", resv?.sipp ? `${resv.sipp}${resv.classDecision?.detail ? ` — ${resv.classDecision.detail}` : ""}` : ""],
+            ["Vehicle", resv?.vehicle ? `${[resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(" ")}${resv.vehicle.noVehicleChange ? " (no vehicle change)" : ""}` : ""],
             ["Confirmation", confirmation],
             ["Reservation", intent.reservation_state],
             // Route block + texts are cutover-only steps; a request's
@@ -211,6 +238,55 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             </div>
           )}
 
+          {resv?.specialNotes ? (
+            <div style={{ marginTop: 8, padding: 8, background: colors.background, borderRadius: 8 }}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
+                Special notes (sent to Enterprise verbatim)
+              </div>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, whiteSpace: "pre-wrap" }}>{String(resv.specialNotes)}</div>
+              {Array.isArray(resv.bookingReferences) && resv.bookingReferences.length > 0 && (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, marginTop: 6 }}>
+                  ETD references: {resv.bookingReferences.join(" · ")}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {!isRequest && intent?.preview?.artBlock ? (
+            <div style={{ marginTop: 8, padding: 8, background: colors.background, borderRadius: 8 }}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
+                Route block (ART) payload
+              </div>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink }}>
+                {`Unit ${intent.preview.artBlock.unit ?? "—"} · ${intent.preview.artBlock.date ?? "—"} ${intent.preview.artBlock.startTime ?? ""} (${intent.preview.artBlock.startTimeRequest ?? ""}) · ${intent.preview.artBlock.durationMinutesRequested ?? "—"} min · ZIP ${intent.preview.artBlock.locationZip5 ?? "—"} · activity "${intent.preview.artBlock.activityReadbackToken ?? ""}" · ${intent.preview.artBlock.live ? "LIVE filing" : "inert (flag disarmed)"}`}
+              </div>
+            </div>
+          ) : null}
+
+          {!isRequest && intent?.preview?.messages ? (
+            <div style={{ marginTop: 8, padding: 8, background: colors.background, borderRadius: 8 }}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>
+                Technician texts (exact copy + schedule)
+              </div>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, marginBottom: 6 }}>
+                Recipient: {intent.preview.messages.recipientState ?? "state unknown"} · {intent.preview.messages.recipientTimeZone} · phone {intent.preview.messages.recipientPhoneOnFile ? "on file" : "MISSING"}
+              </div>
+              {[intent.preview.messages.msg1, intent.preview.messages.msg2].filter(Boolean).map((m: any, i: number) => (
+                <div key={i} style={{ marginBottom: i === 0 ? 8 : 0 }}>
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.ink }}>
+                    Text {i + 1} — {m.moment} · {m.scheduledSend}
+                  </div>
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, whiteSpace: "pre-wrap", marginTop: 2 }}>{m.body}</div>
+                </div>
+              ))}
+              {intent.preview.messages.msg2?.quietFallbackRequired && (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, marginTop: 6 }}>
+                  ⚠ Quiet-hours exception state: text 2 will NOT release until the operator fallback (send at window open vs skip) is set in settings.
+                </div>
+              )}
+            </div>
+          ) : null}
+
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             {canConfirm && (
               <button type="button" disabled={!!busy} onClick={doConfirm}
@@ -235,10 +311,23 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             )}
             {canCancel && (
               <button type="button" disabled={!!busy}
-                      onClick={() => window.confirm("Cancel this workflow? Anything already booked stays booked; this only stops further steps.") &&
+                      onClick={() => window.confirm("Cancel this workflow? If a live reservation may exist, the workflow waits for ETD readback proof before it closes.") &&
                         run("cancel", () => post(`${BASE}/intents/${intent.id}/cancel`, { reason: `cancelled from ${workflow} drawer` }))}
                       style={{ ...btn, color: colors.inkMuted }}>
                 {busy === "cancel" ? <Loader2 size={13} className="animate-spin" /> : "Cancel"}
+              </button>
+            )}
+            {status === "cancel_pending_readback" && (
+              <button type="button" disabled={!!busy}
+                      onClick={() => {
+                        const ref = (window.prompt("ETD cancellation reference (leave blank to enter a note instead):") ?? "").trim();
+                        const note = ref ? "" : (window.prompt("Note describing the manual ETD cancellation:") ?? "").trim();
+                        if (!ref && !note) return;
+                        run("evidence", () => post(`${BASE}/intents/${intent.id}/cancellation-evidence`,
+                          { etdCancellationRef: ref || undefined, note: note || undefined }));
+                      }}
+                      style={{ ...btn, color: colors.red, borderColor: colors.red }}>
+                {busy === "evidence" ? <Loader2 size={13} className="animate-spin" /> : "Record ETD cancellation evidence"}
               </button>
             )}
             {IN_FLIGHT.has(status) && (

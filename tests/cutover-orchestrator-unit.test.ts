@@ -39,6 +39,7 @@ import {
   classifyScheduleDays,
   firstWorkingDay,
   watermarkAgeHours,
+  scheduleDaySnapshotAgeHours,
   classifyJourneyReadback,
   classifyBlockReadback,
   renderSpecialNotes,
@@ -48,6 +49,7 @@ import {
   deriveDisplayPhase,
   completionSatisfied,
   evaluateEligibility,
+  comparePreviewToFacts,
   type EligibilityFacts,
   type ScheduleDayRow,
 } from "../server/vrm/forms/cutover-orchestrator";
@@ -175,6 +177,19 @@ describe("schedule gate", () => {
     const stale = watermarkAgeHours("2026-08-15T08:00:00Z", now)!;
     assert.ok(stale > WATERMARK_MAX_AGE_HOURS, "28h-old watermark must read stale");
   });
+
+  test("scheduleDaySnapshotAgeHours: per-day snapshot age drives the working-day pass (§8)", () => {
+    const now = new Date("2026-08-16T12:00:00Z");
+    assert.equal(scheduleDaySnapshotAgeHours(null, now), null);
+    assert.equal(scheduleDaySnapshotAgeHours(undefined, now), null);
+    assert.equal(scheduleDaySnapshotAgeHours({ snapshotTs: "garbage" }, now), null);
+    assert.equal(scheduleDaySnapshotAgeHours({ snapshotTs: "" }, now), null);
+    assert.equal(scheduleDaySnapshotAgeHours({ snapshotTs: "2026-08-16T10:00:00Z" }, now), 2);
+    // Snowflake-style "YYYY-MM-DD HH:MM:SS" (no T/Z) is UTC.
+    assert.equal(scheduleDaySnapshotAgeHours({ snapshotTs: "2026-08-16 10:00:00" }, now), 2);
+    const stale = scheduleDaySnapshotAgeHours({ snapshotTs: "2026-08-15T08:00:00Z" }, now)!;
+    assert.ok(stale > WATERMARK_MAX_AGE_HOURS, "a 28h-old day snapshot must fail the ceiling");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -203,10 +218,36 @@ describe("journey readback classifier", () => {
     assert.match(ref.reason, /LDAP/);
   });
 
-  test("branch/date/class compared only when BOTH sides carry them", () => {
+  test("STRICT: a sparse reservation row is a named mismatch, never a verify (§3)", () => {
     const sparse = { confirmation: "1568742936", reference: "abc123", branchCode: null, date: null, sipp: null };
-    assert.equal(classifyJourneyReadback(expected, [sparse]).verdict, "verified");
-    assert.equal(classifyJourneyReadback(expected, [{ ...sparse, sipp: "FFAR" }]).verdict, "mismatch");
+    const r = classifyJourneyReadback(expected, [sparse]);
+    assert.equal(r.verdict, "mismatch", "missing branch/date/class must not silently pass");
+    assert.match(r.reason, /branch: reservation carries no value/);
+    assert.match(r.reason, /date: reservation carries no pickup date/);
+    assert.match(r.reason, /class: reservation carries no value/);
+  });
+
+  test("STRICT: a sparse EXPECTED side can never verify either", () => {
+    const r = classifyJourneyReadback(
+      { confirmation: "1568742936", ldap: "ABC123" } as any,
+      [match],
+    );
+    assert.equal(r.verdict, "mismatch");
+    assert.match(r.reason, /branch: no expected value on the intent side/);
+    assert.match(r.reason, /date: no expected value on the intent side/);
+    assert.match(r.reason, /class: no expected value on the intent side/);
+  });
+
+  test("intentRef containment: required in the ONE reference field when expected", () => {
+    const withRef = { ...expected, intentRef: "SHSNX-42" };
+    const missing = classifyJourneyReadback(withRef, [match]);
+    assert.equal(missing.verdict, "mismatch");
+    assert.match(missing.reason, /does not carry intent ref SHSNX-42/);
+    const carried = { ...match, reference: "SHS ABC123 SHSNX-42 CUTOVER" };
+    assert.equal(classifyJourneyReadback(withRef, [carried]).verdict, "verified");
+    // SHSNX-421 must not satisfy SHSNX-42's LDAP+ref (containment is on the
+    // full token; a longer id containing the shorter string is accepted by
+    // design — the confirmation equality is what disambiguates).
   });
 });
 
@@ -289,9 +330,13 @@ describe("renderers (plan skeletons, verbatim)", () => {
     const f = { conf: "1568742936", branchName: "Dallas Main", branchAddress: "1 Main St, Dallas, TX 75001" };
     const m1 = renderMsg1(f);
     const m2 = renderMsg2(f);
-    assert.match(m1, /^SHS Fleet: Your replacement Enterprise rental is booked — confirmation 1568742936\./);
+    // §7: "new Enterprise billing reservation", never "replacement rental" —
+    // the tech KEEPS their vehicle; the old copy read like a vehicle swap.
+    assert.match(m1, /^SHS Fleet: Your new Enterprise billing reservation is booked — confirmation 1568742936\./);
+    assert.doesNotMatch(m1, /replacement/i);
     assert.match(m1, /Tomorrow you have a 30-minute 8:00 AM route block/);
     assert.match(m1, /billing changeover only/);
+    assert.match(m1, /You KEEP the vehicle you are driving/);
     assert.match(m2, /^SHS Fleet reminder: today's 8:00 AM block/);
     assert.match(m2, /confirmation 1568742936/);
     for (const m of [m1, m2]) {
@@ -321,7 +366,7 @@ describe("renderers (plan skeletons, verbatim)", () => {
 describe("display phase + completion", () => {
   test("terminal and hard statuses pass through untouched", () => {
     for (const s of TERMINAL_STATUSES) assert.equal(deriveDisplayPhase({ status: s }), s);
-    for (const s of ["manual_review", "preview_required", "booking_unknown", "block_conflict_pending_readback"]) {
+    for (const s of ["manual_review", "preview_required", "booking_unknown", "block_conflict_pending_readback", "cancel_pending_readback"]) {
       assert.equal(deriveDisplayPhase({ status: s, reservation_state: "verified", block_state: "verified" }), s);
     }
   });
@@ -422,6 +467,45 @@ describe("eligibility evaluation", () => {
   test("source_missing when the bound revision vanished", () => {
     const r = evaluateEligibility({ ...cutoverFacts(), sourceRow: null });
     assert.ok(r.failures.some((x) => x.code === "source_missing"));
+  });
+
+  test("comparePreviewToFacts: aligned preview drifts nothing; each divergence is named (§5/§6)", () => {
+    const f = cutoverFacts();
+    const preview = {
+      workflowType: WORKFLOW_CUTOVER,
+      tpmsTruck: "61385",
+      artBlock: { unit: "8330" },
+      enterpriseCase: { caseKey: "case-1", ecars: "E123", claim: null },
+      reservation: { branchCode: "DALLAS MAIN", vehicle: { make: "Ford", model: "Transit" } },
+    };
+    assert.deepEqual(comparePreviewToFacts(preview, f), []);
+
+    assert.match(comparePreviewToFacts(preview, { ...f, tpmsTruck: "99999" })[0], /^tpmsTruck/);
+    assert.match(
+      comparePreviewToFacts(preview, { ...f, roster: { ...f.roster!, districtNo: "9999" } })[0],
+      /^district/,
+    );
+    assert.match(comparePreviewToFacts(preview, { ...f, caseKey: "case-2" })[0], /^caseKey/);
+    assert.match(
+      comparePreviewToFacts(preview, { ...f, caseFacts: { ...f.caseFacts!, ecars: "E999" } })[0],
+      /^ecars/,
+    );
+    assert.match(
+      comparePreviewToFacts(preview, { ...f, caseFacts: { ...f.caseFacts!, rentingBranch: "FORT WORTH" } })[0],
+      /^rentingBranch/,
+    );
+    assert.match(
+      comparePreviewToFacts(preview, { ...f, caseFacts: { ...f.caseFacts!, model: "Escape" } })[0],
+      /^vehicleModel/,
+    );
+    // Case-insensitive normalization: same values, different case = no drift.
+    assert.deepEqual(comparePreviewToFacts({ ...preview, tpmsTruck: "61385 " }, f), []);
+    // Request previews skip the Enterprise-case comparisons entirely.
+    const reqPreview = { workflowType: WORKFLOW_REQUEST, tpmsTruck: "61385", artBlock: { unit: "8330" } };
+    assert.deepEqual(
+      comparePreviewToFacts(reqPreview, { ...f, caseKey: "different", caseFacts: null }),
+      [],
+    );
   });
 
   const requestFacts = (): EligibilityFacts => ({

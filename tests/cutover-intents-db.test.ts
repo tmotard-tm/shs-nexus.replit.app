@@ -33,19 +33,27 @@ import { initFormsSchema } from "../server/vrm/forms/schema";
 import {
   WORKFLOW_CUTOVER,
   WORKFLOW_REQUEST,
+  QUIET_FALLBACK_SETTING_KEY,
+  cancelIntent,
   claimBookingWork,
   claimSendGuardDispatch,
   confirmIntent,
+  evaluateEligibility,
   fetchEligibilityFacts,
   fileContractBlock,
+  finalizeCompletion,
+  getQuietStateFallback,
   invalidateRequestPreviews,
   isContractBlockLive,
   openBookingAttempt,
   persistPreviewFromRunner,
   requestBookingInFlight,
   recordBookingPostback,
+  recordCancellationEvidence,
   reconcileOpenBlockAttempt,
   reconcileOpenBlockAttempts,
+  releaseMsg2IfDue,
+  setQuietStateFallback,
   type BlockReadbackRow,
 } from "../server/vrm/forms/cutover-orchestrator";
 
@@ -55,6 +63,12 @@ async function cleanup() {
   await db.execute(sql`DELETE FROM vrm_rental_workflow_intents WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
   await db.execute(sql`DELETE FROM vrm_rental_request WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
   await db.execute(sql`DELETE FROM vrm_rental_cutover WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM vrm_rental_tech_survey WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM all_techs WHERE upper(tech_racfid) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM tpms_tech_profiles WHERE upper(enterprise_id) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM fs_comms_contacts WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM vrm_rental_operations_cases WHERE case_key LIKE 'ZZCUT-%'`);
+  await db.execute(sql`DELETE FROM vrm_rental_identity_resolutions WHERE case_key LIKE 'ZZCUT-%'`);
 }
 
 async function insertIntent(over: Partial<Record<string, unknown>> = {}): Promise<number> {
@@ -347,13 +361,23 @@ describe("request lane source keying", () => {
 
   test("request booking completes on verified readback; duplicate and post-cancel postbacks never revive a terminal intent", async () => {
     const ldap = `${LDAP_PREFIX}RQDONE`;
-    const id = await insertIntent({ workflow_type: WORKFLOW_REQUEST, ldap, status: "confirmed" });
+    // Strict readback identity (repair spec §3) verifies branch/date/class
+    // too — a production intent always carries them (preview + event_date),
+    // so the fixture does as well.
+    const id = await insertIntent({
+      workflow_type: WORKFLOW_REQUEST, ldap, status: "confirmed",
+      preview: JSON.stringify({ reservation: { branchCode: "DAL123", sipp: "ICAR" } }),
+    });
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = '2026-08-20' WHERE id = ${id}`);
     const mine = (await claimBookingWork({ runnerId: "req-done-runner", limit: 50 })).find((i) => i.intentId === id);
     assert.ok(mine, "claim must return the confirmed request fixture");
 
     const verifiedPayload = {
       expected: { confirmation: "REQ-C1" },
-      matches: [{ confirmation: "REQ-C1", reference: `SHS ${ldap} pickup` }],
+      matches: [{
+        confirmation: "REQ-C1", reference: `SHS ${ldap} pickup`,
+        branchCode: "DAL123", date: "2026-08-20", sipp: "ICAR",
+      }],
     };
     const rb1 = await recordBookingPostback({
       intentId: id, runnerId: "req-done-runner", fencingToken: mine!.fencingToken,
@@ -553,13 +577,34 @@ describe("booked-unverified recovery lane", () => {
     assert.ok(mine, "reconcile-directed booking must be claimable");
     assert.equal(mine!.requiresReconcile, true, "ambiguous outcomes must reconcile before any new booking");
 
-    // Clean readback (zero journeys found) reconciles it back to bookable.
-    const rb = await recordBookingPostback({
+    // A bare empty match list is NOT authoritative (repair spec §3): without
+    // search meta proving the search ran and covered this intent's own
+    // identifiers, "found nothing" must change nothing.
+    const vague = await recordBookingPostback({
       intentId: id,
       runnerId: "test-runner-rcv",
       fencingToken: mine!.fencingToken,
       phase: "readback",
       payload: { matches: [] },
+    });
+    assert.equal(vague.accepted, true);
+    assert.equal(vague.readback?.verdict, "inconclusive", "empty matches without search meta must be inconclusive");
+    assert.equal(vague.status, "booking", "an inconclusive readback must not move the intent");
+    const rowNow = ((await db.execute(sql`
+      SELECT status, reservation_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(rowNow.status, "booking");
+    assert.equal(rowNow.reservation_state, "unknown", "unknown stays unknown — never bookable off a mis-keyed search");
+    assert.match(String(rowNow.last_error), /inconclusive/i);
+
+    // Same empty result, but the runner PROVES the search succeeded under
+    // this intent's identifier (LDAP criterion) → authoritative clean-none.
+    const rb = await recordBookingPostback({
+      intentId: id,
+      runnerId: "test-runner-rcv",
+      fencingToken: mine!.fencingToken,
+      phase: "readback",
+      payload: { matches: [], search: { status: "ok", criteria: [`${LDAP_PREFIX}RCV4`] } },
     });
     assert.equal(rb.status, "confirmed", "clean-none on a reconcile retry must return the intent to 'confirmed'");
   });
@@ -1023,5 +1068,348 @@ describe("request-lane input edits (vehicle class adjust)", () => {
     assert.match(String(row.last_error), /vehicle class set to 'suv' mid-build/,
       "the edit's reason is not clobbered by the runner's failure codes");
     assert.equal(row.preview, null, "no stale preview lands");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("eligibility facts: Enterprise-only case binding (repair spec §1)", () => {
+  test("HERTZ cases are invisible; exactly one ENTERPRISE case binds with full facts", async () => {
+    const ldap = `${LDAP_PREFIX}ELG1`;
+    const { rows: sv } = await db.execute(sql`
+      INSERT INTO vrm_rental_tech_survey (ldap, tech_name, has_rental, van_status, assigned_truck_number)
+      VALUES (${ldap}, 'ZZ Cut Elg', true, 'in_shop', '61385')
+      RETURNING id
+    `);
+    const surveyId = String((sv as any[])[0].id);
+    await db.execute(sql`
+      INSERT INTO all_techs (employee_id, tech_racfid, tech_name, employment_status, district_no, effective_date, synced_at)
+      VALUES ('990001', ${ldap}, 'ZZ Cut Elg', 'A', '8330', now(), now())
+    `);
+    await db.execute(sql`
+      INSERT INTO tpms_tech_profiles (tech_id, enterprise_id, truck_no, synced_at)
+      VALUES ('ZZT990001', ${ldap}, '61385', now())
+    `);
+    await db.execute(sql`
+      INSERT INTO fs_comms_contacts (ldap, phone, primary_state)
+      VALUES (${ldap}, '2145550100', 'TX')
+    `);
+    const feed = JSON.stringify({
+      RENTING_BRANCH: "DFW123", RENTING_CITY_NAME: "Dallas", RENTING_STATE: "TX",
+      ECARS_2_0_TKT_NBR: "E1234567", CLAIM_NUMBER: "CLM-9",
+      RENTED_VEH_MAKE: "CHEVROLET", RENTED_VEH_MODEL: "MALIBU",
+      RENTED_VEH_YEAR: "2025", RENTAL_START_DATE: "2026-08-01",
+    });
+    // case_key is varchar(10) in both case tables — keep fixtures short.
+    for (const [key, vendor] of [
+      ["ZZCUT-ENT", "ENTERPRISE RENT A CAR"],
+      ["ZZCUT-HTZ", "HERTZ"],
+    ] as const) {
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operations_cases
+          (case_key, vehicle_number_padded, vehicle_number, present_in_latest, ticket_status, rental_vendor, feed_json)
+        VALUES (${key}, '061385', '61385', true, 'OPEN', ${vendor}, ${feed}::jsonb)
+      `);
+      await db.execute(sql`
+        INSERT INTO vrm_rental_identity_resolutions (case_key, state, resolved_employee_id)
+        VALUES (${key}, 'resolved', '990001')
+      `);
+    }
+
+    const facts = await fetchEligibilityFacts({ workflowType: WORKFLOW_CUTOVER, sourceId: surveyId });
+    assert.equal(facts.openCaseCount, 1, "the HERTZ case must not count — vendor filter is ENTERPRISE%");
+    assert.equal(facts.caseKey, "ZZCUT-ENT");
+    assert.equal(facts.caseFacts?.ecars, "E1234567");
+    assert.equal(facts.caseFacts?.rentingBranch, "DFW123");
+    assert.equal(facts.tpmsTruck, "61385");
+    assert.equal(facts.roster?.districtNo, "8330");
+    assert.equal(facts.contactPhone, "2145550100");
+    assert.equal(facts.contactState, "TX");
+    assert.equal(facts.truckContradiction, null, "survey truck agrees with TPMS — no contradiction");
+    const gate = evaluateEligibility(facts);
+    assert.equal(gate.ok, true, `fully-seeded tech must pass: ${JSON.stringify((gate as any).failures ?? gate)}`);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("cancel is TRUE (repair spec §4)", () => {
+  const FLAG = "VRM_CONTRACT_BLOCK_ENABLED";
+
+  test("dry_run cancel is immediately terminal", async () => {
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}CXA`, status: "confirmed" });
+    const out = await cancelIntent(id, "db-test", "fixture teardown");
+    assert.equal(out.status, "cancelled", "no external effects possible in dry_run — terminal at once");
+  });
+
+  test("live possibly-booked cancel parks at cancel_pending_readback, holds the live lock, writes NO tracking row", async () => {
+    const ldap = `${LDAP_PREFIX}CXB`;
+    const id = await insertIntent({ execution_mode: "live", ldap, status: "awaiting_verification" });
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET reservation_state = 'booked_unverified' WHERE id = ${id}`);
+
+    const out = await cancelIntent(id, "db-test", "tech declined");
+    assert.equal(out.status, "cancel_pending_readback", "a possibly-booked live intent must never terminal-cancel on hope");
+    assert.match(String(out.last_error), /awaiting ETD readback proof/);
+
+    // Live-lock retained: a second live workflow for this tech stays blocked.
+    await assert.rejects(
+      () => insertIntent({ execution_mode: "live", ldap, status: "created" }),
+      isUniqueViolation,
+      "cancel_pending_readback is NONTERMINAL — the per-ldap live lock must hold",
+    );
+    // D5: no phantom tracking row — the mirror is UPDATE-only and completion never ran.
+    const n = ((await db.execute(sql`
+      SELECT count(*)::int AS n FROM vrm_rental_cutover WHERE upper(ldap) = ${ldap}
+    `)).rows as any[])[0].n;
+    assert.equal(n, 0, "cancel must never fabricate a vrm_rental_cutover row");
+  });
+
+  test("authoritative-none readback completes the cancel; a found reservation demands human evidence", async () => {
+    const prev = process.env[FLAG];
+    try {
+      const ldapNone = `${LDAP_PREFIX}CXC`;
+      const idNone = await insertIntent({ execution_mode: "live", ldap: ldapNone, status: "awaiting_verification" });
+      await db.execute(sql`UPDATE vrm_rental_workflow_intents SET reservation_state = 'booked_unverified' WHERE id = ${idNone}`);
+      await cancelIntent(idNone, "db-test", "tech declined");
+
+      const ldapFound = `${LDAP_PREFIX}CXD`;
+      const idFound = await insertIntent({ execution_mode: "live", ldap: ldapFound, status: "awaiting_verification" });
+      await db.execute(sql`UPDATE vrm_rental_workflow_intents SET reservation_state = 'booked_unverified' WHERE id = ${idFound}`);
+      await cancelIntent(idFound, "db-test", "tech declined");
+
+      // Claiming live rows requires transient arming (test-scoped). No
+      // external effect is possible here: claims and readback postbacks are
+      // DB-only — nothing dials ETD.
+      process.env[FLAG] = "true";
+      const items = await claimBookingWork({ runnerId: "cancel-runner", limit: 50 });
+      const mineNone = items.find((i) => i.intentId === idNone);
+      const mineFound = items.find((i) => i.intentId === idFound);
+      assert.ok(mineNone && mineFound, "cancel lane must serve cancel_pending_readback intents");
+      assert.equal(mineNone!.kind, "cancel");
+      assert.equal(mineNone!.requiresReconcile, true, "cancel claims are readback-first by definition");
+
+      const rbNone = await recordBookingPostback({
+        intentId: idNone, runnerId: "cancel-runner", fencingToken: mineNone!.fencingToken,
+        phase: "readback",
+        payload: { matches: [], search: { status: "ok", criteria: [`SHSNX-${idNone}`] } },
+      });
+      assert.equal(rbNone.status, "cancelled", "authoritative none = proof ETD holds nothing → terminal cancel");
+
+      const rbFound = await recordBookingPostback({
+        intentId: idFound, runnerId: "cancel-runner", fencingToken: mineFound!.fencingToken,
+        phase: "readback",
+        payload: {
+          matches: [{ confirmation: "C-LIVE-1", reference: `SHS ${ldapFound} SHSNX-${idFound}` }],
+          search: { status: "ok", criteria: [`SHSNX-${idFound}`] },
+        },
+      });
+      assert.equal(rbFound.status, "manual_review", "anything found blocks the cancel — a human must cancel in ETD");
+      const row = ((await db.execute(sql`
+        SELECT last_error FROM vrm_rental_workflow_intents WHERE id = ${idFound}
+      `)).rows as any[])[0];
+      assert.match(String(row.last_error), /cancel it in ETD manually/);
+
+      // Staff records the manual ETD cancellation → terminal with evidence.
+      const done = await recordCancellationEvidence(idFound, "db-test", { etdCancellationRef: "ETD-CXL-778" });
+      assert.equal(done.status, "cancelled");
+      assert.equal((done.reservation_evidence as any)?.cancellation?.etdCancellationRef, "ETD-CXL-778");
+      assert.equal((done.reservation_evidence as any)?.cancellation?.recordedBy, "db-test");
+    } finally {
+      if (prev === undefined) delete process.env[FLAG];
+      else process.env[FLAG] = prev;
+    }
+  });
+
+  test("cancellation evidence is state- and payload-guarded", async () => {
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}CXE`, status: "confirmed" });
+    await assert.rejects(
+      () => recordCancellationEvidence(id, "db-test", { note: "nope" }),
+      (e: any) => String(e?.code ?? "") === "bad_state" && e?.httpStatus === 409,
+      "evidence outside cancel_pending_readback/manual_review must 409",
+    );
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET status = 'cancel_pending_readback' WHERE id = ${id}`);
+    await assert.rejects(
+      () => recordCancellationEvidence(id, "db-test", {}),
+      (e: any) => String(e?.code ?? "") === "bad_payload",
+      "empty evidence must 400 — a ref or note is the whole point",
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("terminal completion (repair spec §5)", () => {
+  test("non-live completion is a CAS flip only — no tracking row, no double fire", async () => {
+    const ldap = `${LDAP_PREFIX}FINA`;
+    const id = await insertIntent({ ldap, status: "reservation_verified" });
+    assert.equal(await finalizeCompletion(id, "reservation_verified"), true, "observed status matches → flip");
+    const row = ((await db.execute(sql`
+      SELECT status FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.status, "completed");
+    const n = ((await db.execute(sql`
+      SELECT count(*)::int AS n FROM vrm_rental_cutover WHERE upper(ldap) = ${ldap}
+    `)).rows as any[])[0].n;
+    assert.equal(n, 0, "dry_run completion must never write tracking evidence");
+    assert.equal(await finalizeCompletion(id, "reservation_verified"), false, "CAS: a second finalize must lose");
+  });
+
+  test("live cutover completion lands the tracking row transactionally with the flip", async () => {
+    const ldap = `${LDAP_PREFIX}FINB`;
+    const id = await insertIntent({
+      execution_mode: "live", ldap, status: "reservation_verified",
+      preview: JSON.stringify({
+        reservation: {
+          branchCode: "DFW123", branchName: "Dallas Central", branchAddress: "1 Main St, Dallas TX",
+          sipp: "FCAR", pickupDate: "2026-08-17", returnDate: "2026-09-16",
+          quote: { journeyId: "J-778899" },
+        },
+      }),
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET tech_name = 'ZZ Fin Tech', truck_number = '61385',
+          reservation_state = 'verified', block_state = 'verified',
+          msg1_state = 'sent', msg2_state = 'released',
+          reservation_evidence = '{"confirmation":"1568742936"}'::jsonb,
+          block_evidence = '{"projectId":"P-1","projectName":"SHS BLOCK"}'::jsonb,
+          event_date = '2026-08-17', block_submitted_at = now()
+      WHERE id = ${id}
+    `);
+    assert.equal(await finalizeCompletion(id, "reservation_verified"), true);
+    const intent = ((await db.execute(sql`
+      SELECT status FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(intent.status, "completed");
+    const t = ((await db.execute(sql`
+      SELECT * FROM vrm_rental_cutover WHERE upper(ldap) = ${ldap}
+    `)).rows as any[])[0];
+    assert.ok(t, "live cutover completion must land the tracking row in the same transaction");
+    assert.equal(t.reservation_status, "booked");
+    assert.equal(t.route_block_status, "filed");
+    assert.equal(t.route_block_live, true);
+    assert.equal(t.etd_reference, "1568742936");
+    assert.equal(t.etd_reservation_id, "J-778899", "journey id falls back to the preview quote");
+    assert.equal(t.vehicle_class, "FCAR");
+    assert.equal(Number(t.intent_id), id);
+    assert.equal(t.workflow_status, "completed");
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("msg2 morning release gates (repair spec §7)", () => {
+  const localISO = (offsetDays: number, tz = "America/New_York") =>
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" })
+      .format(new Date(Date.now() + offsetDays * 86_400_000));
+
+  async function msg2Fixture(ldap: string, over: Record<string, unknown> = {}): Promise<number> {
+    const id = await insertIntent({ ldap, status: "reservation_verified", ...over });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET reservation_state = 'verified', block_state = 'verified', msg1_state = 'sent', msg2_state = 'held'
+      WHERE id = ${id}
+    `);
+    return id;
+  }
+
+  async function stageGuard(id: number) {
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_send_guards (intent_id, workflow_type, message_moment, execution_mode, status, body)
+      VALUES (${id}, ${WORKFLOW_CUTOVER}, 'msg2_morning', 'dry_run', 'held', 'db-test msg2 body')
+    `);
+  }
+
+  const guardStatus = async (id: number) =>
+    String(((await db.execute(sql`
+      SELECT status FROM vrm_workflow_send_guards WHERE intent_id = ${id} AND message_moment = 'msg2_morning' LIMIT 1
+    `)).rows as any[])[0]?.status ?? "");
+
+  test("no staged guard → blocked, msg2 stays held", async () => {
+    const id = await msg2Fixture(`${LDAP_PREFIX}M2A`);
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(0)} WHERE id = ${id}`);
+    assert.equal(await releaseMsg2IfDue(id), "blocked");
+    const row = ((await db.execute(sql`
+      SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.msg2_state, "held");
+    assert.match(String(row.last_error), /never staged/);
+  });
+
+  test("event tomorrow → skipped_not_event_day (nothing resolves)", async () => {
+    const id = await msg2Fixture(`${LDAP_PREFIX}M2B`);
+    await stageGuard(id);
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(1)} WHERE id = ${id}`);
+    assert.equal(await releaseMsg2IfDue(id), "skipped_not_event_day");
+    assert.equal(await guardStatus(id), "held", "not-yet is a wait, not a resolution");
+  });
+
+  test("event already passed → skipped_stale_event; guard stamped; msg2 released WITHOUT sending", async () => {
+    const id = await msg2Fixture(`${LDAP_PREFIX}M2C`);
+    await stageGuard(id);
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(-1)} WHERE id = ${id}`);
+    assert.equal(await releaseMsg2IfDue(id), "skipped_stale_event");
+    assert.equal(await guardStatus(id), "skipped_stale_event");
+    const row = ((await db.execute(sql`
+      SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.msg2_state, "released", "released-as-skipped: completion may proceed, no stale text goes out");
+    assert.match(String(row.last_error), /already passed/);
+  });
+
+  test("event today (dry_run, non-exception state) → released", async () => {
+    const id = await msg2Fixture(`${LDAP_PREFIX}M2D`);
+    await stageGuard(id);
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(0)} WHERE id = ${id}`);
+    assert.equal(await releaseMsg2IfDue(id), "released");
+    assert.equal(await guardStatus(id), "released");
+  });
+
+  test("quiet-exception state (TX): blocked without a persisted policy; skip_msg2 policy skips", async () => {
+    const prior = ((await db.execute(sql`
+      SELECT value, updated_by FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}
+    `)).rows as any[])[0] ?? null;
+    try {
+      const ldap = `${LDAP_PREFIX}M2Q`;
+      const { rows: sv } = await db.execute(sql`
+        INSERT INTO vrm_rental_tech_survey (ldap, tech_name, has_rental, van_status)
+        VALUES (${ldap}, 'ZZ Quiet TX', true, 'in_shop')
+        RETURNING id
+      `);
+      const surveyId = String((sv as any[])[0].id);
+      await db.execute(sql`
+        INSERT INTO fs_comms_contacts (ldap, phone, primary_state) VALUES (${ldap}, '2145550101', 'TX')
+      `);
+      const id = await msg2Fixture(ldap, { source_id: surveyId });
+      await stageGuard(id);
+      // Event day in the RECIPIENT's timezone (TX → America/Chicago).
+      await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(0, "America/Chicago")} WHERE id = ${id}`);
+
+      await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
+      assert.equal(await getQuietStateFallback(), null);
+      assert.equal(await releaseMsg2IfDue(id), "blocked", "exception state without a persisted operator choice must hold");
+      let row = ((await db.execute(sql`
+        SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+      `)).rows as any[])[0];
+      assert.equal(row.msg2_state, "held");
+      assert.match(String(row.last_error), /no fallback policy/);
+
+      await setQuietStateFallback("skip_msg2", "db-test");
+      assert.equal(await releaseMsg2IfDue(id), "skipped_policy");
+      assert.equal(await guardStatus(id), "skipped_policy");
+      row = ((await db.execute(sql`
+        SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+      `)).rows as any[])[0];
+      assert.equal(row.msg2_state, "released");
+      assert.match(String(row.last_error), /skip_msg2/);
+    } finally {
+      await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
+      if (prior) {
+        await db.execute(sql`
+          INSERT INTO app_settings (key, value, updated_by, updated_at)
+          VALUES (${QUIET_FALLBACK_SETTING_KEY}, ${JSON.stringify(prior.value)}::jsonb, ${prior.updated_by ?? null}, now())
+        `);
+      }
+    }
   });
 });

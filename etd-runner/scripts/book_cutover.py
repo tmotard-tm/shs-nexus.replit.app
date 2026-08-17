@@ -1001,11 +1001,12 @@ def main() -> None:
                 # generic digs matched data.referenceNumber first on some
                 # responses, which is the QUOTE reference and matches nothing
                 # a branch can look up (how JABJ2WPW3J got recorded for BKIRK).
+                # referenceNumber fallback removed — it is the QUOTE reference
+                # (see _parse_confirmation); UNPARSED beats confidently wrong.
                 confirmation = str((((out or {}).get("data") or {})
                                     .get("reservationNumber") or {}).get("number") or "") \
                     or dig(out, ("confirmation",)) \
-                    or dig(out, ("reservationnumber", "reservationno")) \
-                    or dig((out or {}).get("data"), ("referencenumber",))
+                    or dig(out, ("reservationnumber", "reservationno"))
                 # The journey referenceNumber is the confirmation with a COUNT
                 # suffix bolted on. The email shows it without; store what the
                 # email shows or nobody can match the two.
@@ -1258,19 +1259,26 @@ def _parse_confirmation(out: dict) -> str:
                     return got
         return None
 
+    # referenceNumber fallback REMOVED (repair spec §2): data.referenceNumber
+    # is the QUOTE reference, not a reservation confirmation — recording it
+    # poisons downstream readbacks (branches can't look it up, journey search
+    # keyed on it matches nothing). UNPARSED + readback beats confidently wrong.
     confirmation = str((((out or {}).get("data") or {})
                         .get("reservationNumber") or {}).get("number") or "") \
         or dig(out, ("confirmation",)) \
-        or dig(out, ("reservationnumber", "reservationno")) \
-        or dig((out or {}).get("data"), ("referencenumber",)) or ""
+        or dig(out, ("reservationnumber", "reservationno")) or ""
     if confirmation and confirmation.upper().endswith("COUNT"):
         confirmation = confirmation[:-5]
     return confirmation
 
 
 def _journey_matches(etd: EtdClient, criteria: str, expect_conf: str = "",
-                     expect_ldap: str = "") -> list:
+                     expect_ldap: str = "") -> tuple:
     """Best-effort reservation rows from ETD's journey search.
+
+    Returns (rows, error). A search FAILURE is ([], "reason") — callers must
+    post it as search.status="error" so the server never mistakes a broken
+    search for an authoritative "no reservation exists" (repair spec §3).
 
     The server classifies; this only extracts. Rows are filtered to the
     expected confirmation when one is known, otherwise to rows whose
@@ -1281,7 +1289,7 @@ def _journey_matches(etd: EtdClient, criteria: str, expect_conf: str = "",
         res = etd.search_journeys(criteria=criteria or "", period="Last30Days")
     except Exception as exc:
         print(f"       journey search failed: {str(exc)[:120]}")
-        return []
+        return [], str(exc)[:300]
     rows: list = []
 
     def walk(node):
@@ -1321,12 +1329,12 @@ def _journey_matches(etd: EtdClient, criteria: str, expect_conf: str = "",
     if expect_conf:
         hits = [r for r in out if r["confirmation"] == expect_conf]
         if hits:
-            return hits
+            return hits, None
     if expect_ldap:
         hits = [r for r in out if expect_ldap.upper() in r["reference"].upper()]
         if hits:
-            return hits
-    return out
+            return hits, None
+    return out, None
 
 
 def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
@@ -1342,13 +1350,32 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
                          {"runnerId": runner, "fencingToken": item["fencingToken"],
                           "phase": phase, "payload": payload})
 
-    # An unfinished attempt exists (crash mid-booking): readback FIRST. The
-    # server decides what the found (or not-found) journey means.
-    if item.get("requiresReconcile"):
-        matches = _journey_matches(etd, ldap, expect_ldap=ldap)
-        st, body = post("readback", {"matches": matches, "expected": {}})
-        print(f"  RECON {label} readback ({len(matches)} match) -> "
-              f"{body.get('status', st)}")
+    intent_ref = str(resv.get("intentReference") or f"SHSNX-{iid}")
+
+    # An unfinished attempt exists (crash mid-booking), a reconcile was
+    # ordered, or this is a cancel-lane claim: readback FIRST/ONLY. Search on
+    # the intent reference (unique to THIS intent — it rides the ETD reference
+    # field and the special notes), with the LDAP as a second witness. The
+    # server decides what the found (or not-found) journey means; the search
+    # meta tells it whether a "none" is authoritative (repair spec §3/§4).
+    if item.get("requiresReconcile") or item.get("kind") == "cancel":
+        known_conf = str(((item.get("reservationEvidence") or {}).get("confirmation")) or "")
+        tried = [known_conf or intent_ref]
+        matches, search_err = _journey_matches(etd, tried[0], expect_conf=known_conf,
+                                               expect_ldap=ldap)
+        if not matches and not search_err:
+            tried.append(ldap)
+            matches, search_err = _journey_matches(etd, ldap, expect_conf=known_conf,
+                                                   expect_ldap=ldap)
+        st, body = post("readback", {
+            "matches": matches,
+            "expected": {"confirmation": known_conf} if known_conf else {},
+            "search": {"status": "error" if search_err else "ok",
+                       "criteria": tried,
+                       "error": search_err},
+        })
+        print(f"  RECON {label} {'cancel-' if item.get('kind') == 'cancel' else ''}readback "
+              f"({len(matches)} match) -> {body.get('status', st)}")
         return
 
     if mode == "live" and not confirm:
@@ -1424,13 +1451,38 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
     if note:
         model["notes"] = note
         model["notesViewModel"] = {"reservationNote": note}
-    refs = resv.get("bookingReferences") or []
+    refs = [str(x) for x in (resv.get("bookingReferences") or [])]
+    # ETD surfaces ONE reference value on the Open RA report (the first entry;
+    # LDAP owns it, 2026-08-14). The intent reference must ride IN that same
+    # field — as a separate list entry it never reaches the report or the
+    # journey search — or readbacks can never find THIS intent's reservation
+    # (repair spec §3).
+    if refs and intent_ref and intent_ref not in " ".join(refs[:1]):
+        refs[0] = f"{refs[0]} {intent_ref}".strip()
     if refs:
-        model["bookingReferences"] = [str(x) for x in refs]
+        model["bookingReferences"] = refs
 
     req_hash = hashlib.sha256(json.dumps(
         {"branch": got_branch, "sipp": sipp, "date": pickup, "ldap": ldap},
         sort_keys=True).encode()).hexdigest()[:32]
+
+    # 3.5 Pre-commit duplicate search (repair spec §3): before opening an
+    # attempt, ask ETD whether THIS intent already has a reservation (crash
+    # after a commit but before op_result, a double claim, …). Found → post
+    # the readback and stop; the server settles the true state. Search error
+    # → do NOT proceed to booking on a blind spot.
+    dup_matches, dup_err = _journey_matches(etd, intent_ref, expect_ldap=ldap)
+    if dup_err:
+        print(f"  HOLD {label} pre-commit duplicate search failed: {dup_err[:120]}")
+        return
+    if dup_matches:
+        st, body = post("readback", {
+            "matches": dup_matches, "expected": {},
+            "search": {"status": "ok", "criteria": [intent_ref], "error": None},
+        })
+        print(f"  DUPE {label} pre-commit search found {len(dup_matches)} journey(s) "
+              f"-> {body.get('status', st)} (no new booking)")
+        return
 
     # 4. Open the attempt BEFORE any call that could create a reservation.
     st, body = post("op_open", {"requestHash": req_hash,
@@ -1495,10 +1547,14 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
         print(f"  ???? {label} booked but confirmation UNPARSED (readback will decide)")
 
     # 8. Journey readback — the only path to reservation_verified.
-    matches = _journey_matches(etd, confirmation or ldap,
-                               expect_conf=confirmation, expect_ldap=ldap)
+    rb_criteria = confirmation or intent_ref
+    matches, search_err = _journey_matches(etd, rb_criteria,
+                                           expect_conf=confirmation, expect_ldap=ldap)
     st, body = post("readback", {"matches": matches,
-                                 "expected": {"confirmation": confirmation}})
+                                 "expected": {"confirmation": confirmation},
+                                 "search": {"status": "error" if search_err else "ok",
+                                            "criteria": [rb_criteria],
+                                            "error": search_err}})
     print(f"       readback ({len(matches)} match) -> {body.get('status', st)}")
 
 
@@ -1538,7 +1594,8 @@ def run_intents(workflow_type=None, watch=False, poll=60, days=7,
                 if items:
                     print(f"{len(items)} intent(s) claimed "
                           f"({sum(1 for i in items if i.get('kind') == 'preview')} preview, "
-                          f"{sum(1 for i in items if i.get('kind') == 'book')} book)")
+                          f"{sum(1 for i in items if i.get('kind') == 'book')} book, "
+                          f"{sum(1 for i in items if i.get('kind') == 'cancel')} cancel)")
                 for item in items:
                     try:
                         if item.get("kind") == "preview":

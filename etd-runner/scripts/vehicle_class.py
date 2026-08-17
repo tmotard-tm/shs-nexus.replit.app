@@ -330,25 +330,28 @@ def choose_same_vehicle(make: str | None, model: str | None, offered: list,
         return {"pick": None, "code": "", "match": "NONE", "changes_vehicle": None,
                 "note": "branch offered nothing"}
 
-    # Two witnesses, feed first (structured), tech's words second.
+    # The FEED is the only witness that may pick a class (repair spec §9).
+    # The tech's free-text description is EVIDENCE for the reviewing human,
+    # never a booking input — a vague "sedan" must not size a real
+    # reservation. Unmapped feed = hard stop.
     candidates = preferred_codes(make, model)
-    said = desc_class(tech_desc)
-    if not candidates and said:
-        candidates = [said]
     if not candidates:
         return {"pick": None, "code": "", "match": "UNMAPPED", "changes_vehicle": None,
                 "note": f"no class mapping for {describe(make, model) or 'unknown vehicle'}"
                         f"{f' / tech says {tech_desc.strip()!r}' if (tech_desc or '').strip() else ''};"
                         " same-vehicle booking needs a human"}
 
-    for code in candidates:
-        if code in by_code:
-            return {"pick": by_code[code], "code": code, "match": "same_class",
-                    "changes_vehicle": False,
-                    "note": f"kept {code} to match their {describe(make, model) or (tech_desc or '').strip() or 'vehicle'}"}
+    # Exact PRIMARY class only — mapping alternates are not tried, because
+    # some are smaller and "no vehicle change" must never quietly shrink
+    # someone's vehicle. Anything else is same-body size-UP or a hard stop.
+    primary = candidates[0]
+    if primary in by_code:
+        return {"pick": by_code[primary], "code": primary, "match": "same_class",
+                "changes_vehicle": False,
+                "note": f"kept {primary} to match their {describe(make, model) or 'vehicle'}"}
 
     # Nearest size UP in the same body style; never smaller, never cross-body.
-    target = _rank(candidates[0])
+    target = _rank(primary)
     same_body = sorted([(c, _rank(c)) for c in by_code if _rank(c)[0] == target[0]],
                        key=lambda x: x[1][1])
     up = [x for x in same_body if x[1][1] >= target[1]]
@@ -356,6 +359,6 @@ def choose_same_vehicle(make: str | None, model: str | None, offered: list,
         code = up[0][0]
         return {"pick": by_code[code], "code": code, "match": "same_body_size_up",
                 "changes_vehicle": False,
-                "note": f"{candidates[0]} not offered; took {code} (same body, next size up)"}
+                "note": f"{primary} not offered; took {code} (same body, next size up)"}
     return {"pick": None, "code": "", "match": "NO_MATCH", "changes_vehicle": None,
-            "note": f"branch offers no {candidates[0]}-equivalent at or above their size. REVIEW"}
+            "note": f"branch offers no {primary}-equivalent at or above their size. REVIEW"}

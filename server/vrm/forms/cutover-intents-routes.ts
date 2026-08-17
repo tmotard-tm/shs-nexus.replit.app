@@ -48,6 +48,10 @@ import {
   etTodayISO,
   morningSweep,
   isContractBlockLive,
+  recordCancellationEvidence,
+  getQuietStateFallback,
+  setQuietStateFallback,
+  QUIET_FALLBACK_SETTING_KEY,
 } from "./cutover-orchestrator";
 
 function sendOrchestratorError(res: any, e: any): void {
@@ -109,6 +113,29 @@ export function requireCronOrAdmin(req: any, res: any, next: any): void {
   const role = String(req.user?.role ?? "");
   if (role === "admin" || role === "developer") return next();
   res.status(403).json({ message: "internal-cron bearer or admin session required", code: "cron_or_admin_only" });
+}
+
+/**
+ * LIVE-mode RBAC (repair spec §6): any session-lane mutation that creates or
+ * advances a LIVE intent requires an admin/developer session. Dry-run/test
+ * intents keep the normal VRM session gate. Exported for route auth tests.
+ */
+export function isAdminSession(req: any): boolean {
+  const role = String(req.user?.role ?? "");
+  return role === "admin" || role === "developer";
+}
+
+/** True = blocked (403 already sent). Unknown intent falls through to the handler's 404. */
+async function blockNonAdminLiveIntent(req: any, res: any, intentId: number): Promise<boolean> {
+  const { rows } = await db.execute(sql`
+    SELECT execution_mode FROM vrm_rental_workflow_intents WHERE id = ${intentId} LIMIT 1
+  `);
+  const mode = String((rows as any[])[0]?.execution_mode ?? "");
+  if (mode === "live" && !isAdminSession(req)) {
+    res.status(403).json({ message: "live intents require an admin or developer session", code: "admin_required_live" });
+    return true;
+  }
+  return false;
 }
 
 export function registerCutoverIntentRoutes(router: Router): void {
@@ -215,6 +242,9 @@ export function registerCutoverIntentRoutes(router: Router): void {
     try {
       const sourceId = String(req.body?.surveyResponseId ?? "").trim();
       if (!sourceId) return res.status(400).json({ message: "surveyResponseId required" });
+      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req)) {
+        return res.status(403).json({ message: "creating a LIVE intent requires an admin or developer session", code: "admin_required_live" });
+      }
       const { intent, created } = await createIntent({
         workflowType: WORKFLOW_CUTOVER,
         sourceId,
@@ -302,8 +332,10 @@ export function registerCutoverIntentRoutes(router: Router): void {
       if (!Number.isInteger(previewVersion) || previewVersion <= 0) {
         return res.status(400).json({ message: "previewVersion (integer) required" });
       }
+      const intentId = intentIdParam(req);
+      if (await blockNonAdminLiveIntent(req, res, intentId)) return;
       const out = await confirmIntent({
-        intentId: intentIdParam(req),
+        intentId,
         previewVersion,
         confirmedBy: actor(req),
       });
@@ -315,7 +347,9 @@ export function registerCutoverIntentRoutes(router: Router): void {
 
   router.post(`${base}/intents/:intentId/retry`, async (req, res) => {
     try {
-      res.json(await retryIntent(intentIdParam(req), actor(req)));
+      const intentId = intentIdParam(req);
+      if (await blockNonAdminLiveIntent(req, res, intentId)) return;
+      res.json(await retryIntent(intentId, actor(req)));
     } catch (e: any) {
       sendOrchestratorError(res, e);
     }
@@ -325,7 +359,52 @@ export function registerCutoverIntentRoutes(router: Router): void {
     try {
       const reason = String(req.body?.reason ?? "").trim();
       if (!reason) return res.status(400).json({ message: "reason required" });
-      res.json(await cancelIntent(intentIdParam(req), actor(req), reason));
+      const intentId = intentIdParam(req);
+      if (await blockNonAdminLiveIntent(req, res, intentId)) return;
+      res.json(await cancelIntent(intentId, actor(req), reason));
+    } catch (e: any) {
+      sendOrchestratorError(res, e);
+    }
+  });
+
+  /**
+   * Staff records PROOF of a manual ETD cancellation: flips
+   * cancel_pending_readback (or manual_review) to terminal cancelled with the
+   * evidence stored on the intent. Same live RBAC as the other mutations.
+   */
+  router.post(`${base}/intents/:intentId/cancellation-evidence`, async (req, res) => {
+    try {
+      const intentId = intentIdParam(req);
+      if (await blockNonAdminLiveIntent(req, res, intentId)) return;
+      res.json(
+        await recordCancellationEvidence(intentId, actor(req), {
+          etdCancellationRef: req.body?.etdCancellationRef,
+          note: req.body?.note,
+        }),
+      );
+    } catch (e: any) {
+      sendOrchestratorError(res, e);
+    }
+  });
+
+  /** Quiet-hours exception-state msg2 fallback policy (persisted; admin-set). */
+  router.get(`${base}/settings/quiet-state-fallback`, async (_req, res) => {
+    try {
+      res.json({ key: QUIET_FALLBACK_SETTING_KEY, fallback: await getQuietStateFallback() });
+    } catch (e: any) {
+      sendOrchestratorError(res, e);
+    }
+  });
+
+  router.post(`${base}/settings/quiet-state-fallback`, async (req, res) => {
+    try {
+      if (!isAdminSession(req)) {
+        return res.status(403).json({ message: "admin or developer session required", code: "admin_required" });
+      }
+      res.json({
+        key: QUIET_FALLBACK_SETTING_KEY,
+        fallback: await setQuietStateFallback(String(req.body?.mode ?? ""), actor(req)),
+      });
     } catch (e: any) {
       sendOrchestratorError(res, e);
     }
@@ -395,6 +474,9 @@ export function registerCutoverIntentRoutes(router: Router): void {
     try {
       const sourceId = String(req.params.id ?? "").trim();
       if (!sourceId) return res.status(400).json({ message: "request id required" });
+      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req)) {
+        return res.status(403).json({ message: "creating a LIVE intent requires an admin or developer session", code: "admin_required_live" });
+      }
       const { intent, created } = await createIntent({
         workflowType: WORKFLOW_REQUEST,
         sourceId,

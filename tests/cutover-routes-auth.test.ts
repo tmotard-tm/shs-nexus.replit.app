@@ -16,11 +16,15 @@
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import express from "express";
+import { sql } from "drizzle-orm";
+import { db, pool } from "../server/db";
 import {
   registerCutoverIntentRoutes,
   requireCronOrAdmin,
 } from "../server/vrm/forms/cutover-intents-routes";
+import { QUIET_FALLBACK_SETTING_KEY } from "../server/vrm/forms/cutover-orchestrator";
 
 const CRON = process.env.NEXUS_CRON_SECRET || process.env.SESSION_SECRET || "";
 
@@ -30,6 +34,7 @@ const B = "/api/vrm/forms/rental-survey/cutover";
 
 before(async () => {
   assert.ok(CRON, "NEXUS_CRON_SECRET or SESSION_SECRET must be present to exercise the cron bearer");
+  await db.execute(sql`DELETE FROM vrm_rental_workflow_intents WHERE upper(ldap) LIKE 'ZZAUTH%'`);
   const app = express();
   app.use(express.json());
   // Simulated authenticated session on EVERY request (worst case).
@@ -46,8 +51,16 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
 });
 
-after(() => {
+after(async () => {
   server?.close();
+  await db.execute(sql`DELETE FROM vrm_rental_workflow_intents WHERE upper(ldap) LIKE 'ZZAUTH%'`).catch(() => {});
+  await pool.end().catch(() => {});
+  try {
+    const { fsPool } = await import("../server/fleet-scope-db");
+    await fsPool.end().catch(() => {});
+  } catch {
+    /* fleet-scope pool may be untouched in this suite */
+  }
 });
 
 describe("runner-owned endpoints are cron-only", () => {
@@ -124,5 +137,114 @@ describe("staff lane unaffected", () => {
   test("a plain session still reads the intent list", async () => {
     const res = await fetch(`${baseUrl}${B}/intents?limit=1`);
     assert.equal(res.status, 200, "staff list route must remain session-usable");
+  });
+});
+
+describe("LIVE-mode RBAC (repair spec §6)", () => {
+  test("creating a LIVE intent is admin-gated on BOTH create lanes; admin then hits the kill switch", async () => {
+    for (const [path, body] of [
+      [`${B}/intents`, { surveyResponseId: crypto.randomUUID(), executionMode: "live" }],
+      [`/api/vrm/forms/rental-request/${crypto.randomUUID()}/booking-intent`, { executionMode: "live" }],
+    ] as const) {
+      const plain = await fetch(baseUrl + path, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      assert.equal(plain.status, 403, `${path} must refuse a plain session for live`);
+      assert.equal(((await plain.json()) as any).code, "admin_required_live");
+
+      // Admin clears RBAC and lands on the NEXT gate: the dark-build kill
+      // switch (VRM_CONTRACT_BLOCK_ENABLED absent → live_disarmed) — proving
+      // no eligibility read or intent write ran for a live create.
+      const admin = await fetch(baseUrl + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-test-role": "admin" },
+        body: JSON.stringify(body),
+      });
+      assert.equal(admin.status, 403, `${path} admin live create must hit live_disarmed while dark`);
+      assert.equal(((await admin.json()) as any).code, "live_disarmed");
+    }
+  });
+
+  test("a dry_run create is NOT RBAC-blocked (plain session reaches the handler's own gates)", async () => {
+    const res = await fetch(`${baseUrl}${B}/intents`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ surveyResponseId: crypto.randomUUID(), executionMode: "dry_run" }),
+    });
+    assert.equal(res.status, 404, "random survey id must fall through RBAC into source_missing");
+    assert.equal(((await res.json()) as any).code, "source_missing");
+  });
+
+  test("every session mutation on an EXISTING live intent is admin-gated; admin reaches handler validation", async () => {
+    const { rows } = await db.execute(sql`
+      INSERT INTO vrm_rental_workflow_intents
+        (workflow_type, source_id, source_revision, execution_mode, ldap, status, preview_version)
+      VALUES ('cutover', ${crypto.randomUUID()}, 0, 'live', 'ZZAUTHLIVE', 'preview_ready', 1)
+      RETURNING id
+    `);
+    const id = (rows as any[])[0].id;
+    const muts: Array<[string, any]> = [
+      ["confirm", { previewVersion: 1 }],
+      ["retry", {}],
+      ["cancel", { reason: "auth-test" }],
+      ["cancellation-evidence", { note: "auth-test" }],
+    ];
+    for (const [leaf, body] of muts) {
+      const res = await fetch(`${baseUrl}${B}/intents/${id}/${leaf}`, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      assert.equal(res.status, 403, `${leaf} on a live intent must refuse a plain session`);
+      assert.equal(((await res.json()) as any).code, "admin_required_live", leaf);
+    }
+    // Admin passes RBAC and lands on the handler's own state validation
+    // (preview_ready is not an evidence-recording state) — 409, not 403.
+    const adminRes = await fetch(`${baseUrl}${B}/intents/${id}/cancellation-evidence`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-role": "admin" },
+      body: JSON.stringify({ note: "auth-test" }),
+    });
+    assert.equal(adminRes.status, 409);
+    assert.equal(((await adminRes.json()) as any).code, "bad_state");
+  });
+});
+
+describe("quiet-state fallback settings route", () => {
+  test("GET is session-open; POST is admin-only, validated, and persisted", async () => {
+    const prior = ((await db.execute(sql`
+      SELECT value, updated_by FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}
+    `)).rows as any[])[0] ?? null;
+    try {
+      const g0 = await fetch(`${baseUrl}${B}/settings/quiet-state-fallback`);
+      assert.equal(g0.status, 200, "reading the policy is part of the staff surface");
+      assert.equal(((await g0.json()) as any).key, QUIET_FALLBACK_SETTING_KEY);
+
+      const plain = await fetch(`${baseUrl}${B}/settings/quiet-state-fallback`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "send_at_window_open" }),
+      });
+      assert.equal(plain.status, 403);
+      assert.equal(((await plain.json()) as any).code, "admin_required");
+
+      const bad = await fetch(`${baseUrl}${B}/settings/quiet-state-fallback`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-role": "admin" },
+        body: JSON.stringify({ mode: "yolo" }),
+      });
+      assert.equal(bad.status, 400, "unknown modes must never persist");
+
+      const ok = await fetch(`${baseUrl}${B}/settings/quiet-state-fallback`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-test-role": "admin" },
+        body: JSON.stringify({ mode: "send_at_window_open" }),
+      });
+      assert.equal(ok.status, 200);
+      const g1: any = await (await fetch(`${baseUrl}${B}/settings/quiet-state-fallback`)).json();
+      assert.equal(g1.fallback?.mode, "send_at_window_open", "GET must reflect the persisted policy");
+    } finally {
+      await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
+      if (prior) {
+        await db.execute(sql`
+          INSERT INTO app_settings (key, value, updated_by, updated_at)
+          VALUES (${QUIET_FALLBACK_SETTING_KEY}, ${JSON.stringify(prior.value)}::jsonb, ${prior.updated_by ?? null}, now())
+        `);
+      }
+    }
   });
 });

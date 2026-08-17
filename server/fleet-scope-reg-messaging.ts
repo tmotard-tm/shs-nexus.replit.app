@@ -49,6 +49,15 @@ const STATE_TZ_MAP: Record<string, string> = {
   WI: "America/Chicago", WV: "America/New_York", WY: "America/Denver",
 };
 
+/**
+ * IANA timezone for a US state (fallback: America/New_York). Exported for the
+ * cutover workflow's recipient-local send scheduling — the same map quiet
+ * hours are computed from, so both clocks agree.
+ */
+export function stateTimeZone(state: string): string {
+  return STATE_TZ_MAP[(state || "").toUpperCase()] || "America/New_York";
+}
+
 // Return the current local time parts for a given IANA timezone using Intl
 function getLocalTimeParts(tz: string, now: Date) {
   const parts = new Intl.DateTimeFormat("en-US", {
