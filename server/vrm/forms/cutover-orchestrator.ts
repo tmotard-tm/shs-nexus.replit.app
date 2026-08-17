@@ -462,6 +462,47 @@ export function renderRequestSpecialNotes(f: { truck: string | null; ldap: strin
   );
 }
 
+/**
+ * Request-lane msg1. A NEW rental, so none of the cutover's language: there is no
+ * prior agreement to close, no vehicle to keep, and no route block to attend. The
+ * technician is waiting on a car, so this is the whole message: number, where,
+ * when, what to bring, and that they must not pay.
+ */
+export function renderRequestMsg1(f: {
+  conf: string;
+  branchName: string;
+  branchAddress: string;
+  pickupDate?: string | null;
+  pickupTime?: string | null;
+  returnDate?: string | null;
+}): string {
+  const when = f.pickupDate
+    ? `${usDate(f.pickupDate)}${f.pickupTime ? ` from ${usTime(f.pickupTime)}` : ""}`
+    : "today";
+  const back = f.returnDate ? ` Return by ${usDate(f.returnDate)}.` : "";
+  return (
+    `SHS Fleet: your rental is booked. Confirmation ${f.conf}. ` +
+    `Pick up ${when} at Enterprise ${f.branchName}, ${f.branchAddress}. ` +
+    `Walk in and bring your driver's license. Billed direct to Sears, do not pay.` +
+    `${back} Questions? Reply here.`
+  );
+}
+
+/** 2026-08-18 -> 8/18. The technician does not read ISO. */
+function usDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso));
+  return m ? `${Number(m[2])}/${Number(m[3])}` : String(iso);
+}
+
+/** 09:00:00 -> 9:00 AM. */
+function usTime(t: string): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(t));
+  if (!m) return String(t);
+  const h = Number(m[1]);
+  const ap = h < 12 ? "AM" : "PM";
+  return `${h % 12 === 0 ? 12 : h % 12}:${m[2]} ${ap}`;
+}
+
 /** Draft bodies (plan §Messages). EXACT rendered text appears in Preview; live arming requires Tyler's approval. */
 export function renderMsg1(f: { conf: string; branchName: string; branchAddress: string }): string {
   return (
@@ -1811,9 +1852,18 @@ export async function persistPreviewFromRunner(params: {
   // The window is fetched even when the runner sent NO date, so a "no date"
   // preview failure still tells the staffer WHY (stale watermark vs genuinely
   // no working day in the horizon) instead of a bare no_date.
+  // CUTOVER ONLY. A cutover pairs the reservation with a 30-minute route block, so
+  // the day must be one the technician actually works and the snapshot must be fresh.
+  // A same-day request books today and files no block: ServicePower has no say in
+  // whether a stranded technician gets a car. Leaving the gate on this lane turned a
+  // single cause into four codes (no_date, quote_failed, class_unmapped,
+  // branch_zip_missing) and made anyone with no route in the window unbookable.
+  // When it is off, both `schedule` and `scheduleFailure` stay null and neither
+  // failure branch below can fire.
+  const scheduleGated = intent.workflow_type !== WORKFLOW_REQUEST;
   let schedule: ScheduleWindow | null = null;
   let scheduleFailure: { code: string; detail: string } | null = null;
-  try {
+  if (scheduleGated) try {
     schedule = await fetchScheduleWindow(intent.ldap, etTodayISO(), 21);
     if (!schedule.fresh) {
       scheduleFailure = {
@@ -1905,7 +1955,16 @@ export async function persistPreviewFromRunner(params: {
   const quietException = QUIET_EXCEPTION_STATES[state] ?? null;
   const branchName = params.quote.branchName ?? params.quote.branchCode ?? "branch";
   const branchAddress = params.quote.branchAddress ?? "";
-  const msg1Body = renderMsg1({ conf, branchName, branchAddress });
+  const msg1Body = isCutover
+    ? renderMsg1({ conf, branchName, branchAddress })
+    : renderRequestMsg1({
+        conf,
+        branchName,
+        branchAddress,
+        pickupDate: requestedDate,
+        pickupTime: params.quote.pickupTime ?? null,
+        returnDate: params.quote.returnDate ?? null,
+      });
   const msg2Body = renderMsg2({ conf, branchName, branchAddress });
   const recipientPhone = facts.contactPhone ?? facts.requestFallbackPhone;
 
@@ -1981,9 +2040,14 @@ export async function persistPreviewFromRunner(params: {
       },
     },
     schedule: {
-      watermarkUtc: schedule!.watermarkUtc,
-      watermarkAgeHours: schedule!.watermarkAgeHours,
-      requestedDateWorking: true,
+      // Null on a request: the lane is not schedule-gated, so nothing was fetched.
+      // `requestedDateWorking` is null rather than true for the same reason — no
+      // check ran, and recording a pass that never happened would be a lie in the
+      // evidence a staffer reads.
+      watermarkUtc: schedule?.watermarkUtc ?? null,
+      watermarkAgeHours: schedule?.watermarkAgeHours ?? null,
+      scheduleGated,
+      requestedDateWorking: scheduleGated ? true : null,
       runnerEvidence: params.quote.scheduleEvidence ?? null,
     },
     builtAt: new Date().toISOString(),
@@ -2270,17 +2334,45 @@ export async function recordBookingPostback(params: {
     }
 
     if (outcome === "booked") {
+      const confirmation = strOrNull(params.payload?.evidence?.confirmation);
+      // A cutover still waits for an independent journey readback before anyone
+      // is texted. A request cannot: ETD's /api/myjourney/search ignores both
+      // SearchCriteria and Period (every value returns the same rows, a nonsense
+      // criteria included) and returns only past-dated journeys, so a future
+      // pickup is never in it. Gating on it parked every booked request at
+      // manual_review forever. The savedr response carrying a confirmation
+      // number is the proof, and it is recorded as that rather than passed off
+      // as a readback.
+      const verifiedOnCommit = intent.workflow_type === WORKFLOW_REQUEST && !!confirmation;
       await touchIntent(intent.id, {
-        reservation_state: "booked_unverified",
-        status: "awaiting_verification",
+        reservation_state: verifiedOnCommit ? "verified" : "booked_unverified",
+        status: verifiedOnCommit ? "reservation_verified" : "awaiting_verification",
         reservation_evidence: {
-          confirmation: strOrNull(params.payload?.evidence?.confirmation),
+          confirmation,
+          verifiedBy: verifiedOnCommit ? "commit_response" : null,
           bookedAt: new Date().toISOString(),
           attemptNo,
           raw: params.payload?.evidence ?? null,
         },
         last_error: null,
+        ...(verifiedOnCommit ? { claimed_by: null, lease_expires_at: null } : {}),
       });
+      if (verifiedOnCommit) {
+        // Close the request row so the queue and the card both read 'booked'
+        // instead of an approved row that silently already has a car.
+        await db.execute(sql`
+          UPDATE vrm_rental_request
+             SET status = 'booked',
+                 etd_reference = ${confirmation},
+                 etd_reservation_id = ${strOrNull(params.payload?.evidence?.quoteReference)},
+                 etd_booked_at = now(),
+                 etd_error = NULL,
+                 updated_at = now()
+           WHERE request_no = ${Number(intent.source_id)}
+        `);
+        await mirrorCutoverSummary(intent.id);
+        await releaseMessagesIfEligible(intent.id);
+      }
     } else if (outcome === "failed_clean") {
       // Proven no reservation was created (validation-gate failure before the
       // confirm call). No auto-retry for bookings — a human decides.
@@ -3052,22 +3144,35 @@ export async function claimSendGuardDispatch(
 export async function releaseMessagesIfEligible(intentId: number): Promise<void> {
   const intent = await loadIntent(intentId);
   if (TERMINAL_STATUSES.has(intent.status)) return;
-  // Request-path SMS wording is not approved; the whole message lane stays
-  // pending for rental_request intents until Tyler signs the request rules.
-  if (intent.workflow_type === WORKFLOW_REQUEST) return;
+  const isRequest = intent.workflow_type === WORKFLOW_REQUEST;
   const darkValidated = intent.execution_mode !== "live" && intent.reservation_state === "dry_run_validated";
   if (intent.reservation_state !== "verified" && !darkValidated) return;
-  const blockOk =
-    intent.block_state === "accepted" ||
-    intent.block_state === "verified" ||
-    (intent.execution_mode === "dry_run" && intent.block_state === "dry_run_would_file");
-  if (!blockOk) return;
+  // A request files no route block, so block_state is born 'not_applicable' and
+  // the cutover's block gate can never be satisfied. Applying it to this lane is
+  // what left two technicians holding real reservations and no message.
+  if (!isRequest) {
+    const blockOk =
+      intent.block_state === "accepted" ||
+      intent.block_state === "verified" ||
+      (intent.execution_mode === "dry_run" && intent.block_state === "dry_run_would_file");
+    if (!blockOk) return;
+  }
 
   const preview = intent.preview ?? {};
   const conf = strOrNull(intent.reservation_evidence?.confirmation) ?? "(pending)";
   const branchName = preview.reservation?.branchName ?? preview.reservation?.branchCode ?? "branch";
   const branchAddress = preview.reservation?.branchAddress ?? "";
-  const msg1Body = renderMsg1({ conf, branchName, branchAddress });
+  const resv = (preview.reservation ?? {}) as Record<string, unknown>;
+  const msg1Body = isRequest
+    ? renderRequestMsg1({
+        conf,
+        branchName,
+        branchAddress,
+        pickupDate: strOrNull(resv.pickupDate),
+        pickupTime: strOrNull(resv.pickupTime),
+        returnDate: strOrNull(resv.returnDate),
+      })
+    : renderMsg1({ conf, branchName, branchAddress });
   const msg2Body = renderMsg2({ conf, branchName, branchAddress });
 
   const facts = await fetchEligibilityFacts({
@@ -3091,7 +3196,12 @@ export async function releaseMessagesIfEligible(intentId: number): Promise<void>
   const msg1EveISO = addDaysISO(msg1EventISO, -1);
   const msg1Tz = stateTimeZone(String(facts.contactState ?? ""));
   const [evY, evM, evD] = msg1EveISO.split("-").map((n) => parseInt(n, 10));
-  let msg1ScheduledFor = localHourToUtc(msg1Tz, evY, evM, evD, 19);
+  // A cutover's msg1 is instructions for tomorrow's route block, so it goes out
+  // the evening before. A request is a technician standing without a van right
+  // now: it goes the moment the reservation is real.
+  let msg1ScheduledFor = isRequest
+    ? new Date()
+    : localHourToUtc(msg1Tz, evY, evM, evD, 19);
   if (msg1ScheduledFor.getTime() <= Date.now()) msg1ScheduledFor = new Date();
   if (intent.msg1_state === "pending") {
     const g1 = await upsertSendGuard({

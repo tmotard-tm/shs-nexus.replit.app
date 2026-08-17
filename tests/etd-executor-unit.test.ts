@@ -34,6 +34,7 @@ import {
   WORKFLOW_CUTOVER,
   WORKFLOW_REQUEST,
   isContractBlockLive,
+  etTodayISO,
   claimBookingWork,
   type QueueItem,
   type ScheduleWindow,
@@ -462,7 +463,14 @@ describe("preview lane", () => {
     assert.equal(run.results[0].status, "preview_required", "…and a synthetic LDAP still has no schedule");
   });
 
-  test("a stale schedule watermark yields no date instead of guessing one", async () => {
+  test("a same-day request ignores the schedule entirely, stale watermark included", async () => {
+    // The stale-watermark hard stop protects the CUTOVER lane, where a reservation is
+    // paired with a route block and must land on a day the technician is working.
+    // A request is a technician already off the road asking for a car today: it picks
+    // today, files no block, and never reads ServicePower. Enforcing the cutover rule
+    // here meant anyone with no route inside the 21-day window could never be booked,
+    // and it surfaced as four separate codes (no_date, quote_failed, class_unmapped,
+    // branch_zip_missing) that were all this one cause.
     const ldap = `${LDAP_PREFIX}STALE`;
     const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
     const { client, calls } = fakeEtd();
@@ -472,11 +480,20 @@ describe("preview lane", () => {
       deps: { client, schedule: fakeSchedule({ fresh: false }) },
     });
 
-    assert.equal(calls.filter((c) => c.startsWith("quote:")).length, 0, "a stale watermark must stop before quoting");
-    // Nothing was quoted, so every runner-owned gate code is unsatisfied — the preview
-    // is explicitly unbookable rather than dated by guesswork.
-    assert.match(run.results[0].detail ?? "", /no_date/);
-    assert.match(run.results[0].detail ?? "", /quote_failed/, "and the missing quote is named as such");
+    assert.equal(
+      calls.filter((c) => c.startsWith("quote:")).length,
+      1,
+      "a request quotes regardless of the schedule watermark",
+    );
+    assert.doesNotMatch(run.results[0].detail ?? "", /no_date/, "today is always a date");
+    // The pickup date IS today. That is the whole contract for this lane, and it is
+    // what makes a technician with no ServicePower route bookable.
+    const row = await loadIntentRow(intentId);
+    assert.equal(
+      String((row.preview as any)?.reservation?.pickupDate ?? ""),
+      etTodayISO(),
+      "a same-day request is dated today, never pushed to the next working day",
+    );
   });
 
   test("a quote failure lands in the preview warnings, not in an exception", async () => {

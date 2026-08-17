@@ -18,7 +18,15 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { regionForState, REGION_OWNER } from "../rental-operations/region";
-import { requestBookingInFlight, invalidateRequestPreviews } from "./cutover-orchestrator";
+import {
+  requestBookingInFlight,
+  invalidateRequestPreviews,
+  createIntent,
+  requestPreview,
+  confirmIntent,
+  WORKFLOW_REQUEST,
+} from "./cutover-orchestrator";
+import { runBookingExecutor } from "../etd/executor";
 
 // .b, 2026-08-14: the first five acknowledgements are now attested by ONE
 // checkbox listing them as bullets; the four terms of use stay individual.
@@ -1649,9 +1657,66 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
             + PUBLIC_REQUEST_URL;
       void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
 
+      // APPROVE books it. The acknowledgement above promises a confirmation number
+      // and a branch; this is what actually produces them.
+      if (decision === "APPROVE") void autoBookApprovedRequest(no);
+
       res.json({ ok: true, decision });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "decide failed" });
     }
   });
 }
+
+/**
+ * APPROVE means booked and notified. Nothing else is asked of a staffer.
+ *
+ * Runs the whole chain the panel used to make a person click through one button at a
+ * time: create the intent, take the preview, confirm it, and hand it to the booking
+ * executor, which commits in ETD and releases the technician's text. Deliberately
+ * fire-and-forget: the commit costs 20-30s of ETD round trips and the decision button
+ * must not hang on it. Every failure is written to the request row so the card can say
+ * WHY rather than sitting on 'approved' looking finished.
+ */
+async function autoBookApprovedRequest(requestNo: number): Promise<void> {
+  const fail = async (stage: string, detail: string) => {
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+         SET etd_error = ${`${stage}: ${detail}`.slice(0, 500)}, updated_at = now()
+       WHERE request_no = ${requestNo} AND etd_booked_at IS NULL
+    `);
+  };
+  try {
+    const { intent } = await createIntent({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: String(requestNo),
+      executionMode: "live",
+      createdBy: "auto-approve",
+    });
+    const previewed =
+      intent.status === "created" || intent.status === "preview_required"
+        ? await requestPreview(intent.id)
+        : intent;
+    if (previewed.status !== "preview_ready") {
+      await fail("preview", String(previewed.last_error ?? previewed.status));
+      return;
+    }
+    await confirmIntent({
+      intentId: previewed.id,
+      previewVersion: Number(previewed.preview_version),
+      confirmedBy: "auto-approve",
+    });
+    const run = await runBookingExecutor({
+      runnerId: "nexus-autobook",
+      intentId: previewed.id,
+      limit: 1,
+    });
+    const r = run.results?.[0];
+    if (r && r.action !== "BOOK") {
+      await fail("booking", `${r.status}${r.detail ? `: ${r.detail}` : ""}`);
+    }
+  } catch (err: any) {
+    await fail("auto-book", String(err?.message ?? err));
+  }
+}
+

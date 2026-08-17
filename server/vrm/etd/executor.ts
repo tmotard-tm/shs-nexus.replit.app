@@ -47,6 +47,7 @@ import {
   etTodayISO,
   addDaysISO,
   isContractBlockLive,
+  WORKFLOW_REQUEST,
   type QueueItem,
   type RunnerQuote,
   type RunnerClassDecision,
@@ -226,10 +227,34 @@ type ScheduleEvidence = {
 async function nextWorkingDay(
   ldap: string,
   readSchedule: NonNullable<ExecutorDeps["schedule"]>,
+  opts: { sameDay?: boolean } = {},
 ): Promise<{ day: string | null; evidence: ScheduleEvidence }> {
   const from = etTodayISO();
-  const minDate = addDaysISO(from, 1);
   const checkedAt = new Date().toISOString();
+  // A cutover books a branch visit into TOMORROW's route and files a 30-minute
+  // block against it, so the earliest day is today+1 AND it has to be a day the
+  // technician is scheduled. A rental request is the opposite case: the van is
+  // already off the road, today is the entire point, and a ServicePower shift is
+  // not a precondition for renting someone a car. Requiring one meant a
+  // technician with no route in the 21-day window could never be booked at all,
+  // and reported as four separate failures (no_date, quote_failed,
+  // class_unmapped, branch_zip_missing) that were all the same cause.
+  if (opts.sameDay) {
+    return {
+      day: from,
+      evidence: {
+        source: "in-process",
+        fresh: true,
+        watermarkUtc: null,
+        watermarkAgeHours: null,
+        firstWorkingDay: from,
+        minDate: from,
+        checkedAt,
+        note: "same-day request: pickup is today, no schedule gate",
+      },
+    };
+  }
+  const minDate = addDaysISO(from, 1);
   try {
     const win = await readSchedule(ldap, from, SCHEDULE_HORIZON_DAYS);
     const day = win.fresh ? firstWorkingDay(win.days, minDate) : null;
@@ -436,7 +461,9 @@ async function runPreview(
   readSchedule: NonNullable<ExecutorDeps["schedule"]>,
 ): Promise<ExecutorResult> {
   const { intentId, ldap } = item;
-  const { day: firstDay, evidence } = await nextWorkingDay(ldap, readSchedule);
+  const { day: firstDay, evidence } = await nextWorkingDay(ldap, readSchedule, {
+    sameDay: item.workflowType === WORKFLOW_REQUEST,
+  });
 
   const quote: RunnerQuote & Record<string, unknown> = {
     scheduleEvidence: evidence as any,

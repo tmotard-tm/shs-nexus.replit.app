@@ -1,0 +1,6 @@
+[
+ {
+  "ldap": "ABALICE",
+  "error": "class FVAR is not in the template's classInfo list; the selection flag cannot be set, so ETD would book the captured class. Refusing."
+ }
+]
