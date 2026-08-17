@@ -11,17 +11,14 @@
 import type { StandardActivityArgs } from "../dca-task-client";
 
 /**
- * The ZIP of the branch we reserved, taken off the stored branch address, WITH the
- * +4 when the address carries one
- * ("EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805" -> "79904-2805").
+ * The 5-digit ZIP of the branch we reserved, taken off the stored branch address
+ * ("EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805" -> "79904").
  *
  * This is the value the route block's LocationValue must carry: it is the only
  * thing the scheduler can compute drive time from — notes are invisible to it.
  *
- * Tyler, 2026-08-17: the full ZIP+4, not ZIP5. This previously trimmed the +4
- * because the API reference types LocationValue as "Zip code". Plenty of stored
- * addresses carry no +4 at all ("11130 GULF FWY,STE 320,HOUSTON,77034"), so five
- * digits is still a valid answer when that is all there is.
+ * ZIP5, and the +4 is trimmed (Tyler, 2026-08-17, after checking with the API
+ * owner). The reference types LocationValue as "Zip code".
  *
  * Anchored at the END of the address on purpose: a leading street number is
  * five digits too ("11130 FUQUA ST, HOUSTON, 77034" must yield 77034).
@@ -29,7 +26,7 @@ import type { StandardActivityArgs } from "../dca-task-client";
  * Returns "" when the address carries no ZIP.
  */
 export function branchZip(address: unknown): string {
-  const m = String(address ?? "").trim().match(/(\d{5}(?:-\d{4})?)\s*$/);
+  const m = String(address ?? "").trim().match(/(\d{5})(?:-\d{4})?\s*$/);
   return m ? m[1] : "";
 }
 

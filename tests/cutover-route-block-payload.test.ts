@@ -14,11 +14,9 @@
  *   1. Every technician's block starts at 8:00 AM, EXACT. Filed with "Anytime",
  *      only 11 of the 136 blocks that landed came back at 08:00:00 — the rest
  *      scattered from 06:23 to 15:55, against a text promising 8:00 AM.
- *   2. LocationValue carries the FULL ZIP of the branch the reservation was
- *      booked at, including the +4 when the stored address has one (Tyler,
- *      2026-08-17). Not a street number, and never empty — no ZIP, no filing.
- *      Plenty of branch addresses carry no +4, so five digits is still valid
- *      when that is all the address holds.
+ *   2. LocationValue carries the 5-digit ZIP of the branch the reservation was
+ *      booked at. The +4 is trimmed (Tyler, 2026-08-17, after checking with the
+ *      API owner). Not a street number, and never empty — no ZIP, no filing.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -61,10 +59,10 @@ function wire(input: CutoverBlockInput): Record<string, any> {
 }
 
 describe("branchZip", () => {
-  test("keeps the +4 when the branch address carries one", () => {
+  test("trims the +4 off a ZIP+4 branch address", () => {
     assert.equal(
       branchZip("EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805"),
-      "79904-2805",
+      "79904",
     );
   });
 
@@ -137,23 +135,22 @@ describe("the lane's decision — 8:00 AM for every tech", () => {
 });
 
 describe("the lane's decision — reserved branch ZIP in LocationValue", () => {
-  test("LocationValue is the branch ZIP with its +4, and LocationType is Supplied", () => {
+  test("LocationValue is the branch ZIP5 and LocationType is Supplied", () => {
     const r = wire(candidate());
     assert.equal(r.LocationType, "Supplied");
-    assert.equal(r.LocationValue, "79904-2805");
+    assert.equal(r.LocationValue, "79904");
   });
 
-  test("the +4 survives all the way to the wire, untrimmed", () => {
+  test("a ZIP+4 never reaches LocationValue", () => {
     const r = wire(candidate());
-    assert.match(r.LocationValue, /^\d{5}(-\d{4})?$/);
-    assert.ok(r.LocationValue.includes("-"), "this fixture's address has a +4");
+    assert.match(r.LocationValue, /^\d{5}$/);
   });
 
-  test("real branch addresses each yield their own LocationValue", () => {
+  test("real branch addresses each yield their own 5-digit LocationValue", () => {
     const cases: Array<[string, string]> = [
-      ["EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805", "79904-2805"],
-      ["FORT WORTH SOUTH FWY., 4851 SOUTH FRWY,FORT WORTH,76115-4003", "76115-4003"],
-      ["FRONT ROYAL, 1500 N SHENANDOAH AVE,FRONT ROYAL,22630-3640", "22630-3640"],
+      ["EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805", "79904"],
+      ["FORT WORTH SOUTH FWY., 4851 SOUTH FRWY,FORT WORTH,76115-4003", "76115"],
+      ["FRONT ROYAL, 1500 N SHENANDOAH AVE,FRONT ROYAL,22630-3640", "22630"],
       ["KAHULUI HANA HWY., 40 HANA HWY,KAHULUI,96732", "96732"],
       ["11130 FUQUA ST, HOUSTON, 77034", "77034"],
     ];
