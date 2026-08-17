@@ -466,6 +466,79 @@ export class HolmanApiService {
     }
   }
 
+  // ── Task #636: fail-closed existence probes ────────────────────────────────
+  // findVehicleByNumber() collapses "not found" and "the lookup blew up" into the
+  // same `{ success: false }`, which makes it unusable as a duplicate GATE (an
+  // outage would read as "no duplicate"). These two probes return an explicit
+  // `checked` flag so the caller can refuse the submission when the check itself
+  // could not complete.
+  async lookupVehicleByNumberChecked(vehicleNumber: string): Promise<{
+    checked: boolean;
+    found: boolean;
+    vehicle?: any;
+    error?: string;
+  }> {
+    const numVariants = Array.from(new Set([
+      toCanonical(vehicleNumber),
+      toDisplayNumber(vehicleNumber),
+      toHolmanRef(vehicleNumber),
+      String(vehicleNumber ?? '').trim(),
+    ])).filter(Boolean);
+    if (numVariants.length === 0) {
+      return { checked: true, found: false };
+    }
+    try {
+      const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', {
+        lesseeCodes: ['2B56'],
+        additionalFilters: [
+          { name: 'holmanVehicleNumber', values: numVariants },
+          { name: 'statusCode', values: ['0', '1', '2'] },
+        ],
+        paging: { pageNumber: 1, pageSize: 10 },
+      });
+      const items: any[] = Array.isArray(data?.items) ? data.items : [];
+      const searchCanonical = toCanonical(vehicleNumber);
+      const match = items.find((v: any) => {
+        const holmanNum = toCanonical(String(v?.holmanVehicleNumber || '').trim());
+        const clientNum = toCanonical(String(v?.clientVehicleNumber || '').trim());
+        return holmanNum === searchCanonical || clientNum === searchCanonical;
+      });
+      return match ? { checked: true, found: true, vehicle: match } : { checked: true, found: false };
+    } catch (error: any) {
+      return { checked: false, found: false, error: error?.message || 'Holman vehicle-number lookup failed' };
+    }
+  }
+
+  // VIN existence probe. `vin` IS a supported additionalFilter on
+  // /vehicles/custom-query (verified against the live API), so this is a single
+  // indexed round-trip rather than a full-fleet page walk.
+  async lookupVehicleByVinChecked(vin: string): Promise<{
+    checked: boolean;
+    found: boolean;
+    vehicle?: any;
+    error?: string;
+  }> {
+    const normalized = String(vin ?? '').trim().toUpperCase();
+    if (normalized.length !== 17) {
+      return { checked: true, found: false };
+    }
+    try {
+      const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', {
+        lesseeCodes: ['2B56'],
+        additionalFilters: [
+          { name: 'vin', values: [normalized] },
+          { name: 'statusCode', values: ['0', '1', '2'] },
+        ],
+        paging: { pageNumber: 1, pageSize: 10 },
+      });
+      const items: any[] = Array.isArray(data?.items) ? data.items : [];
+      const match = items.find((v: any) => String(v?.vin || '').trim().toUpperCase() === normalized);
+      return match ? { checked: true, found: true, vehicle: match } : { checked: true, found: false };
+    } catch (error: any) {
+      return { checked: false, found: false, error: error?.message || 'Holman VIN lookup failed' };
+    }
+  }
+
   // Lightweight check: fetch only assignedStatus for a vehicle number.
   // Used by the async verification loop to confirm Holman processed an assign/unassign.
   // Uses custom-query POST to look up a specific vehicle by holmanVehicleNumber.

@@ -60,7 +60,7 @@ const ENDPOINTS: Endpoint[] = [
     group: "Trucks",
     method: "POST",
     name: "Create Truck Location",
-    description: "Creates a new truck location in NetSuite. Returns a NetSuite ID on success.",
+    description: "Disabled — creating a truck here would skip the vehicle-creation gates. Use the Create Vehicle flow instead; this endpoint now returns 403.",
     path: "/api/wms/trucks",
     pathParams: [],
     bodyFields: [

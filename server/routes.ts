@@ -20,6 +20,21 @@ import crypto from 'crypto';
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion, insertDistrictCostCenterSchema, insertExternalAppSchema, updateExternalAppSchema, type User, type RolePermissionSettings } from "@shared/schema";
 import { deepMergePermissions, getServerDefaultPermissions } from "./permission-utils";
+import {
+  VEHICLE_CREATE_ENABLED_KEY,
+  VEHICLE_CREATE_REHEARSAL_KEY,
+  NUMBER_HOLD_TTL_MS,
+  RESERVATION_STALE_MS,
+  validateVin,
+  allocateVehicleNumber,
+  classifyHolmanSubmitResponse,
+  decideDuplicateGate,
+  decideReservationConflict,
+  summarizeCreateOutcome,
+  type DuplicateProbe,
+  type SystemOutcome,
+} from "./vehicle-create-gate";
+import { runGuardedWmsCreate, runGuardedHolmanSubmit } from "./vehicle-create-external";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -917,6 +932,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       ALTER TABLE byov_creation_audit
         ADD COLUMN IF NOT EXISTS blocked_source varchar(10)
     `), 20000, "byov_creation_audit migrate");
+    // Task 636 — forensic + reservation columns. Every attempt must be
+    // reconstructable (who / what was sent / what each system answered / when),
+    // and the reservation row doubles as the suggested-number hold.
+    await withTimeout(db.execute(sql`
+      ALTER TABLE byov_creation_audit
+        ADD COLUMN IF NOT EXISTS request_id varchar(64),
+        ADD COLUMN IF NOT EXISTS reserved_session varchar(64),
+        ADD COLUMN IF NOT EXISTS hold_expires_at timestamp,
+        ADD COLUMN IF NOT EXISTS submitted_payload jsonb,
+        ADD COLUMN IF NOT EXISTS holman_response jsonb,
+        ADD COLUMN IF NOT EXISTS holman_submitted_at timestamp,
+        ADD COLUMN IF NOT EXISTS holman_pending boolean DEFAULT false,
+        ADD COLUMN IF NOT EXISTS wms_response jsonb,
+        ADD COLUMN IF NOT EXISTS wms_submitted_at timestamp,
+        ADD COLUMN IF NOT EXISTS tpms_success boolean,
+        ADD COLUMN IF NOT EXISTS tpms_error text,
+        ADD COLUMN IF NOT EXISTS tpms_response jsonb,
+        ADD COLUMN IF NOT EXISTS tpms_submitted_at timestamp
+    `), 20000, "byov_creation_audit task636 migrate");
     console.log("[BYOV] byov_creation_audit table ready");
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_creation_audit table:", e.message);
@@ -8997,17 +9031,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Updates intentionally omit fields (Holman treats omitted as no-change), so only
       // ADD records are checked here.
       const records = Array.isArray(req.body) ? req.body : [req.body];
-      for (const rec of records) {
-        if (rec && String(rec.assetAction || "").toUpperCase() === "ADD") {
-          const missing = (["vin", "firstName", "lastName"] as const).filter(
-            (k) => !rec[k] || String(rec[k]).trim() === ""
-          );
-          if (missing.length > 0) {
-            return res.status(400).json({
-              message: `Vehicle create (assetAction ADD) is missing required fields: ${missing.join(", ")}`,
-            });
-          }
-        }
+      const hasAdd = records.some((rec: any) => rec && String(rec.assetAction || "").toUpperCase() === "ADD");
+      if (hasAdd) {
+        // Task #636: this relay is an UPDATE path. A raw ADD here would bring a
+        // vehicle into existence in Holman without the feature gate, the create
+        // permission, the VIN/number/reservation gates or acceptance evidence —
+        // exactly the bypass the re-gate exists to close. Creates go through
+        // /api/byov/create, which runs all of them.
+        return res.status(403).json({
+          message:
+            "Creating a vehicle (assetAction ADD) is not allowed on this endpoint. Use the Create Vehicle flow (/api/byov/create), which runs the duplicate, reservation and permission gates.",
+          code: "vehicle_create_route_required",
+        });
       }
       const result = await holmanApiService.submitVehicle(req.body);
       res.json(result);
@@ -9092,6 +9127,308 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
     }
     return byovReservationIndexReady;
+  };
+
+  // ── Task #636: Create Vehicle gate helpers ──────────────────────────────────
+  // Companion partial unique index on the VIN, so an ACTIVE reservation claims
+  // its VIN as well as its number. Two concurrent creates for the same physical
+  // vehicle under DIFFERENT numbers (the 088277/088279 failure class) can no
+  // longer both proceed. Scoped to rows written by this gate (request_id NOT
+  // NULL) so pre-existing history — which contains legitimate duplicate VINs
+  // from the incidents this task exists to prevent — cannot block the DDL.
+  let byovVinReservationIndexReady: Promise<void> | null = null;
+  const ensureByovVinReservationIndex = (): Promise<void> => {
+    if (!byovVinReservationIndexReady) {
+      byovVinReservationIndexReady = db
+        .execute(sql`
+          CREATE UNIQUE INDEX IF NOT EXISTS "byov_creation_audit_active_vin_uq"
+            ON "byov_creation_audit" ("vin")
+            WHERE "blocked_source" IS NULL AND "vin" IS NOT NULL AND "request_id" IS NOT NULL;
+        `)
+        .then(() => undefined)
+        .catch((e) => {
+          byovVinReservationIndexReady = null;
+          throw e;
+        });
+    }
+    return byovVinReservationIndexReady;
+  };
+
+  // Opaque, stable key for the caller's session. Used to prove that the person
+  // submitting the form is the same one the suggested-number hold was issued to.
+  const vehicleHoldSessionKey = (req: any): string | null => {
+    const sid = String(req?.headers?.cookie || "").match(/sessionId=([^;]+)/)?.[1];
+    if (!sid) return null;
+    return crypto.createHash("sha256").update(sid).digest("hex").slice(0, 32);
+  };
+
+  // Release holds nobody came back to finish, so an abandoned form never burns a
+  // number. Only ever touches un-submitted hold rows (hold_expires_at set, no VIN,
+  // nothing created yet).
+  const sweepExpiredVehicleHolds = async (): Promise<void> => {
+    try {
+      await db
+        .update(byovCreationAudit)
+        .set({ blockedSource: "expired", holmanError: "Number hold expired before submission" })
+        .where(
+          and(
+            isNull(byovCreationAudit.blockedSource),
+            isNull(byovCreationAudit.vin),
+            isNotNull(byovCreationAudit.holdExpiresAt),
+            lt(byovCreationAudit.holdExpiresAt, new Date()),
+            eq(byovCreationAudit.holmanSuccess, false),
+            eq(byovCreationAudit.wmsSuccess, false),
+          ),
+        );
+    } catch (e) {
+      console.warn("[BYOV] hold sweep failed (non-fatal):", (e as any)?.message || e);
+    }
+  };
+
+  // Is someone else mid-create on this number right now? Used by the retry
+  // routes, which legitimately re-attempt OUR partially-failed create (a
+  // reservation row with no live hold) but must not write underneath another
+  // session's un-expired hold. Fail-closed: an unreadable table blocks.
+  const probeActiveNumberHold = async (
+    paddedVehicle: string,
+    sessionKey: string | null,
+  ): Promise<
+    | { action: "proceed" }
+    | { action: "block-conflict"; holder: string }
+    | { action: "block-unverified"; error: string }
+  > => {
+    try {
+      await sweepExpiredVehicleHolds();
+      const rows = await db
+        .select({
+          holdExpiresAt: byovCreationAudit.holdExpiresAt,
+          reservedSession: byovCreationAudit.reservedSession,
+          submittedBy: byovCreationAudit.submittedBy,
+        })
+        .from(byovCreationAudit)
+        .where(
+          and(
+            eq(byovCreationAudit.vehicleNumber, paddedVehicle),
+            isNull(byovCreationAudit.blockedSource),
+            isNotNull(byovCreationAudit.holdExpiresAt),
+          ),
+        )
+        .limit(5);
+      const now = Date.now();
+      const foreignHold = rows.find(
+        (r) =>
+          r.holdExpiresAt instanceof Date &&
+          r.holdExpiresAt.getTime() > now &&
+          (!sessionKey || r.reservedSession !== sessionKey),
+      );
+      if (foreignHold) {
+        return { action: "block-conflict", holder: foreignHold.submittedBy || "another user" };
+      }
+      return { action: "proceed" };
+    } catch (e: any) {
+      return { action: "block-unverified", error: e?.message || "reservation lookup failed" };
+    }
+  };
+
+  // Feature gate. Fail-safe OFF: an unreadable app_settings table means the
+  // function stays disabled, never silently enabled. Mirrors the reconciliation
+  // auto-apply convention.
+  const vehicleCreateGateState = async (): Promise<{ enabled: boolean; rehearsal: boolean; readable: boolean }> => {
+    try {
+      const { getBooleanSetting } = await import("./app-settings");
+      const [enabled, rehearsal] = await Promise.all([
+        getBooleanSetting(VEHICLE_CREATE_ENABLED_KEY, false),
+        getBooleanSetting(VEHICLE_CREATE_REHEARSAL_KEY, false),
+      ]);
+      return { enabled, rehearsal, readable: true };
+    } catch (e) {
+      console.error("[BYOV] Could not read the vehicle-create feature gate — treating as DISABLED:", e);
+      return { enabled: false, rehearsal: false, readable: false };
+    }
+  };
+
+  // Server-side authorization for vehicle creation. Mirrors the client gate
+  // (quickActions.createVehicle + pageFeatures.createVehicle.enabled) resolved
+  // through defaults → stored role row → per-user overrides, exactly like
+  // userCanManageCostCenters. developer/admin always pass, matching the
+  // drift-check endpoints.
+  async function userCanCreateVehicle(user: User | undefined): Promise<boolean> {
+    if (!user || !user.role) return false;
+    if (user.role === "developer" || user.role === "admin") return true;
+
+    const defaults = getServerDefaultPermissions(user.role);
+    const stored = await storage.getRolePermission(user.role);
+    const merged = deepMergePermissions(defaults, stored?.permissions ?? null) as RolePermissionSettings;
+    const overrides = user.permissionOverrides as Partial<RolePermissionSettings> | null | undefined;
+    const effective = (overrides ? deepMergePermissions(merged, overrides) : merged) as RolePermissionSettings;
+
+    const quick = (effective as any)?.quickActions;
+    const page = (effective as any)?.pageFeatures?.createVehicle;
+    return !!(quick?.enabled && quick?.createVehicle && page?.enabled !== false);
+  }
+
+  // Resolve the full user record (req.user from requireAuth carries no overrides)
+  // and answer the create-vehicle authorization question in one call.
+  const requireVehicleCreatePermission = async (req: any, res: any): Promise<boolean> => {
+    const currentUser = await storage.getUserByUsername((req.user as any)?.username);
+    if (!(await userCanCreateVehicle(currentUser ?? undefined))) {
+      res.status(403).json({ error: "You don't have permission to create vehicles." });
+      return false;
+    }
+    return true;
+  };
+
+  type UsedNumberScan = {
+    used: Set<number>;
+    sources: { name: string; ok: boolean; error?: string }[];
+    complete: boolean;
+  };
+
+  // Every system that can own a vehicle number. A number missing from ANY of
+  // these is not free — TPMS in particular swallows a duplicate addtruck as
+  // success, silently adopting a ghost truck, so it must be scanned.
+  const gatherUsedVehicleNumbers = async (): Promise<UsedNumberScan> => {
+    const used = new Set<number>();
+    const sources: { name: string; ok: boolean; error?: string }[] = [];
+    const addUsed = (raw: unknown) => {
+      const c = toCanonical(raw as any);
+      if (!c) return;
+      const n = Number(c);
+      if (Number.isFinite(n)) used.add(n);
+    };
+    const scan = async (name: string, fn: () => Promise<void>) => {
+      try {
+        await fn();
+        sources.push({ name, ok: true });
+      } catch (e: any) {
+        console.error(`[BYOV] next-number: ${name} scan FAILED:`, e?.message || e);
+        sources.push({ name, ok: false, error: e?.message || String(e) });
+      }
+    };
+
+    await scan("holman_cache", async () => {
+      const rows = await db.select({ n: holmanVehiclesCache.holmanVehicleNumber }).from(holmanVehiclesCache);
+      for (const r of rows) addUsed(r.n);
+    });
+
+    await scan("byov_audit", async () => {
+      const rows = await db.select({ n: byovCreationAudit.vehicleNumber }).from(byovCreationAudit);
+      for (const r of rows) addUsed(r.n);
+    });
+
+    await scan("wms", async () => {
+      const trucks = await wmsEngineService.getAllTrucks();
+      for (const t of trucks) {
+        // NOTE: no `locationId` here — the WMS read projection never returns it.
+        addUsed((t as any)?.name);
+        addUsed((t as any)?.externalId);
+      }
+    });
+
+    await scan("tpms", async () => {
+      const { tpmsTechProfiles, tpmsLastKnownTruckTech } = await import("@shared/schema");
+      const rows = await db.select({ n: tpmsTechProfiles.truckNo }).from(tpmsTechProfiles);
+      for (const r of rows) addUsed(r.n);
+      const lastKnown = await db.select({ n: tpmsLastKnownTruckTech.truckNo }).from(tpmsLastKnownTruckTech);
+      for (const r of lastKnown) addUsed(r.n);
+    });
+
+    await scan("fleet_mirrors", async () => {
+      const { pgQueryWithRetry } = await import("./fleet-scope-all-vehicles-mirror");
+      const mirror = await pgQueryWithRetry(
+        `SELECT vehicle_number_key, unassigned_vehicle_number, base_row->>'VEHICLE_NUMBER' AS base_number
+           FROM fs_all_vehicles_mirror`,
+        [],
+        "byov-next-number-mirror",
+      );
+      for (const r of mirror.rows) {
+        addUsed(r.vehicle_number_key);
+        addUsed(r.unassigned_vehicle_number);
+        addUsed(r.base_number);
+      }
+      const trucks = await pgQueryWithRetry(
+        `SELECT truck_number FROM fs_trucks`,
+        [],
+        "byov-next-number-fs-trucks",
+      );
+      for (const r of trucks.rows) addUsed(r.truck_number);
+    });
+
+    return { used, sources, complete: sources.every((s) => s.ok) };
+  };
+
+  // Fail-closed VIN duplicate probes: local Holman cache, live Holman, and any
+  // ACTIVE in-flight reservation. Each probe reports whether it completed, so a
+  // database blip or a Holman outage refuses the submission instead of waving it
+  // through the way the old advisory try/catch did.
+  const probeVinDuplicates = async (args: {
+    vin: string;
+    paddedVehicle: string;
+  }): Promise<DuplicateProbe[]> => {
+    const { vin, paddedVehicle } = args;
+    const canonicalTarget = toCanonical(paddedVehicle);
+    const probes: DuplicateProbe[] = [];
+
+    try {
+      const rows = await db
+        .select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          makeName: holmanVehiclesCache.makeName,
+          modelName: holmanVehiclesCache.modelName,
+        })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.vin, vin));
+      const hit = rows.find((r) => toCanonical(r.holmanVehicleNumber) !== canonicalTarget);
+      probes.push({
+        source: "holman_cache",
+        checked: true,
+        conflict: hit
+          ? {
+              vehicleNumber: hit.holmanVehicleNumber,
+              vin,
+              label: [hit.makeName, hit.modelName].filter(Boolean).join(" ") || null,
+            }
+          : null,
+      });
+    } catch (e: any) {
+      probes.push({ source: "holman_cache", checked: false, error: e?.message || String(e) });
+    }
+
+    try {
+      const rows = await db
+        .select({ id: byovCreationAudit.id, vehicleNumber: byovCreationAudit.vehicleNumber })
+        .from(byovCreationAudit)
+        .where(and(eq(byovCreationAudit.vin, vin), isNull(byovCreationAudit.blockedSource)));
+      const hit = rows.find((r) => toCanonical(r.vehicleNumber) !== canonicalTarget);
+      probes.push({
+        source: "in_flight_reservation",
+        checked: true,
+        conflict: hit ? { vehicleNumber: hit.vehicleNumber, vin, label: "in-flight submission" } : null,
+      });
+    } catch (e: any) {
+      probes.push({ source: "in_flight_reservation", checked: false, error: e?.message || String(e) });
+    }
+
+    const live = await holmanApiService.lookupVehicleByVinChecked(vin);
+    if (!live.checked) {
+      probes.push({ source: "holman_live", checked: false, error: live.error });
+    } else {
+      const liveNumber = String(live.vehicle?.holmanVehicleNumber || "").trim();
+      const isOtherVehicle = live.found && toCanonical(liveNumber) !== canonicalTarget;
+      probes.push({
+        source: "holman_live",
+        checked: true,
+        conflict: isOtherVehicle
+          ? {
+              vehicleNumber: liveNumber,
+              vin,
+              label: [live.vehicle?.makeName, live.vehicle?.modelName].filter(Boolean).join(" ") || null,
+            }
+          : null,
+      });
+    }
+
+    return probes;
   };
 
   // --- VIN decode (NHTSA vPIC, free, no API key) ---
@@ -9185,7 +9522,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   //   holman     → next 0-prefixed 6-digit (canonical 1–99999), excluding the 088 BYOV band
   //   enterprise → next >= 260000 (start 260000)
   // "Used" numbers are gathered from the Holman cache, the local BYOV creation audit,
-  // and live WMS trucks so a suggestion never collides with any of the three systems.
+  // live WMS trucks, TPMS, and the fleet mirrors so a suggestion never collides with
+  // any system that can already own the number (Task #636 — TPMS silently swallows a
+  // duplicate addtruck as success, so a TPMS-only number MUST be treated as taken).
+  //
+  // The suggestion is also a short-lived HOLD (Task #636): the number is reserved on
+  // the same byov_creation_audit row the create path uses, tied to the requesting
+  // session, and expires so an abandoned form never burns a number. A dispatcher no
+  // longer races another user for the number they are looking at.
   app.get("/api/byov/next-number", requireAuth, async (req: any, res) => {
     try {
       const vehicleClass = String(req.query.class || "byov").toLowerCase();
@@ -9193,79 +9537,78 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ error: "Invalid vehicle class. Expected byov, holman, or enterprise." });
       }
 
-      const used = new Set<number>();
-      const addUsed = (raw: unknown) => {
-        const c = toCanonical(raw as any);
-        if (!c) return;
-        const n = Number(c);
-        if (Number.isFinite(n)) used.add(n);
-      };
+      if (!(await requireVehicleCreatePermission(req, res))) return;
 
-      // 1) Holman cache (6-digit padded numbers)
-      try {
-        const rows = await db
-          .select({ n: holmanVehiclesCache.holmanVehicleNumber })
-          .from(holmanVehiclesCache);
-        for (const r of rows) addUsed(r.n);
-      } catch (e) {
-        console.warn("[BYOV] next-number: Holman cache scan failed (non-fatal):", e);
-      }
+      // Release holds nobody came back to finish before scanning.
+      await sweepExpiredVehicleHolds();
 
-      // 2) Local BYOV creation audit — reserves numbers we just created even before caches refresh
-      try {
-        const rows = await db
-          .select({ n: byovCreationAudit.vehicleNumber })
-          .from(byovCreationAudit);
-        for (const r of rows) addUsed(r.n);
-      } catch (e) {
-        console.warn("[BYOV] next-number: audit scan failed (non-fatal):", e);
-      }
-
-      // 3) Live WMS trucks
-      try {
-        const trucks = await wmsEngineService.getAllTrucks();
-        for (const t of trucks) {
-          addUsed(t?.name);
-          addUsed(t?.externalId);
-          addUsed(t?.locationId);
-        }
-      } catch (e) {
-        console.warn("[BYOV] next-number: WMS scan failed (non-fatal):", e);
+      const scan = await gatherUsedVehicleNumbers();
+      if (!scan.complete) {
+        // Fail closed: recommending a number off a partial scan is exactly how a
+        // live-in-TPMS number reads as free and becomes a ghost truck.
+        const failed = scan.sources.filter((s) => !s.ok).map((s) => s.name);
+        return res.status(503).json({
+          error: `Cannot recommend a vehicle number right now — could not read ${failed.join(", ")}. Try again shortly.`,
+          vehicleClass,
+          sources: scan.sources,
+        });
       }
 
       const inByovBand = (n: number) => n >= 88000 && n <= 88999;
+      const bandFor = (cls: string): { start: number; end: number; excluded?: (n: number) => boolean } =>
+        cls === "byov"
+          ? { start: 88000, end: 88999 }
+          : cls === "enterprise"
+            ? { start: 260000, end: 999999 }
+            : // holman: 0-prefixed 6-digit (canonical 1..99999), excluding the 088 BYOV band
+              { start: 1, end: 99999, excluded: inByovBand };
 
-      // Allocate the next number for a class band [start, end].
-      // Prefer max(used-in-band)+1 (always-increasing — never re-picks a number
-      // that may still be referenced in a system we cannot enumerate, e.g. TPMS).
-      // Only when that would overflow the band do we fall back to the lowest free
-      // gap. Returns null when the band is fully exhausted.
-      const allocate = (
-        start: number,
-        end: number,
-        excluded: (n: number) => boolean = () => false,
-      ): number | null => {
-        const inBand = Array.from(used).filter((n) => n >= start && n <= end && !excluded(n));
-        let candidate = inBand.length ? Math.max(...inBand) + 1 : start;
-        while (candidate <= end && excluded(candidate)) candidate++;
-        if (candidate >= start && candidate <= end) return candidate;
-        // Overflowed the band — scan for the lowest free gap instead.
-        const taken = new Set(inBand);
-        for (let n = start; n <= end; n++) {
-          if (taken.has(n) || excluded(n)) continue;
-          return n;
+      const band = bandFor(vehicleClass);
+      const sessionKey = vehicleHoldSessionKey(req);
+      const holder: string = String(req.user?.username || req.user?.id || "unknown");
+
+      try {
+        await ensureByovReservationIndex();
+      } catch (idxErr) {
+        console.error("[BYOV] next-number: failed to ensure reservation index:", idxErr);
+        return res.status(503).json({ error: "Could not prepare the vehicle number hold. Please try again." });
+      }
+
+      // Take the hold on the number we are about to show. If another request
+      // claimed it between the scan and the insert, mark it used and try again.
+      const taken = new Set(scan.used);
+      let recommended: number | null = null;
+      let holdId: number | null = null;
+      let holdExpiresAt: Date | null = null;
+
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const candidate = allocateVehicleNumber({ used: taken, ...band });
+        if (candidate === null) break;
+        const paddedCandidate = String(candidate).padStart(6, "0");
+        const expiresAt = new Date(Date.now() + NUMBER_HOLD_TTL_MS);
+        const inserted = await db
+          .insert(byovCreationAudit)
+          .values({
+            vehicleNumber: paddedCandidate,
+            vin: null, // a hold carries no VIN — it is not a submission
+            submittedBy: holder,
+            holmanSuccess: false,
+            wmsSuccess: false,
+            blockedSource: null,
+            requestId: crypto.randomUUID(),
+            reservedSession: sessionKey,
+            holdExpiresAt: expiresAt,
+            holmanError: "Number held for an in-progress Create Vehicle form",
+          })
+          .onConflictDoNothing()
+          .returning({ id: byovCreationAudit.id });
+        if (inserted.length > 0) {
+          recommended = candidate;
+          holdId = inserted[0].id;
+          holdExpiresAt = expiresAt;
+          break;
         }
-        return null;
-      };
-
-      let recommended: number | null;
-      if (vehicleClass === "byov") {
-        recommended = allocate(88000, 88999);
-      } else if (vehicleClass === "enterprise") {
-        recommended = allocate(260000, 999999);
-      } else {
-        // holman: 0-prefixed 6-digit (canonical 1..99999), excluding the 088 BYOV band
-        recommended = allocate(1, 99999, inByovBand);
+        taken.add(candidate);
       }
 
       if (recommended === null) {
@@ -9277,7 +9620,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       const canonical = String(recommended);
       const padded = canonical.padStart(6, "0");
-      return res.json({ vehicleClass, recommended: canonical, padded });
+      console.log(`[BYOV] next-number: held ${padded} for ${holder} until ${holdExpiresAt?.toISOString()}`);
+      return res.json({
+        vehicleClass,
+        recommended: canonical,
+        padded,
+        held: true,
+        holdId,
+        holdExpiresAt: holdExpiresAt?.toISOString() ?? null,
+        scannedSources: scan.sources.map((s) => s.name),
+      });
     } catch (error: any) {
       console.error("[BYOV] next-number error:", error);
       return res.status(500).json({ error: error.message || "Failed to compute next number" });
@@ -9295,7 +9647,33 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     let reservationFreshlyInserted = false;
     let priorHolmanSuccess = false;
     let priorWmsSuccess = false;
+    // Stable identifier for this attempt — stamped on the audit row and returned
+    // to the caller so an attempt can be reconstructed end-to-end (Task #636).
+    const requestId = crypto.randomUUID();
     try {
+      // ── Feature gate (Task #636) — fail-safe OFF ─────────────────────────────
+      // Vehicle creation stays off until an administrator explicitly enables it,
+      // and an unreadable setting keeps it off. Same convention as the
+      // reconciliation auto-apply toggle.
+      const gate = await vehicleCreateGateState();
+      if (!gate.enabled) {
+        return res.status(403).json({
+          error: gate.readable
+            ? "Vehicle creation is currently turned off. A developer can enable it on the Vehicle Creation admin page (/vehicle-create-admin)."
+            : "Vehicle creation is unavailable right now — the feature gate could not be read. Try again shortly.",
+          code: "vehicle_create_disabled",
+          requestId,
+        });
+      }
+      // Rehearsal mode runs every gate and reports exactly what WOULD be sent,
+      // without calling Holman/WMS/TPMS and without taking a reservation (a dry
+      // run must never hold the active number/VIN lock).
+      const rehearsal = gate.rehearsal;
+
+      // ── Server-side authorization (Task #636) ────────────────────────────────
+      // The client permission map is no longer the only barrier.
+      if (!(await requireVehicleCreatePermission(req, res))) return;
+
       const {
         vehicleNumber, vin, assetType, modelYear, make, model,
         firstName, lastName, enterpriseId, phone,
@@ -9317,10 +9695,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const createInWms    = createInWmsRaw    !== false && createInWmsRaw    !== "false";
 
       if (!createInHolman && !createInWms) {
-        return res.status(400).json({ error: "At least one of createInHolman or createInWms must be true." });
+        return res.status(400).json({ error: "At least one of createInHolman or createInWms must be true.", requestId });
       }
 
-      if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
+      if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required", requestId });
 
       // Zero-pad vehicle number to 6 digits
       const paddedVehicle = toHolmanRef(vehicleNumber);
@@ -9352,235 +9730,154 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (missingFields.length > 0) {
         return res.status(400).json({
           error: `Missing required fields: ${missingFields.join(", ")}`,
+          requestId,
         });
       }
 
-      // VIN duplicate guard — check that this VIN is not already registered under a
-      // DIFFERENT vehicle number in our local Holman cache. Catches cases like the
-      // 088277/088279 dual-registration where the same physical car was submitted twice
-      // with different numbers. Only runs when a full 17-char VIN is provided.
-      if (vin && createInHolman) {
-        const normVinCheck = String(vin).trim().toUpperCase();
-        if (normVinCheck.length === 17) {
-          try {
-            const vinRows = await db
-              .select({
-                holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
-                makeName: holmanVehiclesCache.makeName,
-                modelName: holmanVehiclesCache.modelName,
-              })
-              .from(holmanVehiclesCache)
-              .where(eq(holmanVehiclesCache.vin, normVinCheck));
-            const vinConflict = vinRows.find(
-              (r) => toCanonical(r.holmanVehicleNumber) !== toCanonical(vehicleNumber),
-            );
-            if (vinConflict) {
-              const conflictLabel = [vinConflict.makeName, vinConflict.modelName]
-                .filter(Boolean)
-                .join(" ");
-              return res.status(409).json({
-                error: `VIN ${normVinCheck} is already registered under vehicle ${vinConflict.holmanVehicleNumber}${conflictLabel ? ` (${conflictLabel})` : ""}. Check for a duplicate before proceeding.`,
-                vinConflict: {
-                  vehicleNumber: vinConflict.holmanVehicleNumber,
-                  make: vinConflict.makeName,
-                  model: vinConflict.modelName,
-                },
-              });
-            }
-          } catch (vinCheckErr) {
-            console.warn("[BYOV] create: VIN duplicate check failed (non-fatal):", vinCheckErr);
-          }
-        }
+      // VIN validity — more than the old bare 17-char length test.
+      const vinCheck = validateVin(vin);
+      if (!vinCheck.valid) {
+        return res.status(400).json({ error: vinCheck.reason, requestId });
       }
+      const normVin = vinCheck.vin;
 
-      // Holman duplicate guard — only enforced when we are actually creating in Holman.
-      // Skipping this check for WMS-only rows avoids a spurious 409 for vehicles that
-      // already exist in Holman (by design) but are missing in WMS.
-      if (createInHolman) {
-        const canonical = toCanonical(vehicleNumber);
-        const directRows = await db
-          .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
-          .from(holmanVehiclesCache)
-          .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle))
-          .limit(1);
-        let duplicate = directRows.length > 0;
-        // 'cache' = blocked by local Holman cache, 'live' = blocked by live Holman API call
-        let duplicateSource: "cache" | "live" | null = duplicate ? "cache" : null;
-        if (!duplicate) {
-          // Full scan — no row limit — to catch any non-padded legacy entries
-          const allRows = await db
-            .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
-            .from(holmanVehiclesCache);
-          duplicate = allRows.some((r) => toCanonical(r.holmanVehicleNumber) === canonical);
-          if (duplicate) duplicateSource = "cache";
-        }
-        if (!duplicate) {
-          // Cache miss — fall back to a live Holman lookup so a stale cache
-          // cannot let a real duplicate slip through.
-          try {
-            const liveResult = await holmanApiService.findVehicleByNumber(vehicleNumber);
-            if (liveResult.success && liveResult.vehicle) {
-              duplicate = true;
-              duplicateSource = "live";
-              console.log(`[BYOV] Live Holman lookup found existing vehicle ${paddedVehicle}; blocking duplicate submission.`);
-            }
-          } catch (liveErr) {
-            console.error("[BYOV] Live Holman duplicate check failed (non-fatal):", liveErr);
-          }
-        }
-        if (duplicate) {
-          // Write an audit log entry so dispatchers can trace why the submission was blocked.
-          const u = req.user as any;
-          const submittedBy: string = u?.username || u?.email || u?.id ? String(u.username || u.email || u.id) : "unknown";
-          const blockReason = duplicateSource === "live"
-            ? "Blocked by duplicate guard (live Holman lookup)"
-            : "Blocked by duplicate guard (cache hit)";
-          try {
-            await db.insert(byovCreationAudit).values({
-              vehicleNumber: paddedVehicle,
-              vin: vin ?? null,
-              make: make ?? null,
-              model: model ?? null,
-              modelYear: modelYear ? String(modelYear) : null,
-              assetType: assetType ?? null,
-              district: district ? String(district) : null,
-              submittedBy,
-              holmanSuccess: false,
-              holmanError: blockReason,
-              wmsSuccess: false,
-              wmsError: "Blocked: duplicate vehicle, submission not attempted",
-              blockedSource: duplicateSource ?? "cache",
-            });
-            console.log(`[BYOV] Duplicate block written to audit log for ${paddedVehicle} (source: ${duplicateSource})`);
-          } catch (auditErr) {
-            console.error("[BYOV] Failed to write duplicate-block audit entry:", auditErr);
-          }
-          return res.status(409).json({
-            error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
-          });
-        }
-      }
+      const submittedBy: string = String(req.user?.username || req.user?.email || req.user?.id || "unknown");
+      const districtStr = String(district || "").trim();
 
-      // --- Atomic number reservation (Task #450) ---
-      // Claim this vehicle number locally BEFORE any external fan-out so two
-      // concurrent creates can never both allocate the same recommended number.
-      // The partial unique index lets only one ACTIVE (non-blocked) audit row
-      // exist per number; the loser of the race falls into the conflict branch.
-      // A retry of the SAME vehicle (matching VIN) is allowed through so the
-      // existing idempotent per-system guards can finish a partial create; a
-      // DIFFERENT vehicle hitting the same number is a genuine collision (409).
-      // A stale active row (older than the TTL with nothing created) is treated
-      // as abandoned and reclaimed so a crash between reserve and finalize can
-      // never permanently burn a number.
-      const RESERVATION_STALE_MS = 15 * 60 * 1000; // 15 minutes
-      {
-        const ru = req.user as any;
-        const reservedBy: string = String(ru?.username || ru?.email || ru?.id || "unknown");
-        const normVin = String(vin ?? "").trim().toUpperCase();
+      // The payload exactly as submitted, kept on the audit row for replay.
+      const submittedRequest = { ...req.body, vin: normVin, requestId, submittedBy };
+
+      // Writes a blocked (non-reserving) audit row so a refusal is traceable.
+      // blocked_source is also the release valve: these rows are excluded from the
+      // active number/VIN partial unique indexes.
+      const writeBlockAudit = async (
+        blockedSource: string,
+        holmanError: string,
+        wmsError: string,
+        extra: Record<string, unknown> = {},
+      ) => {
         try {
-          await ensureByovReservationIndex();
-        } catch (idxErr) {
-          console.error("[BYOV] create: failed to ensure reservation index:", idxErr);
-          return res.status(500).json({ error: "Could not prepare vehicle number reservation. Please try again." });
-        }
-        const inserted = await db
-          .insert(byovCreationAudit)
-          .values({
+          await db.insert(byovCreationAudit).values({
             vehicleNumber: paddedVehicle,
-            vin: vin ?? null,
+            vin: normVin,
             make: make ?? null,
             model: model ?? null,
             modelYear: modelYear ? String(modelYear) : null,
             assetType: assetType ?? null,
-            district: district ? String(district) : null,
-            submittedBy: reservedBy,
+            district: districtStr || null,
+            submittedBy,
             holmanSuccess: false,
+            holmanError,
             wmsSuccess: false,
-            blockedSource: null,
-          })
-          .onConflictDoNothing()
-          .returning({ id: byovCreationAudit.id });
+            wmsError,
+            blockedSource,
+            requestId,
+            submittedPayload: { request: submittedRequest, ...extra } as any,
+          });
+        } catch (auditErr) {
+          console.error("[BYOV] Failed to write gate-block audit entry:", auditErr);
+        }
+      };
 
-        if (inserted.length > 0) {
-          reservationId = inserted[0].id;
-          reservationFreshlyInserted = true;
-        } else {
-          // An active (non-blocked) row already exists for this number.
-          const existing = await db
-            .select({
-              id: byovCreationAudit.id,
-              vin: byovCreationAudit.vin,
-              holmanSuccess: byovCreationAudit.holmanSuccess,
-              wmsSuccess: byovCreationAudit.wmsSuccess,
-              submittedAt: byovCreationAudit.submittedAt,
-            })
-            .from(byovCreationAudit)
-            .where(and(eq(byovCreationAudit.vehicleNumber, paddedVehicle), isNull(byovCreationAudit.blockedSource)))
+      // ── VIN duplicate gate (Task #636) ───────────────────────────────────────
+      // A real gate, not a warning: local Holman cache + live Holman + active
+      // in-flight reservations, applied REGARDLESS of which systems are targeted,
+      // and fail-closed — a check that cannot complete refuses the submission.
+      // This is the 088277/088279 dual-registration class of failure.
+      const vinProbes = await probeVinDuplicates({ vin: normVin, paddedVehicle });
+      const vinDecision = decideDuplicateGate(vinProbes);
+      if (vinDecision.action === "block-duplicate") {
+        const c = vinDecision.conflict;
+        const message = `VIN ${normVin} is already registered under vehicle ${c.vehicleNumber || "(unknown number)"}${c.label ? ` (${c.label})` : ""} [${vinDecision.source}]. Resolve the duplicate before creating this vehicle.`;
+        await writeBlockAudit("vin_dup", `Blocked by VIN duplicate gate (${vinDecision.source})`, "Blocked: duplicate VIN, submission not attempted", { vinProbes });
+        return res.status(409).json({
+          error: message,
+          requestId,
+          vinConflict: { vehicleNumber: c.vehicleNumber, vin: normVin, label: c.label, source: vinDecision.source },
+        });
+      }
+      if (vinDecision.action === "block-unverified") {
+        const message = `Cannot verify whether VIN ${normVin} already exists — the ${vinDecision.source} check failed (${vinDecision.error}). The submission was refused rather than risk a duplicate. Try again shortly.`;
+        await writeBlockAudit("unverified", `Blocked: VIN check unavailable (${vinDecision.source})`, "Blocked: VIN check unavailable, submission not attempted", { vinProbes });
+        return res.status(503).json({ error: message, code: "duplicate_check_unavailable", source: vinDecision.source, requestId, retryable: true });
+      }
+
+      // ── Vehicle-number duplicate gate ────────────────────────────────────────
+      // Only enforced when we are actually creating in Holman: a WMS-only row for
+      // a vehicle that already exists in Holman is legitimate. Fail-closed on both
+      // the cache read and the live lookup.
+      const numberProbes: DuplicateProbe[] = [];
+      if (createInHolman) {
+        const canonical = toCanonical(vehicleNumber);
+        try {
+          const directRows = await db
+            .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+            .from(holmanVehiclesCache)
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle))
             .limit(1);
-          const row = existing[0];
-          const sameVehicle = !!row && String(row.vin ?? "").trim().toUpperCase() === normVin;
-          const submittedAtMs = row?.submittedAt ? new Date(row.submittedAt).getTime() : 0;
-          const isStale =
-            !!row &&
-            !row.holmanSuccess &&
-            !row.wmsSuccess &&
-            Number.isFinite(submittedAtMs) &&
-            Date.now() - submittedAtMs > RESERVATION_STALE_MS;
-          if (row && !sameVehicle && !isStale) {
-            return res.status(409).json({
-              error: `Vehicle number ${paddedVehicle} is already assigned to a different vehicle${row.vin ? ` (VIN ${row.vin})` : ""}. Pick a different number.`,
+          let hit: string | null = directRows[0]?.holmanVehicleNumber ?? null;
+          if (!hit) {
+            // Full scan — no row limit — to catch any non-padded legacy entries
+            const allRows = await db
+              .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+              .from(holmanVehiclesCache);
+            hit = allRows.find((r) => toCanonical(r.holmanVehicleNumber) === canonical)?.holmanVehicleNumber ?? null;
+          }
+          numberProbes.push({
+            source: "holman_cache",
+            checked: true,
+            conflict: hit ? { vehicleNumber: hit, label: "existing Holman vehicle" } : null,
+          });
+        } catch (e: any) {
+          numberProbes.push({ source: "holman_cache", checked: false, error: e?.message || String(e) });
+        }
+
+        if (!numberProbes.some((p) => p.conflict)) {
+          const live = await holmanApiService.lookupVehicleByNumberChecked(vehicleNumber);
+          if (!live.checked) {
+            numberProbes.push({ source: "holman_live", checked: false, error: live.error });
+          } else {
+            numberProbes.push({
+              source: "holman_live",
+              checked: true,
+              conflict: live.found
+                ? { vehicleNumber: String(live.vehicle?.holmanVehicleNumber || paddedVehicle), label: "existing Holman vehicle" }
+                : null,
             });
           }
-          if (row && !sameVehicle && isStale) {
-            // Abandoned reservation from a crashed/aborted create — reclaim it for
-            // this vehicle. Compare-and-swap: the UPDATE is guarded by the exact
-            // stale state we observed (same id, still un-blocked, both flags false,
-            // and the SAME submitted_at we read). Only one of N concurrent requests
-            // can win the swap; losers get 0 rows back and fall through to 409 so
-            // they never proceed to fan-out on a row someone else just claimed.
-            const reclaimed = await db
-              .update(byovCreationAudit)
-              .set({
-                vin: vin ?? null,
-                make: make ?? null,
-                model: model ?? null,
-                modelYear: modelYear ? String(modelYear) : null,
-                assetType: assetType ?? null,
-                district: district ? String(district) : null,
-                submittedBy: reservedBy,
-                submittedAt: new Date(),
-                holmanSuccess: false,
-                holmanError: null,
-                wmsSuccess: false,
-                wmsError: null,
-              })
-              .where(
-                and(
-                  eq(byovCreationAudit.id, row.id),
-                  isNull(byovCreationAudit.blockedSource),
-                  eq(byovCreationAudit.holmanSuccess, false),
-                  eq(byovCreationAudit.wmsSuccess, false),
-                  eq(byovCreationAudit.submittedAt, row.submittedAt),
-                ),
-              )
-              .returning({ id: byovCreationAudit.id });
-            if (reclaimed.length === 0) {
-              // Another request won the reclaim (or the row changed under us).
-              return res.status(409).json({
-                error: `Vehicle number ${paddedVehicle} was just claimed by another vehicle. Pick a different number.`,
-              });
-            }
-            console.warn(
-              `[BYOV] create: reclaimed stale reservation for ${paddedVehicle} (was VIN ${row.vin ?? "(none)"}, age ${Math.round((Date.now() - submittedAtMs) / 60000)}m).`,
-            );
-            reservationId = row.id;
-            reservationFreshlyInserted = true; // we now own this row; release on failure
-          } else {
-            // Same vehicle → reuse the existing reservation row and finish the create idempotently.
-            reservationId = row?.id ?? null;
-            priorHolmanSuccess = !!row?.holmanSuccess;
-            priorWmsSuccess = !!row?.wmsSuccess;
-          }
+        }
+
+        const numberDecision = decideDuplicateGate(numberProbes);
+        if (numberDecision.action === "block-duplicate") {
+          const blockReason = numberDecision.source === "holman_live"
+            ? "Blocked by duplicate guard (live Holman lookup)"
+            : "Blocked by duplicate guard (cache hit)";
+          await writeBlockAudit(
+            numberDecision.source === "holman_live" ? "live" : "cache",
+            blockReason,
+            "Blocked: duplicate vehicle, submission not attempted",
+            { numberProbes },
+          );
+          console.log(`[BYOV] Duplicate block written to audit log for ${paddedVehicle} (source: ${numberDecision.source})`);
+          return res.status(409).json({
+            error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
+            requestId,
+          });
+        }
+        if (numberDecision.action === "block-unverified") {
+          await writeBlockAudit(
+            "unverified",
+            `Blocked: vehicle-number check unavailable (${numberDecision.source})`,
+            "Blocked: duplicate check unavailable, submission not attempted",
+            { numberProbes },
+          );
+          return res.status(503).json({
+            error: `Cannot verify whether vehicle ${paddedVehicle} already exists in Holman — the ${numberDecision.source} check failed (${numberDecision.error}). The submission was refused rather than risk a duplicate. Try again shortly.`,
+            code: "number_check_unavailable",
+            source: numberDecision.source,
+            requestId,
+            retryable: true,
+          });
         }
       }
 
@@ -9604,7 +9901,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const finalOnRoadDate = toHolmanDate(onRoadDate || todayStr);
 
       // prefix is the full district number (not sliced)
-      const districtStr = String(district || "").trim();
       const prefix = districtStr || null;
 
       // WMS cost center comes from the District Cost Centers cross-reference
@@ -9616,96 +9912,322 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const regionRaw = "890";
       const wmsRegionNo = regionRaw.padStart(7, "0");
 
-      // --- Holman submission (conditional) ---
-      let holmanResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
-      if (createInHolman) {
-        const holmanPayload = {
-          assetAction: "ADD",
-          lesseeCode: "2B56",
-          holmanVehicleNumber: paddedVehicle,
-          vin: vin || null,
-          division: "01",
-          firstName: firstName || null,
-          lastName: lastName || null,
-          addressLine1: deliveryAddress || null,
-          addressLine2: deliveryAddress2 || null,
-          addressLine3: deliveryAddress3 || null,
-          city: city || null,
-          stateProvince: state || null,
-          zipPostalCode: zip || null,
-          assetType: assetType || null,
-          vendorCode: "OTH",
-          modelYear: modelYear ? String(modelYear) : null,
-          makeClient: make || null,
-          modelClient: model || null,
-          deliveryDate: finalDeliveryDate,
-          prefix,
-          clientData1,
-          clientData2,
-          clientData3: "890",
-          clientData4,
-          auxData7,
-          workPhone: phone || null,
-          email: "FLEET_SUPPORT@TRANSFORMCO.COM",
-          assignedStatusCode: "D",
-          driverClass: "N",
-          onRoadDate: finalOnRoadDate,
-          licensePlate: licensePlate || null,
-          tagStateProvince: plateState || null,
-          plateType: plateType || null,
-          renewalDate: toHolmanDate(regRenewalDate),
-        };
-        // Pre-check: if the vehicle already exists in Holman (live lookup), treat as success
-        // immediately — idempotent retry guard for cases where Holman creation succeeded
-        // but the local cache hasn't refreshed yet.
-        let holmanAlreadyExists = false;
-        try {
-          const holmanLookup = await holmanApiService.findVehicleByNumber(paddedVehicle);
-          if (holmanLookup.success && holmanLookup.vehicle) {
-            console.log("[BYOV] create: vehicle already exists in Holman, skipping submit:", paddedVehicle);
-            holmanAlreadyExists = true;
-          }
-        } catch (holmanLookupErr: unknown) {
-          // Lookup failure is non-fatal — log and continue to attempt submission
-          console.warn("[BYOV] create: unexpected error during Holman pre-check lookup:", holmanLookupErr);
-        }
+      // --- Payloads (built before any external call so rehearsal can report them) ---
+      const holmanPayload = {
+        assetAction: "ADD",
+        lesseeCode: "2B56",
+        holmanVehicleNumber: paddedVehicle,
+        vin: normVin,
+        division: "01",
+        firstName: firstName || null,
+        lastName: lastName || null,
+        addressLine1: deliveryAddress || null,
+        addressLine2: deliveryAddress2 || null,
+        addressLine3: deliveryAddress3 || null,
+        city: city || null,
+        stateProvince: state || null,
+        zipPostalCode: zip || null,
+        assetType: assetType || null,
+        vendorCode: "OTH",
+        modelYear: modelYear ? String(modelYear) : null,
+        makeClient: make || null,
+        modelClient: model || null,
+        deliveryDate: finalDeliveryDate,
+        prefix,
+        clientData1,
+        clientData2,
+        clientData3: "890",
+        clientData4,
+        auxData7,
+        workPhone: phone || null,
+        email: "FLEET_SUPPORT@TRANSFORMCO.COM",
+        assignedStatusCode: "D",
+        driverClass: "N",
+        onRoadDate: finalOnRoadDate,
+        licensePlate: licensePlate || null,
+        tagStateProvince: plateState || null,
+        plateType: plateType || null,
+        renewalDate: toHolmanDate(regRenewalDate),
+      };
 
-        if (holmanAlreadyExists) {
-          holmanResult = { success: true };
-        } else {
-          try {
-            const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-            console.log("[BYOV] Holman submit response:", JSON.stringify(holmanResp, null, 2));
-            holmanResult = { success: true };
-          } catch (holmanErr: unknown) {
-            const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
-            // Safety net: if Holman returns a duplicate/conflict response (race condition
-            // between the pre-check lookup and the actual submit), treat as success.
-            const isHolmanDuplicate =
-              /already.?exists/i.test(holmanMsg) ||
-              /duplicate/i.test(holmanMsg) ||
-              /conflict/i.test(holmanMsg);
-            if (isHolmanDuplicate) {
-              console.log("[BYOV] create: vehicle already exists in Holman (race condition), treating as success:", holmanMsg);
-              holmanResult = { success: true };
-            } else {
-              console.error("[BYOV] Holman submit error:", holmanErr);
-              holmanResult = { success: false, error: holmanMsg };
-            }
-          }
-        }
+      const wmsPayload = {
+        name: paddedVehicle,
+        locationId: paddedVehicle,
+        externalId: paddedVehicle,
+        description: `${classLabel} ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
+        isActive: true,
+        costCenter: wmsCostCenter,
+        regionNo: wmsRegionNo,
+        spareTruck: true,
+        useCaseId: "Nexus",
+      };
 
+      const tpmsPayload = {
+        truckNo: paddedVehicle,
+        truckName: `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle,
+        regionNo: wmsRegionNo,
+        distNo: districtStr ? districtStr.padStart(7, "0") : "",
+        spareTruck: true,
+        updatedBy: String(req.user?.username || req.user?.email || req.user?.id || "NEXUS").toUpperCase(),
+      };
+
+      // ── Rehearsal mode (Task #636) ───────────────────────────────────────────
+      // Every gate above has run for real. Nothing is sent anywhere, and no
+      // reservation is taken, so a rehearsal can never block a real submission.
+      if (rehearsal) {
+        await writeBlockAudit(
+          "rehearsal",
+          "Rehearsal mode — nothing was sent to Holman",
+          "Rehearsal mode — nothing was sent to WMS",
+          { wouldSend: { holman: createInHolman ? holmanPayload : null, wms: createInWms ? wmsPayload : null, tpms: createInWms ? tpmsPayload : null }, vinProbes, numberProbes },
+        );
+        console.log(`[BYOV] create: REHEARSAL for ${paddedVehicle} (request ${requestId}) — all gates passed, nothing sent.`);
+        return res.json({
+          rehearsal: true,
+          requestId,
+          vehicleNumber: paddedVehicle,
+          message: "Rehearsal mode: every gate passed and nothing was sent to Holman, WMS, or TPMS.",
+          gates: { vin: vinProbes, vehicleNumber: numberProbes },
+          wouldSend: {
+            holman: createInHolman ? holmanPayload : null,
+            wms: createInWms ? wmsPayload : null,
+            tpms: createInWms ? tpmsPayload : null,
+          },
+          holman: { success: false, skipped: true, rehearsal: true },
+          wms: { success: false, skipped: true, rehearsal: true },
+          tpms: { success: false, skipped: true, rehearsal: true },
+          holmanOnly: false,
+        });
       }
 
-      // Cache refresh: upsert the newly created vehicle into holman_vehicles_cache so that
-      // same-session duplicate checks (the DB-cache guard above) reliably catch retries
-      // without needing a live Holman API round-trip on every subsequent attempt.
-      if (createInHolman && holmanResult.success) {
+      // --- Atomic number + VIN reservation (Task #450, extended by Task #636) ---
+      // Claim this vehicle number AND this VIN locally BEFORE any external fan-out.
+      // Two partial unique indexes (number, VIN) over ACTIVE audit rows mean neither
+      // two concurrent creates for the same number nor two concurrent creates for the
+      // same VIN under different numbers can both proceed.
+      // A retry of the SAME vehicle (matching VIN) is allowed through so the existing
+      // idempotent per-system guards can finish a partial create; an un-expired hold
+      // owned by this session is adopted; an abandoned hold/reservation is reclaimed
+      // by compare-and-swap; anything else is a genuine collision (409).
+      const sessionKey = vehicleHoldSessionKey(req);
+      {
+        try {
+          await ensureByovReservationIndex();
+          await ensureByovVinReservationIndex();
+        } catch (idxErr) {
+          console.error("[BYOV] create: failed to ensure reservation indexes:", idxErr);
+          return res.status(503).json({ error: "Could not prepare vehicle number reservation. Please try again.", requestId });
+        }
+
+        const reservationValues = {
+          vehicleNumber: paddedVehicle,
+          vin: normVin,
+          make: make ?? null,
+          model: model ?? null,
+          modelYear: modelYear ? String(modelYear) : null,
+          assetType: assetType ?? null,
+          district: districtStr || null,
+          submittedBy,
+          holmanSuccess: false,
+          wmsSuccess: false,
+          blockedSource: null,
+          requestId,
+          reservedSession: sessionKey,
+          holdExpiresAt: null,
+          submittedPayload: {
+            request: submittedRequest,
+            holman: createInHolman ? holmanPayload : null,
+            wms: createInWms ? wmsPayload : null,
+            tpms: createInWms ? tpmsPayload : null,
+          } as any,
+        };
+
+        const inserted = await db
+          .insert(byovCreationAudit)
+          .values(reservationValues)
+          .onConflictDoNothing()
+          .returning({ id: byovCreationAudit.id });
+
+        if (inserted.length > 0) {
+          reservationId = inserted[0].id;
+          reservationFreshlyInserted = true;
+        } else {
+          // The insert hit one of the active partial unique indexes.
+          const existing = await db
+            .select({
+              id: byovCreationAudit.id,
+              vin: byovCreationAudit.vin,
+              holmanSuccess: byovCreationAudit.holmanSuccess,
+              wmsSuccess: byovCreationAudit.wmsSuccess,
+              submittedAt: byovCreationAudit.submittedAt,
+              holdExpiresAt: byovCreationAudit.holdExpiresAt,
+              reservedSession: byovCreationAudit.reservedSession,
+            })
+            .from(byovCreationAudit)
+            .where(and(eq(byovCreationAudit.vehicleNumber, paddedVehicle), isNull(byovCreationAudit.blockedSource)))
+            .limit(1);
+          const row = existing[0];
+
+          if (!row) {
+            // Not the number index — the VIN index rejected us: the same physical
+            // vehicle is already being submitted under a DIFFERENT number.
+            const [vinRow] = await db
+              .select({ vehicleNumber: byovCreationAudit.vehicleNumber })
+              .from(byovCreationAudit)
+              .where(and(eq(byovCreationAudit.vin, normVin), isNull(byovCreationAudit.blockedSource)))
+              .limit(1);
+            return res.status(409).json({
+              error: `VIN ${normVin} is already being submitted under vehicle ${vinRow?.vehicleNumber ?? "another number"}. Only one create per VIN can be in flight.`,
+              requestId,
+            });
+          }
+
+          const decision = decideReservationConflict({
+            row: {
+              id: row.id,
+              vin: row.vin,
+              holmanSuccess: row.holmanSuccess,
+              wmsSuccess: row.wmsSuccess,
+              submittedAt: row.submittedAt,
+              holdExpiresAt: row.holdExpiresAt,
+              reservedSession: row.reservedSession,
+            },
+            incomingVin: normVin,
+            sessionKey,
+            nowMs: Date.now(),
+            staleMs: RESERVATION_STALE_MS,
+          });
+
+          if (decision.action === "collision") {
+            return res.status(409).json({
+              error: `Vehicle number ${paddedVehicle} cannot be used — ${decision.reason}. Pick a different number.`,
+              requestId,
+            });
+          }
+
+          if (decision.action === "reuse") {
+            // Same vehicle → reuse the existing reservation row and finish idempotently.
+            reservationId = row.id;
+            priorHolmanSuccess = !!row.holmanSuccess;
+            priorWmsSuccess = !!row.wmsSuccess;
+          } else {
+            // adopt-hold (our own suggestion hold) or reclaim-stale (abandoned row).
+            // Compare-and-swap on the exact state we observed: only one of N
+            // concurrent requests can win; losers get 0 rows and 409 rather than
+            // fanning out on a row someone else just claimed.
+            let claimed: { id: number }[] = [];
+            try {
+              claimed = await db
+                .update(byovCreationAudit)
+                .set({
+                  ...reservationValues,
+                  submittedAt: new Date(),
+                  holmanError: null,
+                  wmsError: null,
+                })
+                .where(
+                  and(
+                    eq(byovCreationAudit.id, row.id),
+                    isNull(byovCreationAudit.blockedSource),
+                    eq(byovCreationAudit.holmanSuccess, false),
+                    eq(byovCreationAudit.wmsSuccess, false),
+                    eq(byovCreationAudit.submittedAt, row.submittedAt),
+                  ),
+                )
+                .returning({ id: byovCreationAudit.id });
+            } catch (claimErr: any) {
+              // Most likely the active-VIN unique index: this VIN is in flight elsewhere.
+              console.warn(`[BYOV] create: reservation claim rejected for ${paddedVehicle}:`, claimErr?.message || claimErr);
+              return res.status(409).json({
+                error: `Vehicle number ${paddedVehicle} could not be claimed — VIN ${normVin} may already be in flight under another number.`,
+                requestId,
+              });
+            }
+            if (claimed.length === 0) {
+              return res.status(409).json({
+                error: `Vehicle number ${paddedVehicle} was just claimed by another submission. Pick a different number.`,
+                requestId,
+              });
+            }
+            console.warn(
+              `[BYOV] create: ${decision.action === "adopt-hold" ? "adopted own hold" : "reclaimed stale reservation"} for ${paddedVehicle} (was VIN ${row.vin ?? "(none)"}).`,
+            );
+            reservationId = row.id;
+            reservationFreshlyInserted = true; // we now own this row; release on failure
+          }
+        }
+      }
+
+      // --- Holman submission (conditional) ---
+      // Success is derived from EVIDENCE in the response body, never from "the call
+      // did not throw" (Task #636). Anything short of a confirmed acceptance is
+      // reported as pending verification.
+      let holmanResult: {
+        success: boolean;
+        skipped?: boolean;
+        pending?: boolean;
+        error?: string;
+        detail?: string;
+        referenceToken?: string | null;
+      } = { success: true, skipped: true };
+      let holmanRawResponse: any = null;
+      let holmanSubmittedAt: Date | null = null;
+      let holmanLiveConfirmed = false;
+
+      if (createInHolman) {
+        // Race guard: the duplicate gate already ran, but a concurrent create may
+        // have landed the record between the gate and here — and this last probe
+        // is fail-closed too. A pre-check that could not complete refuses the
+        // submit rather than creating blind.
+        const submitOutcome = await runGuardedHolmanSubmit(
+          {
+            lookupByNumber: (num) => holmanApiService.lookupVehicleByNumberChecked(num),
+            submit: (payloads) => holmanApiService.submitVehicleArray(payloads),
+          },
+          { paddedVehicle, payload: holmanPayload },
+        );
+        if (submitOutcome.refusal) {
+          await writeBlockAudit(
+            "unverified",
+            `Blocked: pre-submit Holman check unavailable`,
+            "Blocked: duplicate check unavailable, submission not attempted",
+            { numberProbes, preSubmit: submitOutcome.rawResponse },
+          );
+          // Release the reservation we took — nothing was sent anywhere.
+          if (reservationId) {
+            try {
+              await db
+                .update(byovCreationAudit)
+                .set({ blockedSource: "unverified", holmanError: submitOutcome.refusal.error })
+                .where(eq(byovCreationAudit.id, reservationId));
+            } catch (relErr) {
+              console.warn("[BYOV] Could not release reservation after a refused submit:", relErr);
+            }
+          }
+          return res.status(503).json({
+            error: submitOutcome.refusal.error,
+            code: submitOutcome.refusal.code,
+            requestId,
+            retryable: true,
+          });
+        }
+        holmanResult = submitOutcome.result;
+        holmanLiveConfirmed = submitOutcome.liveConfirmed;
+        holmanRawResponse = submitOutcome.rawResponse;
+        holmanSubmittedAt = submitOutcome.submittedAt;
+        console.log("[BYOV] Holman submit outcome:", JSON.stringify(holmanResult));
+      }
+
+      // Cache mirror (Task #636): ONLY when a live Holman read has confirmed the
+      // vehicle exists. Mirroring off an unconfirmed submit is what created the
+      // phantom rows that then poisoned the number guard, the VIN guard, and the
+      // allocator — the function corrupting its own future inputs.
+      if (createInHolman && holmanLiveConfirmed) {
         try {
           const now = new Date();
           const cacheValues = {
             holmanVehicleNumber: paddedVehicle,
-            vin: vin ? String(vin) : null,
+            vin: normVin,
             modelYear: modelYear ? Number(modelYear) : null,
             makeName: make ? String(make) : null,
             modelName: model ? String(model) : null,
@@ -9725,7 +10247,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             holmanAssignedStatusCd: "D",
             statusCode: 1,
             isActive: true,
-            byovVinMissing: !vin,
+            byovVinMissing: false,
             lastLocalUpdateAt: now,
           };
           await db
@@ -9735,131 +10257,142 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
               target: holmanVehiclesCache.holmanVehicleNumber,
               set: { ...cacheValues, updatedAt: now },
             });
-          console.log("[BYOV] create: upserted vehicle into holman_vehicles_cache:", paddedVehicle);
+          console.log("[BYOV] create: upserted live-confirmed vehicle into holman_vehicles_cache:", paddedVehicle);
         } catch (cacheErr: unknown) {
           // Cache update failure is non-fatal — log and continue
           console.warn("[BYOV] create: failed to upsert into holman_vehicles_cache:", cacheErr);
         }
+      } else if (createInHolman && holmanResult.success) {
+        console.log(
+          `[BYOV] create: NOT mirroring ${paddedVehicle} into holman_vehicles_cache — acceptance was not read back from Holman. The Holman sync will pick it up.`,
+        );
       }
 
       // --- WMS submission (conditional) ---
       let wmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
-      if (createInWms) {
-        const wmsPayload = {
-          name: paddedVehicle,
-          locationId: paddedVehicle,
-          externalId: paddedVehicle,
-          description: `${classLabel} ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
-          isActive: true,
-          costCenter: wmsCostCenter,
-          regionNo: wmsRegionNo,
-          spareTruck: true,
-          useCaseId: "Nexus",
-        };
-
-        // Pre-check: if the truck already exists in WMS, treat as success immediately
-        // (idempotent retry — truck was created on a prior partial-failure attempt)
-        let wmsAlreadyExists = false;
-        try {
-          const existing = await wmsEngineService.getTruck(paddedVehicle);
-          if (existing) {
-            console.log("[BYOV] create: truck already exists in WMS, skipping create:", paddedVehicle);
-            wmsAlreadyExists = true;
-          }
-        } catch (lookupErr: unknown) {
-          const lookupStatus: number | undefined = (lookupErr as any)?.status;
-          if (lookupStatus !== 404) {
-            // Unexpected lookup error — log but continue to attempt create
-            console.warn("[BYOV] create: unexpected error during WMS truck lookup:", lookupErr);
-          }
-          // 404 means not found — proceed to create below
-        }
-
-        if (wmsAlreadyExists) {
-          wmsResult = { success: true };
-        } else {
-          try {
-            const wmsResp = await wmsEngineService.createTruck(wmsPayload);
-            console.log("[BYOV] WMS create truck response:", wmsResp);
-            wmsResult = { success: true };
-          } catch (wmsErr: unknown) {
-            const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
-            const wmsStatus: number | undefined = (wmsErr as any)?.status;
-            const wmsMessage: string = (wmsErr as any)?.wmsMessage || wmsMsg;
-            // Safety net: treat 409 Conflict or any "already exists" WMS response as success
-            // in case a concurrent request created the truck between our lookup and create
-            const isAlreadyExists =
-              wmsStatus === 409 ||
-              /already.?exists/i.test(wmsMessage) ||
-              /duplicate/i.test(wmsMessage);
-            if (isAlreadyExists) {
-              console.log("[BYOV] create: truck already exists in WMS (race condition), treating as success:", wmsMessage);
-              wmsResult = { success: true };
-            } else {
-              console.error("[BYOV] WMS create truck error:", wmsErr);
-              wmsResult = { success: false, error: wmsMsg };
-            }
-          }
-        }
-      }
-
+      let wmsRawResponse: any = null;
+      let wmsSubmittedAt: Date | null = null;
       // --- TPMS truck registration (conditional, best-effort) ---
-      // Register the new truck in TPMS so it exists in the tech-profile system too.
-      // Only runs when WMS creation succeeded, to avoid registering a truck in TPMS
-      // while it failed in WMS. Failures are non-fatal and reported separately.
+      // Registered right after WMS by the same guarded call, so TPMS never runs
+      // for a truck that failed (or was never verified) in WMS.
       let tpmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
-      if (createInWms && wmsResult.success) {
-        try {
-          const { getTPMSService } = await import("./tpms-service");
-          const tpmsService = getTPMSService();
-          if (!tpmsService.isConfigured()) {
-            console.warn("[BYOV] create: TPMS not configured — skipping addtruck for", paddedVehicle);
-            tpmsResult = { success: true, skipped: true };
-          } else {
-            const u = req.user as any;
-            const updatedBy: string = String(u?.username || u?.email || u?.id || "NEXUS").toUpperCase();
-            const truckName = `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle;
-            await tpmsService.addTruck({
-              truckNo: paddedVehicle,
-              truckName,
-              regionNo: wmsRegionNo,
-              distNo: districtStr ? districtStr.padStart(7, "0") : "",
-              spareTruck: true,
-              updatedBy,
-            });
-            tpmsResult = { success: true };
-          }
-        } catch (tpmsErr: unknown) {
-          const tpmsMsg = tpmsErr instanceof Error ? tpmsErr.message : "TPMS addtruck failed";
-          // Treat "already exists"/duplicate as success — idempotent retry guard.
-          if (/already.?exists/i.test(tpmsMsg) || /duplicate/i.test(tpmsMsg)) {
-            console.log("[BYOV] create: truck already exists in TPMS, treating as success:", paddedVehicle);
-            tpmsResult = { success: true };
-          } else {
-            console.error("[BYOV] TPMS addtruck error:", tpmsErr);
-            tpmsResult = { success: false, error: tpmsMsg };
-          }
+      let tpmsRawResponse: any = null;
+      let tpmsSubmittedAt: Date | null = null;
+      let tpmsAttempted = false;
+
+      if (createInWms) {
+        const { getTPMSService } = await import("./tpms-service");
+        const tpmsService = getTPMSService();
+        const tpmsConfigured = tpmsService.isConfigured();
+        if (!tpmsConfigured) {
+          console.warn("[BYOV] create: TPMS not configured — skipping addtruck for", paddedVehicle);
         }
+
+        // Same guarded, fail-closed path as the WMS-only retry route (Task #636):
+        // an existence check that could not complete refuses the create outright —
+        // nothing is sent to WMS or TPMS — instead of creating blind.
+        const wmsOutcome = await runGuardedWmsCreate(
+          {
+            lookupTruck: async (num) => {
+              try {
+                const existing = await wmsEngineService.getTruck(num);
+                return { checked: true, found: !!existing };
+              } catch (lookupErr: any) {
+                if (lookupErr?.status === 404) return { checked: true, found: false };
+                console.warn("[BYOV] create: WMS truck lookup failed:", lookupErr);
+                return {
+                  checked: false,
+                  found: false,
+                  error: lookupErr instanceof Error ? lookupErr.message : String(lookupErr),
+                };
+              }
+            },
+            createTruck: (payload) => {
+              wmsSubmittedAt = new Date();
+              return wmsEngineService.createTruck(payload);
+            },
+            addTruck: tpmsConfigured
+              ? (payload) => {
+                  tpmsAttempted = true;
+                  tpmsSubmittedAt = new Date();
+                  return tpmsService.addTruck(payload as any);
+                }
+              : null,
+          },
+          { paddedVehicle, wmsPayload, tpmsPayload },
+        );
+
+        if (wmsOutcome.refusal) {
+          // Nothing was written to WMS or TPMS. Holman may already have been
+          // submitted above — keep that on the audit row and surface both.
+          await db
+            .update(byovCreationAudit)
+            .set({
+              holmanSuccess: createInHolman && holmanResult.success,
+              holmanError: holmanResult.error ?? null,
+              holmanResponse: holmanRawResponse ?? null,
+              holmanSubmittedAt: holmanSubmittedAt ?? null,
+              holmanPending: !!holmanResult.pending,
+              wmsSuccess: false,
+              wmsError: wmsOutcome.refusal.error,
+              wmsResponse: { refused: wmsOutcome.refusal.code } as any,
+            })
+            .where(reservationId !== null ? eq(byovCreationAudit.id, reservationId) : eq(byovCreationAudit.requestId, requestId))
+            .catch((e) => console.warn("[BYOV] Could not stamp the WMS refusal on the audit row:", e));
+
+          return res.status(503).json({
+            error: wmsOutcome.refusal.error,
+            code: wmsOutcome.refusal.code,
+            requestId,
+            retryable: true,
+            holman: createInHolman ? holmanResult : { success: true, skipped: true },
+            wms: wmsOutcome.wms,
+            tpms: wmsOutcome.tpms,
+          });
+        }
+
+        wmsResult = { success: wmsOutcome.wms.success, error: wmsOutcome.wms.error };
+        wmsRawResponse = wmsOutcome.wms.alreadyExisted
+          ? { preCheck: "already-exists", ...(wmsOutcome.wms.response ?? {}) }
+          : wmsOutcome.wms.response ?? null;
+        tpmsResult = {
+          success: wmsOutcome.tpms.success,
+          skipped: wmsOutcome.tpms.skipped,
+          error: wmsOutcome.tpms.error,
+        };
+        tpmsRawResponse = wmsOutcome.tpms.response ?? (wmsOutcome.tpms.error ? { error: wmsOutcome.tpms.error } : null);
       }
 
       // --- Finalize reservation (Task #450) ---
       // Record the outcome on the reserved audit row. Rows are always kept — even
       // for fully-failed creates — so the history panel shows what was attempted.
       // When both systems fail we set blockedSource='failed' which releases the
-      // partial unique index (it only covers WHERE blocked_source IS NULL) so the
+      // partial unique indexes (they only cover WHERE blocked_source IS NULL) so the
       // number can be reused, while the row itself stays visible in the audit log.
+      // A Holman submit that is pending verification is NOT released: the record may
+      // yet land, so the number and VIN stay claimed.
       const finalHolmanSuccess = priorHolmanSuccess || (createInHolman && holmanResult.success);
       const finalWmsSuccess = priorWmsSuccess || (createInWms && wmsResult.success);
+      const holmanPending = !!holmanResult.pending;
       if (reservationId !== null) {
         try {
-          const fullyFailed = !finalHolmanSuccess && !finalWmsSuccess;
+          const fullyFailed = !finalHolmanSuccess && !finalWmsSuccess && !holmanPending;
           await db
             .update(byovCreationAudit)
             .set({
               holmanSuccess: finalHolmanSuccess,
               holmanError: holmanResult.error ?? null,
+              holmanResponse: holmanRawResponse ?? null,
+              holmanSubmittedAt: holmanSubmittedAt ?? null,
+              holmanPending,
               wmsSuccess: finalWmsSuccess,
               wmsError: wmsResult.error ?? null,
+              wmsResponse: wmsRawResponse ?? null,
+              wmsSubmittedAt: wmsSubmittedAt ?? null,
+              tpmsSuccess: tpmsAttempted ? tpmsResult.success : null,
+              tpmsError: tpmsResult.error ?? null,
+              tpmsResponse: tpmsRawResponse ?? null,
+              tpmsSubmittedAt: tpmsSubmittedAt ?? null,
               ...(fullyFailed ? { blockedSource: "failed" } : {}),
             })
             .where(eq(byovCreationAudit.id, reservationId));
@@ -9868,19 +10401,38 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }
       }
 
-      const holmanOnly = holmanResult.success && !wmsResult.success;
-      return res.json({ holman: holmanResult, wms: wmsResult, tpms: tpmsResult, holmanOnly });
+      // Per-system reporting that reflects what was actually ATTEMPTED (Task #636).
+      const systems: Record<string, SystemOutcome> = {
+        holman: {
+          attempted: createInHolman,
+          success: !!finalHolmanSuccess,
+          pending: holmanPending,
+          error: holmanResult.error,
+        },
+        wms: { attempted: createInWms, success: !!finalWmsSuccess, error: wmsResult.error },
+        tpms: { attempted: tpmsAttempted, success: tpmsResult.success, error: tpmsResult.error },
+      };
+      const summary = summarizeCreateOutcome(systems);
+
+      return res.json({
+        holman: holmanResult,
+        wms: wmsResult,
+        tpms: tpmsResult,
+        holmanOnly: summary.holmanOnly,
+        requestId,
+        summary,
+      });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "BYOV creation failed";
       console.error("[BYOV] create error:", error);
       // Release a number we reserved in THIS request if the create blew up before
       // finalize, so an unexpected exception never permanently burns the number.
-      // Only delete rows we freshly own with nothing yet created (never a reused
+      // Only release rows we freshly own with nothing yet created (never a reused
       // row that may carry a prior system success).
       if (reservationId !== null && reservationFreshlyInserted && !priorHolmanSuccess && !priorWmsSuccess) {
         try {
           // Mark as 'failed' rather than deleting — keeps the row visible in the
-          // audit log and releases the partial unique index so the number is reusable.
+          // audit log and releases the partial unique indexes so the number is reusable.
           await db
             .update(byovCreationAudit)
             .set({
@@ -9895,7 +10447,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           console.error("[BYOV] create: failed to mark reservation as failed after error:", releaseErr);
         }
       }
-      return res.status(500).json({ error: msg });
+      return res.status(500).json({ error: msg, requestId });
     }
   });
 
@@ -10237,8 +10789,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // BYOV WMS-only retry — for when Holman succeeded but WMS failed on a prior attempt
-  app.post("/api/byov/create-wms-only", requireAuth, async (req, res) => {
+  app.post("/api/byov/create-wms-only", requireAuth, async (req: any, res) => {
     try {
+      // Same feature gate and authorization as the full create path (Task #636) —
+      // a retry route is still a write into an external system.
+      const gate = await vehicleCreateGateState();
+      if (!gate.enabled) {
+        return res.status(403).json({
+          error: "Vehicle creation is currently turned off. A developer can enable it on the Vehicle Creation admin page (/vehicle-create-admin).",
+          code: "vehicle_create_disabled",
+        });
+      }
+      if (!(await requireVehicleCreatePermission(req, res))) return;
+
       const {
         vehicleNumber, make, model, modelYear, district,
         vehicleClass: vehicleClassRaw,
@@ -10271,89 +10834,98 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         useCaseId: "Nexus",
       };
 
-      let wmsResult: { success: boolean; error?: string } = { success: false };
-
-      // Pre-check: if the truck already exists in WMS, treat as success immediately
-      // (idempotent retry — truck was created on a prior attempt)
-      let truckAlreadyExists = false;
-      try {
-        const existing = await wmsEngineService.getTruck(paddedVehicle);
-        if (existing) {
-          console.log("[BYOV] WMS-only retry: truck already exists in WMS, skipping create:", paddedVehicle);
-          truckAlreadyExists = true;
-        }
-      } catch (lookupErr: unknown) {
-        const lookupStatus: number | undefined = (lookupErr as any)?.status;
-        if (lookupStatus !== 404) {
-          // Unexpected lookup error — log but continue to attempt create
-          console.warn("[BYOV] WMS-only retry: unexpected error during truck lookup:", lookupErr);
-        }
-        // 404 means not found — proceed to create below
-      }
-
-      if (truckAlreadyExists) {
-        wmsResult = { success: true };
-      } else {
-        try {
-          const wmsResp = await wmsEngineService.createTruck(wmsPayload);
-          console.log("[BYOV] WMS-only retry response:", wmsResp);
-          wmsResult = { success: true };
-        } catch (wmsErr: unknown) {
-          const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
-          const wmsStatus: number | undefined = (wmsErr as any)?.status;
-          const wmsMessage: string = (wmsErr as any)?.wmsMessage || wmsMsg;
-          // Safety net: treat 409 Conflict or any "already exists" WMS response as success
-          // in case a concurrent request created the truck between our lookup and create
-          const isAlreadyExists =
-            wmsStatus === 409 ||
-            /already.?exists/i.test(wmsMessage) ||
-            /duplicate/i.test(wmsMessage);
-          if (isAlreadyExists) {
-            console.log("[BYOV] WMS-only retry: truck already exists (race condition), treating as success:", wmsMessage);
-            wmsResult = { success: true };
-          } else {
-            console.error("[BYOV] WMS-only retry error:", wmsErr);
-            wmsResult = { success: false, error: wmsMsg };
-          }
-        }
-      }
-
-      // --- TPMS truck registration (best-effort, only after WMS success) ---
-      let tpmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
-      if (wmsResult.success) {
-        try {
-          const { getTPMSService } = await import("./tpms-service");
-          const tpmsService = getTPMSService();
-          if (!tpmsService.isConfigured()) {
-            console.warn("[BYOV] WMS-only retry: TPMS not configured — skipping addtruck for", paddedVehicle);
-            tpmsResult = { success: true, skipped: true };
-          } else {
-            const u = req.user as any;
-            const updatedBy: string = String(u?.username || u?.email || u?.id || "NEXUS").toUpperCase();
-            const truckName = `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle;
-            await tpmsService.addTruck({
+      // Rehearsal mode reports what would be sent to WMS/TPMS without writing to
+      // either system (Task #636).
+      if (gate.rehearsal) {
+        const u = req.user as any;
+        const rehearsalUpdatedBy: string = String(u?.username || u?.email || u?.id || "NEXUS").toUpperCase();
+        return res.json({
+          rehearsal: true,
+          wms: { success: false, skipped: true, error: undefined, detail: "Rehearsal mode — nothing was sent to WMS." },
+          tpms: { success: false, skipped: true, detail: "Rehearsal mode — nothing was sent to TPMS." },
+          wouldSend: {
+            wms: wmsPayload,
+            tpms: {
               truckNo: paddedVehicle,
-              truckName,
+              truckName: `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle,
               regionNo: wmsRegionNo,
               distNo: districtStr ? districtStr.padStart(7, "0") : "",
               spareTruck: true,
-              updatedBy,
-            });
-            tpmsResult = { success: true };
-          }
-        } catch (tpmsErr: unknown) {
-          const tpmsMsg = tpmsErr instanceof Error ? tpmsErr.message : "TPMS addtruck failed";
-          if (/already.?exists/i.test(tpmsMsg) || /duplicate/i.test(tpmsMsg)) {
-            console.log("[BYOV] WMS-only retry: truck already exists in TPMS, treating as success:", paddedVehicle);
-            tpmsResult = { success: true };
-          } else {
-            console.error("[BYOV] WMS-only retry: TPMS addtruck error:", tpmsErr);
-            tpmsResult = { success: false, error: tpmsMsg };
-          }
-        }
+              updatedBy: rehearsalUpdatedBy,
+            },
+          },
+        });
       }
 
-      return res.json({ wms: wmsResult, tpms: tpmsResult });
+      // Number-conflict guard: refuse while another session is actively holding
+      // this number for an in-flight create. Retrying our own partially-failed
+      // create (a reservation row with no live hold) is exactly what this route
+      // is for, so only un-expired holds owned by someone else block it.
+      const retryReservation = await probeActiveNumberHold(paddedVehicle, vehicleHoldSessionKey(req));
+      if (retryReservation.action === "block-unverified") {
+        return res.status(503).json({
+          error: `Cannot verify whether vehicle ${paddedVehicle} is being created by someone else right now (${retryReservation.error}). The retry was refused rather than risk a duplicate. Try again shortly.`,
+          code: "reservation_check_unavailable",
+          retryable: true,
+        });
+      }
+      if (retryReservation.action === "block-conflict") {
+        return res.status(409).json({
+          error: `Vehicle ${paddedVehicle} is currently held by another in-flight create (${retryReservation.holder}). Wait for it to finish or expire before retrying.`,
+          code: "number_held",
+        });
+      }
+
+      const u = req.user as any;
+      const updatedBy: string = String(u?.username || u?.email || u?.id || "NEXUS").toUpperCase();
+      const tpmsPayload = {
+        truckNo: paddedVehicle,
+        truckName: `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle,
+        regionNo: wmsRegionNo,
+        distNo: districtStr ? districtStr.padStart(7, "0") : "",
+        spareTruck: true,
+        updatedBy,
+      };
+
+      const { getTPMSService } = await import("./tpms-service");
+      const tpmsService = getTPMSService();
+
+      // Fail-closed WMS duplicate check + guarded writes (Task #636). A lookup
+      // that could not complete refuses the create; only an authoritative 404
+      // means "not there".
+      const wmsOutcome = await runGuardedWmsCreate(
+        {
+          lookupTruck: async (num) => {
+            try {
+              const existing = await wmsEngineService.getTruck(num);
+              return { checked: true, found: !!existing };
+            } catch (lookupErr: any) {
+              if (lookupErr?.status === 404) return { checked: true, found: false };
+              console.warn("[BYOV] WMS-only retry: truck lookup failed:", lookupErr);
+              return {
+                checked: false,
+                found: false,
+                error: lookupErr instanceof Error ? lookupErr.message : String(lookupErr),
+              };
+            }
+          },
+          createTruck: (payload) => wmsEngineService.createTruck(payload),
+          addTruck: tpmsService.isConfigured() ? (payload) => tpmsService.addTruck(payload as any) : null,
+        },
+        { paddedVehicle, wmsPayload, tpmsPayload },
+      );
+
+      if (wmsOutcome.refusal) {
+        return res.status(503).json({
+          error: wmsOutcome.refusal.error,
+          code: wmsOutcome.refusal.code,
+          retryable: true,
+          wms: wmsOutcome.wms,
+          tpms: wmsOutcome.tpms,
+        });
+      }
+
+      return res.json({ wms: wmsOutcome.wms, tpms: wmsOutcome.tpms });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "WMS-only creation failed";
       console.error("[BYOV] create-wms-only error:", error);
@@ -10366,8 +10938,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // (e.g. due to a Holman API failure during the original create).
   // Mirrors create-wms-only but targets Holman. On success, upserts the vehicle into
   // holman_vehicles_cache and stamps the existing audit row with holman_success=true.
-  app.post("/api/byov/create-holman-only", requireAuth, async (req, res) => {
+  app.post("/api/byov/create-holman-only", requireAuth, async (req: any, res) => {
     try {
+      // Same feature gate and authorization as the full create path (Task #636).
+      const gate = await vehicleCreateGateState();
+      if (!gate.enabled) {
+        return res.status(403).json({
+          error: "Vehicle creation is currently turned off. A developer can enable it on the Vehicle Creation admin page (/vehicle-create-admin).",
+          code: "vehicle_create_disabled",
+        });
+      }
+      if (!(await requireVehicleCreatePermission(req, res))) return;
+
       const {
         vehicleNumber, vin, assetType, modelYear, make, model,
         firstName, lastName, enterpriseId, phone,
@@ -10396,6 +10978,36 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const paddedVehicle = toHolmanRef(vehicleNumber);
       const districtStr = String(district || "").trim();
       const prefix = districtStr || null;
+
+      // Task #636: this retry route writes a real Holman record, so it runs the
+      // SAME fail-closed VIN gate as /api/byov/create. Without it a caller could
+      // register a duplicate VIN simply by using the retry endpoint.
+      const vinCheck = validateVin(vin);
+      if (!vinCheck.valid) {
+        return res.status(400).json({ error: vinCheck.reason, code: "invalid_vin" });
+      }
+      const normalizedVin = vinCheck.vin;
+
+      // The probes ignore conflicts on THIS vehicle number, so a legitimate retry
+      // of the same vehicle (its own audit row, or a partially-created Holman
+      // record) is not mistaken for a duplicate.
+      const vinProbes = await probeVinDuplicates({ vin: normalizedVin, paddedVehicle });
+      const vinDecision = decideDuplicateGate(vinProbes);
+      if (vinDecision.action === "block-duplicate") {
+        return res.status(409).json({
+          error: `VIN ${normalizedVin} is already registered to vehicle ${vinDecision.conflict.vehicleNumber}. Refusing to create a duplicate.`,
+          code: "vin_duplicate",
+          source: vinDecision.source,
+          conflict: vinDecision.conflict,
+        });
+      }
+      if (vinDecision.action === "block-unverified") {
+        return res.status(503).json({
+          error: `Cannot verify this VIN is unique right now (${vinDecision.source}: ${vinDecision.error}). Refusing to create until the check can complete.`,
+          code: "duplicate_check_unavailable",
+          source: vinDecision.source,
+        });
+      }
 
       const NULL_VAL = "^null^";
       const isUnknown = (lastName || "").trim().toUpperCase() === "UNKNOWN";
@@ -10450,44 +11062,65 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         renewalDate: toHolmanDate(regRenewalDate),
       };
 
-      let holmanResult: { success: boolean; error?: string } = { success: false };
+      let holmanResult: { success: boolean; pending?: boolean; error?: string; detail?: string; referenceToken?: string | null } = { success: false };
+      let holmanRawResponse: any = null;
+      let holmanSubmittedAt: Date | null = null;
+      // Only a LIVE read of the Holman record justifies mirroring it locally
+      // (Task #636) — an unconfirmed submit must not create a phantom cache row.
+      let holmanLiveConfirmed = false;
 
-      // Pre-check: if vehicle already exists in Holman, treat as success (idempotent retry)
-      let holmanAlreadyExists = false;
-      try {
-        const holmanLookup = await holmanApiService.findVehicleByNumber(paddedVehicle);
-        if (holmanLookup.success && holmanLookup.vehicle) {
-          console.log("[BYOV] Holman-only retry: vehicle already in Holman, skipping submit:", paddedVehicle);
-          holmanAlreadyExists = true;
-        }
-      } catch (holmanLookupErr) {
-        console.warn("[BYOV] Holman-only retry: pre-check lookup error (non-fatal):", holmanLookupErr);
+      // Rehearsal mode runs every gate above and reports exactly what would be
+      // sent, without touching Holman (Task #636).
+      if (gate.rehearsal) {
+        return res.json({
+          rehearsal: true,
+          holman: { success: false, pending: false, skipped: true, detail: "Rehearsal mode — nothing was sent to Holman." },
+          wouldSend: { holman: holmanPayload },
+          gate: { vin: vinProbes },
+        });
       }
 
-      if (holmanAlreadyExists) {
-        holmanResult = { success: true };
-      } else {
-        try {
-          const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-          console.log("[BYOV] Holman-only retry submit response:", JSON.stringify(holmanResp, null, 2));
-          holmanResult = { success: true };
-        } catch (holmanErr: unknown) {
-          const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
-          const isHolmanDuplicate =
-            /already.?exists/i.test(holmanMsg) ||
-            /duplicate/i.test(holmanMsg) ||
-            /conflict/i.test(holmanMsg);
-          if (isHolmanDuplicate) {
-            console.log("[BYOV] Holman-only retry: already exists (race), treating as success:", holmanMsg);
-            holmanResult = { success: true };
-          } else {
-            console.error("[BYOV] Holman-only retry error:", holmanErr);
-            holmanResult = { success: false, error: holmanMsg };
-          }
-        }
+      // Don't write underneath another session's in-flight hold on this number.
+      const holdProbe = await probeActiveNumberHold(paddedVehicle, vehicleHoldSessionKey(req));
+      if (holdProbe.action === "block-unverified") {
+        return res.status(503).json({
+          error: `Cannot verify whether vehicle ${paddedVehicle} is being created by someone else right now (${holdProbe.error}). The retry was refused rather than risk a duplicate. Try again shortly.`,
+          code: "reservation_check_unavailable",
+          retryable: true,
+        });
+      }
+      if (holdProbe.action === "block-conflict") {
+        return res.status(409).json({
+          error: `Vehicle ${paddedVehicle} is currently held by another in-flight create (${holdProbe.holder}). Wait for it to finish or expire before retrying.`,
+          code: "number_held",
+        });
       }
 
-      if (holmanResult.success) {
+      // Pre-check + submit through the shared guarded path: fail CLOSED on a
+      // lookup that cannot complete, and derive success from the response
+      // evidence rather than from "the call did not throw" (Task #636).
+      const submitOutcome = await runGuardedHolmanSubmit(
+        {
+          lookupByNumber: (num) => holmanApiService.lookupVehicleByNumberChecked(num),
+          submit: (payloads) => holmanApiService.submitVehicleArray(payloads),
+        },
+        { paddedVehicle, payload: holmanPayload },
+      );
+      if (submitOutcome.refusal) {
+        console.warn("[BYOV] Holman-only retry refused:", submitOutcome.refusal.error);
+        return res.status(503).json({
+          error: submitOutcome.refusal.error,
+          code: submitOutcome.refusal.code,
+          retryable: true,
+        });
+      }
+      holmanResult = submitOutcome.result;
+      holmanLiveConfirmed = submitOutcome.liveConfirmed;
+      holmanRawResponse = submitOutcome.rawResponse;
+      holmanSubmittedAt = submitOutcome.submittedAt;
+      console.log("[BYOV] Holman-only retry outcome:", JSON.stringify(holmanResult));
+
+      if (holmanLiveConfirmed) {
         // Upsert into holman_vehicles_cache so Fleet Management can find the vehicle
         try {
           const now = new Date();
@@ -10527,29 +11160,40 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         } catch (cacheErr) {
           console.warn("[BYOV] Holman-only retry: holman_vehicles_cache upsert failed (non-fatal):", cacheErr);
         }
+      } else if (holmanResult.success) {
+        console.log(
+          `[BYOV] Holman-only retry: NOT mirroring ${paddedVehicle} into holman_vehicles_cache — acceptance was not read back from Holman. The Holman sync will pick it up.`,
+        );
+      }
 
-        // Stamp the existing audit row holman_success=true so the history panel reflects reality.
-        // Targets only unblocked rows with holman_success=false (partial-failure rows).
-        try {
-          const stamped = await db
-            .update(byovCreationAudit)
-            .set({ holmanSuccess: true, holmanError: null })
-            .where(
-              and(
-                eq(byovCreationAudit.vehicleNumber, paddedVehicle),
-                eq(byovCreationAudit.holmanSuccess, false),
-                isNull(byovCreationAudit.blockedSource),
-              ),
-            )
-            .returning({ id: byovCreationAudit.id });
-          if (stamped.length > 0) {
-            console.log("[BYOV] Holman-only retry: stamped audit row holman_success=true for", paddedVehicle);
-          } else {
-            console.log("[BYOV] Holman-only retry: no matching unblocked audit row found for", paddedVehicle, "(may already be stamped)");
-          }
-        } catch (auditErr) {
-          console.warn("[BYOV] Holman-only retry: audit stamp failed (non-fatal):", auditErr);
+      // Stamp the existing audit row so the history panel reflects reality. Targets
+      // only unblocked rows with holman_success=false (partial-failure rows). A
+      // pending-verification retry records the attempt WITHOUT claiming success.
+      try {
+        const stamped = await db
+          .update(byovCreationAudit)
+          .set({
+            holmanSuccess: !!holmanResult.success,
+            holmanError: holmanResult.error ?? null,
+            holmanPending: !!holmanResult.pending,
+            holmanResponse: holmanRawResponse ?? null,
+            holmanSubmittedAt: holmanSubmittedAt ?? null,
+          })
+          .where(
+            and(
+              eq(byovCreationAudit.vehicleNumber, paddedVehicle),
+              eq(byovCreationAudit.holmanSuccess, false),
+              isNull(byovCreationAudit.blockedSource),
+            ),
+          )
+          .returning({ id: byovCreationAudit.id });
+        if (stamped.length > 0) {
+          console.log(`[BYOV] Holman-only retry: stamped audit row for ${paddedVehicle} (success=${!!holmanResult.success}, pending=${!!holmanResult.pending})`);
+        } else {
+          console.log("[BYOV] Holman-only retry: no matching unblocked audit row found for", paddedVehicle, "(may already be stamped)");
         }
+      } catch (auditErr) {
+        console.warn("[BYOV] Holman-only retry: audit stamp failed (non-fatal):", auditErr);
       }
 
       return res.json({ holman: holmanResult });
@@ -10806,13 +11450,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // GET /api/byov/check-vin/:vin — lightweight VIN duplicate check against the
-  // local Holman cache. Used by the create-vehicle-location form to warn the
-  // dispatcher before submission when a VIN is already registered.
+  // local Holman cache and any ACTIVE in-flight create reservation. Used by the
+  // create-vehicle-location form to warn the dispatcher before submission when a
+  // VIN is already registered. This is advisory only — the authoritative,
+  // fail-closed gate (which also queries Holman live) runs inside POST /api/byov/create.
   app.get("/api/byov/check-vin/:vin", requireAuth, async (req, res) => {
     try {
       const rawVin = String(req.params.vin || "").trim().toUpperCase();
-      if (rawVin.length !== 17) {
-        return res.json({ exists: false });
+      const validity = validateVin(rawVin);
+      if (!validity.valid) {
+        return res.json({ exists: false, valid: false, reason: validity.reason });
       }
       const rows = await db
         .select({
@@ -10822,19 +11469,35 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           modelYear: holmanVehiclesCache.modelYear,
         })
         .from(holmanVehiclesCache)
-        .where(eq(holmanVehiclesCache.vin, rawVin))
+        .where(eq(holmanVehiclesCache.vin, validity.vin))
         .limit(5);
-      if (rows.length === 0) {
-        return res.json({ exists: false });
+      const inFlight = await db
+        .select({ vehicleNumber: byovCreationAudit.vehicleNumber })
+        .from(byovCreationAudit)
+        .where(and(eq(byovCreationAudit.vin, validity.vin), isNull(byovCreationAudit.blockedSource)))
+        .limit(5);
+      if (rows.length === 0 && inFlight.length === 0) {
+        return res.json({ exists: false, valid: true });
       }
       return res.json({
         exists: true,
-        matches: rows.map((r) => ({
-          vehicleNumber: r.holmanVehicleNumber,
-          make: r.makeName,
-          model: r.modelName,
-          modelYear: r.modelYear,
-        })),
+        valid: true,
+        matches: [
+          ...rows.map((r) => ({
+            vehicleNumber: r.holmanVehicleNumber,
+            make: r.makeName,
+            model: r.modelName,
+            modelYear: r.modelYear,
+            source: "holman_cache" as const,
+          })),
+          ...inFlight.map((r) => ({
+            vehicleNumber: r.vehicleNumber,
+            make: null,
+            model: null,
+            modelYear: null,
+            source: "in_flight_reservation" as const,
+          })),
+        ],
       });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "VIN check failed";
@@ -12006,6 +12669,73 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.json({ enabled: parsed.data.enabled, updatedBy: currentUser.username, updatedAt: new Date().toISOString() });
     } catch (error: any) {
       console.error("Error updating reconciliation automation:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // ─── Vehicle Creation feature gate (Task #636) ───────────────────────────────
+  // Read the on/off + rehearsal state of the Create Vehicle function. Fail-safe
+  // OFF: an absent setting means disabled, exactly like reconciliation auto-apply.
+  app.get("/api/admin/vehicle-create/gate", requireAuth, async (req: any, res) => {
+    try {
+      const { appSettings } = await import("@shared/schema");
+      const [enabledRow] = await db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, VEHICLE_CREATE_ENABLED_KEY))
+        .limit(1);
+      const [rehearsalRow] = await db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, VEHICLE_CREATE_REHEARSAL_KEY))
+        .limit(1);
+      res.json({
+        enabled: enabledRow ? enabledRow.value === true : false,
+        rehearsalMode: rehearsalRow ? rehearsalRow.value === true : false,
+        enabledUpdatedAt: enabledRow?.updatedAt ?? null,
+        enabledUpdatedBy: enabledRow?.updatedBy ?? null,
+        rehearsalUpdatedAt: rehearsalRow?.updatedAt ?? null,
+        rehearsalUpdatedBy: rehearsalRow?.updatedBy ?? null,
+      });
+    } catch (error: any) {
+      console.error("Error reading vehicle-create gate:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Developer-only: turn vehicle creation on/off, and put it in rehearsal mode.
+  // Rehearsal runs every gate and reports exactly what WOULD be sent without
+  // writing to Holman, WMS, or TPMS.
+  app.put("/api/admin/vehicle-create/gate", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can change the vehicle creation gate" });
+      }
+      const parsed = z
+        .object({ enabled: z.boolean().optional(), rehearsalMode: z.boolean().optional() })
+        .refine((b) => b.enabled !== undefined || b.rehearsalMode !== undefined, {
+          message: "Provide at least one of { enabled, rehearsalMode }",
+        })
+        .safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Body must be { enabled?: boolean, rehearsalMode?: boolean }" });
+      }
+      const { setSetting, getBooleanSetting } = await import("./app-settings");
+      if (parsed.data.enabled !== undefined) {
+        await setSetting(VEHICLE_CREATE_ENABLED_KEY, parsed.data.enabled, currentUser.username);
+      }
+      if (parsed.data.rehearsalMode !== undefined) {
+        await setSetting(VEHICLE_CREATE_REHEARSAL_KEY, parsed.data.rehearsalMode, currentUser.username);
+      }
+      const enabled = await getBooleanSetting(VEHICLE_CREATE_ENABLED_KEY, false);
+      const rehearsalMode = await getBooleanSetting(VEHICLE_CREATE_REHEARSAL_KEY, false);
+      console.log(
+        `[Vehicle Create Gate] enabled=${enabled} rehearsalMode=${rehearsalMode} set by ${currentUser.username}`,
+      );
+      res.json({ enabled, rehearsalMode, updatedBy: currentUser.username, updatedAt: new Date().toISOString() });
+    } catch (error: any) {
+      console.error("Error updating vehicle-create gate:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });

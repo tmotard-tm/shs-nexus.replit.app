@@ -74,6 +74,7 @@ import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
 import NexusFlowcharts from "@/pages/nexus-flowcharts";
 import ReconciliationAdmin from "@/pages/reconciliation-admin";
+import VehicleCreateAdmin from "@/pages/vehicle-create-admin";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -524,6 +525,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <ReconciliationAdmin />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/vehicle-create-admin">
+        <ProtectedRoute>
+          <MainContent>
+            <VehicleCreateAdmin />
           </MainContent>
         </ProtectedRoute>
       </Route>

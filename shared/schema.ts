@@ -2810,8 +2810,31 @@ export const byovCreationAudit = pgTable("byov_creation_audit", {
   wmsSuccess: boolean("wms_success").notNull(),
   wmsError: text("wms_error"),
   // 'cache' = blocked by local Holman cache hit, 'live' = blocked by live Holman API lookup.
-  // NULL for normal (non-blocked) submission attempts.
+  // Also used as the reservation release valve: 'failed', 'expired', 'rehearsal',
+  // 'backfill' rows are excluded from the partial unique indexes.
+  // NULL for normal (non-blocked / actively reserved) submission attempts.
   blockedSource: varchar("blocked_source", { length: 10 }),
+  // ── Task #636: forensic + reservation columns ──────────────────────────────
+  // Stable per-attempt identifier so an attempt can be reconstructed/replayed.
+  // Also scopes the active-VIN unique index to rows written by the new gate.
+  requestId: varchar("request_id", { length: 64 }),
+  // Opaque hash of the session that owns a suggested-number hold.
+  reservedSession: varchar("reserved_session", { length: 64 }),
+  // Non-null only while the row is an un-submitted hold from /api/byov/next-number.
+  holdExpiresAt: timestamp("hold_expires_at"),
+  // The create payload exactly as submitted (request body + derived payloads).
+  submittedPayload: jsonb("submitted_payload"),
+  // Raw per-system responses / identifiers and when each system was called.
+  holmanResponse: jsonb("holman_response"),
+  holmanSubmittedAt: timestamp("holman_submitted_at"),
+  // Holman accepted-for-processing but acceptance could not be confirmed.
+  holmanPending: boolean("holman_pending").default(false),
+  wmsResponse: jsonb("wms_response"),
+  wmsSubmittedAt: timestamp("wms_submitted_at"),
+  tpmsSuccess: boolean("tpms_success"),
+  tpmsError: text("tpms_error"),
+  tpmsResponse: jsonb("tpms_response"),
+  tpmsSubmittedAt: timestamp("tpms_submitted_at"),
 });
 
 export type ByovCreationAuditEntry = typeof byovCreationAudit.$inferSelect;

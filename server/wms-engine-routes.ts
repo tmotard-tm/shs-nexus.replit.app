@@ -5,7 +5,7 @@
  * All routes proxy to the WMS Engine API via wms-engine-service.ts.
  *
  * Trucks:
- *   POST   /api/wms/trucks                              — create truck location
+ *   POST   /api/wms/trucks                              — DISABLED (creates go through /api/byov/create)
  *   GET    /api/wms/trucks                              — list all trucks
  *   GET    /api/wms/trucks/:truckId                     — get truck by ID
  *   POST   /api/wms/trucks/:truckId                     — update truck
@@ -117,17 +117,18 @@ export function registerWmsRoutes(requireAuth: any): Router {
     }
   });
 
-  router.post("/trucks", async (req, res) => {
-    try {
-      const data = truckRequestSchema.parse(req.body);
-      const result = await wmsEngineService.createTruck(data);
-      res.status(201).json({ success: true, data: result });
-    } catch (err: any) {
-      if (err instanceof z.ZodError) {
-        return res.status(400).json({ success: false, message: err.errors[0].message });
-      }
-      handleWmsError(res, err);
-    }
+  // Task #636: creating a truck location in WMS *is* vehicle creation. A raw
+  // create here would skip the feature gate, the create permission, the
+  // VIN/number duplicate gates, the session hold/reservation and the audit row —
+  // exactly the bypass the re-gate exists to close. The gated create route owns
+  // this write (and /api/byov/create-wms-only repairs a partial create).
+  router.post("/trucks", async (_req, res) => {
+    return res.status(403).json({
+      success: false,
+      message:
+        "Creating a truck in WMS is not allowed on this endpoint. Use the Create Vehicle flow (/api/byov/create), which runs the permission, duplicate, reservation and audit gates — or /api/byov/create-wms-only to finish a partially-created vehicle.",
+      code: "vehicle_create_route_required",
+    });
   });
 
   router.get("/trucks", async (req, res) => {

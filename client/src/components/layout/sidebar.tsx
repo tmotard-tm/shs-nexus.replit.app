@@ -366,6 +366,20 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
             </DropdownMenuItem>
           )}
 
+          {user.role === 'developer' && (
+            <DropdownMenuItem asChild>
+              <Link
+                href="/vehicle-create-admin"
+                onClick={handleNavClick}
+                className="flex items-center gap-3 cursor-pointer"
+                data-testid="link-nav-vehicle-create-admin"
+              >
+                <Wrench className="h-4 w-4" />
+                Vehicle Creation
+              </Link>
+            </DropdownMenuItem>
+          )}
+
           <DropdownMenuSeparator />
 
           {/* View as Role - Super Admin Only */}
