@@ -35,6 +35,7 @@ import {
   type SystemOutcome,
 } from "./vehicle-create-gate";
 import { runGuardedWmsCreate, runGuardedHolmanSubmit } from "./vehicle-create-external";
+import { decideFinalizeRelease } from "./vehicle-create-verification";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -951,6 +952,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         ADD COLUMN IF NOT EXISTS tpms_response jsonb,
         ADD COLUMN IF NOT EXISTS tpms_submitted_at timestamp
     `), 20000, "byov_creation_audit task636 migrate");
+    // Task 638 — post-create read-back verification. A Holman submit is a queue
+    // receipt, so an attempt is only resolved once each targeted system has been
+    // read back live. AMS is deliberately never one of them (it is written by a
+    // downstream sync ~24h later).
+    await withTimeout(db.execute(sql`
+      ALTER TABLE byov_creation_audit
+        ADD COLUMN IF NOT EXISTS verification_state varchar(20) DEFAULT 'pending',
+        ADD COLUMN IF NOT EXISTS verification_detail text,
+        ADD COLUMN IF NOT EXISTS verification_attempts integer DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS verification_checked_at timestamp,
+        ADD COLUMN IF NOT EXISTS verified_at timestamp,
+        ADD COLUMN IF NOT EXISTS verification_systems jsonb
+    `), 20000, "byov_creation_audit task638 migrate");
     console.log("[BYOV] byov_creation_audit table ready");
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_creation_audit table:", e.message);
@@ -994,9 +1008,41 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         duration_ms integer NOT NULL DEFAULT 0
       )
     `), 20000, "byov_drift_checks init");
+    // Task 638 — the same report now also carries the creation read-back state, so
+    // unconfirmed / failed / partially-created vehicles are visible next to the
+    // assignment drift results instead of only in the logs.
+    await withTimeout(db.execute(sql`
+      ALTER TABLE byov_drift_checks
+        ADD COLUMN IF NOT EXISTS create_pending_count integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS create_failed_count integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS create_partial_count integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS create_unverified_count integer NOT NULL DEFAULT 0,
+        ADD COLUMN IF NOT EXISTS create_issues jsonb NOT NULL DEFAULT '[]'::jsonb
+    `), 20000, "byov_drift_checks task638 migrate");
     console.log("[BYOV] byov_drift_checks table ready");
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_drift_checks table:", e.message);
+  }
+
+  // Phantom purge log — idempotent table init (Task 638). One row per locally
+  // cached vehicle removed by the reviewed cleanup path. Local cache only: nothing
+  // is ever deleted from Holman, WMS or TPMS.
+  try {
+    await withTimeout(db.execute(sql`
+      CREATE TABLE IF NOT EXISTS byov_phantom_purges (
+        id serial PRIMARY KEY,
+        vehicle_number varchar(20) NOT NULL,
+        purged_at timestamp NOT NULL DEFAULT NOW(),
+        purged_by varchar(100) NOT NULL,
+        reason text,
+        audit_id integer,
+        cache_row jsonb,
+        number_released boolean DEFAULT false
+      )
+    `), 20000, "byov_phantom_purges init");
+    console.log("[BYOV] byov_phantom_purges table ready");
+  } catch (e: any) {
+    console.error("[BYOV] Failed to init byov_phantom_purges table:", e.message);
   }
 
   // app_settings — idempotent table init. Backs the Reconciliation Admin
@@ -9647,6 +9693,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     let reservationFreshlyInserted = false;
     let priorHolmanSuccess = false;
     let priorWmsSuccess = false;
+    // Task #638: set the moment a create request goes on the wire to a system that
+    // creates vehicle records. Hoisted out here because the outer catch must know
+    // it too — an exception AFTER a submit is exactly the ambiguous case where the
+    // vehicle may exist, so the reservation must survive the error and be resolved
+    // by read-back instead of being released on the spot.
+    let submittedToCreatingSystem = false;
     // Stable identifier for this attempt — stamped on the audit row and returned
     // to the caller so an attempt can be reconstructed end-to-end (Task #636).
     const requestId = crypto.randomUUID();
@@ -10215,6 +10267,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         holmanLiveConfirmed = submitOutcome.liveConfirmed;
         holmanRawResponse = submitOutcome.rawResponse;
         holmanSubmittedAt = submitOutcome.submittedAt;
+        if (holmanSubmittedAt) submittedToCreatingSystem = true;
         console.log("[BYOV] Holman submit outcome:", JSON.stringify(holmanResult));
       }
 
@@ -10309,6 +10362,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             },
             createTruck: (payload) => {
               wmsSubmittedAt = new Date();
+              submittedToCreatingSystem = true;
               return wmsEngineService.createTruck(payload);
             },
             addTruck: tpmsConfigured
@@ -10363,20 +10417,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         tpmsRawResponse = wmsOutcome.tpms.response ?? (wmsOutcome.tpms.error ? { error: wmsOutcome.tpms.error } : null);
       }
 
-      // --- Finalize reservation (Task #450) ---
+      // --- Finalize reservation (Task #450, re-gated by Task #638) ---
       // Record the outcome on the reserved audit row. Rows are always kept — even
       // for fully-failed creates — so the history panel shows what was attempted.
-      // When both systems fail we set blockedSource='failed' which releases the
-      // partial unique indexes (they only cover WHERE blocked_source IS NULL) so the
-      // number can be reused, while the row itself stays visible in the audit log.
-      // A Holman submit that is pending verification is NOT released: the record may
-      // yet land, so the number and VIN stay claimed.
+      // Releasing the reservation (blockedSource='failed' drops the row out of the
+      // partial unique indexes on number and VIN, which only cover
+      // WHERE blocked_source IS NULL) is NOT decided by the immediate result flags:
+      // a 5xx or timeout after the request went on the wire looks identical to a
+      // refusal from here, and Holman applies submissions asynchronously. The number
+      // is therefore held whenever anything was actually submitted, and only a
+      // read-back that proves absence may release it.
       const finalHolmanSuccess = priorHolmanSuccess || (createInHolman && holmanResult.success);
       const finalWmsSuccess = priorWmsSuccess || (createInWms && wmsResult.success);
       const holmanPending = !!holmanResult.pending;
+      const finalizeDecision = decideFinalizeRelease({
+        holmanSubmittedAt,
+        wmsSubmittedAt,
+        holmanSuccess: finalHolmanSuccess,
+        wmsSuccess: finalWmsSuccess,
+        holmanPending,
+      });
       if (reservationId !== null) {
         try {
-          const fullyFailed = !finalHolmanSuccess && !finalWmsSuccess && !holmanPending;
+          const fullyFailed = finalizeDecision.release;
           await db
             .update(byovCreationAudit)
             .set({
@@ -10399,6 +10462,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         } catch (finalizeErr) {
           console.error("[BYOV] create: failed to finalize reservation audit row:", finalizeErr);
         }
+      }
+
+      // Post-create read-back (Task #638). Holman applies submissions asynchronously,
+      // so nothing here is trustworthy until the vehicle has been READ BACK out of
+      // each targeted system. This resolves the audit row from 'pending' to
+      // confirmed / partial / failed / unverified and releases the reserved number
+      // when the create is proven not to have landed. Fire-and-forget: the request
+      // must not wait on Holman's queue, and `sweepUnverifiedCreates()` (nightly
+      // drift check) is the level-triggered backstop when this process goes away.
+      if (reservationId !== null && finalizeDecision.verify) {
+        const { scheduleCreateVerification } = await import("./vehicle-create-verification-service");
+        scheduleCreateVerification(reservationId, { triggeredBy: `create:${requestId}` });
       }
 
       // Per-system reporting that reflects what was actually ATTEMPTED (Task #636).
@@ -10428,8 +10503,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Release a number we reserved in THIS request if the create blew up before
       // finalize, so an unexpected exception never permanently burns the number.
       // Only release rows we freshly own with nothing yet created (never a reused
-      // row that may carry a prior system success).
-      if (reservationId !== null && reservationFreshlyInserted && !priorHolmanSuccess && !priorWmsSuccess) {
+      // row that may carry a prior system success) — and never once a request has
+      // reached Holman or WMS (Task #638): the exception may have happened after
+      // the vehicle was created, so that number stays claimed and the scheduled
+      // read-back decides. The nightly sweep is the backstop if this process dies.
+      if (reservationId !== null && submittedToCreatingSystem) {
+        try {
+          const { scheduleCreateVerification } = await import("./vehicle-create-verification-service");
+          scheduleCreateVerification(reservationId, { triggeredBy: `create-error:${requestId}` });
+        } catch (scheduleErr) {
+          console.error("[BYOV] create: could not schedule read-back after error:", scheduleErr);
+        }
+      }
+      if (
+        reservationId !== null &&
+        reservationFreshlyInserted &&
+        !submittedToCreatingSystem &&
+        !priorHolmanSuccess &&
+        !priorWmsSuccess
+      ) {
         try {
           // Mark as 'failed' rather than deleting — keeps the row visible in the
           // audit log and releases the partial unique indexes so the number is reusable.
@@ -23874,6 +23966,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         wms_fail_count:    r.wmsFailCount,
         mismatches:        r.mismatches,
         duration_ms:       r.durationMs,
+        // Task 638 — creation read-back state alongside the assignment drift.
+        create_pending_count:    r.createVerification.counts.pending,
+        create_failed_count:     r.createVerification.counts.failed,
+        create_partial_count:    r.createVerification.counts.partial,
+        create_unverified_count: r.createVerification.counts.unverified,
+        create_confirmed_count:  r.createVerification.counts.confirmed,
+        create_issues:           r.createVerification.attention,
       };
       return res.json({ success: true, result });
     } catch (err: any) {
@@ -23901,7 +24000,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         mismatches: any;
         duration_ms: number;
       }>(sql`
-        SELECT id, run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms
+        SELECT id, run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms,
+               create_pending_count, create_failed_count, create_partial_count, create_unverified_count, create_issues
         FROM byov_drift_checks
         ORDER BY run_at DESC
         LIMIT ${limitParam}
@@ -23932,7 +24032,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         mismatches: any;
         duration_ms: number;
       }>(sql`
-        SELECT id, run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms
+        SELECT id, run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms,
+               create_pending_count, create_failed_count, create_partial_count, create_unverified_count, create_issues
         FROM byov_drift_checks
         ORDER BY run_at DESC
         LIMIT 1
@@ -23943,6 +24044,121 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     } catch (err: any) {
       console.error("[BYOV] GET /api/byov/verify/latest error:", err.message);
       return res.status(500).json({ message: err.message || "Failed to load latest run" });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Create read-back verification & phantom cleanup — admin-only (Task 638)
+  //
+  // A Holman submit is a queue receipt, not an applied record. These endpoints
+  // expose the read-back state of recent creates, the reconciliation of local
+  // cache rows against live Holman, and the reviewed removal of the phantoms the
+  // older optimistic path left behind. AMS is never consulted: AMS records arrive
+  // from a downstream sync ~24h later, so their absence is expected.
+  // -------------------------------------------------------------------------
+
+  const requireByovAdmin = (req: any, res: any): any | null => {
+    const currentUser = req.user as any;
+    if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+      res.status(403).json({ message: "Access denied. Admin or developer role required." });
+      return null;
+    }
+    return currentUser;
+  };
+
+  // GET /api/byov/create-verification — recent creates and their read-back state
+  app.get("/api/byov/create-verification", requireAuth, async (req: any, res) => {
+    if (!requireByovAdmin(req, res)) return;
+    try {
+      const days = Math.min(Math.max(parseInt((req.query.days as string) || "14", 10) || 14, 1), 90);
+      const { getCreateVerificationReport } = await import("./vehicle-create-verification-service");
+      const report = await getCreateVerificationReport(days);
+      return res.json(report);
+    } catch (err: any) {
+      console.error("[BYOV] GET /api/byov/create-verification error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load create verification state" });
+    }
+  });
+
+  // POST /api/byov/create-verification/sweep — re-read every unresolved create now
+  app.post("/api/byov/create-verification/sweep", requireAuth, async (req: any, res) => {
+    if (!requireByovAdmin(req, res)) return;
+    try {
+      const { sweepUnverifiedCreates, getCreateVerificationReport } = await import(
+        "./vehicle-create-verification-service"
+      );
+      const swept = await sweepUnverifiedCreates();
+      const report = await getCreateVerificationReport();
+      return res.json({ success: true, swept: swept.scanned, resolved: swept.resolved, report });
+    } catch (err: any) {
+      console.error("[BYOV] POST /api/byov/create-verification/sweep error:", err.message);
+      return res.status(500).json({ message: err.message || "Sweep failed" });
+    }
+  });
+
+  // POST /api/byov/create-verification/:id/verify — re-read one attempt now
+  app.post("/api/byov/create-verification/:id/verify", requireAuth, async (req: any, res) => {
+    if (!requireByovAdmin(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: "A numeric audit id is required." });
+      const { verifyCreateAttemptOnce } = await import("./vehicle-create-verification-service");
+      const outcome = await verifyCreateAttemptOnce(id, { immediate: true });
+      if (!outcome) {
+        return res.status(404).json({ message: "No verifiable create attempt with that id." });
+      }
+      return res.json({ success: true, outcome });
+    } catch (err: any) {
+      console.error("[BYOV] POST /api/byov/create-verification/:id/verify error:", err.message);
+      return res.status(500).json({ message: err.message || "Verification failed" });
+    }
+  });
+
+  // GET /api/byov/phantom-vehicles — READ-ONLY reconciliation report. Nothing is
+  // removed here; the purge below is a separate, explicitly-confirmed call.
+  app.get("/api/byov/phantom-vehicles", requireAuth, async (req: any, res) => {
+    if (!requireByovAdmin(req, res)) return;
+    try {
+      const limit = Math.min(Math.max(parseInt((req.query.limit as string) || "200", 10) || 200, 1), 500);
+      const { reconcilePhantomVehicles, getRecentPhantomPurges } = await import(
+        "./vehicle-create-verification-service"
+      );
+      const [report, purges] = await Promise.all([
+        reconcilePhantomVehicles({ limit }),
+        getRecentPhantomPurges(25),
+      ]);
+      return res.json({ ...report, recentPurges: purges });
+    } catch (err: any) {
+      console.error("[BYOV] GET /api/byov/phantom-vehicles error:", err.message);
+      return res.status(500).json({ message: err.message || "Phantom reconciliation failed" });
+    }
+  });
+
+  // POST /api/byov/phantom-vehicles/purge — reviewed cleanup. The caller must name
+  // the exact vehicle numbers from the report AND confirm explicitly; every number
+  // is re-classified against live Holman before it is touched.
+  app.post("/api/byov/phantom-vehicles/purge", requireAuth, async (req: any, res) => {
+    const currentUser = requireByovAdmin(req, res);
+    if (!currentUser) return;
+    try {
+      const { vehicleNumbers, confirm } = req.body ?? {};
+      if (confirm !== true) {
+        return res.status(400).json({
+          message: "Cleanup must be confirmed. Re-send with confirm: true after reviewing the report.",
+        });
+      }
+      if (!Array.isArray(vehicleNumbers) || vehicleNumbers.length === 0) {
+        return res.status(400).json({ message: "vehicleNumbers must be a non-empty array." });
+      }
+      const { purgePhantomVehicles } = await import("./vehicle-create-verification-service");
+      const result = await purgePhantomVehicles(
+        vehicleNumbers.map((n: unknown) => String(n)),
+        String(currentUser.username ?? currentUser.id ?? "admin"),
+      );
+      return res.json({ success: true, ...result });
+    } catch (err: any) {
+      console.error("[BYOV] POST /api/byov/phantom-vehicles/purge error:", err.message);
+      return res.status(500).json({ message: err.message || "Purge failed" });
     }
   });
 

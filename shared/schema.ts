@@ -2835,9 +2835,49 @@ export const byovCreationAudit = pgTable("byov_creation_audit", {
   tpmsError: text("tpms_error"),
   tpmsResponse: jsonb("tpms_response"),
   tpmsSubmittedAt: timestamp("tpms_submitted_at"),
+  // ── Task #638: post-create read-back verification ──────────────────────────
+  // A Holman submit is a queue receipt, not an applied record, so the attempt is
+  // only resolved once each targeted system has been READ BACK live:
+  //   pending    — inside the read-back window, not yet resolved
+  //   confirmed  — every targeted system returned the vehicle
+  //   partial    — present in some targeted systems, absent from others
+  //   failed     — positively absent everywhere (number released via blockedSource)
+  //   unverified — the window closed without a conclusive read (number stays held)
+  // NOTE: AMS is never one of the verified systems — it is written by a downstream
+  // sync ~24h later, so its absence right after a create is expected.
+  verificationState: varchar("verification_state", { length: 20 }).default("pending"),
+  verificationDetail: text("verification_detail"),
+  verificationAttempts: integer("verification_attempts").default(0),
+  verificationCheckedAt: timestamp("verification_checked_at"),
+  verifiedAt: timestamp("verified_at"),
+  // Per-system read-back observations ({ holman: {checked, found, detail}, ... }).
+  verificationSystems: jsonb("verification_systems"),
 });
 
 export type ByovCreationAuditEntry = typeof byovCreationAudit.$inferSelect;
+
+// ===============================
+// Phantom vehicle purge log (Task #638)
+// One row per locally cached Holman vehicle removed by the reviewed cleanup path.
+// The purge deletes a local cache row only — never anything in Holman, WMS or TPMS —
+// so this table is the record of what was removed and which number it freed.
+// ===============================
+
+export const byovPhantomPurges = pgTable("byov_phantom_purges", {
+  id: serial("id").primaryKey(),
+  vehicleNumber: varchar("vehicle_number", { length: 20 }).notNull(),
+  purgedAt: timestamp("purged_at").defaultNow().notNull(),
+  purgedBy: varchar("purged_by", { length: 100 }).notNull(),
+  reason: text("reason"),
+  /** The audit row the phantom traced back to, when there was one. */
+  auditId: integer("audit_id"),
+  /** The cache row exactly as it was before deletion, so it can be reconstructed. */
+  cacheRow: jsonb("cache_row"),
+  /** Whether the held vehicle number was released back into circulation. */
+  numberReleased: boolean("number_released").default(false),
+});
+
+export type ByovPhantomPurge = typeof byovPhantomPurges.$inferSelect;
 
 // ===============================
 // District Cost Centers (Task 207)

@@ -16,9 +16,18 @@ import { sql } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
 import { wmsEngineService } from "./wms-engine-service";
 import { toHolmanRef, toCanonical } from "./vehicle-number-utils";
+import {
+  getCreateVerificationReport,
+  sweepUnverifiedCreates,
+  type CreateVerificationEntry,
+} from "./vehicle-create-verification-service";
+import { emptyVerificationCounts, type CreateVerificationCounts } from "./vehicle-create-verification";
 
 const DELAY_MS = 300;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** How far back the creation read-back section looks. */
+const CREATE_VERIFICATION_WINDOW_DAYS = 14;
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +43,27 @@ export interface ByovMismatch {
   wmsDetail: string;
 }
 
+/**
+ * Task #638 — the creation read-back section of the same report.
+ *
+ * A create is only real once the vehicle has been read back out of the systems it
+ * was submitted to, so this carries the attempts that are still unconfirmed, the
+ * ones that failed verification, and the ones that only partially landed.
+ *
+ * AMS is deliberately not part of it: AMS records are written by a downstream sync
+ * roughly 24 hours after the Holman record exists, so a fresh create is expected to
+ * be absent from AMS and must never be reported as a gap.
+ */
+export interface ByovCreateVerificationSection {
+  counts: CreateVerificationCounts;
+  /** Creates an administrator has to act on (pending / failed / partial / unverified). */
+  attention: CreateVerificationEntry[];
+  /** How many stale 'pending' attempts this run re-read. */
+  swept: number;
+  windowDays: number;
+  error?: string;
+}
+
 export interface ByovVerificationResult {
   runAt: Date;
   triggeredBy: string;
@@ -42,6 +72,7 @@ export interface ByovVerificationResult {
   wmsFailCount: number;
   mismatches: ByovMismatch[];
   durationMs: number;
+  createVerification: ByovCreateVerificationSection;
 }
 
 // ---------------------------------------------------------------------------
@@ -183,6 +214,36 @@ export async function runByovDriftCheck(triggeredBy = "scheduler"): Promise<Byov
     }
   }
 
+  // ── Creation read-back section (Task #638) ────────────────────────────────
+  // Resolve anything still sitting on 'pending' first (the create route's in-process
+  // verifier dies with the process on autoscale, so this level-triggered sweep is
+  // what actually guarantees an attempt gets resolved), then report the state of
+  // every recent create.
+  let createVerification: ByovCreateVerificationSection = {
+    counts: emptyVerificationCounts(),
+    attention: [],
+    swept: 0,
+    windowDays: CREATE_VERIFICATION_WINDOW_DAYS,
+  };
+  try {
+    const swept = await sweepUnverifiedCreates();
+    const report = await getCreateVerificationReport(CREATE_VERIFICATION_WINDOW_DAYS);
+    createVerification = {
+      counts: report.counts,
+      attention: report.attention,
+      swept: swept.scanned,
+      windowDays: report.windowDays,
+    };
+    console.log(
+      `[BYOV-Drift] Create verification — swept ${swept.scanned}, ` +
+        `pending: ${report.counts.pending}, failed: ${report.counts.failed}, ` +
+        `partial: ${report.counts.partial}, unverified: ${report.counts.unverified}`,
+    );
+  } catch (err: any) {
+    createVerification.error = err?.message ?? String(err);
+    console.error("[BYOV-Drift] Create verification section failed:", createVerification.error);
+  }
+
   const durationMs = Date.now() - startTime;
   const totalChecked = enrolled.length;
 
@@ -195,10 +256,14 @@ export async function runByovDriftCheck(triggeredBy = "scheduler"): Promise<Byov
   try {
     await db.execute(sql`
       INSERT INTO byov_drift_checks
-        (run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms)
+        (run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms,
+         create_pending_count, create_failed_count, create_partial_count, create_unverified_count, create_issues)
       VALUES
         (${runAt.toISOString()}, ${triggeredBy}, ${totalChecked}, ${holmanFailCount}, ${wmsFailCount},
-         ${JSON.stringify(mismatches)}::jsonb, ${durationMs})
+         ${JSON.stringify(mismatches)}::jsonb, ${durationMs},
+         ${createVerification.counts.pending}, ${createVerification.counts.failed},
+         ${createVerification.counts.partial}, ${createVerification.counts.unverified},
+         ${JSON.stringify(createVerification.attention)}::jsonb)
     `);
   } catch (err: any) {
     console.error("[BYOV-Drift] Failed to persist run result:", err.message);
@@ -212,6 +277,7 @@ export async function runByovDriftCheck(triggeredBy = "scheduler"): Promise<Byov
     wmsFailCount,
     mismatches,
     durationMs,
+    createVerification,
   };
 }
 

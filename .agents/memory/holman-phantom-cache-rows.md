@@ -1,14 +1,23 @@
 ---
 name: Holman phantom cache rows
-description: Failed assigns leave phantom manual rows in holman_vehicles_cache forever (sync is upsert-only); self-heal must key on manual+never-synced, NOT number format — real Holman numbers can be alphanumeric.
+description: Phantom rows in holman_vehicles_cache come from two different write-throughs; the only guard both share is last_holman_sync_at IS NULL — data_source and number format both lie. Cleanup must fail closed.
 ---
 
-# Holman phantom cache rows & the mismatch self-heal
+# Holman phantom cache rows
 
-**Rule:** A write-through assign whose truck number is bogus (e.g. a user typing "byov" → "00byov") can fail in TPMS but still write a local `holman_vehicles_cache` row (`data_source='manual'`, `last_holman_sync_at` NULL). The nightly Holman sync is upsert-only — it never deletes rows Holman doesn't return — so the phantom pins a permanent "Holman assigned / TPMS blank" mismatch until something removes it. The mismatch builder (`buildMismatchRecords`) now self-heals these: deactivates (`is_active=false`, tech fields cleared) rows matching ALL of (a) `data_source='manual'`, (b) `last_holman_sync_at IS NULL`, (c) number fails `^[0-9]{1,6}$`, and drops them from results only if the guarded UPDATE succeeded.
+**Rule:** `holman_vehicles_cache` accumulates rows for vehicles that do not exist in Holman, from two unrelated write-through paths:
 
-**Why:** Prod incident 2026-07-24: Weekly Onboarding assign to "byov" — TPMS rejected it, Holman leg wrote the phantom, mismatch persisted through every sync. Prod DB is read-only via tooling, so the fix had to be an in-code self-heal that fires on the first mismatch refresh after publish.
+1. **Failed assign** — a bogus truck number (e.g. a user typing "byov" → "00byov") fails in TPMS but the Holman leg still writes a local row (`data_source='manual'`).
+2. **Optimistic create** — Create Vehicle mirrored a row off a bare Holman submit 2xx. Holman's submit is a QUEUE RECEIPT, not an applied record, so a rejected submission left a complete-looking row (`data_source='holman'`). That row then poisoned the number guard, the VIN guard and the allocator — the create corrupting its own future inputs.
 
-**Critical fact — number format is NOT a safe discriminator:** Real, sync-confirmed Holman vehicle numbers CAN be alphanumeric (live examples: `24024B`, `44801A`, `89482A`, `D4329`, `T0003`, `A06431`). Any phantom/garbage detection must lean on `data_source='manual'` + `last_holman_sync_at IS NULL` as the load-bearing guards; the write-through upsert never resets `dataSource` on conflict, so a real synced truck can never look "manual + never-synced". Never relax those two guards in favor of a number-format check.
+The nightly sync is upsert-only and never deletes, so both persist until something removes them.
 
-**How to apply:** When adding any cleanup/validation over `holman_vehicles_cache` (or reasoning about "impossible" vehicle numbers anywhere), check provenance columns first, not the number shape. A wrongly-healed same-day new alphanumeric vehicle self-recovers on the next full Holman sync (upsert resets `isActive`/`dataSource`/tech fields).
+**The one provenance guard both classes share is `last_holman_sync_at IS NULL`.** Only a real Holman sync stamps it, and no write-through path sets it. `data_source` does NOT discriminate (class 2 says `'holman'`), and neither does number shape: real sync-confirmed Holman numbers can be alphanumeric (`24024B`, `44801A`, `D4329`, `T0003`). A row that HAS been sync-stamped and is now absent from Holman is a lifecycle change (disposal/transfer), never a phantom.
+
+**Why:** both classes were found in production burning vehicle numbers permanently — a phantom holds its number against the allocator and can block re-submission of the same VIN. Cleanup deletes rows, so a wrong verdict destroys a real vehicle's record.
+
+**How to apply — cleanup must fail closed:**
+- A live Holman lookup that could not complete is its own verdict ("unverifiable"), never "absent".
+- Inside a ~24h grace window a row is "too new to judge": Holman applies asynchronously and the nightly sync has not run yet. This lagging-cache case is the one most likely to be wrongly purged.
+- Require a linked create/assign attempt; an unexplained row is not automatically a phantom.
+- Never substitute a number-format check for the provenance guards.
