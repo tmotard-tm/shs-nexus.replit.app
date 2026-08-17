@@ -40,3 +40,8 @@ only. If a future WS-drop mitigation is wanted, handle it at the app layer
 (bounded-stale cache / retry), never by switching the pool to fetch transport.
 **Why:** the fetch path silently corrupts booleans app-wide AND splits
 transaction/session semantics from single-query transport for zero benefit.
+
+## App pool driver: DATE columns come back as strings
+The app's pool driver (server/db.ts) returns Postgres DATE columns as 'YYYY-MM-DD' strings — NOT js Date objects.
+**Why:** verified empirically 2026-08-16 (`SELECT '2026-08-17'::date` → typeof string). Cutover code relies on `String(row.event_date).slice(0,10)` for event-day math; a driver/type-parser change would silently break every date comparison.
+**How to apply:** date-vs-today logic may trust the string form through this driver; re-verify before swapping drivers or adding pg-types parsers.
