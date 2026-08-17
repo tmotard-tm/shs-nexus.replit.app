@@ -9,14 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { useHasPermission } from "@/hooks/use-permissions";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert, RefreshCw } from "lucide-react";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert, RefreshCw, Clock, Lock, LockOpen, MinusCircle, HelpCircle, FlaskConical, Ban } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
@@ -38,6 +38,26 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { ByovCreationAuditEntry } from "@shared/schema";
+import {
+  IDLE_VERDICT,
+  applyRetryResponse,
+  combinePreflight,
+  createNumberPreflight,
+  createVinPreflight,
+  describeGate,
+  describeNumberHold,
+  describeOutcome,
+  describeRefusal,
+  getJson,
+  postJson,
+  runNumberCheck,
+  type CheckVerdict,
+  type GateState,
+  type NumberHold,
+  type RefusalBody,
+  type SubmitResponse,
+  type SystemRow,
+} from "@/lib/vehicle-create-preflight";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -75,12 +95,13 @@ interface FormState {
   regRenewalDate: string;
 }
 
-interface SubmitResult {
-  holman: { success: boolean; error?: string };
-  wms: { success: boolean; error?: string };
-  tpms?: { success: boolean; skipped?: boolean; error?: string };
-  holmanOnly?: boolean;
-}
+/**
+ * The create/retry endpoints answer with the Task #636 contract: per-system
+ * results that can be `pending` (submitted, acceptance not established), a
+ * `summary` of what was actually attempted, a `requestId` for support, and a
+ * rehearsal shape that reports what WOULD have been sent.
+ */
+type SubmitResult = SubmitResponse;
 
 const today = new Date().toISOString().split("T")[0];
 
@@ -119,13 +140,42 @@ export default function CreateVehicle() {
   const [backfilling, setBackfilling] = useState(false);
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
-  const [vehicleExistsWarning, setVehicleExistsWarning] = useState<string | null>(null);
-  const [checkingVehicle, setCheckingVehicle] = useState(false);
-  const [vinDuplicateWarning, setVinDuplicateWarning] = useState<string | null>(null);
+  // Preflight: one verdict per check, mirroring the fail-closed server gate.
+  const [numberVerdict, setNumberVerdict] = useState<CheckVerdict>(IDLE_VERDICT);
+  // The value numberVerdict actually describes, so a verdict for a number the
+  // user has since edited is never mistaken for a verdict on the current one.
+  const [numberCheckedValue, setNumberCheckedValue] = useState("");
+  const [vinVerdict, setVinVerdict] = useState<CheckVerdict>(IDLE_VERDICT);
+  // The suggested number is a real reservation, not a recommendation.
+  const [numberHold, setNumberHold] = useState<NumberHold | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
   const [holmanOnlyMode, setHolmanOnlyMode] = useState(false);
+  const [holmanProbe, setHolmanProbe] = useState<{ checking: boolean; result: string | null }>({
+    checking: false,
+    result: null,
+  });
+  // A rehearsed retry sent nothing, so it must never be folded into the real
+  // outcome above it — it is reported separately, as a rehearsal.
+  const [retryRehearsal, setRetryRehearsal] = useState<{ label: string; response: SubmitResult } | null>(null);
+
+  // ── Creation gate (Task #636) ────────────────────────────────────────────────
+  // Fail-safe OFF on the server, so the form says up front whether a submission
+  // will be accepted at all, or will only be rehearsed.
+  const gateQuery = useQuery<GateState>({
+    queryKey: ["/api/admin/vehicle-create/gate"],
+    queryFn: async () => {
+      const resp = await getJson<GateState>("/api/admin/vehicle-create/gate");
+      if (!resp.ok || !resp.body) throw new Error("Could not read the vehicle-creation gate");
+      return { enabled: !!resp.body.enabled, rehearsalMode: !!resp.body.rehearsalMode };
+    },
+    staleTime: 60_000,
+  });
+  const gateBanner = describeGate(gateQuery.data ?? null, gateQuery.isError);
+  const creationDisabled = gateBanner.submissionsRefused;
+  const rehearsalMode = gateBanner.kind === "rehearsal";
 
   const [exportFrom, setExportFrom] = useState(() => {
     try { return localStorage.getItem("byov-export-from") ?? ""; } catch { return ""; }
@@ -201,7 +251,8 @@ export default function CreateVehicle() {
   const setSelect = (field: keyof FormState) => (value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
 
-  // Auto-fill Model Year, Make, Model, and Asset Type from the VIN.
+  // Auto-fill Model Year, Make, Model, and Asset Type from the VIN, and run the
+  // VIN half of the preflight at the same time.
   const [decodingVin, setDecodingVin] = useState(false);
   const lastDecodedVinRef = useRef<string>("");
   const decodeSeqRef = useRef(0);
@@ -209,7 +260,6 @@ export default function CreateVehicle() {
     const vin = form.vin.trim().toUpperCase();
     if (vin.length !== 17) {
       setDecodingVin(false);
-      setVinDuplicateWarning(null);
       return;
     }
     if (lastDecodedVinRef.current === vin) return;
@@ -218,12 +268,8 @@ export default function CreateVehicle() {
     const isCurrent = () => decodeSeqRef.current === seq;
     (async () => {
       setDecodingVin(true);
-      setVinDuplicateWarning(null);
       try {
-        const [decodeResp, vinCheckResp] = await Promise.all([
-          apiRequest("GET", `/api/vin/decode/${encodeURIComponent(vin)}`),
-          fetch(`/api/byov/check-vin/${encodeURIComponent(vin)}`, { credentials: "include" }),
-        ]);
+        const decodeResp = await apiRequest("GET", `/api/vin/decode/${encodeURIComponent(vin)}`);
         const data = await decodeResp.json();
         if (!isCurrent()) return;
         if (data?.decoded) {
@@ -247,19 +293,11 @@ export default function CreateVehicle() {
             variant: "destructive",
           });
         }
-        if (vinCheckResp.ok && isCurrent()) {
-          const vinData = await vinCheckResp.json();
-          if (vinData?.exists && vinData.matches?.length > 0) {
-            const first = vinData.matches[0];
-            const label = [first.modelYear, first.make, first.model].filter(Boolean).join(" ");
-            setVinDuplicateWarning(
-              `This VIN is already registered as vehicle ${first.vehicleNumber}${label ? ` (${label})` : ""}. Submitting will be blocked unless this is intentional.`
-            );
-          }
-        }
       } catch {
         if (isCurrent()) {
           lastDecodedVinRef.current = ""; // allow a retry
+          // Note: the VIN gate is NOT touched here. Decoding is a convenience;
+          // losing it must not discard a duplicate or format verdict.
           toast({
             title: "VIN lookup failed",
             description: "Could not reach the VIN service. Please enter the details manually.",
@@ -315,31 +353,49 @@ export default function CreateVehicle() {
     }
   }, []);
 
-  const checkVehicleExists = async (vehicleNumber: string) => {
-    const trimmed = vehicleNumber.trim();
-    if (!trimmed) { setVehicleExistsWarning(null); return; }
-    setCheckingVehicle(true);
-    try {
-      const resp = await fetch(`/api/holman/vehicles/exists/${encodeURIComponent(trimmed)}`, {
-        credentials: "include",
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.exists) {
-          setVehicleExistsWarning(
-            `Vehicle ${trimmed} already exists in Holman (canonical: ${data.canonical}). Please use a different number.`
-          );
-        } else {
-          setVehicleExistsWarning(null);
-        }
-      } else {
-        setVehicleExistsWarning(null);
-      }
-    } catch {
-      setVehicleExistsWarning(null);
-    } finally {
-      setCheckingVehicle(false);
-    }
+  /**
+   * The two halves of the preflight. Each is sequenced, so a slow answer for a
+   * value the user has since changed is dropped rather than published, and each
+   * always publishes a verdict for the current value — a field edited to
+   * something invalid and back again is re-judged, never left showing the stale
+   * verdict.
+   */
+  const numberPreflight = useRef(
+    createNumberPreflight({
+      publish: (verdict, input) => {
+        setNumberVerdict(verdict);
+        setNumberCheckedValue(input);
+      },
+    }),
+  ).current;
+  const vinPreflight = useRef(createVinPreflight({ publish: setVinVerdict })).current;
+
+  const checkVehicleNumber = (vehicleNumber: string) => numberPreflight.run(vehicleNumber);
+
+  // The VIN gate runs on its own, independent of the optional VIN decode above:
+  // a decode outage must never discard a duplicate verdict.
+  useEffect(() => {
+    void vinPreflight.run(form.vin);
+  }, [form.vin]);
+
+  /**
+   * The number check costs a Holman round-trip, so it is debounced rather than
+   * fired on every keystroke — but it does run while typing. Waiting for blur
+   * left a manually typed number unchecked if the user submitted with Enter
+   * straight from the field.
+   */
+  // Runs for auto-assigned and URL-prefilled numbers too, not just typed ones,
+  // so the field always carries a verdict for whatever is actually in it.
+  useEffect(() => {
+    const timer = setTimeout(() => void numberPreflight.run(form.vehicleNumber), 400);
+    return () => clearTimeout(timer);
+  }, [form.vehicleNumber]);
+
+  /** True while the displayed verdict belongs to an older value of the field. */
+  const numberVerdictStale = form.vehicleNumber.trim() !== numberCheckedValue;
+
+  const rerunPreflight = async () => {
+    await Promise.all([numberPreflight.run(form.vehicleNumber), vinPreflight.run(form.vin)]);
   };
 
   const canManualNumber = useHasPermission("pageFeatures.createVehicle.manualVehicleNumberEntry");
@@ -349,29 +405,53 @@ export default function CreateVehicle() {
   const classLabel =
     form.vehicleClass === "enterprise" ? "Enterprise" : form.vehicleClass === "holman" ? "Holman" : "BYOV";
 
+  /**
+   * The suggestion endpoint HOLDS the number it hands back (tied to this
+   * session, expiring on abandonment), so the form reports it as a reservation
+   * with a countdown rather than as a recommendation.
+   */
   const fetchNextNumber = async (cls: string) => {
     setLoadingNextNumber(true);
     try {
-      const resp = await fetch(`/api/byov/next-number?class=${encodeURIComponent(cls)}`, {
-        credentials: "include",
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data.padded) {
-          setForm((prev) => ({ ...prev, vehicleNumber: data.padded }));
-          setVehicleExistsWarning(null);
-        }
-      } else {
-        toast({
-          title: "Could not get next number",
-          description: "Please try again or enter a number manually.",
-          variant: "destructive",
-        });
+      const resp = await getJson<{
+        padded?: string;
+        recommended?: string;
+        held?: boolean;
+        holdId?: number | null;
+        holdExpiresAt?: string | null;
+        scannedSources?: string[];
+        error?: string;
+        sources?: Array<{ name: string; ok: boolean; error?: string }>;
+      }>(`/api/byov/next-number?class=${encodeURIComponent(cls)}`);
+
+      if (resp.ok && resp.body?.padded) {
+        const padded = resp.body.padded;
+        setForm((prev) => ({ ...prev, vehicleNumber: padded }));
+        setNumberHold(
+          resp.body.held
+            ? {
+                number: padded,
+                holdId: resp.body.holdId ?? null,
+                expiresAt: resp.body.holdExpiresAt ?? null,
+                scannedSources: resp.body.scannedSources ?? [],
+              }
+            : null,
+        );
+        setNowMs(Date.now());
+        void checkVehicleNumber(padded);
+        return;
       }
-    } catch {
+
+      // A refusal here is specific and worth repeating verbatim: an incomplete
+      // source scan (503) must never be rounded off to "try again".
+      const unreachable = (resp.body?.sources || []).filter((s) => !s.ok).map((s) => s.name);
       toast({
-        title: "Could not get next number",
-        description: "Please check your connection and try again.",
+        title: resp.status === 503 ? "Number allocation is unavailable" : "Could not get next number",
+        description:
+          resp.body?.error ||
+          resp.transportError ||
+          "Please try again or enter a number manually." +
+            (unreachable.length ? ` Unreachable: ${unreachable.join(", ")}.` : ""),
         variant: "destructive",
       });
     } finally {
@@ -384,36 +464,113 @@ export default function CreateVehicle() {
     fetchNextNumber(value);
   };
 
-  // Auto-suggest a number for the default class on first load, unless a number was prefilled via URL.
+  // Auto-suggest (and hold) a number for the default class on first load, unless
+  // a number was prefilled via URL — a prefilled number is still preflighted.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    if (params.get("vehicleNumber")) return;
+    const prefilled = params.get("vehicleNumber");
+    if (prefilled) {
+      void checkVehicleNumber(prefilled);
+      return;
+    }
     fetchNextNumber(emptyForm.vehicleClass);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Tick while a hold is live so the countdown — and the lapsed state — are real.
+  const holdStatus = describeNumberHold({ hold: numberHold, currentNumber: form.vehicleNumber, nowMs });
+  const holdCountingDown = holdStatus.state === "held" || holdStatus.state === "expiring";
+  useEffect(() => {
+    if (!holdCountingDown) return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [holdCountingDown]);
+
+  const preflight = combinePreflight(numberVerdict, vinVerdict);
+
+  // One source of truth for "can this be submitted", so the button state, its
+  // tooltip and the warning text can never disagree.
+  const outcome = describeOutcome(submitResult);
+  const submitBlockedReason = showConfirmDialog
+    ? "Confirm or cancel the dialog above"
+    : creationDisabled
+      ? gateBanner.detail
+      : preflight.blocked
+        ? preflight.blockingReasons.join(" ")
+        : preflight.checking
+          ? "Waiting for the duplicate checks to finish"
+          : // A number typed but not yet checked must not slip through, e.g. by
+            // submitting with Enter straight from the field.
+            numberVerdictStale && form.vehicleNumber.trim()
+            ? "Checking vehicle number — one moment"
+            : undefined;
+
+  /**
+   * A server refusal is a first-class outcome, not an exception: it is pinned to
+   * the check it belongs to so the inline verdict, the submit button and the
+   * toast all say the same thing, and a lost number hold is shown as lost.
+   */
+  const handleRefusal = (fallbackTitle: string, status: number, body: RefusalBody | null, transportError?: string) => {
+    if (status === 0) {
+      toast({
+        title: fallbackTitle,
+        description: transportError || "The request could not be sent. Check your connection and try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const refusal = describeRefusal(status, body);
+    toast({ title: refusal.title || fallbackTitle, description: refusal.detail, variant: "destructive" });
+
+    // The server's refusal outranks any advisory check still in flight.
+    if (refusal.attachTo === "vin") {
+      vinPreflight.invalidate();
+      setVinVerdict({
+        status: body?.code === "duplicate_check_unavailable" ? "warn" : "block",
+        title: refusal.title,
+        detail: refusal.detail,
+      });
+    } else if (refusal.attachTo === "vehicleNumber") {
+      numberPreflight.invalidate();
+      setNumberVerdict({
+        status: body?.code === "number_check_unavailable" ? "warn" : "block",
+        title: refusal.title,
+        detail: refusal.detail,
+      });
+    }
+    if (refusal.holdLost) setNumberHold(null);
+    if (body?.code === "vehicle_create_disabled") {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/vehicle-create/gate"] });
+    }
+  };
+
   const createMutation = useMutation({
-    mutationFn: async (payload: FormState) => {
-      const resp = await apiRequest("POST", "/api/byov/create", payload);
-      return (await resp.json()) as SubmitResult & { error?: string };
-    },
-    onSuccess: (data, payload) => {
-      if ("error" in data && data.error) {
-        toast({ title: "Submission Blocked", description: data.error, variant: "destructive" });
+    mutationFn: (payload: FormState) => postJson<SubmitResult & RefusalBody>("/api/byov/create", payload),
+    onSuccess: (resp, payload) => {
+      if (!resp.ok || !resp.body) {
+        handleRefusal("Submission Blocked", resp.status, resp.body, resp.transportError);
         return;
       }
+      const data = resp.body;
       setLastSubmittedForm(payload);
-      setSubmitResult(data as SubmitResult);
-      const coreOk = data.holman?.success && data.wms?.success;
-      const tpmsFailed = data.tpms && !data.tpms.skipped && !data.tpms.success;
-      const allOk = coreOk && !tpmsFailed;
+      setSubmitResult(data);
+
+      if (data.rehearsal) {
+        toast({
+          title: "Rehearsal complete — nothing was created",
+          description: "Every gate passed. See exactly what would have been sent below.",
+        });
+        return;
+      }
+
+      const outcome = describeOutcome(data);
       toast({
-        title: allOk ? "Vehicle Created" : "Partial Success",
-        description: allOk
-          ? `${classLabel} vehicle submitted successfully — see per-system results below.`
-          : "One or more systems had an error — see results below.",
-        variant: allOk ? "default" : "destructive",
+        title: outcome?.headline ?? "Submission complete",
+        description: outcome?.detail || `${classLabel} vehicle — see per-system results below.`,
+        variant: outcome?.kind === "success" ? "default" : "destructive",
       });
+      // The number is spent (or released) — the hold no longer applies.
+      setNumberHold(null);
       queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
     },
     onError: (err: Error) => {
@@ -426,22 +583,25 @@ export default function CreateVehicle() {
   });
 
   const retryWmsMutation = useMutation({
-    mutationFn: async (payload: FormState) => {
-      const resp = await apiRequest("POST", "/api/byov/create-wms-only", payload);
-      return (await resp.json()) as { wms: { success: boolean; error?: string }; tpms?: { success: boolean; skipped?: boolean; error?: string }; error?: string };
-    },
-    onSuccess: (data) => {
-      if ("error" in data && data.error) {
-        toast({ title: "WMS Retry Failed", description: data.error, variant: "destructive" });
+    mutationFn: (payload: FormState) => postJson<SubmitResult & RefusalBody>("/api/byov/create-wms-only", payload),
+    onSuccess: (resp) => {
+      if (!resp.ok || !resp.body) {
+        handleRefusal("WMS Retry Failed", resp.status, resp.body, resp.transportError);
         return;
       }
-      setSubmitResult((prev) =>
-        prev ? { ...prev, wms: data.wms, tpms: data.tpms ?? prev.tpms, holmanOnly: !data.wms.success } : prev
-      );
-      if (data.wms.success) {
+      const data = resp.body;
+      const applied = applyRetryResponse(submitResult, data, "WMS retry", "wms");
+      setSubmitResult(applied.submitResult);
+      setRetryRehearsal(applied.retryRehearsal);
+      if (data.rehearsal) {
+        toast({
+          title: "Rehearsal — nothing was retried",
+          description: "Rehearsal mode is on, so nothing was sent to WMS or TPMS. See what would have been sent below.",
+        });
+      } else if (data.wms?.success) {
         toast({ title: "WMS Retry Succeeded", description: "Truck record created in WMS successfully." });
       } else {
-        toast({ title: "WMS Retry Failed", description: data.wms.error || "WMS truck creation failed.", variant: "destructive" });
+        toast({ title: "WMS Retry Failed", description: data.wms?.error || "WMS truck creation failed.", variant: "destructive" });
       }
     },
     onError: (err: Error) => {
@@ -450,23 +610,32 @@ export default function CreateVehicle() {
   });
 
   const retryHolmanMutation = useMutation({
-    mutationFn: async (payload: FormState) => {
-      const resp = await apiRequest("POST", "/api/byov/create-holman-only", payload);
-      return (await resp.json()) as { holman: { success: boolean; error?: string }; error?: string };
-    },
-    onSuccess: (data) => {
-      if ("error" in data && data.error) {
-        toast({ title: "Holman Retry Failed", description: data.error, variant: "destructive" });
+    mutationFn: (payload: FormState) => postJson<SubmitResult & RefusalBody>("/api/byov/create-holman-only", payload),
+    onSuccess: (resp) => {
+      if (!resp.ok || !resp.body) {
+        handleRefusal("Holman Retry Failed", resp.status, resp.body, resp.transportError);
         return;
       }
-      setSubmitResult((prev) =>
-        prev ? { ...prev, holman: data.holman } : prev
-      );
-      if (data.holman.success) {
+      const data = resp.body;
+      const applied = applyRetryResponse(submitResult, data, "Holman retry", "holman");
+      setSubmitResult(applied.submitResult);
+      setRetryRehearsal(applied.retryRehearsal);
+      if (data.rehearsal) {
+        toast({
+          title: "Rehearsal — nothing was retried",
+          description: "Rehearsal mode is on, so nothing was sent to Holman. See what would have been sent below.",
+        });
+      } else if (data.holman?.pending) {
+        toast({
+          title: "Holman did not confirm the retry",
+          description: "The record was submitted but acceptance was not established. Verify in Holman before trying again.",
+          variant: "destructive",
+        });
+      } else if (data.holman?.success) {
         toast({ title: "Holman Retry Succeeded", description: "Vehicle registered in Holman successfully. Fleet Management will reflect this on the next sync." });
         queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
       } else {
-        toast({ title: "Holman Retry Failed", description: data.holman.error || "Holman submission failed.", variant: "destructive" });
+        toast({ title: "Holman Retry Failed", description: data.holman?.error || "Holman submission failed.", variant: "destructive" });
       }
     },
     onError: (err: Error) => {
@@ -475,21 +644,34 @@ export default function CreateVehicle() {
   });
 
   const holmanOnlyMutation = useMutation({
-    mutationFn: async (payload: FormState) => {
-      const resp = await apiRequest("POST", "/api/byov/create-holman-only", payload);
-      return (await resp.json()) as { holman: { success: boolean; error?: string }; error?: string };
-    },
-    onSuccess: (data, payload) => {
-      if ("error" in data && data.error) {
-        toast({ title: "Holman Submission Blocked", description: data.error, variant: "destructive" });
+    mutationFn: (payload: FormState) => postJson<SubmitResult & RefusalBody>("/api/byov/create-holman-only", payload),
+    onSuccess: (resp, payload) => {
+      if (!resp.ok || !resp.body) {
+        handleRefusal("Holman Submission Blocked", resp.status, resp.body, resp.transportError);
         return;
       }
+      const data = resp.body;
       setLastSubmittedForm(payload);
-      setSubmitResult({ holman: data.holman, wms: { success: true, error: undefined } });
-      if (data.holman.success) {
+      // WMS/TPMS were deliberately not targeted — report them as skipped rather
+      // than inventing a success for a system nothing was sent to.
+      setSubmitResult({
+        ...data,
+        holman: data.holman,
+        wms: { success: false, skipped: true, detail: "Holman-only mode — WMS was not touched." },
+        tpms: { success: false, skipped: true, detail: "Holman-only mode — TPMS was not touched." },
+      });
+      if (data.rehearsal) {
+        toast({ title: "Rehearsal complete — nothing was created", description: "Rehearsal mode is on, so nothing was sent to Holman." });
+      } else if (data.holman?.pending) {
+        toast({
+          title: "Submitted — pending verification",
+          description: "Holman accepted the request but did not confirm it. Verify before re-submitting — a retry could create a duplicate.",
+          variant: "destructive",
+        });
+      } else if (data.holman?.success) {
         toast({ title: "Holman Registration Complete", description: "Vehicle submitted to Holman. Fleet Management will reflect this on the next sync." });
       } else {
-        toast({ title: "Holman Submission Failed", description: data.holman.error || "Holman submission failed.", variant: "destructive" });
+        toast({ title: "Holman Submission Failed", description: data.holman?.error || "Holman submission failed.", variant: "destructive" });
       }
       queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
     },
@@ -497,6 +679,33 @@ export default function CreateVehicle() {
       toast({ title: "Holman Submission Failed", description: err.message || "An unexpected error occurred.", variant: "destructive" });
     },
   });
+
+  /**
+   * Recovery action for a pending Holman submission: read Holman back instead of
+   * re-submitting, because a retry on an unconfirmed create is how duplicates
+   * get made.
+   */
+  const probeHolmanForNumber = async (vehicleNumber: string) => {
+    setHolmanProbe({ checking: true, result: null });
+    const verdict = await runNumberCheck(vehicleNumber);
+    const landed = verdict.status === "block"; // "already exists" here means it landed
+    setHolmanProbe({
+      checking: false,
+      result:
+        verdict.status === "warn"
+          ? `Still cannot reach Holman to verify ${vehicleNumber}. Try again shortly — do not re-submit.`
+          : landed
+            ? `Confirmed: vehicle ${vehicleNumber} now exists in Holman. Nothing further is needed.`
+            : `Holman still has no record of ${vehicleNumber}. It may not have landed — retry Holman only, or check again in a few minutes.`,
+    });
+    toast({
+      title: landed ? "Confirmed in Holman" : "Not confirmed yet",
+      description: landed
+        ? `Vehicle ${vehicleNumber} is present in Holman.`
+        : `Holman has no record of ${vehicleNumber} yet.`,
+      variant: landed ? "default" : "destructive",
+    });
+  };
 
   const REQUIRED_FIELDS: { key: keyof FormState; label: string }[] = [
     { key: "vehicleNumber", label: "Vehicle number" },
@@ -519,10 +728,33 @@ export default function CreateVehicle() {
     { key: "regRenewalDate", label: "Registration renewal date" },
   ];
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (vehicleExistsWarning) {
-      toast({ title: "Duplicate Vehicle", description: vehicleExistsWarning, variant: "destructive" });
+    if (creationDisabled) {
+      toast({ title: gateBanner.title, description: gateBanner.detail, variant: "destructive" });
+      return;
+    }
+    // The number check normally runs as the user types, but a submit can land
+    // before the debounce fires — pressing Enter straight from the field. Settle
+    // it here rather than letting an unchecked number reach the server.
+    if (numberVerdictStale && form.vehicleNumber.trim()) {
+      const verdict = await numberPreflight.run(form.vehicleNumber);
+      if (verdict.status === "block") {
+        toast({ title: verdict.title, description: verdict.detail, variant: "destructive" });
+        return;
+      }
+    }
+    // Any blocking verdict blocks — not just the vehicle-number one.
+    if (preflight.blocked) {
+      toast({
+        title: "Submission blocked",
+        description: preflight.blockingReasons.join(" "),
+        variant: "destructive",
+      });
+      return;
+    }
+    if (preflight.checking) {
+      toast({ title: "Checks still running", description: "Give the duplicate checks a moment to finish." });
       return;
     }
     const missing = REQUIRED_FIELDS.filter(({ key }) => !form[key] || String(form[key]).trim() === "");
@@ -540,6 +772,8 @@ export default function CreateVehicle() {
   const handleConfirm = () => {
     setShowConfirmDialog(false);
     setSubmitResult(null);
+    setRetryRehearsal(null);
+    setHolmanProbe({ checking: false, result: null });
     if (holmanOnlyMode) {
       holmanOnlyMutation.mutate(form);
     } else {
@@ -550,9 +784,15 @@ export default function CreateVehicle() {
   const handleReset = () => {
     setForm(emptyForm);
     setSubmitResult(null);
-    setVehicleExistsWarning(null);
+    setNumberVerdict(IDLE_VERDICT);
+    setVinVerdict(IDLE_VERDICT);
+    setNumberHold(null);
+    setHolmanProbe({ checking: false, result: null });
+    setRetryRehearsal(null);
     setLastSubmittedForm(null);
     setHolmanOnlyMode(false);
+    lastDecodedVinRef.current = "";
+    fetchNextNumber(emptyForm.vehicleClass);
   };
 
   const applyExportPreset = (preset: string) => {
@@ -662,6 +902,31 @@ export default function CreateVehicle() {
                 </div>
                 <CopyLinkButton variant="icon" preserveQuery preserveHash className="shrink-0" />
               </div>
+
+              {/* Say up front whether a submission will actually be accepted. */}
+              {gateBanner.kind && (
+                <Alert
+                  variant={gateBanner.kind === "off" ? "destructive" : "default"}
+                  className={`mt-3 ${
+                    gateBanner.kind === "rehearsal"
+                      ? "border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30"
+                      : gateBanner.kind === "unreadable"
+                        ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30"
+                        : ""
+                  }`}
+                  data-testid="banner-create-gate"
+                >
+                  {gateBanner.kind === "off" ? (
+                    <Ban className="h-4 w-4" />
+                  ) : gateBanner.kind === "rehearsal" ? (
+                    <FlaskConical className="h-4 w-4 text-sky-600 dark:text-sky-400" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  )}
+                  <AlertTitle>{gateBanner.title}</AlertTitle>
+                  <AlertDescription className="text-sm">{gateBanner.detail}</AlertDescription>
+                </Alert>
+              )}
             </CardHeader>
 
             <CardContent>
@@ -701,10 +966,55 @@ export default function CreateVehicle() {
 
                 {/* Section 2: Vehicle Info */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
-                    <Car className="h-5 w-5" />
-                    Vehicle Info
-                  </h3>
+                  <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
+                      <Car className="h-5 w-5" />
+                      Vehicle Info
+                    </h3>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => void rerunPreflight()}
+                      disabled={preflight.checking}
+                      data-testid="button-rerun-preflight"
+                    >
+                      {preflight.checking ? (
+                        <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RefreshCw className="mr-2 h-3.5 w-3.5" />
+                      )}
+                      Re-run checks
+                    </Button>
+                  </div>
+
+                  {/* Preflight: the same checks the server enforces, run up front. */}
+                  <div
+                    className={`rounded-md border p-3 space-y-2 ${
+                      preflight.blocked
+                        ? "border-destructive/50 bg-destructive/5"
+                        : preflight.warnings.length
+                          ? "border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30"
+                          : "bg-muted/40"
+                    }`}
+                    data-testid="panel-preflight"
+                  >
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Duplicate checks
+                    </p>
+                    <CheckVerdictRow label="Vehicle number" verdict={numberVerdict} testId="verdict-vehicle-number" />
+                    <CheckVerdictRow label="VIN" verdict={vinVerdict} testId="verdict-vin" />
+                    {preflight.blocked && (
+                      <p className="text-xs text-destructive font-medium pt-1">
+                        Submission is blocked until this is resolved.
+                      </p>
+                    )}
+                    {!preflight.blocked && preflight.warnings.length > 0 && (
+                      <p className="text-xs text-amber-800 dark:text-amber-300 pt-1">
+                        You can still submit — the server re-runs these checks and will refuse if it finds a duplicate.
+                      </p>
+                    )}
+                  </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
@@ -737,16 +1047,20 @@ export default function CreateVehicle() {
                               canManualNumber
                                 ? (e) => {
                                     setForm((prev) => ({ ...prev, vehicleNumber: e.target.value }));
-                                    setVehicleExistsWarning(null);
+                                    // This check runs on blur, so clear the old
+                                    // verdict and drop any answer still in
+                                    // flight for the previous number.
+                                    numberPreflight.invalidate();
+                                    setNumberVerdict(IDLE_VERDICT);
                                   }
                                 : undefined
                             }
-                            onBlur={canManualNumber ? (e) => checkVehicleExists(e.target.value) : undefined}
+                            onBlur={canManualNumber ? (e) => void checkVehicleNumber(e.target.value) : undefined}
                             readOnly={!canManualNumber}
                             placeholder="e.g. 088095"
-                            className={`${vehicleExistsWarning ? "border-destructive pr-9" : checkingVehicle ? "pr-9" : ""} ${!canManualNumber ? "bg-muted cursor-not-allowed" : ""}`}
+                            className={`${numberVerdict.status === "block" ? "border-destructive pr-9" : numberVerdict.status === "checking" ? "pr-9" : ""} ${!canManualNumber ? "bg-muted cursor-not-allowed" : ""}`}
                           />
-                          {checkingVehicle && (
+                          {numberVerdict.status === "checking" && (
                             <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
                           )}
                         </div>
@@ -757,21 +1071,61 @@ export default function CreateVehicle() {
                           className="shrink-0"
                           onClick={() => fetchNextNumber(form.vehicleClass)}
                           disabled={loadingNextNumber}
-                          title="Get next available number"
+                          title="Get a fresh held number"
                         >
                           {loadingNextNumber ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                         </Button>
                       </div>
-                      {vehicleExistsWarning && (
-                        <Alert variant="destructive" className="py-2">
-                          <AlertTriangle className="h-4 w-4" />
-                          <AlertDescription className="text-sm">{vehicleExistsWarning}</AlertDescription>
-                        </Alert>
+
+                      {/* The hold is a real reservation with a real clock — say so. */}
+                      {holdStatus.state !== "none" && (
+                        <div
+                          className={`flex items-start gap-2 rounded-md border px-2.5 py-2 text-xs ${
+                            holdStatus.state === "held"
+                              ? "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300"
+                              : holdStatus.state === "expiring"
+                                ? "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300"
+                                : holdStatus.state === "lapsed"
+                                  ? "border-destructive/50 bg-destructive/5 text-destructive"
+                                  : "bg-muted/40 text-muted-foreground"
+                          }`}
+                          data-testid="status-number-hold"
+                        >
+                          {holdStatus.state === "held" ? (
+                            <Lock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                          ) : holdStatus.state === "expiring" ? (
+                            <Clock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                          ) : (
+                            <LockOpen className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                          )}
+                          <div className="space-y-1">
+                            <p className="font-medium">
+                              {holdStatus.title}
+                              {holdStatus.remainingLabel ? ` — ${holdStatus.remainingLabel} left` : ""}
+                            </p>
+                            <p className="opacity-90">{holdStatus.detail}</p>
+                            {(holdStatus.state === "lapsed" || holdStatus.state === "expiring") && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 mt-1"
+                                onClick={() => fetchNextNumber(form.vehicleClass)}
+                                disabled={loadingNextNumber}
+                                data-testid="button-fresh-number"
+                              >
+                                {loadingNextNumber && <Loader2 className="mr-2 h-3 w-3 animate-spin" />}
+                                Get a fresh number
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       )}
+
                       <p className="text-xs text-muted-foreground">
                         {canManualNumber
-                          ? "Auto-assigned from the selected class — edit if needed. Zero-padded to 6 digits."
-                          : "Auto-assigned from the selected class. Zero-padded to 6 digits."}
+                          ? "Auto-assigned and held from the selected class — edit if needed. Zero-padded to 6 digits."
+                          : "Auto-assigned and held from the selected class. Zero-padded to 6 digits."}
                       </p>
                     </div>
 
@@ -781,22 +1135,31 @@ export default function CreateVehicle() {
                         <Input
                           id="vin"
                           value={form.vin}
-                          onChange={(e) => {
-                            set("vin")(e);
-                            setVinDuplicateWarning(null);
-                          }}
+                          // The VIN gate effect is the sole publisher of this
+                          // verdict, so editing does not clear it here — it is
+                          // re-judged for the new value on the next render.
+                          onChange={set("vin")}
                           placeholder="17-character VIN"
                           maxLength={17}
-                          className={`uppercase ${decodingVin ? "pr-9" : ""} ${vinDuplicateWarning ? "border-amber-500" : ""}`}
+                          className={`uppercase ${decodingVin ? "pr-9" : ""} ${vinVerdict.status === "block" ? "border-destructive" : vinVerdict.status === "warn" ? "border-amber-500" : ""}`}
                         />
                         {decodingVin && (
                           <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
                         )}
                       </div>
-                      {vinDuplicateWarning ? (
+                      {vinVerdict.status === "block" ? (
+                        <Alert variant="destructive" className="py-2" data-testid="alert-vin-blocked">
+                          <Ban className="h-4 w-4" />
+                          <AlertDescription className="text-sm">
+                            {vinVerdict.detail || vinVerdict.title} This VIN cannot be submitted.
+                          </AlertDescription>
+                        </Alert>
+                      ) : vinVerdict.status === "warn" ? (
                         <Alert className="py-2 border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
                           <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
-                          <AlertDescription className="text-sm text-amber-800 dark:text-amber-300">{vinDuplicateWarning}</AlertDescription>
+                          <AlertDescription className="text-sm text-amber-800 dark:text-amber-300">
+                            {vinVerdict.detail || vinVerdict.title}
+                          </AlertDescription>
                         </Alert>
                       ) : (
                         <p className="text-xs text-muted-foreground">
@@ -1005,24 +1368,29 @@ export default function CreateVehicle() {
                   >
                     {(createMutation.isPending || holmanOnlyMutation.isPending) ? "Submitting vehicle, please wait…" : ""}
                   </div>
-                  <span
-                    className="flex-1"
-                    title={
-                      showConfirmDialog
-                        ? "Confirm or cancel the dialog above"
-                        : vehicleExistsWarning
-                        ? "Resolve the vehicle conflict above before submitting"
-                        : undefined
-                    }
-                  >
+                  <span className="flex-1" title={submitBlockedReason}>
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={createMutation.isPending || holmanOnlyMutation.isPending || showConfirmDialog || !!vehicleExistsWarning}
+                      disabled={
+                        createMutation.isPending ||
+                        holmanOnlyMutation.isPending ||
+                        showConfirmDialog ||
+                        !!submitBlockedReason
+                      }
                       aria-describedby={showConfirmDialog ? "confirm-dialog-hint" : undefined}
+                      data-testid="button-submit-vehicle"
                     >
                       {(createMutation.isPending || holmanOnlyMutation.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {(createMutation.isPending || holmanOnlyMutation.isPending) ? "Submitting…" : holmanOnlyMode ? "Register in Holman" : "Create Vehicle"}
+                      {(createMutation.isPending || holmanOnlyMutation.isPending)
+                        ? "Submitting…"
+                        : creationDisabled
+                          ? "Vehicle creation is off"
+                          : preflight.blocked
+                            ? "Blocked — resolve the checks above"
+                            : rehearsalMode
+                              ? holmanOnlyMode ? "Rehearse Holman registration" : "Rehearse Create Vehicle"
+                              : holmanOnlyMode ? "Register in Holman" : "Create Vehicle"}
                     </Button>
                   </span>
                   <Button type="button" variant="outline" onClick={handleReset}>
@@ -1034,57 +1402,177 @@ export default function CreateVehicle() {
           </Card>
 
           {/* Results Panel */}
-          {submitResult && (
-            <Card>
+          {submitResult && outcome && (
+            <Card data-testid="panel-submission-results">
               <CardHeader>
-                <CardTitle className="text-base">Submission Results</CardTitle>
-                <CardDescription>Per-system status for the most recent submission</CardDescription>
+                <div className="flex items-start justify-between gap-3">
+                  <div className="space-y-1">
+                    <CardTitle className="text-base flex items-center gap-2">
+                      {outcome.kind === "success" ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : outcome.kind === "pending" ? (
+                        <Clock className="h-4 w-4 text-amber-600" />
+                      ) : outcome.kind === "rehearsal" ? (
+                        <FlaskConical className="h-4 w-4 text-sky-600" />
+                      ) : (
+                        <AlertTriangle className="h-4 w-4 text-destructive" />
+                      )}
+                      {outcome.headline}
+                    </CardTitle>
+                    <CardDescription>{outcome.detail}</CardDescription>
+                  </div>
+                  {submitResult.requestId && (
+                    <Badge variant="outline" className="shrink-0 font-mono text-[10px]" title="Quote this when asking for help">
+                      {submitResult.requestId}
+                    </Badge>
+                  )}
+                </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <SystemResultRow system="Holman" result={submitResult.holman} />
-                <SystemResultRow system="WMS" result={submitResult.wms} />
-                {submitResult.tpms && !submitResult.tpms.skipped && (
-                  <SystemResultRow system="TPMS" result={submitResult.tpms} />
+                {outcome.rows.map((row) => (
+                  <SystemResultRow key={row.system} row={row} />
+                ))}
+
+                {/* Rehearsal: show what WOULD have been sent, never imply a create. */}
+                {submitResult.rehearsal && (
+                  <div className="rounded-md border border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 p-3 space-y-2 text-sm">
+                    <p className="font-medium text-sky-900 dark:text-sky-200">
+                      {submitResult.message || "Rehearsal mode — no external system was contacted."}
+                    </p>
+                    {submitResult.gates && (
+                      <ul className="text-xs text-sky-900/90 dark:text-sky-200/90 space-y-0.5">
+                        {Object.entries(submitResult.gates).map(([gate, verdict]) => (
+                          <li key={gate}>
+                            <span className="font-medium">{gate}</span>: {String(verdict)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {submitResult.wouldSend && (
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-sky-800 dark:text-sky-300">
+                          What would have been sent
+                        </summary>
+                        <pre className="mt-2 max-h-64 overflow-auto rounded bg-background/70 p-2 text-[11px]">
+                          {JSON.stringify(submitResult.wouldSend, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
                 )}
-                {submitResult.holmanOnly && lastSubmittedForm && (
-                  <Alert className="border-amber-400 dark:border-amber-500">
-                    <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    <AlertDescription className="flex items-center justify-between gap-4">
-                      <span>
-                        Holman succeeded but WMS failed. You can retry just the WMS step without re-submitting to Holman.
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0"
-                        disabled={retryWmsMutation.isPending}
-                        onClick={() => retryWmsMutation.mutate(lastSubmittedForm)}
-                      >
-                        {retryWmsMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Retry WMS only
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
+
+                {/* A rehearsed retry: reported on its own, never merged above. */}
+                {retryRehearsal && (
+                  <div
+                    className="rounded-md border border-sky-300 bg-sky-50 dark:border-sky-800 dark:bg-sky-950/30 p-3 space-y-2 text-sm"
+                    data-testid="panel-retry-rehearsal"
+                  >
+                    <p className="font-medium text-sky-900 dark:text-sky-200 flex items-center gap-2">
+                      <FlaskConical className="h-4 w-4" />
+                      {retryRehearsal.label} was rehearsed — nothing was sent
+                    </p>
+                    <p className="text-xs text-sky-900/90 dark:text-sky-200/90">
+                      {retryRehearsal.response.message ||
+                        "Rehearsal mode is on, so the retry ran its gates and stopped. The result above is unchanged."}
+                    </p>
+                    {retryRehearsal.response.gates && (
+                      <ul className="text-xs text-sky-900/90 dark:text-sky-200/90 space-y-0.5">
+                        {Object.entries(retryRehearsal.response.gates).map(([gate, verdict]) => (
+                          <li key={gate}>
+                            <span className="font-medium">{gate}</span>: {String(verdict)}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                    {retryRehearsal.response.wouldSend && (
+                      <details className="text-xs">
+                        <summary className="cursor-pointer text-sky-800 dark:text-sky-300">
+                          What would have been sent
+                        </summary>
+                        <pre className="mt-2 max-h-64 overflow-auto rounded bg-background/70 p-2 text-[11px]">
+                          {JSON.stringify(retryRehearsal.response.wouldSend, null, 2)}
+                        </pre>
+                      </details>
+                    )}
+                  </div>
                 )}
-                {!submitResult.holman?.success && submitResult.wms?.success && lastSubmittedForm && (
-                  <Alert className="border-amber-400 dark:border-amber-500">
-                    <AlertTriangle className="h-4 w-4 text-amber-500" />
-                    <AlertDescription className="flex items-center justify-between gap-4">
-                      <span>
-                        WMS succeeded but Holman failed. You can retry just the Holman step — WMS and TPMS won't be touched.
-                      </span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0"
-                        disabled={retryHolmanMutation.isPending}
-                        onClick={() => retryHolmanMutation.mutate(lastSubmittedForm)}
-                      >
-                        {retryHolmanMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Retry Holman only
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
+
+                {/* Recovery: one action per outcome, spelled out. */}
+                {!submitResult.rehearsal && lastSubmittedForm && (
+                  <>
+                    {outcome.rows.some((r) => r.system === "Holman" && r.status === "pending") && (
+                      <Alert className="border-amber-400 dark:border-amber-500">
+                        <Clock className="h-4 w-4 text-amber-500" />
+                        <AlertDescription className="space-y-2">
+                          <div className="flex items-center justify-between gap-4">
+                            <span>
+                              Holman took the submission but never confirmed it. Check whether the record landed before
+                              doing anything else — re-submitting an unconfirmed create can produce a duplicate vehicle.
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0"
+                              disabled={holmanProbe.checking}
+                              onClick={() => void probeHolmanForNumber(lastSubmittedForm.vehicleNumber)}
+                              data-testid="button-check-holman"
+                            >
+                              {holmanProbe.checking && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                              Check Holman now
+                            </Button>
+                          </div>
+                          {holmanProbe.result && <p className="text-xs font-medium">{holmanProbe.result}</p>}
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {outcome.rows.some((r) => r.system === "WMS" && r.status === "failed") && (
+                      <Alert className="border-amber-400 dark:border-amber-500">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <AlertDescription className="flex items-center justify-between gap-4">
+                          <span>
+                            {outcome.rows.some((r) => r.system === "Holman" && r.status === "success")
+                              ? "Holman succeeded but WMS failed. Retry just the WMS step — Holman will not be re-submitted."
+                              : "WMS failed. Retry just the WMS step — Holman will not be re-submitted."}
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="shrink-0"
+                            disabled={retryWmsMutation.isPending}
+                            onClick={() => retryWmsMutation.mutate(lastSubmittedForm)}
+                            data-testid="button-retry-wms"
+                          >
+                            {retryWmsMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Retry WMS only
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+
+                    {outcome.rows.some((r) => r.system === "Holman" && r.status === "failed") && (
+                      <Alert className="border-amber-400 dark:border-amber-500">
+                        <AlertTriangle className="h-4 w-4 text-amber-500" />
+                        <AlertDescription className="flex items-center justify-between gap-4">
+                          <span>
+                            Holman failed outright — nothing was registered there. Retry just the Holman step; WMS and
+                            TPMS won't be touched.
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="shrink-0"
+                            disabled={retryHolmanMutation.isPending}
+                            onClick={() => retryHolmanMutation.mutate(lastSubmittedForm)}
+                            data-testid="button-retry-holman"
+                          >
+                            {retryHolmanMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                            Retry Holman only
+                          </Button>
+                        </AlertDescription>
+                      </Alert>
+                    )}
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -1619,27 +2107,91 @@ function MarkVinDuplicateButton({
   );
 }
 
-function SystemResultRow({ system, result }: { system: string; result: { success: boolean; error?: string } }) {
+/**
+ * A system row has five honest states. "Pending" is the important one: Holman
+ * answers 2xx for everything, so a submission it never confirmed is reported as
+ * unverified rather than as a success.
+ */
+function SystemResultRow({ row }: { row: SystemRow }) {
+  const chrome = {
+    success: {
+      icon: <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />,
+      label: "Success",
+      badge: "default" as const,
+    },
+    pending: {
+      icon: <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400" />,
+      label: "Pending verification",
+      badge: "outline" as const,
+    },
+    failed: {
+      icon: <XCircle className="h-5 w-5 text-destructive" />,
+      label: "Failed",
+      badge: "destructive" as const,
+    },
+    skipped: {
+      icon: <MinusCircle className="h-5 w-5 text-muted-foreground" />,
+      label: "Not attempted",
+      badge: "secondary" as const,
+    },
+    rehearsal: {
+      icon: <FlaskConical className="h-5 w-5 text-sky-600 dark:text-sky-400" />,
+      label: "Rehearsed",
+      badge: "outline" as const,
+    },
+  }[row.status];
+
   return (
-    <div className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30">
-      <div className="mt-0.5">
-        {result.success
-          ? <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
-          : <XCircle className="h-5 w-5 text-destructive" />}
-      </div>
+    <div
+      className={`flex items-start gap-3 p-3 rounded-lg border ${
+        row.status === "pending" ? "border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20" : "bg-muted/30"
+      }`}
+      data-testid={`row-result-${row.system.toLowerCase()}`}
+    >
+      <div className="mt-0.5">{chrome.icon}</div>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <span className="font-medium text-sm">{system}</span>
-          <Badge variant={result.success ? "default" : "destructive"} className="text-xs">
-            {result.success ? "Success" : "Failed"}
-          </Badge>
+          <span className="font-medium text-sm">{row.system}</span>
+          <Badge variant={chrome.badge} className="text-xs">{chrome.label}</Badge>
         </div>
-        {!result.success && result.error && (
-          <p className="text-sm text-muted-foreground mt-1 break-words">{result.error}</p>
-        )}
-        {result.success && (
-          <p className="text-sm text-muted-foreground mt-1">Vehicle record created successfully.</p>
-        )}
+        <p className="text-sm text-muted-foreground mt-1 break-words">{row.message}</p>
+      </div>
+    </div>
+  );
+}
+
+/** One preflight check, rendered with the verdict the server would reach. */
+function CheckVerdictRow({ label, verdict, testId }: { label: string; verdict: CheckVerdict; testId: string }) {
+  const icon =
+    verdict.status === "checking" ? (
+      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+    ) : verdict.status === "clear" ? (
+      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+    ) : verdict.status === "block" ? (
+      <Ban className="h-4 w-4 text-destructive" />
+    ) : verdict.status === "warn" ? (
+      <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+    ) : (
+      <HelpCircle className="h-4 w-4 text-muted-foreground" />
+    );
+
+  return (
+    <div className="flex items-start gap-2 text-sm" data-testid={testId}>
+      <div className="mt-0.5 shrink-0">{icon}</div>
+      <div className="min-w-0">
+        <span className="font-medium">{label}:</span>{" "}
+        <span
+          className={
+            verdict.status === "block"
+              ? "text-destructive"
+              : verdict.status === "warn"
+                ? "text-amber-800 dark:text-amber-300"
+                : "text-muted-foreground"
+          }
+        >
+          {verdict.title}
+        </span>
+        {verdict.detail && <p className="text-xs text-muted-foreground mt-0.5 break-words">{verdict.detail}</p>}
       </div>
     </div>
   );

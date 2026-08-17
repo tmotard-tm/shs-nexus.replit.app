@@ -531,11 +531,23 @@ export default function ByovBulkUpload() {
             status: "error",
             apiError: data?.error ?? `HTTP ${resp.status}`,
           });
-        } else {
+        } else if (data?.rehearsal) {
+          // Rehearsal mode gates the row but sends nothing — never bank it as created.
           freshResults.set(row.id, {
-            status: "success",
-            holman: data.holman,
-            wms: data.wms,
+            status: "error",
+            apiError: "Rehearsal mode is on — nothing was created. Turn rehearsal off and re-run this row.",
+          });
+        } else {
+          // A 2xx with an unconfirmed Holman submission is not a success: surface
+          // it as needing attention so the row is verified, not assumed.
+          freshResults.set(row.id, {
+            status: data?.holman?.pending || data?.wms?.pending ? "error" : "success",
+            holman: data.holman?.pending
+              ? { ...data.holman, success: false, error: data.holman.error ?? "Submitted, but Holman never confirmed it — verify before re-running." }
+              : data.holman,
+            wms: data.wms?.pending
+              ? { ...data.wms, success: false, error: data.wms.error ?? "Submitted, but WMS never confirmed it — verify before re-running." }
+              : data.wms,
           });
         }
       } catch (err: any) {
