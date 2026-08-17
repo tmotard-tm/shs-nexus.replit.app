@@ -1,6 +1,29 @@
 [
  {
-  "ldap": "ABALICE",
-  "error": "class FVAR is not in the template's classInfo list; the selection flag cannot be set, so ETD would book the captured class. Refusing."
+  "ldap": "AELSER",
+  "tech_name": "ALBERT J ELSER",
+  "truck_number": "047055",
+  "branch_code_wanted": "24YM",
+  "branch_code_booked": "24YM",
+  "branch_pinned": true,
+  "branch_name": "Middletown Rte. 211",
+  "branch_address": "265 ROUTE 211 E,MIDDLETOWN,10940-3107",
+  "vehicle_class": "TOYOTA COROLLA OR SIMILAR",
+  "vehicle_code": "ICAR",
+  "class_match": "already_sedan",
+  "class_note": "already in a sedan (Hyundai ELANTRA); kept ICAR",
+  "changes_vehicle": false,
+  "job_title": "Service Technician 2, In-Home",
+  "current_vehicle": "24 HYUN ELAN (tech says: Hyundai ELANTRA)",
+  "start": "2026-08-18T09:00:00",
+  "end": "2026-08-25T09:00:00",
+  "work_day": "2026-08-18 (Tue)",
+  "van_status": "decommissioned",
+  "district": "7670",
+  "ecars_ticket": "46RKTD",
+  "holman_claim": "119694338",
+  "etd_reference": "2130008828",
+  "quote_reference": "JA9N1IROUG",
+  "etd_reservation_id": ""
  }
 ]
