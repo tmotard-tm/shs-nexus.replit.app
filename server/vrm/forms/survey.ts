@@ -20,12 +20,14 @@ import crypto from "crypto";
 import { sendStandardActivity } from "../dca-task-client";
 import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
 import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
+import { buildCutoverBlockArgs } from "./cutover-block-args";
 
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
   const digits = String(v || "").replace(/\D/g, "").replace(/^0+/, "");
   return digits || String(v || "").trim().toUpperCase();
 }
+
 
 const RENTAL_COMPANIES = new Set(["Enterprise", "Avis", "Hertz"]);
 
@@ -752,77 +754,27 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         LIMIT ${limit}
       `);
 
-      const results: any[] = [];
-      let filed = 0, skipped = 0, failed = 0;
-      for (const r of rows as any[]) {
-        const truck = String(r.truck_number || "").trim() || "n/a";
-        const unit = String(r.unit || "").trim();
-        if (!unit) {
-          failed++;
-          results.push({ ldap: r.ldap, ok: false, reason: "no district on the roster; Unit is required" });
-          continue;
-        }
-        // Zip from the booked branch address ("...,VENTURA,93003-6653").
-        // Structured location = drive time; Notes alone are invisible to the
-        // scheduler.
-        // ZIP5 only. The reference types LocationValue as "Zip code" and the
-        // orchestrator lane normalizes with zip5(); this lane was passing the
-        // full ZIP+4 straight off the branch address ("...,EL PASO,79904-2805").
-        const zipMatch = String(r.branch_address || "").match(/(\d{5})(?:-\d{4})?\s*$/);
-        const out = await sendStandardActivity({
-          techLdap: r.ldap,
-          unit,
-          truckNumber: truck,
-          date,
-          durationMinutes: 30,
-          locationZip: zipMatch ? zipMatch[1] : null,
-          // "Exact", NOT "Anytime".
-          //
-          // 2026-08-17, measured against PRD_SERVICEPOWER SCH_ACTIVITIES_PROD:
-          // of the 136 blocks this lane filed that landed as "Vehicle - Change",
-          // only ELEVEN came back at 08:00:00. The rest were scattered from
-          // 06:23 to 15:55 because "Anytime" tells the optimizer that 08:00 is
-          // a hint it may move. The technician's text promised 8:00 AM, so
-          // every one of those had to be repaired by hand.
-          //
-          // The projectNotes below still tell the DCA a human may move the slot
-          // if Enterprise has a conflict — that is a human affordance and costs
-          // nothing. What must not happen is the optimizer silently relocating
-          // a block whose time we already texted to the technician.
-          startTimeRequest: "Exact",
-          live,
-          projectLabel: "Enterprise Contract Change",
-          // Tyler 2026-08-13: short and labeled. The long instructions go in
-          // the technician's TEXT, not the block. No truck number here — the
-          // project name already carries it.
-          projectNotes:
-            "30 minutes requested first thing in the morning. If there is a "
-            + "conflict, the time can be moved during normal business hours "
-            + "for Enterprise.",
-          rowNotes:
-            `Location: Enterprise ${String(r.branch_name || "").trim()}, `
-            + `${String(r.branch_address || "").trim()}. `
-            + `Enterprise billing swap from Holman contract to direct billing contract.`,
-        });
-        if (out.ok) filed++;
-        else if (out.skipReason) skipped++;
-        else failed++;
-
-        // Tracking. A filed block that leaves no trace outside this response
-        // body cannot be reconciled tomorrow, so record it against the
-        // technician before moving on.
-        const blkStatus = out.ok ? (live ? "filed" : "test")
-                        : out.skipReason ? "skipped" : "failed";
+      // ONE writer for the tracking row, so a REFUSED block is exactly as
+      // visible as a filed one. A refusal that leaves no row lets the
+      // technician's previous route-block state stand as though it were still
+      // current, which is how a skipped tech becomes an invisible one.
+      const trackOutcome = async (r: any, truck: string, o: {
+        status: string;
+        projectId?: string | null;
+        projectName?: string | null;
+        filedNow: boolean;
+        error?: string | null;
+      }) => {
         try {
           await db.execute(sql`
             INSERT INTO vrm_rental_cutover
               (ldap, tech_name, truck_number, route_block_status,
                route_block_project_id, route_block_project_name, route_block_date,
                route_block_live, route_block_filed_at, route_block_error, updated_at)
-            VALUES (${r.ldap}, ${r.tech_name ?? null}, ${truck}, ${blkStatus},
-                    ${out.projectId ?? null}, ${out.projectName ?? null}, ${date}::date,
-                    ${live}, ${out.ok ? sql`now()` : sql`NULL`},
-                    ${out.errorMessage ?? out.skipReason ?? null}, now())
+            VALUES (${r.ldap}, ${r.tech_name ?? null}, ${truck}, ${o.status},
+                    ${o.projectId ?? null}, ${o.projectName ?? null}, ${date}::date,
+                    ${live}, ${o.filedNow ? sql`now()` : sql`NULL`},
+                    ${o.error ?? null}, now())
             ON CONFLICT (ldap) DO UPDATE SET
               tech_name                = COALESCE(EXCLUDED.tech_name, vrm_rental_cutover.tech_name),
               truck_number             = COALESCE(EXCLUDED.truck_number, vrm_rental_cutover.truck_number),
@@ -839,6 +791,56 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           // Never let bookkeeping fail a block that was actually filed.
           console.error("[survey] cutover tracking failed for", r.ldap, trackErr?.message);
         }
+      };
+
+      const results: any[] = [];
+      let filed = 0, skipped = 0, failed = 0;
+      for (const r of rows as any[]) {
+        const truck = String(r.truck_number || "").trim() || "n/a";
+        const unit = String(r.unit || "").trim();
+
+        // ONE decision builds this lane's payload: 08:00 Exact, and the
+        // reserved branch's ZIP5 in LocationValue or no filing at all. It lives
+        // in cutover-block-args.ts so the tests drive the same code this route
+        // does — a rule enforced only inline here is a rule that regresses
+        // silently, which is exactly what happened to the 2026-08-14 batch.
+        const decision = buildCutoverBlockArgs({
+          ldap: r.ldap,
+          unit,
+          truckNumber: truck,
+          branchName: r.branch_name,
+          branchAddress: r.branch_address,
+          date,
+          live,
+        });
+        if (!decision.ok) {
+          failed++;
+          await trackOutcome(r, truck, { status: "failed", filedNow: false, error: decision.reason });
+          results.push({
+            ldap: r.ldap, tech_name: r.tech_name, truck_number: truck, unit,
+            ok: false, skipReason: null, projectName: null, projectId: null,
+            httpStatus: null, error: decision.reason, reason: decision.reason,
+          });
+          continue;
+        }
+
+        const out = await sendStandardActivity(decision.args);
+        if (out.ok) filed++;
+        else if (out.skipReason) skipped++;
+        else failed++;
+
+        // Tracking. A filed block that leaves no trace outside this response
+        // body cannot be reconciled tomorrow, so record it against the
+        // technician before moving on.
+        const blkStatus = out.ok ? (live ? "filed" : "test")
+                        : out.skipReason ? "skipped" : "failed";
+        await trackOutcome(r, truck, {
+          status: blkStatus,
+          projectId: out.projectId ?? null,
+          projectName: out.projectName ?? null,
+          filedNow: out.ok,
+          error: out.errorMessage ?? out.skipReason ?? null,
+        });
         results.push({
           ldap: r.ldap, tech_name: r.tech_name, truck_number: truck, unit,
           ok: out.ok, skipReason: out.skipReason ?? null,

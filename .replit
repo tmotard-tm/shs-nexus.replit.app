@@ -168,6 +168,10 @@ args = "vrm-phone-search-unit"
 task = "workflow.run"
 args = "bucket-queue-unit"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "cutover-orchestrator-unit"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -277,12 +281,12 @@ defaultBucketID = "replit-objstore-c045591a-a89c-45b9-9118-8c388bdd00c6"
 name = "cutover-orchestrator-unit"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx tsx --test tests/cutover-orchestrator-unit.test.ts"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/cutover-orchestrator-unit.test.ts tests/cutover-route-block-payload.test.ts"
 
 [[workflows.workflow]]
 name = "cutover-intents-db"
