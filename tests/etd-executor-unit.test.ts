@@ -49,6 +49,7 @@ import {
   redactedShape,
 } from "../server/vrm/etd/executor";
 import { safeErrorText, rejectionMessage, rejectionReasons } from "../server/vrm/etd/client";
+import { useAccountAdditionalInfo, assertAdditionalInfoComplete } from "../server/vrm/etd/surgery";
 import type { EtdClient, CarClass } from "../server/vrm/etd/client";
 
 const LDAP_PREFIX = "ZZEXEC";
@@ -62,6 +63,26 @@ const CLASSES: CarClass[] = [
   { code: "MVAR", description: "Minivan", passengers: "7", bags: "5", base_rate: 70, estimated_total: null, currency: "USD", unit: null, unlimited_miles: null },
 ];
 
+/**
+ * What account XZ79406 defines TODAY: one mandatory field. The capture in
+ * reference/savedr_request.json still carries two, the second being `Truck Number`
+ * (gid 91912527020037), which Enterprise removed from the account after the 2026-08-13
+ * wave. Sending the removed field is what savedr answers with
+ * `REQUIRED FIELD MISSING: ADDITIONALINFO`.
+ */
+const ACCOUNT_ADDITIONAL_INFO = [
+  {
+    additionalInformationGid: "91991858282501",
+    sequence: 1,
+    fieldTypeCode: 5,
+    fieldName: "LDAP ",
+    fieldValue: null,
+    mandatory: true,
+    includeInReservation: false,
+    isBillingRef: false,
+  },
+];
+
 type FakeOpts = {
   branchCode?: string;
   classes?: CarClass[];
@@ -71,11 +92,15 @@ type FakeOpts = {
   journeys?: unknown;
   searchThrows?: boolean;
   user?: Record<string, unknown> | null;
+  addInfoFields?: unknown[];
+  addInfoThrows?: boolean;
 };
 
 /** Records what was called so a test can assert the commit was never reached. */
 function fakeEtd(opts: FakeOpts = {}) {
   const calls: string[] = [];
+  /** Every model handed to the commit, so a test can assert what was actually sent. */
+  const sent: unknown[] = [];
   const code = opts.branchCode ?? "9911";
   const client = {
     calls: [],
@@ -120,12 +145,18 @@ function fakeEtd(opts: FakeOpts = {}) {
     },
     async confirmReservation(_m: unknown, o: { live: boolean }) {
       calls.push(`confirm:${o.live}`);
+      sent.push(_m);
       if (opts.confirmThrows) throw new Error("ETD savedr 500");
       return opts.confirmOut ?? { data: { reservationNumber: { number: "FAKE123" } } };
     },
+    async accountAdditionalInfoFields() {
+      calls.push("addinfo");
+      if (opts.addInfoThrows) throw new Error("ETD additioninformation 503");
+      return opts.addInfoFields ?? ACCOUNT_ADDITIONAL_INFO;
+    },
     timingSummary: () => "fake",
   };
-  return { client: client as unknown as EtdClient, calls };
+  return { client: client as unknown as EtdClient, calls, sent };
 }
 
 /** A fresh schedule window whose working days start tomorrow. */
@@ -931,5 +962,74 @@ describe("reading a savedr refusal", () => {
       /Journey is no longer valid/,
       "a singular top-level message is still a message",
     );
+  });
+});
+
+
+describe("account additional-info is read live, never inherited from the capture", () => {
+  const preview = () => ({
+    workflowType: WORKFLOW_REQUEST,
+    tpmsTruck: "012345",
+    artBlock: { unit: "8330" },
+    reservation: {
+      pickupDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+      pickupTime: "09:00:00",
+      returnDate: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10),
+      returnTime: "09:00:00",
+      branchCode: "9911",
+      sipp: "ICAR",
+      intentReference: "SHSNX-TEST",
+      specialNotes: "Test note.",
+      bookingReferences: ["ZZ REF"],
+    },
+  });
+
+  test("the account's current field list replaces the captured one", () => {
+    const model: Record<string, unknown> = {
+      additionalInformation: {
+        additionalInformationFields: [
+          { additionalInformationGid: "91912527020037", fieldName: "Truck Number ", fieldValue: "37046", mandatory: true },
+          { additionalInformationGid: "91991858282501", fieldName: "LDAP ", fieldValue: "MRAY0", mandatory: true },
+        ],
+      },
+    };
+
+    const names = useAccountAdditionalInfo(model, ACCOUNT_ADDITIONAL_INFO);
+    const fields = (model.additionalInformation as any).additionalInformationFields as any[];
+
+    assert.deepEqual(names, ["LDAP"]);
+    assert.equal(fields.length, 1, "a field the account no longer defines must not be sent back");
+    assert.ok(
+      fields.every((f) => f.additionalInformationGid !== "91912527020037"),
+      "gid 91912527020037 is the one Enterprise deleted, and the one savedr refuses over",
+    );
+    assert.equal(fields[0].fieldValue, "", "the definition arrives empty; setDriver fills it next");
+  });
+
+  test("a mandatory field nothing knows how to fill refuses BY NAME", () => {
+    const model: Record<string, unknown> = {};
+    useAccountAdditionalInfo(model, [
+      { additionalInformationGid: "99", fieldName: "Cost Centre ", fieldValue: null, mandatory: true },
+    ]);
+    assert.throws(
+      () => assertAdditionalInfoComplete(model, "ZZEXEC1"),
+      /Cost Centre/,
+      "ETD only ever says REQUIRED FIELD MISSING, so the refusal here has to name the field itself",
+    );
+  });
+
+  test("a failed lookup aborts before the commit rather than booking on the captured block", async () => {
+    const ldap = `${LDAP_PREFIX}ADDI`;
+    const { intentId } = await makeRequestIntent({
+      ldap, status: "confirmed", preview: preview(), eventDate: preview().reservation.pickupDate,
+    });
+    const { client, calls } = fakeEtd({ addInfoThrows: true });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "ABRT");
+    assert.equal(run.results[0].status, "aborted_before_open");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "a stale block must never reach savedr");
+    assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0, "and it stops before the ETD gates");
   });
 });

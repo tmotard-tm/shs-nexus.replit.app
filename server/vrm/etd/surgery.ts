@@ -388,6 +388,61 @@ export function setDriver(
  * The header fields (carClassCode etc.) are decorative; the buried flag is
  * the selection, stored as the strings 'True' / 'False'.
  */
+/**
+ * Swap the captured additional-info block for the account's current field list.
+ *
+ * The captured block is a snapshot of the account as it stood when the browser capture
+ * was taken, and it goes stale silently: ETD answers a mismatch with one sentence,
+ * `REQUIRED FIELD MISSING: ADDITIONALINFO`, naming no field. Values arrive empty from the
+ * definition endpoint; `setDriver` fills them immediately after.
+ */
+export function useAccountAdditionalInfo(
+  model: Record<string, unknown>,
+  liveFields: unknown[],
+): string[] {
+  let block = model.additionalInformation as Record<string, unknown> | undefined;
+  if (!block || typeof block !== "object" || Array.isArray(block)) {
+    block = {};
+    model.additionalInformation = block;
+  }
+  const fields: Record<string, unknown>[] = [];
+  for (const src of Array.isArray(liveFields) ? liveFields : []) {
+    if (!src || typeof src !== "object" || Array.isArray(src)) continue;
+    const fld = JSON.parse(JSON.stringify(src)) as Record<string, unknown>;
+    fld.fieldValue = fld.fieldValue ?? "";
+    fld.fieldValueDateString = fld.fieldValueDateString ?? "";
+    fields.push(fld);
+  }
+  block.additionalInformationFields = fields;
+  return fields.map((f) => String(f.fieldName ?? "").trim());
+}
+
+/**
+ * Refuse to commit while a mandatory additional-info field is still empty.
+ *
+ * Fails closed and BY NAME. If Enterprise adds a field nothing here knows how to fill,
+ * the alternative is ETD's generic refusal, which cost hours to attribute on 2026-08-17.
+ */
+export function assertAdditionalInfoComplete(model: Record<string, unknown>, ldap: string): void {
+  const block = model.additionalInformation as Record<string, unknown> | undefined;
+  const fields = (block?.additionalInformationFields ?? []) as unknown[];
+  const missing: string[] = [];
+  for (const fld of Array.isArray(fields) ? fields : []) {
+    if (!fld || typeof fld !== "object" || Array.isArray(fld)) continue;
+    const f = fld as Record<string, unknown>;
+    if (f.mandatory && !String(f.fieldValue ?? "").trim()) {
+      missing.push(String(f.fieldName ?? "?").trim());
+    }
+  }
+  if (missing.length) {
+    throw new Error(
+      `account requires additional-info field(s) nothing fills: ${missing.join(", ")} ` +
+        `(ldap ${ldap}). Teach setDriver the field, or have Enterprise confirm the ` +
+        "account configuration.",
+    );
+  }
+}
+
 export function setClass(model: Record<string, unknown>, pick: Record<string, unknown>): void {
   const code = String(pick.code ?? "").toUpperCase();
   const desc = String(pick.description ?? "");

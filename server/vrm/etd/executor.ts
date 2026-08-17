@@ -76,6 +76,8 @@ import {
   loadUserMapping,
   templateOldIds,
   cloneTemplate,
+  useAccountAdditionalInfo,
+  assertAdditionalInfoComplete,
 } from "./surgery";
 
 /** Default rental length in days when the preview carries no return date. */
@@ -876,7 +878,27 @@ async function runBook(
   model.boboId = (user as any).userId;
   model.isBOBOToggleEnabled = true;
   model.isBOBOBooking = true;
+  // The account's field list, read now. Never the capture's — see
+  // useAccountAdditionalInfo.
+  try {
+    useAccountAdditionalInfo(model, await etd.accountAdditionalInfoFields());
+  } catch (err) {
+    await post("op_result", {
+      outcome: "aborted_before_open",
+      evidence: { reason: `additional-info lookup failed: ${clip(errText(err), 200)}` },
+    });
+    return result("ABRT", "aborted_before_open", `additional-info lookup failed: ${clip(errText(err), 120)}`);
+  }
   setDriver(model, user as Record<string, unknown>, ldap, String(facts.techName || ldap), truck);
+  try {
+    assertAdditionalInfoComplete(model, ldap);
+  } catch (err) {
+    await post("op_result", {
+      outcome: "aborted_before_open",
+      evidence: { reason: clip(errText(err), 200) },
+    });
+    return result("ABRT", "aborted_before_open", clip(errText(err), 160));
+  }
 
   // Server-rendered text is the single source; nothing is composed here.
   const note = String(resv.specialNotes || "").trim();

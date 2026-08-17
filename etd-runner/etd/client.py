@@ -690,6 +690,19 @@ class EtdClient:
 
     # ---------------------------------------------------------------- availability
 
+    def account_additional_info_fields(self, *, account_uid: str = ACCOUNT_UID) -> list[dict]:
+        """The additional-info fields the ACCOUNT requires RIGHT NOW. CONFIRMED.
+
+        Read-only, and deliberately not cached. Enterprise edits this configuration
+        without telling us: between the last accepted booking of the 2026-08-13 wave and
+        2026-08-17 they dropped the mandatory `Truck Number` field, and a stale copy of
+        this list is precisely the bug the call exists to prevent.
+        """
+        payload = self.get(f"/api/reservationwizard/additioninformation/{account_uid}")
+        data = (payload or {}).get("data") or {}
+        return [f for f in (data.get("additionalInformationFields") or [])
+                if isinstance(f, dict)]
+
     def car_classes(self, journey_id: str, site: dict, start: str, end: str,
                     *, account_uid: str = ACCOUNT_UID) -> list[dict]:
         """CONFIRMED. Available vehicle classes with weekly rates.

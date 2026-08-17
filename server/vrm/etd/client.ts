@@ -553,6 +553,22 @@ export class EtdClient {
   // ---------------------------------------------------------------- availability
 
   /** Available vehicle classes with weekly rates, cheapest first. */
+  /**
+   * The additional-info fields the ACCOUNT requires RIGHT NOW.
+   *
+   * Read-only, and deliberately not cached. Enterprise edits this configuration without
+   * telling us: between the last accepted booking of the 2026-08-13 wave and 2026-08-17
+   * they dropped the mandatory `Truck Number` field, and a stale copy of this list is
+   * precisely the bug the call exists to prevent.
+   */
+  async accountAdditionalInfoFields(accountUid: string = ACCOUNT_UID): Promise<Json[]> {
+    const payload = await this.get(`/api/reservationwizard/additioninformation/${accountUid}`);
+    const fields = payload?.data?.additionalInformationFields ?? [];
+    return (Array.isArray(fields) ? fields : []).filter(
+      (f: unknown) => !!f && typeof f === "object" && !Array.isArray(f),
+    );
+  }
+
   async carClasses(
     journeyId: string,
     site: Json,

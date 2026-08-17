@@ -353,6 +353,48 @@ def redate(model: dict, start: datetime, end: datetime) -> int:
     return n
 
 
+def use_account_additional_info(model: dict, live_fields: list) -> list:
+    """Swap the captured additional-info block for the account's current field list.
+
+    The captured block is a snapshot of the account as it stood when the browser capture
+    was taken, and it goes stale silently: ETD answers a mismatch with one sentence,
+    `REQUIRED FIELD MISSING: ADDITIONALINFO`, naming no field. Values arrive empty from
+    the definition endpoint; `set_driver` fills them immediately after.
+    """
+    block = model.get("additionalInformation")
+    if not isinstance(block, dict):
+        block = {}
+        model["additionalInformation"] = block
+    fields = []
+    for src in live_fields or []:
+        if not isinstance(src, dict):
+            continue
+        fld = copy.deepcopy(src)
+        fld["fieldValue"] = fld.get("fieldValue") or ""
+        fld["fieldValueDateString"] = fld.get("fieldValueDateString") or ""
+        fields.append(fld)
+    block["additionalInformationFields"] = fields
+    return [str(f.get("fieldName") or "").strip() for f in fields]
+
+
+def assert_additional_info_complete(model: dict, ldap: str) -> None:
+    """Refuse to commit while a mandatory additional-info field is still empty.
+
+    Fails closed and BY NAME. If Enterprise adds a field nothing here knows how to fill,
+    the alternative is ETD's generic refusal, which cost hours to attribute on 2026-08-17.
+    """
+    fields = (model.get("additionalInformation") or {}).get("additionalInformationFields") or []
+    missing = [str(f.get("fieldName") or "?").strip()
+               for f in fields
+               if isinstance(f, dict) and f.get("mandatory")
+               and not str(f.get("fieldValue") or "").strip()]
+    if missing:
+        raise RuntimeError(
+            "account requires additional-info field(s) nothing fills: "
+            f"{', '.join(missing)} (ldap {ldap}). Teach set_driver the field, "
+            "or have Enterprise confirm the account configuration.")
+
+
 def set_driver(model: dict, user: dict, ldap: str, tech_name: str, truck: str) -> list:
     """Replace EVERY trace of the captured driver with this technician.
 
@@ -881,8 +923,10 @@ def main() -> None:
             model["isBOBOToggleEnabled"] = True
             model["isBOBOBooking"] = True
 
+            use_account_additional_info(model, etd.account_additional_info_fields())
             truck = r["truck_number"]
             driver_fields = set_driver(model, user, ldap, r["tech_name"], truck)
+            assert_additional_info_complete(model, ldap)
 
             # The technician's assigned van, from TPMS. Guaranteed present by the
             # query. Deliberately NOT the rental feed's VEHICLE_NUMBER, which is
@@ -1544,7 +1588,23 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
     model["boboId"] = user.get("userId")
     model["isBOBOToggleEnabled"] = True
     model["isBOBOBooking"] = True
+    # The account's field list, read now. Never the capture's — see
+    # use_account_additional_info.
+    try:
+        use_account_additional_info(model, etd.account_additional_info_fields())
+    except Exception as exc:
+        post("op_result", {"outcome": "aborted_before_open",
+                           "evidence": {"reason": f"additional-info lookup failed: {str(exc)[:200]}"}})
+        print(f"  ABRT {label} additional-info lookup failed: {str(exc)[:120]}")
+        return
     set_driver(model, user, ldap, facts.get("techName") or ldap, truck)
+    try:
+        assert_additional_info_complete(model, ldap)
+    except Exception as exc:
+        post("op_result", {"outcome": "aborted_before_open",
+                           "evidence": {"reason": str(exc)[:200]}})
+        print(f"  ABRT {label} {str(exc)[:160]}")
+        return
     # Server-rendered text is the single source; nothing is composed here.
     note = str(resv.get("specialNotes") or "").strip()
     if note:
