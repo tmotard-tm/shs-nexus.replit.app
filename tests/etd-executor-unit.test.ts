@@ -48,7 +48,7 @@ import {
   classForIntent,
   redactedShape,
 } from "../server/vrm/etd/executor";
-import { safeErrorText, rejectionMessage } from "../server/vrm/etd/client";
+import { safeErrorText, rejectionMessage, rejectionReasons } from "../server/vrm/etd/client";
 import type { EtdClient, CarClass } from "../server/vrm/etd/client";
 
 const LDAP_PREFIX = "ZZEXEC";
@@ -796,5 +796,140 @@ describe("evidence redaction", () => {
     for (const leak of ["Dana Reyes", "dana.reyes@example.com", "214-555-0142"]) {
       assert.ok(!msg.includes(leak), `rejectionMessage leaked ${leak}: ${msg}`);
     }
+  });
+});
+
+describe("reading a savedr refusal", () => {
+  // savedr does NOT answer with the wizard's {success,messages} envelope. It answers
+  // with the reservation VIEW MODEL — the same shape reference/savedr_request.json has —
+  // and puts its reasons in errors/warnings/hasErrors/notificationMessage and in
+  // per-field validationMessage. Reading only messages/errorMessage is how a real
+  // refusal was recorded as "rejected: " with nothing after the colon.
+  const refusal = {
+    success: false,
+    hasErrors: true,
+    hasWarnings: true,
+    errorMessage: null,
+    notificationMessage:
+      "NOTE: A copy of the confirmation email will be sent to your email address on file.",
+    errors: [
+      {
+        code: "RES_DRIVER_DECLARATION",
+        message:
+          "Driver Mustafa Ebadi must accept the driver declaration before this reservation can be committed.",
+      },
+    ],
+    warnings: ["Rate is not guaranteed until pickup."],
+    reasonForHire: { selectedId: null, errors: null, warnings: null, hasErrors: true, hasWarnings: false },
+    additionalInformation: {
+      additionalInformationFields: [
+        { fieldName: "Truck Number ", value: "036056", validationMessage: null },
+        { fieldName: "Reason For Hire", value: "", validationMessage: "Reason For Hire is required." },
+      ],
+      errors: null,
+      warnings: null,
+      hasErrors: true,
+      hasWarnings: false,
+    },
+    driver: {
+      firstName: "Mustafa",
+      lastName: "Ebadi",
+      email: "m.ebadi@example.com",
+      phone: "(703) 555-0188",
+    },
+  };
+
+  test("every reason the view model carries comes back, labelled by where it sat", () => {
+    const reasons = rejectionReasons(refusal);
+    assert.match(reasons, /RES_DRIVER_DECLARATION/, "the code Enterprise gave");
+    assert.match(reasons, /must accept the driver declaration/, "and its sentence");
+    assert.match(reasons, /Rate is not guaranteed until pickup/, "warnings count as reasons");
+    assert.match(
+      reasons,
+      /Reason For Hire validationMessage: Reason For Hire is required/,
+      "a per-field message is useless without the field it belongs to",
+    );
+    assert.ok(
+      !reasons.includes("Truck Number validationMessage"),
+      `a null validationMessage is not a reason: ${reasons}`,
+    );
+  });
+
+  test("the error outranks the boilerplate, so the length cap trims the right end", () => {
+    const reasons = rejectionReasons(refusal);
+    assert.ok(
+      reasons.indexOf("RES_DRIVER_DECLARATION") < reasons.indexOf("A copy of the confirmation"),
+      `the standing email notice must not push the error past the cap: ${reasons}`,
+    );
+    assert.ok(
+      reasons.indexOf("must accept the driver declaration") < reasons.indexOf("Rate is not guaranteed"),
+      `errors rank ahead of warnings: ${reasons}`,
+    );
+  });
+
+  test("the refusal reaches the ledger masked, with the code intact", () => {
+    const msg = rejectionMessage("POST", "/api/reservationwizard/reservation/savedr", refusal);
+    assert.match(msg, /POST \/api\/reservationwizard\/reservation\/savedr rejected: \S/);
+    assert.match(msg, /RES_DRIVER_DECLARATION/, "the code is the diagnosis; it must survive");
+    assert.match(msg, /must accept the driver declaration/);
+    for (const leak of ["Mustafa", "Ebadi", "m.ebadi@example.com", "555-0188"]) {
+      assert.ok(!msg.includes(leak), `the refusal leaked ${leak}: ${msg}`);
+    }
+  });
+
+  test("a body with no message text names its keys instead of ending at a colon", () => {
+    // The exact regression: HTTP 200, succecss:false, flags set, not one string of prose.
+    // "rejected: " with an empty tail is not a thread an operator can pull.
+    const msg = rejectionMessage("POST", "/api/reservationwizard/reservation/savedr", {
+      succecss: false,
+      hasErrors: true,
+      errors: null,
+      warnings: [],
+      notificationMessage: "",
+      data: null,
+    });
+    assert.ok(!/rejected:\s*$/.test(msg), `the empty-tail regression is back: ${msg}`);
+    assert.match(msg, /hasErrors set but carried no text/);
+    assert.match(msg, /keys: succecss, hasErrors, errors, warnings, notificationMessage, data/);
+  });
+
+  test("a rejection with nothing in it at all still says so", () => {
+    assert.match(rejectionMessage("POST", "/x", null), /rejected: empty response body/);
+    assert.match(rejectionMessage("POST", "/x", {}), /no reason text in body; keys: none/);
+  });
+
+  test("a self-referential body cannot hang the reader", () => {
+    const loop: any = { success: false, errors: [{ message: "LOOP_GUARD tripped" }] };
+    loop.self = loop;
+    loop.nested = { parent: loop, warnings: ["also seen"] };
+    const reasons = rejectionReasons(loop);
+    assert.match(reasons, /LOOP_GUARD tripped/);
+    assert.match(reasons, /also seen/);
+  });
+
+  test("the flatter error shapes are read too, and the HTTP status is not mistaken for one", () => {
+    // A parallel fix collected these key names from real refusals before this reader
+    // existed. They are ranked here so that knowledge survives; `status` deliberately
+    // is not, because the attempt stores the HTTP status in its own field and ranking
+    // it would prepend "status: 400" to every reason line.
+    const problem = rejectionReasons({
+      status: 400,
+      title: "Bad Request",
+      detail: "Pickup date is in the past.",
+      validationErrors: { pickupDate: ["PICKUP DATE IS IN THE PAST"] },
+    });
+    assert.match(problem, /Pickup date is in the past/, "the specific reason");
+    assert.match(problem, /PICKUP DATE IS IN THE PAST/, "and the field that carried it");
+    assert.ok(
+      problem.indexOf("PICKUP DATE IS IN THE PAST") < problem.indexOf("Bad Request"),
+      `the generic title must rank behind the real reason: ${problem}`,
+    );
+    assert.ok(!problem.includes("status: 400"), `the HTTP status is not a reason: ${problem}`);
+
+    assert.match(
+      rejectionReasons({ message: "Journey is no longer valid.", errorDescription: "J_EXPIRED" }),
+      /Journey is no longer valid/,
+      "a singular top-level message is still a message",
+    );
   });
 });

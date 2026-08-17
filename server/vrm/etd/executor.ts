@@ -52,7 +52,15 @@ import {
   type RunnerClassDecision,
 } from "../forms/cutover-orchestrator";
 
-import { EtdClient, type CarClass, type QuoteResult } from "./client";
+import {
+  EtdClient,
+  EtdError,
+  rejectionReasons,
+  safeErrorText,
+  type CarClass,
+  type EtdCallLog,
+  type QuoteResult,
+} from "./client";
 import { choose as chooseClass, chooseSameVehicle, type OfferedClass } from "./vehicle-class";
 import {
   zipState,
@@ -158,6 +166,40 @@ export function redactedShape(v: unknown, depth = 0, path = ""): string {
 
 function errText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Everything an operator needs to diagnose a refused external call — and nothing a
+ * technician would recognise as theirs.
+ *
+ * A savedr refusal echoes the whole reservation view model back (driver name, phone,
+ * email, address), so the RAW body is never persisted. What IS persisted: the masked
+ * reason the client extracted, the response SHAPE (the same treatment the `unparsed`
+ * path already gets), the HTTP status, the ETD calls this pass made, and the journey,
+ * branch, class and dates the pass actually used. "Rejected" means nothing months later
+ * without knowing what was on the wire.
+ *
+ * Query strings are stripped from the logged paths: the autocomplete and branch lookups
+ * carry the technician's address and coordinates in theirs.
+ */
+function failureEvidence(
+  err: unknown,
+  ctx: { calls: EtdCallLog[]; request: Record<string, unknown> },
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const etdErr = err instanceof EtdError ? err : null;
+  return {
+    error: clip(errText(err)),
+    httpStatus: etdErr?.httpStatus ?? null,
+    responseShape:
+      etdErr && etdErr.responseBody !== undefined ? redactedShape(etdErr.responseBody) : null,
+    etdCalls: ctx.calls
+      .slice(-12)
+      .map((c) => clip(`${c.method} ${String(c.path).split("?")[0]} -> ${c.status} (${c.ms}ms)`, 120)),
+    request: ctx.request,
+    at: new Date().toISOString(),
+    ...extra,
+  };
 }
 
 // ---------------------------------------------------------------- schedule
@@ -711,6 +753,11 @@ async function runBook(
 
   const intentRef = String(resv.intentReference || `SHSNX-${intentId}`);
 
+  // The ETD client is shared across every intent in a pass, so the call log has to be
+  // sliced to THIS intent's calls before it becomes evidence.
+  const callsAtStart = etd.calls?.length ?? 0;
+  const passCalls = (): EtdCallLog[] => (etd.calls ?? []).slice(callsAtStart);
+
   // An unfinished attempt exists (crash mid-booking), a reconcile was ordered, or this
   // is a cancel-lane claim: readback FIRST/ONLY. The criteria widen (intent reference or
   // known confirmation, then the LDAP) because they are only ETD's server-side filter —
@@ -850,6 +897,21 @@ async function runBook(
 
   const requestHash = bookingRequestHash({ branch: gotBranch, date: pickup, ldap, sipp });
 
+  // What this pass actually put on the wire. Recorded with every failure so a refusal is
+  // diagnosable from the ledger alone, without re-deriving the inputs from a preview that
+  // may since have been rebuilt.
+  const passRequest: Record<string, unknown> = {
+    journeyId: q.journey_id,
+    quoteReference: q.reference,
+    branchCode: gotBranch,
+    branchName: clip(q.branch_name, 60),
+    sipp,
+    pickupDate: pickup,
+    start,
+    end,
+    requestHash,
+  };
+
   // 3.5 Pre-commit duplicate search: before opening an attempt, ask ETD whether THIS
   // intent already has a reservation (a crash after a commit but before op_result, a
   // double claim, ...). Only a row that POSITIVELY identifies as this intent's counts —
@@ -890,7 +952,11 @@ async function runBook(
   }
   const attemptNo = openBody.attemptNo;
 
-  // 5. Validation gates (non-mutating).
+  // 5. Validation gates (non-mutating). A gate that answers success:false normally
+  // raises out of the client; the inline branch is the belt to that suspenders. Both
+  // record the SAME evidence a refused commit does — a validator rejection is the one
+  // signal that says why the commit would have been refused, and dumping the raw gate
+  // body here used to leak the whole driver-bearing model into the ledger.
   try {
     for (const gate of ["/api/dailyrental/validateLocAddInfo", "/api/dailyrental/validate"]) {
       const gr = await etd.postGate(gate, model);
@@ -898,7 +964,17 @@ async function runBook(
         await post("op_result", {
           outcome: "failed_clean",
           attemptNo,
-          evidence: { error: `${gate}: ${clip(JSON.stringify(gr))}` },
+          evidence: {
+            error: `${gate}: ${safeErrorText(rejectionReasons(gr))}`,
+            httpStatus: 200,
+            responseShape: redactedShape(gr),
+            etdCalls: passCalls()
+              .slice(-12)
+              .map((c) => clip(`${c.method} ${String(c.path).split("?")[0]} -> ${c.status} (${c.ms}ms)`, 120)),
+            request: passRequest,
+            gate,
+            at: new Date().toISOString(),
+          },
         });
         return result("FAIL", "failed_clean", `${gate} rejected`);
       }
@@ -907,7 +983,9 @@ async function runBook(
     await post("op_result", {
       outcome: "failed_clean",
       attemptNo,
-      evidence: { error: `validation gate: ${clip(errText(err), 200)}` },
+      evidence: failureEvidence(err, { calls: passCalls(), request: passRequest }, {
+        stage: "validation_gate",
+      }),
     });
     return result("FAIL", "failed_clean", `validation gate: ${clip(errText(err), 120)}`);
   }
@@ -939,7 +1017,9 @@ async function runBook(
     await post("op_result", {
       outcome: "exception",
       attemptNo,
-      evidence: { error: clip(errText(err)) },
+      evidence: failureEvidence(err, { calls: passCalls(), request: passRequest }, {
+        stage: "savedr_commit",
+      }),
     });
     return result("HOLD", "exception", `confirm raised: ${clip(errText(err), 120)} (readback will decide)`);
   }

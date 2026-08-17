@@ -45,3 +45,17 @@ transaction/session semantics from single-query transport for zero benefit.
 The app's pool driver (server/db.ts) returns Postgres DATE columns as 'YYYY-MM-DD' strings — NOT js Date objects.
 **Why:** verified empirically 2026-08-16 (`SELECT '2026-08-17'::date` → typeof string). Cutover code relies on `String(row.event_date).slice(0,10)` for event-day math; a driver/type-parser change would silently break every date comparison.
 **How to apply:** date-vs-today logic may trust the string form through this driver; re-verify before swapping drivers or adding pg-types parsers.
+
+## TIMESTAMPTZ strings from this driver are NOT Date.parse-able
+Same driver, same story for timestamps — but worse, because this one fails silently.
+A `timestamptz` arrives as `2026-08-17 14:15:32.402664+00`: space separator, microsecond
+precision, and an HOUR-ONLY UTC offset. `new Date(...)` on that returns **Invalid Date**
+in V8 (the ECMAScript grammar wants `±HH:mm`), so anything doing `new Date(row.ts)` gets
+NaN and renders "Invalid Date" or an empty timestamp rather than throwing.
+**Why:** the same row reached the UI two ways — through `to_jsonb()` (already ISO, parsed
+fine) and straight off the driver (raw string, NaN) — and only one of them displayed a
+time. Nothing errored; the field was just blank on one surface.
+**How to apply:** never hand a raw driver timestamp to `new Date()` or to the client.
+Normalise server-side first: `String(v).replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00")`
+then `toISOString()`. If two read paths serve the same row to one component, normalise in
+the shared mapper so both spellings converge.

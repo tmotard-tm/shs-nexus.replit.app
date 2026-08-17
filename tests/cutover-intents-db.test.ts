@@ -607,6 +607,60 @@ describe("booked-unverified recovery lane", () => {
       payload: { matches: [], search: { status: "ok", criteria: [`${LDAP_PREFIX}RCV4`] } },
     });
     assert.equal(rb.status, "confirmed", "clean-none on a reconcile retry must return the intent to 'confirmed'");
+    const cleanRow = ((await db.execute(sql`
+      SELECT last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.match(
+      String(cleanRow.last_error),
+      /reconciled clean/,
+      "with no recorded failure the clean-reconcile wording still stands",
+    );
+  });
+
+  test("a clean-none readback after a REFUSED commit keeps the refusal as the last word", async () => {
+    // The MEBADI shape: Enterprise refused the commit, the readback correctly found no
+    // reservation, and "reconciled clean" then overwrote the only explanation the
+    // operator had. The state change is right; the wording was not.
+    const refusal =
+      "POST /api/reservationwizard/reservation/savedr rejected: errors: RES_DRIVER_DECLARATION: driver declaration required";
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}RFUS`, status: "booking" });
+    // Exactly the row a refused commit leaves behind: a closed etd_booking attempt whose
+    // evidence carries the reason, and an intent parked as possibly-booked.
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts (intent_id, phase, attempt_no, fencing_token, outcome, finished_at, evidence)
+      VALUES (${id}, 'etd_booking', 1, 1, 'exception', now(),
+              ${JSON.stringify({ error: refusal, httpStatus: 200, stage: "savedr_commit" })}::jsonb)
+    `);
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET reservation_state = 'unknown', last_error = ${`booking outcome exception: ${refusal}`}
+      WHERE id = ${id}
+    `);
+
+    const mine = (await claimBookingWork({ runnerId: "refusal-runner", limit: 20 }))
+      .find((i) => i.intentId === id);
+    assert.ok(mine, "a possibly-booked intent must be claimable for reconcile");
+    assert.equal(mine!.requiresReconcile, true, "and it must be readback-first");
+
+    const rb = await recordBookingPostback({
+      intentId: id,
+      runnerId: "refusal-runner",
+      fencingToken: mine!.fencingToken,
+      phase: "readback",
+      payload: { matches: [], search: { status: "ok", criteria: [`${LDAP_PREFIX}RFUS`] } },
+    });
+    assert.equal(rb.status, "confirmed", "proven-none still returns the intent to bookable");
+
+    const row = ((await db.execute(sql`
+      SELECT reservation_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.reservation_state, "pending");
+    assert.match(String(row.last_error), /no reservation created/, "the card must say what happened");
+    assert.match(String(row.last_error), /RES_DRIVER_DECLARATION/, "and carry the reason Enterprise gave");
+    assert.ok(
+      !String(row.last_error).includes("reconciled clean"),
+      `a reassurance must not replace the refusal: ${row.last_error}`,
+    );
   });
 });
 

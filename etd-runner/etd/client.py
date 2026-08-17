@@ -11,7 +11,7 @@ unless the caller explicitly opts out.
 """
 from __future__ import annotations
 
-import json
+import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -43,9 +43,26 @@ BRANDS = "ET,ZL"
 class EtdError(RuntimeError):
     """An ETD call failed, or was rejected by their validator."""
 
+    def __init__(self, message: str, *, status: int | None = None,
+                 method: str | None = None, path: str | None = None,
+                 payload: Any = None) -> None:
+        super().__init__(message)
+        self.status = status
+        self.method = method
+        self.path = path
+        # IN MEMORY ONLY. A savedr refusal echoes the whole reservation view model
+        # back — driver name, phone, email, address. It may be written to the
+        # gitignored responses folder on this workstation, never to the shared
+        # attempt ledger.
+        self.payload = payload
+
 
 class DryRun(RuntimeError):
     """A write was attempted while dry_run was in effect."""
+
+
+#: Sentinel for "the response body was not JSON" — distinct from a JSON `null`.
+_UNPARSED = object()
 
 
 def _ok(payload: Any) -> bool:
@@ -58,25 +75,220 @@ def _ok(payload: Any) -> bool:
     return True
 
 
-def _messages(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    msgs = payload.get("messages") or payload.get("errorMessage") or ""
-    if isinstance(msgs, list):
-        msgs = " | ".join(str(m) for m in msgs)
-    text = str(msgs).replace("\xa0", " ").strip()
-    if text:
-        return text
-    # ETD does not always put the reason under `messages`. A rejection with no
-    # readable reason is the worst evidence there is, so fall back to the other
-    # keys it is known to use, then to the whole payload. An over-long dump
-    # beats "rejected: " with nothing after the colon.
-    for key in ("errors", "errorMessages", "errorDescription", "validationErrors",
-                "modelState", "message", "detail", "title", "reason", "status"):
-        val = payload.get(key)
-        if val:
-            return f"{key}={json.dumps(val, default=str)}"[:1500]
-    return json.dumps(payload, default=str)[:1500]
+# --------------------------------------------------------------- rejection reading
+#
+# Kept byte-for-byte in step with `server/vrm/etd/client.ts`. Both runners write into
+# the SAME attempt ledger, so an operator draining the queue from a workstation has to
+# read the same sentence the in-server engine would have written.
+#
+# The wizard's ordinary envelope answers {"success": false, "messages": [...]}, but the
+# reservation endpoints answer with the reservation VIEW MODEL: its reasons live in
+# `errors` / `warnings` / `hasErrors` / `notificationMessage` and in per-field
+# `validationMessage`. Reading only `messages`/`errorMessage` is how a real savedr
+# refusal came to be recorded as "rejected: " with nothing after the colon.
+#
+# `errorDescription` / `validationErrors` / `title` / `detail` and the singular
+# `message` / `reason` are names a parallel fix on main had already collected from
+# real refusals; they are kept here so that knowledge is not lost. `status` is
+# deliberately NOT ranked: it is the HTTP status, which the attempt already stores in
+# its own field, and ranking it would prepend "status: 400" to every reason line.
+
+_REASON_RANK = {
+    "errors": 0,
+    "error": 0,
+    "errormessage": 1,
+    "errormessages": 1,
+    "errordescription": 1,
+    "validationmessage": 1,
+    "validationmessages": 1,
+    "validationerrors": 1,
+    "modelstate": 1,
+    "model_state": 1,
+    "messages": 2,
+    "message": 2,
+    "detail": 2,
+    "reason": 2,
+    "warnings": 3,
+    "notificationmessage": 4,
+    "title": 4,
+}
+
+_REASON_TEXT_KEY = re.compile(
+    r"^(message|messageText|text|description|detail|errorMessage|value|reason)$", re.I)
+_REASON_CODE_KEY = re.compile(r"^(code|errorCode|field|fieldName|key|propertyName)$", re.I)
+_HAS_FLAG_KEY = re.compile(r"^has(Errors|Warnings)$", re.I)
+_VALIDATION_KEY = re.compile(r"^validationmessages?$", re.I)
+
+_REASON_MAX_ITEMS = 24
+_REASON_MAX_DEPTH = 6
+
+
+def safe_error_text(text: Any) -> str:
+    """Mask the person-shaped parts of vendor text; keep the codes and the prose."""
+    s = "" if text is None else str(text)
+    s = re.sub(r"[\w.+-]+@[\w-]+\.[\w.]+", "[email]", s)
+    s = re.sub(r"\+?\d[\d()\s.-]{8,}\d", "[phone]", s)
+    s = re.sub(
+        r'"(firstName|lastName|name|phone\w*|email|address\w*|street\w*|postal\w*'
+        r'|zip\w*|dob|licen[cs]e\w*)"\s*:\s*"[^"]*"',
+        r'"\1":"[redacted]"', s, flags=re.I)
+    # Prose names ("Driver Dana Reyes is ineligible") survive every structural rule
+    # above. Error CODES are ALL CAPS and lowercase prose is untouched, so triage value
+    # stays; over-masking is the right failure.
+    s = re.sub(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z'\u2019-]+)+", "[name]", s)
+    return s[:300]
+
+
+def _reason_texts(value: Any, depth: int = 0) -> list[str]:
+    """Flatten one reason-bearing value (string, list, {code,message}, ModelState map)."""
+    if value is None or depth > 3 or isinstance(value, bool):
+        return []
+    if isinstance(value, (str, int, float)):
+        s = str(value).replace("\xa0", " ").strip()
+        return [s] if s and s.lower() != "null" else []
+    if isinstance(value, list):
+        out: list[str] = []
+        for v in value[:_REASON_MAX_ITEMS]:
+            out.extend(_reason_texts(v, depth + 1))
+        return out
+    if not isinstance(value, dict):
+        return []
+    code_key = next(
+        (k for k in value
+         if _REASON_CODE_KEY.match(str(k))
+         and isinstance(value[k], (str, int, float))
+         and not isinstance(value[k], bool)),
+        None)
+    code = str(value[code_key]).strip() if code_key is not None else ""
+    text_keys = [k for k in value if _REASON_TEXT_KEY.match(str(k))]
+    if text_keys:
+        out = []
+        for k in text_keys:
+            out.extend(_reason_texts(value[k], depth + 1))
+        return [f"{code}: {t}" if code and code not in t else t for t in out]
+    # ASP.NET ModelState shape: {"239": ["PICKUP DATE IS IN THE PAST"]}.
+    out = []
+    for k in list(value)[:12]:
+        for t in _reason_texts(value[k], depth + 1):
+            out.append(f"{k}: {t}")
+    return out[:_REASON_MAX_ITEMS]
+
+
+def rejection_reasons(payload: Any) -> str:
+    """Every reason a rejection body carries, joined into one line (UNMASKED).
+
+    A body that says nothing at all still reports which keys came back: an operator
+    reading the attempt ledger months later needs a thread to pull, and "rejected: "
+    with an empty tail is not one.
+    """
+    if payload is None:
+        return "empty response body"
+    if not isinstance(payload, (dict, list)):
+        s = str(payload).replace("\xa0", " ").strip()
+        return s or "empty response body"
+
+    found: list[tuple[int, str]] = []
+    flags: list[str] = []
+    seen: set[int] = set()
+
+    def walk(node: Any, parent: str, depth: int) -> None:
+        if not isinstance(node, (dict, list)) or depth > _REASON_MAX_DEPTH:
+            return
+        if len(found) >= _REASON_MAX_ITEMS or id(node) in seen:
+            return
+        seen.add(id(node))
+        if isinstance(node, list):
+            for v in node[:25]:
+                walk(v, parent, depth + 1)
+            return
+        # A per-field validation message means nothing without the field it belongs to.
+        field_name = str(node.get("fieldName") or "").strip()
+        for k, v in node.items():
+            if len(found) >= _REASON_MAX_ITEMS:
+                return
+            key = str(k)
+            if v is True and _HAS_FLAG_KEY.match(key):
+                flags.append(f"{parent}.{key}" if parent else key)
+                continue
+            rank = _REASON_RANK.get(key.lower())
+            if rank is not None:
+                if _VALIDATION_KEY.match(key) and field_name:
+                    label = f"{field_name} {key}"
+                else:
+                    label = f"{parent}.{key}" if parent else key
+                for t in _reason_texts(v):
+                    found.append((rank, f"{label}: {t}"))
+                    if len(found) >= _REASON_MAX_ITEMS:
+                        break
+                continue
+            if isinstance(v, (dict, list)):
+                walk(v, key, depth + 1)
+
+    walk(payload, "", 0)
+
+    best: dict[str, int] = {}
+    for rank, text in found:
+        if text not in best or best[text] > rank:
+            best[text] = rank
+    if best:
+        return " | ".join(t for t, _ in sorted(best.items(), key=lambda kv: kv[1]))
+
+    keys = (list(payload)[:20] if isinstance(payload, dict)
+            else [str(i) for i in range(min(len(payload), 20))])
+    flag_note = (f"{', '.join(dict.fromkeys(flags))} set but carried no text; "
+                 if flags else "")
+    joined = ", ".join(str(k) for k in keys)
+    return f"{flag_note}no reason text in body; keys: {joined or 'none'}"
+
+
+# Values safe to keep verbatim in a redacted shape: identifiers and status codes.
+_ID_KEY = re.compile(
+    r"^(status|state|code|errorcode|error_code|reference|confirmation\w*"
+    r"|reservation\w*|journey\w*|id)$", re.I)
+_ID_VALUE = re.compile(r"^[A-Za-z0-9._:/-]{1,32}$")
+
+
+def redacted_shape(value: Any) -> str:
+    """A PII-free description of a response: every leaf as `path:type`.
+
+    Mirrors `redactedShape` in server/vrm/etd/executor.ts — values survive only for
+    short identifier-ish fields. Enough to fix a parser or chase a reservation; never
+    enough to leak a technician.
+    """
+    parts: list[str] = []
+
+    def js_type(node: Any) -> str:
+        if isinstance(node, bool):
+            return "boolean"
+        if isinstance(node, (int, float)):
+            return "number"
+        return "string" if isinstance(node, str) else "object"
+
+    def walk(node: Any, depth: int, path: str) -> None:
+        if len(parts) > 40 or depth > 3:
+            return
+        if node is None:
+            parts.append(f"{path}:null")
+            return
+        if isinstance(node, list):
+            parts.append(f"{path}[{len(node)}]")
+            if node:
+                walk(node[0], depth + 1, f"{path}[0]")
+            return
+        if isinstance(node, dict):
+            for k in list(node)[:20]:
+                walk(node[k], depth + 1, f"{path}.{k}" if path else str(k))
+            return
+        leaf = re.sub(r"\[\d+\]$", "", (path.split(".")[-1] if path else path))
+        # Both runners write into the SAME attempt ledger, so a shape has to read
+        # identically whichever one produced it — Python's str(True) is "True", the
+        # ledger's spelling is "true".
+        s = ("true" if node else "false") if isinstance(node, bool) else str(node)
+        keep = isinstance(node, bool) or (bool(_ID_KEY.match(leaf)) and bool(_ID_VALUE.match(s)))
+        parts.append(f"{path}:{s if keep else js_type(node)}")
+
+    walk(value, 0, "")
+    return " ".join(parts)[:300]
 
 
 @dataclass
@@ -128,19 +340,33 @@ class EtdClient:
             {"method": method, "path": path, "status": resp.status_code, "ms": elapsed_ms}
         )
 
-        if resp.status_code == 403:
-            raise EtdError(f"403 not entitled: {method} {path}")
-        if resp.status_code >= 400:
-            raise EtdError(f"{resp.status_code} {method} {path}: {resp.text[:300]}")
-
         try:
-            payload = resp.json()
+            parsed: Any = resp.json()
         except ValueError:
+            parsed = _UNPARSED
+
+        if resp.status_code == 403:
+            raise EtdError(f"403 not entitled: {method} {path}",
+                           status=403, method=method, path=path,
+                           payload=None if parsed is _UNPARSED else parsed)
+        if resp.status_code >= 400:
+            # A 4xx body can be reasoned about too — read it the same way, and fall back
+            # to the masked raw text when it is not JSON at all.
+            detail = (safe_error_text(resp.text) if parsed is _UNPARSED
+                      else safe_error_text(rejection_reasons(parsed)))
+            raise EtdError(f"{resp.status_code} {method} {path}: {detail}",
+                           status=resp.status_code, method=method, path=path,
+                           payload=None if parsed is _UNPARSED else parsed)
+
+        if parsed is _UNPARSED:
             return resp.text
+        payload = parsed
 
         # ETD returns HTTP 200 with success:false for validation failures.
         if not _ok(payload):
-            raise EtdError(f"{method} {path} rejected: {_messages(payload)}")
+            raise EtdError(
+                f"{method} {path} rejected: {safe_error_text(rejection_reasons(payload))}",
+                status=resp.status_code, method=method, path=path, payload=payload)
         return payload
 
     def get(self, path: str) -> Any:

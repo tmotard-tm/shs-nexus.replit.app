@@ -887,6 +887,38 @@ function strOrNull(v: unknown): string | null {
   return s ? s : null;
 }
 
+function clipText(v: unknown, n: number): string {
+  return String(v ?? "").slice(0, n);
+}
+
+/** Attempt outcomes that mean "the external call answered, and it answered no". */
+const REFUSAL_OUTCOMES = new Set(["exception", "failed_clean", "unparsed", "timeout", "ambiguous"]);
+
+/**
+ * The reason the last booking attempt gave, straight from the shared attempt ledger.
+ *
+ * Read from the ledger rather than from `last_error` on purpose: the ledger is what both
+ * runners write, it survives whatever later writers do to the intent row, and it is the
+ * record an operator is pointed at. Returns null when the last attempt did not fail (or
+ * recorded nothing), so a caller can keep its own wording.
+ */
+async function latestBookingFailureReason(intentId: number): Promise<string | null> {
+  const { rows } = await db.execute(sql`
+    SELECT outcome, evidence
+    FROM vrm_workflow_attempts
+    WHERE intent_id = ${intentId} AND phase = 'etd_booking' AND outcome IS NOT NULL
+    ORDER BY attempt_no DESC
+    LIMIT 1
+  `);
+  const row = (rows as any[])[0];
+  if (!row) return null;
+  const outcome = String(row.outcome ?? "");
+  if (!REFUSAL_OUTCOMES.has(outcome)) return null;
+  const evidence = row.evidence ?? {};
+  const reason = strOrNull(evidence?.error) ?? strOrNull(evidence?.reason);
+  return reason ? clipText(reason, 400) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Snowflake schedule access (bounded per-LDAP reads)
 // ---------------------------------------------------------------------------
@@ -2446,10 +2478,23 @@ export async function recordBookingPostback(params: {
   if (verdict.verdict === "none" && reconcilableNone) {
     // Clean reconcile: nothing was booked. Safe to make bookable again — retry
     // still requires the normal claim + op_open discipline (never automatic).
+    //
+    // But "reconciled clean" is not the WHOLE truth and must not be the last word.
+    // The usual road here is a refused commit: Enterprise said no, the readback
+    // (correctly) found nothing, and a bare "reconciled clean" then overwrites the only
+    // explanation the operator has with a reassurance. Keep the refusal in front — the
+    // state change is the same either way.
+    const refusal = await latestBookingFailureReason(intent.id);
     await touchIntent(intent.id, {
       status: "confirmed",
       reservation_state: "pending",
-      last_error: "readback found no reservation; reconciled clean",
+      last_error: refusal
+        ? clipText(
+            `no reservation created — Enterprise refused: ${refusal}` +
+              ` (readback confirmed none exists; bookable again)`,
+            600,
+          )
+        : "readback found no reservation; reconciled clean",
       claimed_by: null,
       lease_expires_at: null,
     });
@@ -3599,7 +3644,16 @@ export async function getIntentDetail(intentId: number): Promise<any> {
   const { rows: guards } = await db.execute(sql`
     SELECT * FROM vrm_workflow_send_guards WHERE intent_id = ${intentId} ORDER BY message_moment
   `);
-  return { ...intent, displayPhase: deriveDisplayPhase(intent), attempts, guards };
+  const booking = (attempts as any[])
+    .filter((a) => a.phase === "etd_booking")
+    .sort((a, b) => Number(b.attempt_no ?? 0) - Number(a.attempt_no ?? 0));
+  return {
+    ...intent,
+    displayPhase: deriveDisplayPhase(intent),
+    attempts,
+    guards,
+    latestAttempt: latestAttemptOf(booking[0] ?? null),
+  };
 }
 
 export async function listIntents(filters: { status?: string; workflowType?: string; ldap?: string; limit?: number }): Promise<any[]> {
@@ -3615,20 +3669,77 @@ export async function listIntents(filters: { status?: string; workflowType?: str
   return (rows as any[]).map((r) => ({ ...r, displayPhase: deriveDisplayPhase(r) }));
 }
 
+/**
+ * The last booking attempt, flattened for a card.
+ *
+ * `last_error` alone cannot tell an operator whether the engine has even run, when, or
+ * what came back — and a later writer can overwrite it. The attempt row can't be
+ * overwritten, so the card gets both.
+ */
+export type LatestAttemptSummary = {
+  attemptNo: number | null;
+  outcome: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+  httpStatus: number | null;
+};
+
+/**
+ * The two callers reach the same row by different routes — the by-source list through
+ * `to_jsonb()` (already ISO) and the detail read straight off the driver (a
+ * space-separated Postgres timestamp) — so normalise here. Only V8 parses the latter;
+ * the card must not depend on that.
+ */
+function isoOrNull(v: unknown): string | null {
+  if (v === null || v === undefined || v === "") return null;
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v.toISOString();
+  // The pool hands timestamps back as "2026-08-17 14:15:32.402664+00": a space
+  // separator, microsecond precision and an HOUR-ONLY offset, none of which Date.parse
+  // is obliged to accept (this one parses to NaN). Normalise before parsing.
+  const d = new Date(String(v).replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00"));
+  return Number.isNaN(d.getTime()) ? String(v) : d.toISOString();
+}
+
+function latestAttemptOf(raw: any): LatestAttemptSummary | null {
+  if (!raw) return null;
+  const evidence = raw.evidence ?? {};
+  return {
+    attemptNo: raw.attempt_no ?? null,
+    outcome: strOrNull(raw.outcome),
+    startedAt: isoOrNull(raw.started_at),
+    finishedAt: isoOrNull(raw.finished_at),
+    error: strOrNull(evidence?.error) ?? strOrNull(evidence?.reason),
+    httpStatus: Number.isFinite(Number(evidence?.httpStatus)) ? Number(evidence.httpStatus) : null,
+  };
+}
+
 /** Survey-page helper: intent status per survey response id. */
 export async function intentsBySourceIds(workflowType: string, sourceIds: string[]): Promise<Record<string, any>> {
   if (!sourceIds.length) return {};
   const joined = sourceIds.map((s) => String(s)).join(",");
   const { rows } = await db.execute(sql`
-    SELECT DISTINCT ON (source_id) *
-    FROM vrm_rental_workflow_intents
-    WHERE workflow_type = ${workflowType}
-      AND source_id = ANY(string_to_array(${joined}, ','))
-    ORDER BY source_id, source_revision DESC, id DESC
+    SELECT DISTINCT ON (i.source_id) i.*, to_jsonb(a) AS latest_attempt
+    FROM vrm_rental_workflow_intents i
+    LEFT JOIN LATERAL (
+      SELECT attempt_no, outcome, started_at, finished_at, evidence
+      FROM vrm_workflow_attempts
+      WHERE intent_id = i.id AND phase = 'etd_booking'
+      ORDER BY attempt_no DESC
+      LIMIT 1
+    ) a ON true
+    WHERE i.workflow_type = ${workflowType}
+      AND i.source_id = ANY(string_to_array(${joined}, ','))
+    ORDER BY i.source_id, i.source_revision DESC, i.id DESC
   `);
   const out: Record<string, any> = {};
   for (const r of rows as any[]) {
-    out[r.source_id] = { ...r, displayPhase: deriveDisplayPhase(r) };
+    const { latest_attempt, ...intent } = r;
+    out[r.source_id] = {
+      ...intent,
+      displayPhase: deriveDisplayPhase(intent),
+      latestAttempt: latestAttemptOf(latest_attempt),
+    };
   }
   return out;
 }

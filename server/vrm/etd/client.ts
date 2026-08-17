@@ -30,9 +30,29 @@ export const BRANDS = "ET,ZL";
 export const MAX_PAGE_SIZE = 100;
 
 export class EtdError extends Error {
-  constructor(message: string) {
+  /** HTTP status of the failing call, when there was a response at all. */
+  readonly httpStatus?: number;
+  readonly method?: string;
+  readonly path?: string;
+  /**
+   * The parsed response body, IN MEMORY ONLY.
+   *
+   * A savedr refusal is the whole reservation view model echoed back — driver name,
+   * phone, email, address. A caller may derive a REDACTED shape from this for evidence;
+   * nothing may persist it, log it or hand it to a UI raw.
+   */
+  readonly responseBody?: unknown;
+
+  constructor(
+    message: string,
+    meta: { httpStatus?: number; method?: string; path?: string; responseBody?: unknown } = {},
+  ) {
     super(message);
     this.name = "EtdError";
+    this.httpStatus = meta.httpStatus;
+    this.method = meta.method;
+    this.path = meta.path;
+    this.responseBody = meta.responseBody;
   }
 }
 
@@ -50,7 +70,7 @@ type Json = any;
  * as evidence, so it goes through the same mask as a 4xx body.
  */
 export function rejectionMessage(method: string, path: string, payload: Json): string {
-  return `${method} ${path} rejected: ${safeErrorText(messagesOf(payload))}`;
+  return `${method} ${path} rejected: ${safeErrorText(rejectionReasons(payload))}`;
 }
 
 export function safeErrorText(text: string): string {
@@ -75,11 +95,155 @@ function isOk(payload: Json): boolean {
   return true;
 }
 
-function messagesOf(payload: Json): string {
-  if (!payload || typeof payload !== "object") return "";
-  let msgs: unknown = payload.messages ?? payload.errorMessage ?? "";
-  if (Array.isArray(msgs)) msgs = msgs.map((m) => String(m)).join(" | ");
-  return String(msgs).replace(/\u00a0/g, " ");
+/**
+ * Keys that carry a refusal reason, and how important each one is.
+ *
+ * The wizard's ordinary envelope answers `{success:false, messages:[...]}`, but the
+ * reservation endpoints answer with the reservation VIEW MODEL: the reasons live in
+ * `errors` / `warnings` / `hasErrors` / `notificationMessage` and in per-field
+ * `validationMessage`. Reading only `messages`/`errorMessage` is why a real savedr
+ * refusal was recorded as "rejected: " with nothing after the colon.
+ *
+ * The rank orders the join so the 300-char mask cap trims boilerplate (the standing
+ * "a copy of the confirmation email will be sent" notice) before it trims the error.
+ *
+ * `errorDescription` / `validationErrors` / `title` / `detail` and the singular
+ * `message` / `reason` are names a parallel fix on main had already collected from real
+ * refusals; they are kept here so that knowledge is not lost. `status` is deliberately
+ * NOT ranked: it is the HTTP status, which the attempt already stores in its own field,
+ * and ranking it would prepend "status: 400" to every reason line.
+ */
+const REASON_RANK: Record<string, number> = {
+  errors: 0,
+  error: 0,
+  errormessage: 1,
+  errormessages: 1,
+  errordescription: 1,
+  validationmessage: 1,
+  validationmessages: 1,
+  validationerrors: 1,
+  modelstate: 1,
+  model_state: 1,
+  messages: 2,
+  message: 2,
+  detail: 2,
+  reason: 2,
+  warnings: 3,
+  notificationmessage: 4,
+  title: 4,
+};
+
+/** Inside a reason container, the fields that hold the human text and its label. */
+const REASON_TEXT_KEY = /^(message|messageText|text|description|detail|errorMessage|value|reason)$/i;
+const REASON_CODE_KEY = /^(code|errorCode|field|fieldName|key|propertyName)$/i;
+
+const REASON_MAX_ITEMS = 24;
+const REASON_MAX_DEPTH = 6;
+
+/** Flatten one reason-bearing value (string, list, {code,message}, ModelState map). */
+function reasonTexts(value: unknown, depth = 0): string[] {
+  if (value === null || value === undefined || depth > 3) return [];
+  if (typeof value === "boolean") return [];
+  if (typeof value === "string" || typeof value === "number") {
+    const s = String(value).replace(/\u00a0/g, " ").trim();
+    return s && s.toLowerCase() !== "null" ? [s] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, REASON_MAX_ITEMS).flatMap((v) => reasonTexts(v, depth + 1));
+  }
+  if (typeof value !== "object") return [];
+  const obj = value as Record<string, unknown>;
+  const codeKey = Object.keys(obj).find(
+    (k) => REASON_CODE_KEY.test(k) && (typeof obj[k] === "string" || typeof obj[k] === "number"),
+  );
+  const code = codeKey ? String(obj[codeKey]).trim() : "";
+  const textKeys = Object.keys(obj).filter((k) => REASON_TEXT_KEY.test(k));
+  if (textKeys.length) {
+    return textKeys
+      .flatMap((k) => reasonTexts(obj[k], depth + 1))
+      .map((t) => (code && !t.includes(code) ? `${code}: ${t}` : t));
+  }
+  // ASP.NET ModelState shape: { "239": ["PICKUP DATE IS IN THE PAST"] }.
+  const out: string[] = [];
+  for (const k of Object.keys(obj).slice(0, 12)) {
+    for (const t of reasonTexts(obj[k], depth + 1)) out.push(`${k}: ${t}`);
+  }
+  return out.slice(0, REASON_MAX_ITEMS);
+}
+
+/**
+ * Every reason a rejection body carries, joined into one line (UNMASKED — callers pass
+ * the result through `safeErrorText`).
+ *
+ * A body that says nothing at all still reports which keys came back: an operator
+ * reading the attempt ledger months later needs a thread to pull, and "rejected: "
+ * with an empty tail is not one.
+ */
+export function rejectionReasons(payload: Json): string {
+  if (payload === null || payload === undefined) return "empty response body";
+  if (typeof payload !== "object") {
+    const s = String(payload).replace(/\u00a0/g, " ").trim();
+    return s || "empty response body";
+  }
+
+  const found: { rank: number; text: string }[] = [];
+  const flags: string[] = [];
+  const seen = new WeakSet<object>();
+
+  const walk = (node: any, parent: string, depth: number): void => {
+    if (!node || typeof node !== "object" || depth > REASON_MAX_DEPTH) return;
+    if (found.length >= REASON_MAX_ITEMS) return;
+    if (seen.has(node)) return;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      for (const v of node.slice(0, 25)) walk(v, parent, depth + 1);
+      return;
+    }
+    // A per-field validation message means nothing without the field it belongs to.
+    const fieldName = String((node as Record<string, unknown>).fieldName ?? "").trim();
+    for (const k of Object.keys(node)) {
+      if (found.length >= REASON_MAX_ITEMS) return;
+      const v = (node as Record<string, unknown>)[k];
+      if (v === true && /^has(Errors|Warnings)$/i.test(k)) {
+        flags.push(parent ? `${parent}.${k}` : k);
+        continue;
+      }
+      const rank = REASON_RANK[k.toLowerCase()];
+      if (rank !== undefined) {
+        const label =
+          /^validationmessages?$/i.test(k) && fieldName
+            ? `${fieldName} ${k}`
+            : parent
+              ? `${parent}.${k}`
+              : k;
+        for (const t of reasonTexts(v)) {
+          found.push({ rank, text: `${label}: ${t}` });
+          if (found.length >= REASON_MAX_ITEMS) break;
+        }
+        continue;
+      }
+      if (v && typeof v === "object") walk(v, k, depth + 1);
+    }
+  };
+  walk(payload, "", 0);
+
+  const best = new Map<string, number>();
+  for (const r of found) {
+    const prev = best.get(r.text);
+    if (prev === undefined || prev > r.rank) best.set(r.text, r.rank);
+  }
+  if (best.size) {
+    return Array.from(best.entries())
+      .sort((a, b) => a[1] - b[1])
+      .map(([text]) => text)
+      .join(" | ");
+  }
+
+  const keys = Object.keys(payload as object).slice(0, 20);
+  const flagNote = flags.length
+    ? `${Array.from(new Set(flags)).join(", ")} set but carried no text; `
+    : "";
+  return `${flagNote}no reason text in body; keys: ${keys.join(", ") || "none"}`;
 }
 
 export type CarClass = {
@@ -141,7 +305,7 @@ export class EtdClient {
       });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
-      throw new EtdError(`${method} ${path} transport failure: ${reason}`);
+      throw new EtdError(`${method} ${path} transport failure: ${reason}`, { method, path });
     } finally {
       clearTimeout(timer);
     }
@@ -149,21 +313,45 @@ export class EtdClient {
     const text = await resp.text();
     this.calls.push({ method, path, status: resp.status, ms: Date.now() - started });
 
-    if (resp.status === 403) throw new EtdError(`403 not entitled: ${method} ${path}`);
+    const parsed = (() => {
+      try {
+        return JSON.parse(text);
+      } catch {
+        return undefined;
+      }
+    })();
+
+    if (resp.status === 403) {
+      throw new EtdError(`403 not entitled: ${method} ${path}`, {
+        httpStatus: 403,
+        method,
+        path,
+        responseBody: parsed,
+      });
+    }
     if (resp.status >= 400) {
-      throw new EtdError(`${resp.status} ${method} ${path}: ${safeErrorText(text)}`);
+      // A 4xx body can be reasoned about too — read it the same way, and fall back to
+      // the masked raw text when it is not JSON at all.
+      const detail = parsed === undefined ? safeErrorText(text) : safeErrorText(rejectionReasons(parsed));
+      throw new EtdError(`${resp.status} ${method} ${path}: ${detail}`, {
+        httpStatus: resp.status,
+        method,
+        path,
+        responseBody: parsed,
+      });
     }
 
-    let payload: Json;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      return text;
-    }
+    if (parsed === undefined) return text;
+    const payload: Json = parsed;
 
     // ETD returns HTTP 200 with success:false for validation failures.
     if (!isOk(payload)) {
-      throw new EtdError(rejectionMessage(method, path, payload));
+      throw new EtdError(rejectionMessage(method, path, payload), {
+        httpStatus: resp.status,
+        method,
+        path,
+        responseBody: payload,
+      });
     }
     return payload;
   }

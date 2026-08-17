@@ -24,6 +24,33 @@ only collide in production, on a real reservation in a technician's name.
 or runs it, never a restatement of what the Python is believed to do. Fixture-generating a
 Python run and deep-comparing is the pattern that has caught real drift.
 
+Two concrete traps the deep-compare has caught, both invisible to a reading of either side:
+
+- `str(True)` is `"True"`, `String(true)` is `"true"`. Any evidence string built by
+  stringifying a boolean diverges between runners. Spell booleans explicitly on the Python
+  side.
+- The runner's HTTP dependency is not installed in the Replit workspace, so importing its
+  client to test a PURE helper fails at `import requests`. Stub the module into
+  `sys.modules` before the import rather than skipping the parity check.
+
+# The savedr refusal is an HTTP 200
+
+Enterprise refuses a reservation commit with **HTTP 200** and a body carrying
+`success: false` (also seen misspelled `succecss`). The body is the reservation VIEW MODEL,
+not an error envelope: reasons live in `errors` / `warnings` / `hasErrors` /
+`errorMessage` / `notificationMessage` and in per-field `validationMessage` entries nested
+beside a `fieldName`, plus a model-state style dict. A reader that only knows `messages`
+and `errorMessage` extracts nothing and logs `rejected: ` with an empty tail.
+
+**Why:** that empty tail cost a technician his rental — the reason was received and dropped,
+and the readback then overwrote the evidence with a reassuring "reconciled clean".
+
+**How to apply:** the raw body echoes the driver's name, phone, email and address, so it is
+in-memory only — persist the masked reasons plus a redacted `path:type` shape, never the
+body. When a refusal carries no message text at all, report which keys came back; a
+diagnosis has to survive on the ledger alone. Any state change that follows a refusal must
+keep the refusal as the operator-visible last word.
+
 # The synthetic-fixture ceiling
 
 The orchestrator (not the runner) re-verifies the technician's schedule against Snowflake

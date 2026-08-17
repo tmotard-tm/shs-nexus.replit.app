@@ -83,6 +83,10 @@ export function IntentPill({ intent }: { intent: any }) {
 }
 
 const IN_FLIGHT = new Set(["preview_pending", "confirmed", "booking", "awaiting_verification"]);
+/** Booking-attempt outcomes that mean Enterprise (or a gate) said no. */
+const ATTEMPT_FAILED = new Set([
+  "exception", "failed_clean", "unparsed", "timeout", "ambiguous", "no_reservation_found",
+]);
 const TERMINAL = new Set(["completed", "cancelled", "superseded", "failed"]);
 
 /**
@@ -188,6 +192,24 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const confirmation = intent?.reservation_evidence?.confirmation ?? null;
   const live = intent?.execution_mode === "live";
 
+  // The last time the engine actually talked to Enterprise, and what came back.
+  // `last_error` alone cannot say whether the engine has even run, when, or what it was
+  // told — and a later writer can overwrite it. The attempt row cannot be overwritten,
+  // so a refusal stays legible here even after the intent has been reconciled clean.
+  const attempt = intent?.latestAttempt ?? null;
+  const attemptAt = attempt?.finishedAt ?? attempt?.startedAt ?? null;
+  const attemptWhen = attemptAt
+    ? new Date(attemptAt).toLocaleString(undefined, {
+        month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      })
+    : "";
+  const attemptFailed = !!attempt?.outcome && ATTEMPT_FAILED.has(String(attempt.outcome));
+  const attemptLine = attempt?.outcome
+    ? `#${attempt.attemptNo ?? "?"} ${String(attempt.outcome).replace(/_/g, " ")}` +
+      `${attemptWhen ? ` · ${attemptWhen}` : ""}` +
+      `${attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ""}`
+    : "";
+
   const canConfirm = status === "preview_ready";
   const canRepreview = ["preview_ready", "preview_required", "preview_failed", "eligibility_failed"].includes(status);
   const canRetry = ["manual_review", "booking_unknown", "block_conflict_pending_readback"].includes(status);
@@ -269,6 +291,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                   ["Route block", intent.block_state],
                   ["Text 1 / Text 2", `${intent.msg1_state ?? "—"} / ${intent.msg2_state ?? "—"}`],
                 ] as Array<[string, unknown]>)),
+            ["Latest attempt", attemptLine],
             ["Last error", intent.last_error],
           ] as Array<[string, unknown]>)
             .filter(([, v]) => String(v ?? "").trim() !== "")
@@ -293,6 +316,20 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                   {f.code}{f.detail ? ` — ${f.detail}` : ""}
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* The refusal itself. A "no reservation created" reconcile returns the intent
+              to bookable, which is correct, but the operator still needs to see WHY the
+              last commit was refused before pressing the engine again. */}
+          {attemptFailed && attempt?.error && (
+            <div style={{ marginTop: 8, padding: 8, background: colors.redLight, borderRadius: 8 }}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.red, marginBottom: 4 }}>
+                Last booking attempt refused{attemptWhen ? ` · ${attemptWhen}` : ""}
+              </div>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, wordBreak: "break-word" }}>
+                {String(attempt.error)}
+              </div>
             </div>
           )}
 

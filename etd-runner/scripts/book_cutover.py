@@ -39,7 +39,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import psycopg2
@@ -49,6 +49,8 @@ HERE = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(HERE))
 
 from etd import EtdClient  # noqa: E402
+from etd.client import (redacted_shape, rejection_reasons,  # noqa: E402
+                        safe_error_text)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vehicle_class import (choose as choose_class, choose_same_vehicle,  # noqa: E402
@@ -936,7 +938,11 @@ def main() -> None:
             for gate in ("/api/dailyrental/validateLocAddInfo", "/api/dailyrental/validate"):
                 gr = etd.post(gate, model, mutating=False)
                 if not (gr.get("success") or gr.get("succecss")):
-                    raise RuntimeError(f"{gate} rejected it: {json.dumps(gr)[:200]}")
+                    # Read the reasons; dump the body. `json.dumps(gr)[:200]` used to
+                    # truncate the answer away AND echo driver fields into the report.
+                    _dump_response(f"{ldap}_gate_refused", gr)
+                    raise RuntimeError(
+                        f"{gate} rejected it: {safe_error_text(rejection_reasons(gr))}")
 
             rec = {
                 "ldap": ldap, "tech_name": r["tech_name"], "truck_number": truck,
@@ -966,16 +972,21 @@ def main() -> None:
                 req_dir.mkdir(exist_ok=True)
                 (req_dir / f"{ldap}.json").write_text(
                     json.dumps(model, indent=1, default=str), encoding="utf-8")
-                out = etd.confirm_reservation(model, dry_run=False)
+                try:
+                    out = etd.confirm_reservation(model, dry_run=False)
+                except Exception as exc:
+                    # Dump the REFUSAL as well as the success. Saving only after a
+                    # commit succeeded is exactly why a refused savedr left nothing to
+                    # read: the body that carries the reasons is the one thrown away.
+                    if getattr(exc, "payload", None) is not None:
+                        _dump_response(f"{ldap}_refused", exc.payload)
+                    raise
                 # Save the raw response. JA70BDZ1M8 was recorded as "the
                 # confirmation" because this code read the top level of the
                 # response, found nothing, and fell back to the QUOTE
                 # reference — a number no Enterprise branch recognises. The
                 # real confirmation (1497889698-style) is nested in `data`.
-                raw_dir = REF / "savedr_responses"
-                raw_dir.mkdir(exist_ok=True)
-                (raw_dir / f"{ldap}.json").write_text(
-                    json.dumps(out, indent=1, default=str), encoding="utf-8")
+                _dump_response(ldap, out)
 
                 def dig(node, keys):
                     """First value under any key containing one of `keys`."""
@@ -1379,6 +1390,49 @@ def _journey_matches(etd: EtdClient, criteria: str, confirmation: str = "",
             "error": None}
 
 
+def _failure_evidence(exc: Exception, calls: list, request: dict,
+                      stage: str | None = None) -> dict:
+    """The evidence a refused external call leaves in the shared attempt ledger.
+
+    Mirrors failureEvidence() in server/vrm/etd/executor.ts, key for key. Both runners
+    write into the SAME ledger, so an operator draining the queue from a workstation has
+    to see the same text the in-server engine would have written.
+
+    The RAW body never goes in: a savedr refusal echoes the whole reservation view model
+    back (driver name, phone, email, address). It goes to the gitignored responses folder
+    on this workstation instead, where the operator who ran the pass can read it.
+
+    Query strings are stripped from the logged paths — the autocomplete and branch
+    lookups carry the technician's address and coordinates in theirs.
+    """
+    payload = getattr(exc, "payload", None)
+    evidence = {
+        "error": str(exc)[:300],
+        "httpStatus": getattr(exc, "status", None),
+        "responseShape": redacted_shape(payload) if payload is not None else None,
+        "etdCalls": [
+            f"{c.get('method')} {str(c.get('path') or '').split('?')[0]} "
+            f"-> {c.get('status')} ({c.get('ms')}ms)"[:120]
+            for c in (calls or [])[-12:]
+        ],
+        "request": request,
+        "at": datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+              .replace("+00:00", "Z"),
+    }
+    if stage:
+        evidence["stage"] = stage
+    return evidence
+
+
+def _dump_response(name: str, payload) -> str:
+    """Write a raw ETD response to the gitignored responses folder. Returns the name."""
+    raw_dir = REF / "savedr_responses"
+    raw_dir.mkdir(exist_ok=True)
+    (raw_dir / f"{name}.json").write_text(
+        json.dumps(payload, indent=1, default=str), encoding="utf-8")
+    return f"savedr_responses/{name}.json"
+
+
 def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
              old_j, old_r, confirm: bool, runner: str) -> None:
     iid, ldap, mode = item["intentId"], item["ldap"], item["executionMode"]
@@ -1542,18 +1596,48 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
         return
     attempt_no = body.get("attemptNo")
 
-    # 5. Validation gates (non-mutating).
+    # What this pass actually put on the wire, recorded with every failure so a refusal
+    # is diagnosable from the ledger alone.
+    pass_request = {"journeyId": q.get("journey_id"), "quoteReference": q.get("reference"),
+                    "branchCode": got_branch, "branchName": str(q.get("branch_name") or "")[:60],
+                    "sipp": sipp, "pickupDate": pickup, "start": start, "end": end,
+                    "requestHash": req_hash}
+    calls_at_start = len(etd.calls)
+
+    # 5. Validation gates (non-mutating). A validator rejection is the one signal that
+    # says why the commit WOULD have been refused, so it gets the same evidence a refused
+    # commit does — and never the raw gate body, which is the driver-bearing model.
     try:
         for gate in ("/api/dailyrental/validateLocAddInfo", "/api/dailyrental/validate"):
             gr = etd.post(gate, model, mutating=False)
             if not (gr.get("success") or gr.get("succecss")):
+                _dump_response(f"intent{iid}_{ldap}_gate_refused", gr)
                 post("op_result", {"outcome": "failed_clean", "attemptNo": attempt_no,
-                                   "evidence": {"error": f"{gate}: {json.dumps(gr)[:300]}"}})
-                print(f"  FAIL {label} {gate} rejected")
+                                   "evidence": {
+                                       "error": f"{gate}: "
+                                                f"{safe_error_text(rejection_reasons(gr))}",
+                                       "httpStatus": 200,
+                                       "responseShape": redacted_shape(gr),
+                                       "etdCalls": [
+                                           f"{c.get('method')} "
+                                           f"{str(c.get('path') or '').split('?')[0]} "
+                                           f"-> {c.get('status')} ({c.get('ms')}ms)"[:120]
+                                           for c in etd.calls[calls_at_start:][-12:]],
+                                       "request": pass_request,
+                                       "gate": gate,
+                                       "at": datetime.now(timezone.utc)
+                                             .isoformat(timespec="milliseconds")
+                                             .replace("+00:00", "Z")}})
+                print(f"  FAIL {label} {gate} rejected: "
+                      f"{safe_error_text(rejection_reasons(gr))[:120]}")
                 return
     except Exception as exc:
+        if getattr(exc, "payload", None) is not None:
+            _dump_response(f"intent{iid}_{ldap}_gate_refused", exc.payload)
         post("op_result", {"outcome": "failed_clean", "attemptNo": attempt_no,
-                           "evidence": {"error": f"validation gate: {str(exc)[:200]}"}})
+                           "evidence": _failure_evidence(
+                               exc, etd.calls[calls_at_start:], pass_request,
+                               stage="validation_gate")})
         print(f"  FAIL {label} validation gate: {str(exc)[:120]}")
         return
 
@@ -1574,14 +1658,20 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
     try:
         out = etd.confirm_reservation(model, dry_run=False)
     except Exception as exc:
+        # Dump the refusal too, not just a success. The refusal body IS the diagnosis —
+        # it is the reservation view model with the reasons filled in — and an operator
+        # who cannot read it is left with the same empty "rejected:" the ledger used to
+        # carry. Gitignored: it echoes the driver's name, phone and email.
+        where = (_dump_response(f"intent{iid}_{ldap}_refused", exc.payload)
+                 if getattr(exc, "payload", None) is not None else "")
         post("op_result", {"outcome": "exception", "attemptNo": attempt_no,
-                           "evidence": {"error": str(exc)[:300]}})
-        print(f"  ???? {label} confirm raised: {str(exc)[:120]} (readback will decide)")
+                           "evidence": _failure_evidence(
+                               exc, etd.calls[calls_at_start:], pass_request,
+                               stage="savedr_commit")})
+        print(f"  ???? {label} confirm raised: {str(exc)[:120]} (readback will decide)"
+              f"{f' [raw: {where}]' if where else ''}")
         return
-    raw_dir = REF / "savedr_responses"
-    raw_dir.mkdir(exist_ok=True)
-    (raw_dir / f"intent{iid}_{ldap}.json").write_text(
-        json.dumps(out, indent=1, default=str), encoding="utf-8")
+    _dump_response(f"intent{iid}_{ldap}", out)
     confirmation = _parse_confirmation(out)
     if confirmation:
         post("op_result", {"outcome": "booked", "attemptNo": attempt_no,
