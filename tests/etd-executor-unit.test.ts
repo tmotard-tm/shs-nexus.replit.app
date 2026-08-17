@@ -460,7 +460,16 @@ describe("preview lane", () => {
     for (const owned of RUNNER_OWNED) {
       assert.ok(!detail.includes(owned), `a good quote must clear ${owned} (detail: ${detail})`);
     }
-    assert.equal(run.results[0].status, "preview_required", "…and a synthetic LDAP still has no schedule");
+    // A request is not schedule-gated, so a clean quote is a READY preview. It used
+    // to stop at preview_required purely because the server re-checked ServicePower
+    // and a synthetic LDAP has no rows there — the same gate that made real
+    // technicians with no route unbookable.
+    assert.equal(run.results[0].status, "preview_ready", "a clean request quote is ready to confirm");
+
+    const row = await loadIntentRow(intentId);
+    const sched = (row.preview as any)?.schedule ?? {};
+    assert.equal(sched.scheduleGated, false, "and the preview records that no schedule gate ran");
+    assert.equal(sched.requestedDateWorking, null, "so it must not claim a working-day check passed");
   });
 
   test("a same-day request ignores the schedule entirely, stale watermark included", async () => {
