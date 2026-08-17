@@ -4,7 +4,7 @@
  * This drives `buildCutoverBlockArgs` — the SAME function the live
  * `/forms/rental-survey/file-route-blocks` lane calls — and then pushes its
  * output through the real payload builder. Asserting the builder alone would
- * be worthless here: the builder was always capable of sending 08:00/Exact and
+ * be worthless here: the builder was always capable of sending 08:00 and
  * a ZIP5, and the lane still sent "Anytime" and a ZIP+4. The rule has to be
  * tested where the lane decides it.
  *
@@ -85,10 +85,13 @@ describe("branchZip", () => {
 });
 
 describe("the lane's decision — 8:00 AM for every tech", () => {
-  test("asks for 08:00 and tells the scheduler it is Exact", () => {
+  test("pins 08:00 by sending it in BOTH fields, as the reference requires", () => {
+    // Standard_Activities_API_Reference_Guide: "To pin an exact time, send a HH:MM
+    // value here and match it in StartTime." "Exact" was invented here and is not a
+    // value the API defines.
     const a = argsFor(candidate());
     assert.equal(a.startTime, "08:00");
-    assert.equal(a.startTimeRequest, "Exact");
+    assert.equal(a.startTimeRequest, "08:00");
   });
 
   test('the lane never sends "Anytime"', () => {
@@ -99,10 +102,10 @@ describe("the lane's decision — 8:00 AM for every tech", () => {
     }
   });
 
-  test("08:00 / Exact survive onto the wire", () => {
+  test("08:00 survives onto the wire in both fields", () => {
     const r = wire(candidate());
     assert.equal(r.StartTime, "08:00");
-    assert.equal(r.StartTimeRequest, "Exact");
+    assert.equal(r.StartTimeRequest, "08:00");
   });
 
   test("every candidate gets the same 8:00, whatever their branch or truck", () => {
@@ -115,13 +118,13 @@ describe("the lane's decision — 8:00 AM for every tech", () => {
     for (const c of varied) {
       const r = wire(c);
       assert.equal(r.StartTime, "08:00", `${c.ldap} start time`);
-      assert.equal(r.StartTimeRequest, "Exact", `${c.ldap} start request`);
+      assert.equal(r.StartTimeRequest, "08:00", `${c.ldap} start request`);
     }
   });
 
   test("the client's own defaults agree with the lane", () => {
     assert.equal(ROUTE_BLOCK_START_TIME, "08:00");
-    assert.equal(ROUTE_BLOCK_START_TIME_REQUEST, "Exact");
+    assert.equal(ROUTE_BLOCK_START_TIME_REQUEST, "08:00");
   });
 
   test("the day is pinned on all three date fields", () => {
@@ -212,7 +215,9 @@ describe("the rest of the contract", () => {
   test("a live block carries no TEST prefix; a dark one does", () => {
     assert.equal(
       buildStandardActivityPayload(argsFor(candidate({ live: true }))).projectName,
-      "Enterprise Contract Change - 061385 - 081826",
+      // Keyed on the LDAP, not the truck number (Tyler, 2026-08-17): the name only
+      // has to be unique, and "the truck number" is ambiguous on a cutover.
+      "Enterprise Contract Change - JDOE - 081826",
     );
     assert.match(
       buildStandardActivityPayload(argsFor(candidate({ live: false }))).projectName,

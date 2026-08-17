@@ -89,9 +89,12 @@ export function buildCutoverBlockArgs(input: CutoverBlockInput): CutoverBlockDec
       durationMinutes: 30,
       locationZip: zip,
       startTime: "08:00",
-      startTimeRequest: "Exact",
+      // Pin by sending the same HH:MM the row starts at, per the API reference.
+      startTimeRequest: "08:00",
       live: input.live,
       projectLabel: "Enterprise Contract Change",
+      // Unique per technician without relying on which truck number is meant.
+      projectKey: input.ldap,
       // Tyler 2026-08-13: short and labeled. The long instructions go in the
       // technician's TEXT, not the block. No truck number here — the project
       // name already carries it.

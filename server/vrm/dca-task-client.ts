@@ -211,7 +211,12 @@ export const RENTAL_RETURN_DURATION_MIN = 120;
 export const ROUTE_BLOCK_START_TIME = "08:00";
 
 /** The only three values the API reference documents for StartTimeRequest. */
-export type StartTimeRequest = "Anytime" | "Exact" | "AsSoonAsPossible";
+/**
+ * What the API reference actually accepts: "Start of Day", "All Day", or an HH:MM
+ * value that you also send in StartTime to pin the slot. "Exact", "Anytime" and
+ * "AsSoonAsPossible" were invented here and are not in the spec.
+ */
+export type StartTimeRequest = string;
 
 /**
  * Default scheduling intent: "Exact" — 8:00 AM is the ask for a rental pickup
@@ -221,13 +226,13 @@ export type StartTimeRequest = "Anytime" | "Exact" | "AsSoonAsPossible";
  * pass "Anytime" instead (the reference's own example pairs "Anytime" with an
  * 08:00 StartTime). The Enterprise contract-change block does exactly that.
  */
-export const ROUTE_BLOCK_START_TIME_REQUEST: StartTimeRequest = "Exact";
+export const ROUTE_BLOCK_START_TIME_REQUEST: StartTimeRequest = ROUTE_BLOCK_START_TIME;
 
 /** HH:MM, 00:00–23:59. Anything else is not put on the wire. */
 const HHMM = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 function defaultSubmittedBy(): string {
-  return (process.env.EVENT_REQUEST_SUBMITTED_BY ?? "TMORGAN (tyler.morgan@transformco.com)").trim();
+  return (process.env.EVENT_REQUEST_SUBMITTED_BY ?? "JMORGA1 (tyler.morgan@transformco.com)").trim();
 }
 function defaultSubmitterEmail(): string {
   return (process.env.EVENT_REQUEST_SUBMITTER_EMAIL ?? "tyler.morgan@transformco.com").trim();
@@ -263,6 +268,8 @@ export interface StandardActivityArgs {
    * unchanged.
    */
   projectLabel?: string;
+  /** Overrides truckNumber as the unique discriminator in projectName. */
+  projectKey?: string;
   /** Project-level note. Defaults to the rental-return wording. */
   projectNotes?: string;
   /** Row-level Notes the technician and dispatcher read. */
@@ -327,10 +334,14 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
   const duration = args.durationMinutes ?? RENTAL_RETURN_DURATION_MIN;
   const where = args.shopName ? ` at ${args.shopName}` : "";
   const label = args.projectLabel ?? "Rental Return";
-  // Per-truck discriminator: many projects now fire on the same date, so
-  // region/sequence naming from the batched design would collide.
+  // The name only has to be UNIQUE — the API rejects one already taken — and many
+  // projects fire on the same date. Truck number is the default discriminator, but a
+  // caller can pass `projectKey` instead: the cutover keys on LDAP, because "the
+  // truck number" is ambiguous there (assigned vs the one the rental was raised on)
+  // and the LDAP is already the row's TechnicianId.
+  const discriminator = args.projectKey ?? args.truckNumber;
   const projectName =
-    `${args.live ? "" : "TEST "}${label} - ${args.truckNumber} - ${mmddyy(args.date)}`;
+    `${args.live ? "" : "TEST "}${label} - ${discriminator} - ${mmddyy(args.date)}`;
 
   const body: Record<string, unknown> = {
     submittedBy: args.submittedBy ?? defaultSubmittedBy(),
@@ -356,7 +367,9 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
         Duration: duration,
         LocationType: args.locationZip ? "Supplied" : "None",
         LocationValue: args.locationZip ?? "",
-        TravelBehavior: "None",
+        // None/From/To/Both. The technician drives to the branch and away from it,
+        // so "None" would book 30 minutes with no travel allocated either side.
+        TravelBehavior: "Both",
         Notes: args.rowNotes
           ?? `Return rental, pick up truck ${args.truckNumber}${where}`,
         CheckJobs: "FALSE",
