@@ -418,6 +418,26 @@ export function useAccountAdditionalInfo(
 }
 
 /**
+ * Drop any bookingReferences entry labelled Truck Number.
+ *
+ * Enterprise removed that field from the account, so the label refers to nothing. The
+ * truck number belongs in the reservation's special notes and is put there by
+ * renderRequestSpecialNotes / renderSpecialNotes. Deliberately narrow: the cutover's
+ * `CLOSE Enterprise Ticket` and `Holman ARI Claim` entries are not account fields
+ * either, and they are what ties a converted reservation back to its Holman ticket.
+ */
+export function stripTruckNumberReference(model: Record<string, unknown>): number {
+  const refs = model.bookingReferences;
+  if (!Array.isArray(refs)) return 0;
+  const kept = refs.filter(
+    (r) => !(typeof r === "string" && /^\s*(SHS\s+)?truck\s*number\b/i.test(r)),
+  );
+  const dropped = refs.length - kept.length;
+  if (dropped) model.bookingReferences = kept;
+  return dropped;
+}
+
+/**
  * Refuse to commit while a mandatory additional-info field is still empty.
  *
  * Fails closed and BY NAME. If Enterprise adds a field nothing here knows how to fill,

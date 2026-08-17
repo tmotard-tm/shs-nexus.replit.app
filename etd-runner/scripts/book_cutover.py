@@ -377,6 +377,25 @@ def use_account_additional_info(model: dict, live_fields: list) -> list:
     return [str(f.get("fieldName") or "").strip() for f in fields]
 
 
+def strip_truck_number_reference(model: dict) -> int:
+    """Drop any bookingReferences entry labelled Truck Number.
+
+    Enterprise removed that field from the account, so the label refers to nothing.
+    The truck number belongs in the reservation's special notes and is put there by
+    render_request_special_notes / render_special_notes.
+    """
+    refs = model.get("bookingReferences")
+    if not isinstance(refs, list):
+        return 0
+    kept = [r for r in refs
+            if not (isinstance(r, str)
+                    and re.match(r"\s*(SHS\s+)?truck\s*number\b", r, re.I))]
+    dropped = len(refs) - len(kept)
+    if dropped:
+        model["bookingReferences"] = kept
+    return dropped
+
+
 def assert_additional_info_complete(model: dict, ldap: str) -> None:
     """Refuse to commit while a mandatory additional-info field is still empty.
 
@@ -926,6 +945,7 @@ def main() -> None:
             use_account_additional_info(model, etd.account_additional_info_fields())
             truck = r["truck_number"]
             driver_fields = set_driver(model, user, ldap, r["tech_name"], truck)
+            strip_truck_number_reference(model)
             assert_additional_info_complete(model, ldap)
 
             # The technician's assigned van, from TPMS. Guaranteed present by the
@@ -1598,6 +1618,7 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
         print(f"  ABRT {label} additional-info lookup failed: {str(exc)[:120]}")
         return
     set_driver(model, user, ldap, facts.get("techName") or ldap, truck)
+    strip_truck_number_reference(model)
     try:
         assert_additional_info_complete(model, ldap)
     except Exception as exc:

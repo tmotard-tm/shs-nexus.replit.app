@@ -79,6 +79,7 @@ import {
   cloneTemplate,
   useAccountAdditionalInfo,
   assertAdditionalInfoComplete,
+  stripTruckNumberReference,
 } from "./surgery";
 
 /** Default rental length in days when the preview carries no return date. */
@@ -943,6 +944,8 @@ async function runBook(
     refs[0] = `${refs[0]} ${intentRef}`.trim();
   }
   if (refs.length) model.bookingReferences = refs;
+  // The account has no Truck Number field. Nothing may claim it does.
+  stripTruckNumberReference(model);
 
   const requestHash = bookingRequestHash({ branch: gotBranch, date: pickup, ldap, sipp });
 
