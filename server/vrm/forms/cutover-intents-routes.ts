@@ -53,6 +53,7 @@ import {
   setQuietStateFallback,
   QUIET_FALLBACK_SETTING_KEY,
 } from "./cutover-orchestrator";
+import { runBookingExecutor } from "../etd/executor";
 
 function sendOrchestratorError(res: any, e: any): void {
   if (e instanceof OrchestratorError) {
@@ -113,6 +114,26 @@ export function requireCronOrAdmin(req: any, res: any, next: any): void {
   const role = String(req.user?.role ?? "");
   if (role === "admin" || role === "developer") return next();
   res.status(403).json({ message: "internal-cron bearer or admin session required", code: "cron_or_admin_only" });
+}
+
+/**
+ * In-server booking executor: platform cron, OR any authenticated session.
+ *
+ * This is deliberately NOT `requireInternalCron`. The runner endpoints are cron-only
+ * because they hand out fencing tokens and accept caller-supplied evidence — a session
+ * that could claim work could forge a "verified" reservation. This route accepts no
+ * evidence at all: it claims and serves work entirely server-side, under the same
+ * guards the cron lane runs, and returns a summary. The dangerous surface is the
+ * evidence, not the trigger, so a staffer clicking "start" can fire it.
+ *
+ * Live intents keep their own protection: while the flag is disarmed they are
+ * unclaimable, and every mutation route still runs blockNonAdminLiveIntent.
+ * Exported for route auth tests.
+ */
+export function requireCronOrStaff(req: any, res: any, next: any): void {
+  if (hasValidCronBearer(req)) return next();
+  if (req.user) return next();
+  res.status(403).json({ message: "internal-cron bearer or signed-in session required", code: "cron_or_staff_only" });
 }
 
 /**
@@ -228,11 +249,55 @@ export function registerCutoverIntentRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Run the in-server booking engine: claim queued work and drive ETD to completion.
+   *
+   * This is what makes a staff click actually book. The panel fires it after create
+   * (-> preview) and after confirm (-> booking), and offers it as a manual button; the
+   * morning sweep runs a pass first. `intentId` narrows the claim to one intent so a
+   * click serves the row the staffer is looking at.
+   *
+   * Slow by nature: a cold token costs ~21 s of Azure B2C and each intent walks the
+   * full ETD chain. Callers must not race it — the executor serializes passes itself.
+   */
+  router.post(`${base}/intents/executor/run`, requireCronOrStaff, async (req, res) => {
+    try {
+      const rawId = req.body?.intentId;
+      const intentId = rawId === undefined || rawId === null || rawId === "" ? undefined : Number(rawId);
+      if (intentId !== undefined && (!Number.isInteger(intentId) || intentId <= 0)) {
+        return res.status(400).json({ message: "intentId must be a positive integer" });
+      }
+      const out = await runBookingExecutor({
+        // Server-owned, never caller-supplied: the attempt ledger is the audit trail for
+        // real reservations, so a caller must not be able to sign someone else's name to
+        // a booking (or shadow the Python runner's id and confuse cross-runner dedupe).
+        runnerId: "nexus-inline",
+        intentId,
+        workflowType: req.body?.workflowType ? String(req.body.workflowType) : undefined,
+        limit: req.body?.limit ? Number(req.body.limit) : undefined,
+      });
+      res.json(out);
+    } catch (e: any) {
+      sendOrchestratorError(res, e);
+    }
+  });
+
   /** Morning sweep: block readbacks, msg2 releases, completion checks, block retries. */
   router.post(`${base}/morning-sweep`, requireCronOrAdmin, async (_req, res) => {
     try {
+      // Serve the booking queue BEFORE sweeping: the sweep reconciles the state the
+      // executor produces (readbacks, completions, block retries), so running it first
+      // means a preview requested overnight is already built when the sweep looks.
+      // A booking failure must not stop the sweep — it is the recovery pass.
+      let executor: unknown = null;
+      try {
+        executor = await runBookingExecutor({ runnerId: "nexus-morning-sweep", limit: 20 });
+      } catch (err: any) {
+        executor = { error: String(err?.message ?? err).slice(0, 300) };
+        console.error("[cutover] morning-sweep executor pass failed:", err?.message ?? err);
+      }
       const summary = await morningSweep();
-      res.json(summary);
+      res.json({ ...summary, executor });
     } catch (e: any) {
       sendOrchestratorError(res, e);
     }

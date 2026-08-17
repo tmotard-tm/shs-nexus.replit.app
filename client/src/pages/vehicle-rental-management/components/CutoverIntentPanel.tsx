@@ -85,6 +85,13 @@ export function IntentPill({ intent }: { intent: any }) {
 const IN_FLIGHT = new Set(["preview_pending", "confirmed", "booking", "awaiting_verification"]);
 const TERMINAL = new Set(["completed", "cancelled", "superseded", "failed"]);
 
+/**
+ * Statuses the in-server booking engine can pick up. IN_FLIGHT plus the cancel
+ * readback lane — exactly the claim lanes in claimBookingWork (verify / cancel /
+ * preview / book). Anything else has nothing for the engine to claim.
+ */
+const ENGINE_RUNNABLE = new Set(Array.from(IN_FLIGHT).concat("cancel_pending_readback"));
+
 async function post(path: string, body: unknown) {
   const res = await fetch(path, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body ?? {}),
@@ -120,12 +127,42 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const { user } = useAuth();
   const isAdmin = ["admin", "developer"].includes(String(user?.role ?? ""));
 
-  const run = async (label: string, fn: () => Promise<any>) => {
+  /**
+   * Drive the in-server booking engine for one intent and summarise what it did.
+   *
+   * This is why a click books. Starting a workflow queues a preview and confirming
+   * queues a booking, but until something SERVES that queue the intent just sits there
+   * — which used to mean someone running the Python runner by hand. The engine claims
+   * the queued work under the same lease/fencing rules and drives ETD to completion.
+   *
+   * Slow on purpose: a cold ETD token costs ~21 s of Azure B2C on top of the quote
+   * chain, so a first run of 30–60 s is normal. Failures are reported, never swallowed
+   * — the intent's own status is still the truth, and onChanged() refetches it.
+   */
+  const engine = async (intentId?: number): Promise<string> => {
+    const j = await post(`${BASE}/intents/executor/run`, intentId ? { intentId } : {});
+    const rows: any[] = j?.results ?? [];
+    if (!rows.length) return j?.claimed === 0 ? "engine: nothing queued to run" : "engine: no results";
+    return `engine: ${rows.map((r) => `${r.action} ${r.status}${r.detail ? ` (${r.detail})` : ""}`).join(" · ")}`;
+  };
+
+  const run = async (label: string, fn: () => Promise<any>, after?: (j: any) => Promise<string>) => {
     setBusy(label); setErr(""); setInfo("");
     try {
       const j = await fn();
       const codes = (j?.failures ?? []).map((f: any) => `${f.code}${f.detail ? `: ${f.detail}` : ""}`);
-      setInfo(codes.length ? `Server says ${j?.status ?? ""} — ${codes.join(" · ")}` : (j?.status ? `→ ${j.status}` : "done"));
+      let msg = codes.length ? `Server says ${j?.status ?? ""} — ${codes.join(" · ")}` : (j?.status ? `→ ${j.status}` : "done");
+      if (after) {
+        setInfo(`${msg} — running booking engine (this can take up to a minute)…`);
+        try {
+          msg = `${msg} · ${await after(j)}`;
+        } catch (e: any) {
+          // The state change itself succeeded; only the engine pass failed. Say so
+          // instead of reporting the whole action as a failure.
+          msg = `${msg} · engine failed: ${e.message}`;
+        }
+      }
+      setInfo(msg);
       onChanged();
     } catch (e: any) {
       setErr(e.message);
@@ -134,10 +171,15 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
     }
   };
 
-  const create = (mode?: "live") => run(mode === "live" ? "create-live" : "create", () =>
-    workflow === "survey"
-      ? post(`${BASE}/intents`, { surveyResponseId: sourceId, ...(mode === "live" ? { executionMode: "live" } : {}) })
-      : post(`/api/vrm/forms/rental-request/${sourceId}/booking-intent`, mode === "live" ? { executionMode: "live" } : {}));
+  const create = (mode?: "live") => run(
+    mode === "live" ? "create-live" : "create",
+    () =>
+      workflow === "survey"
+        ? post(`${BASE}/intents`, { surveyResponseId: sourceId, ...(mode === "live" ? { executionMode: "live" } : {}) })
+        : post(`/api/vrm/forms/rental-request/${sourceId}/booking-intent`, mode === "live" ? { executionMode: "live" } : {}),
+    // Build the quote immediately: starting the workflow IS the request for a preview.
+    (j) => engine(Number(j?.intent?.id) || undefined),
+  );
 
   const status = String(intent?.status ?? "");
   const tone = intent ? phaseTone(intent) : null;
@@ -158,7 +200,13 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
         : "LIVE intent: Confirm queues a REAL Enterprise reservation for the runner to book, then the route block and technician texts. Proceed?"
       : `${intent.execution_mode} intent: the runner will validate everything but commit nothing. Proceed?`;
     if (!window.confirm(msg)) return;
-    run("confirm", () => post(`${BASE}/intents/${intent.id}/confirm`, { previewVersion: intent.preview_version }));
+    run(
+      "confirm",
+      () => post(`${BASE}/intents/${intent.id}/confirm`, { previewVersion: intent.preview_version }),
+      // Confirm IS the go-ahead. Book it now rather than leaving the intent queued for
+      // someone to run a script later.
+      () => engine(intent.id),
+    );
   };
 
   return (
@@ -330,9 +378,21 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                 {busy === "evidence" ? <Loader2 size={13} className="animate-spin" /> : "Record ETD cancellation evidence"}
               </button>
             )}
-            {IN_FLIGHT.has(status) && (
+            {ENGINE_RUNNABLE.has(status) && (
+              <button type="button" disabled={!!busy}
+                      title="Claims this intent's queued work and drives Enterprise to completion. Safe to press again — a claim already in flight is skipped, and nothing is booked twice."
+                      onClick={() => run("engine", () => Promise.resolve({ status }), () => engine(intent.id))}
+                      style={{ ...btn, color: colors.accent, borderColor: colors.accent }}>
+                {busy === "engine"
+                  ? <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <Loader2 size={13} className="animate-spin" /> Working…
+                    </span>
+                  : "Run booking engine"}
+              </button>
+            )}
+            {ENGINE_RUNNABLE.has(status) && (
               <span style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, alignSelf: "center" }}>
-                Runner work in flight — no actions until it reports back.
+                Work is queued — it runs automatically; press if you want it now.
               </span>
             )}
           </div>

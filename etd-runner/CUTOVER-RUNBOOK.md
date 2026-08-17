@@ -1,16 +1,66 @@
 # Cutover workflow runbook (ops)
 
-How the CUTOVER booking pipeline actually runs in production. Two moving
-parts, both **pull-based** — nothing books, texts, or files unless one of
-these is running AND the kill switch is armed.
+How the CUTOVER booking pipeline actually runs in production. Everything is
+**pull-based** — nothing books, texts, or files unless something below is
+running AND the kill switch is armed.
 
-## 1. The booking runner (ETD browser automation)
+Normal operation is section 0: staff click in the VRM panel and the server
+books. Sections 1–2 are the fallback and the daily sweep.
+
+## 0. The in-server booking engine (normal path)
+
+The panel's own engine. Creating an intent or confirming a preview runs a
+booking pass **inside the server process** — same claim/lease/fencing rules,
+same attempt ledger, same postbacks as the Python runner, just called
+directly instead of over HTTP. Runner id in the ledger: `nexus-inline`.
+
+What a staffer does — and it is the whole procedure:
+
+1. **Create the intent** in the VRM panel. A preview pass runs immediately;
+   the quoted branch, class and pickup date appear on the card.
+2. **Review the preview.** Anything the gate refuses is listed on the card
+   (stale schedule, unmapped class, unpinned branch, roster/approval gaps).
+3. **Confirm.** A booking pass runs immediately. Dark intents stop at
+   `dry_run_validated`; live intents commit and the confirmation number
+   comes back on the card.
+
+If a pass is interrupted (tab closed, deploy, timeout), press **Run booking
+engine** on the card. It is safe to press repeatedly: the pre-commit
+duplicate search plus the shared attempt ledger mean a second pass adopts the
+first one's reservation instead of making another. The morning sweep also
+runs an engine pass before it sweeps, so stalled intents self-heal daily.
+
+Live bookings additionally require `VRM_CONTRACT_BLOCK_ENABLED=true` on the
+server (prod only — dev is deliberately unarmed). While it is unset the
+server will not even hand a live intent to the engine.
+
+Ad-hoc trigger (cron bearer or any authenticated staff session):
+
+```bash
+curl -X POST "$APP_URL/api/vrm/forms/rental-survey/cutover/intents/executor/run" \
+     -H "x-internal-cron: $NEXUS_CRON_SECRET" \
+     -H 'content-type: application/json' \
+     -d '{"limit": 5}'          # optional: {"intentId": 123} for one intent
+```
+
+The engine needs no browser: it talks to ETD's HTTP API with the shared token
+from `vrm_etd_token`, so it runs fine on autoscale. If the token row is empty
+or stale, minting still needs a browser host — see section 1's note and
+`etd-runner/scripts/etd_token.py`.
+
+## 1. The booking runner (ETD browser automation) — fallback
 
 Claims `preview` / `book` / `cancel` work from the server queue, drives ETD
 headlessly, and posts evidence back (`op_open` → `booked`/`op_result` →
 `readback`). The server owns ALL state; the runner is stateless and safe to
 kill/restart at any time (fencing tokens + leases + pre-commit duplicate
 search make retries safe).
+
+Still supported and still correct — reach for it when the in-server engine is
+unavailable (app down, deploy in progress) or when you want to drain a large
+queue from a workstation. The two share one queue and one attempt ledger, so
+they can run at the same time without double-booking; `FOR UPDATE SKIP
+LOCKED` hands each intent to exactly one of them.
 
 ```bash
 # Dark validation pass (default — never commits in ETD):

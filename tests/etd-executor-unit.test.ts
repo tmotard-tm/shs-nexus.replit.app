@@ -1,0 +1,716 @@
+/**
+ * In-server booking executor — lane behaviour, against the real DEV database.
+ *
+ * The executor is what turns a staff click into an actual Enterprise reservation, so
+ * the things worth pinning are the ones that decide whether a REAL booking happens:
+ * which lane an intent lands in, what has to be true before the commit call is
+ * reachable, and what it records when it stops. Every external system is substituted
+ * (the ETD client and the Snowflake-backed schedule read are injected), but the
+ * orchestrator, its claim/lease/fencing rules and the attempt ledger are the real ones
+ * on the real schema — those are exactly the parts a mock would make lie.
+ *
+ * Fixtures are WORKFLOW_REQUEST intents on purpose: a request workflow files no route
+ * block and sends no technician texts (block_state is born 'not_applicable'), so
+ * driving one to completion cannot reach ART or Twilio even by accident.
+ *
+ * One real external read remains and is deliberate: the orchestrator re-checks the
+ * schedule server-side inside its own preview postback, and that read is NOT the
+ * executor's injected one. ZZEXEC ldaps have no Snowflake schedule, so a persisted
+ * preview always carries `not_working_day` here. The preview assertions are written
+ * against the RUNNER-owned failure codes for exactly that reason.
+ *
+ * All fixtures use ZZEXEC* ldaps and are deleted in before()/after().
+ */
+import { test, describe, before, after } from "node:test";
+import assert from "node:assert/strict";
+import crypto from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { sql } from "drizzle-orm";
+
+import { db, pool } from "../server/db";
+import { initFormsSchema } from "../server/vrm/forms/schema";
+import {
+  WORKFLOW_CUTOVER,
+  WORKFLOW_REQUEST,
+  isContractBlockLive,
+  claimBookingWork,
+  type QueueItem,
+  type ScheduleWindow,
+} from "../server/vrm/forms/cutover-orchestrator";
+import {
+  runBookingExecutor,
+  bookingRequestHash,
+  extractJourneyRows,
+  filterJourneyRows,
+  parseConfirmation,
+  intentAddress,
+  classForIntent,
+  redactedShape,
+} from "../server/vrm/etd/executor";
+import { safeErrorText, rejectionMessage } from "../server/vrm/etd/client";
+import type { EtdClient, CarClass } from "../server/vrm/etd/client";
+
+const LDAP_PREFIX = "ZZEXEC";
+
+// --------------------------------------------------------------------- fakes
+
+const CLASSES: CarClass[] = [
+  { code: "ECAR", description: "Economy Car", passengers: "4", bags: "2", base_rate: 30, estimated_total: null, currency: "USD", unit: null, unlimited_miles: null },
+  { code: "ICAR", description: "Intermediate Car", passengers: "5", bags: "3", base_rate: 40, estimated_total: null, currency: "USD", unit: null, unlimited_miles: null },
+  { code: "FCAR", description: "Full Size Car", passengers: "5", bags: "4", base_rate: 50, estimated_total: null, currency: "USD", unit: null, unlimited_miles: null },
+  { code: "MVAR", description: "Minivan", passengers: "7", bags: "5", base_rate: 70, estimated_total: null, currency: "USD", unit: null, unlimited_miles: null },
+];
+
+type FakeOpts = {
+  branchCode?: string;
+  classes?: CarClass[];
+  gateOk?: boolean;
+  confirmOut?: unknown;
+  confirmThrows?: boolean;
+  journeys?: unknown;
+  searchThrows?: boolean;
+  user?: Record<string, unknown> | null;
+};
+
+/** Records what was called so a test can assert the commit was never reached. */
+function fakeEtd(opts: FakeOpts = {}) {
+  const calls: string[] = [];
+  const code = opts.branchCode ?? "9911";
+  const client = {
+    calls: [],
+    async quote(p: any) {
+      calls.push(`quote:${p.preferBranchCode ?? ""}`);
+      return {
+        journey_id: "j-fake-1",
+        reference: "R-FAKE-1",
+        place: { latitude: "41.1", longitude: "-81.5" },
+        branch: {
+          branchCode: code,
+          customerFacingBranchName: "Testville Central",
+          fullAddress: "100 EXAMPLE WAY,TESTVILLE,OH,44100",
+          latitude: "41.1",
+          longitude: "-81.5",
+          peoplesoftBranchId: "PS9911",
+          stationId: "ST9911",
+          formattedPhoneNumber: "(+1) 555-0100",
+        },
+        branch_pinned: true,
+        branch_code: code,
+        branch_name: "Testville Central",
+        branch_address: "100 EXAMPLE WAY,TESTVILLE,OH,44100",
+        site: {},
+        classes: opts.classes ?? CLASSES,
+      };
+    },
+    async findUserByUsername(u: string) {
+      calls.push(`user:${u}`);
+      return opts.user === undefined
+        ? { userId: "u-fake", firstName: "Pat", lastName: "Sample", emailAddress: "p@example.invalid", userName: u }
+        : opts.user;
+    },
+    async searchJourneys() {
+      calls.push("search");
+      if (opts.searchThrows) throw new Error("ETD search 503");
+      return opts.journeys ?? { data: [] };
+    },
+    async postGate(p: string) {
+      calls.push(`gate:${p.split("/").pop()}`);
+      return { success: opts.gateOk !== false };
+    },
+    async confirmReservation(_m: unknown, o: { live: boolean }) {
+      calls.push(`confirm:${o.live}`);
+      if (opts.confirmThrows) throw new Error("ETD savedr 500");
+      return opts.confirmOut ?? { data: { reservationNumber: { number: "FAKE123" } } };
+    },
+    timingSummary: () => "fake",
+  };
+  return { client: client as unknown as EtdClient, calls };
+}
+
+/** A fresh schedule window whose working days start tomorrow. */
+function fakeSchedule(opts: { fresh?: boolean; workingFrom?: number } = {}) {
+  return async (ldap: string, fromISO: string, horizon: number): Promise<ScheduleWindow> => {
+    const base = new Date(`${fromISO}T00:00:00Z`);
+    const days = Array.from({ length: horizon }, (_, i) => {
+      const d = new Date(base.getTime() + i * 86400000).toISOString().slice(0, 10);
+      return { date: d, hasShift: true, absences: [] as string[], working: i >= (opts.workingFrom ?? 1), snapshotTs: "" };
+    });
+    return {
+      ldap: ldap.toUpperCase(),
+      watermarkUtc: new Date().toISOString(),
+      watermarkAgeHours: 1,
+      fresh: opts.fresh !== false,
+      days,
+    };
+  };
+}
+
+// ------------------------------------------------------------------ fixtures
+
+async function cleanup() {
+  await db.execute(sql`DELETE FROM vrm_rental_workflow_intents WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM vrm_rental_request WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM all_techs WHERE upper(tech_racfid) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM tpms_tech_profiles WHERE upper(enterprise_id) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM fs_comms_contacts WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+}
+
+/**
+ * The roster / TPMS / contact rows the eligibility gate demands. Without these the
+ * gate fails for reasons that have nothing to do with the executor, and every lane
+ * test would pass for the wrong reason.
+ */
+async function seedEligibility(ldap: string) {
+  await db.execute(sql`
+    INSERT INTO all_techs (employee_id, tech_racfid, tech_name, employment_status, district_no, effective_date, synced_at)
+    VALUES (${"99" + Math.floor(Math.random() * 1e6)}, ${ldap}, 'ZZ Exec Fixture', 'A', '8330', now(), now())
+  `);
+  await db.execute(sql`
+    INSERT INTO tpms_tech_profiles (tech_id, enterprise_id, truck_no, synced_at)
+    VALUES (${"ZZX" + Math.floor(Math.random() * 1e6)}, ${ldap}, '012345', now())
+  `);
+  await db.execute(sql`
+    INSERT INTO fs_comms_contacts (ldap, phone, primary_state) VALUES (${ldap}, '2145550142', 'OH')
+  `);
+}
+
+/**
+ * Gate codes the RUNNER owns — the ones that say something about the quote it just
+ * took, as opposed to roster/approval facts. A synthetic LDAP has no Snowflake
+ * schedule, so the orchestrator's own server-side re-check always adds
+ * `not_working_day` and these fixtures can never reach preview_ready. What the
+ * executor is responsible for is that these four codes clear on a good quote and
+ * appear on a bad one.
+ */
+const RUNNER_OWNED = ["branch_not_pinned", "class_unmapped", "branch_zip_missing", "no_date"] as const;
+
+/** A request row + an intent pointing at it, in the given lane. */
+async function makeRequestIntent(over: {
+  ldap: string;
+  status: string;
+  executionMode?: string;
+  preview?: unknown;
+  eventDate?: string;
+  shopState?: string;
+  approvedClass?: string;
+}): Promise<{ intentId: number; sourceId: string }> {
+  const sourceId = crypto.randomUUID();
+  await db.execute(sql`
+    INSERT INTO vrm_rental_request (id, ldap, status, shop_address, shop_city, shop_state, approved_vehicle_class, truck_number)
+    VALUES (${sourceId}::uuid, ${over.ldap}, 'approved', '100 Example Way', 'Testville',
+            ${over.shopState ?? "OH"}, ${over.approvedClass ?? null}, '012345')
+  `);
+  await seedEligibility(over.ldap);
+  const { rows } = await db.execute(sql`
+    INSERT INTO vrm_rental_workflow_intents
+      (workflow_type, source_id, source_revision, execution_mode, ldap, status, preview_version, preview, event_date)
+    VALUES (${WORKFLOW_REQUEST}, ${sourceId}, 0, ${over.executionMode ?? "dry_run"}, ${over.ldap},
+            ${over.status}, ${over.preview ? 1 : 0}, ${over.preview ? JSON.stringify(over.preview) : null},
+            ${over.eventDate ?? null})
+    RETURNING id
+  `);
+  return { intentId: (rows as any[])[0].id as number, sourceId };
+}
+
+const loadIntentRow = async (id: number) =>
+  ((await db.execute(sql`
+    SELECT status, reservation_state, preview, preview_version, last_error
+    FROM vrm_rental_workflow_intents WHERE id = ${id}
+  `)).rows as any[])[0];
+
+const attemptsFor = async (id: number) =>
+  (await db.execute(sql`
+    SELECT attempt_no, outcome, request_hash FROM vrm_workflow_attempts
+    WHERE intent_id = ${id} AND phase = 'etd_booking' ORDER BY attempt_no
+  `)).rows as any[];
+
+before(async () => {
+  await initFormsSchema();
+  await cleanup();
+});
+
+after(async () => {
+  await cleanup().catch(() => {});
+  await pool.end().catch(() => {});
+  const { fsPool } = await import("../server/fleet-scope-db");
+  await fsPool.end().catch(() => {});
+});
+
+// ------------------------------------------------------------- pure helpers
+
+describe("journey readback parsing", () => {
+  test("collects reservation and reference numbers from any shape, and strips COUNT", () => {
+    const rows = extractJourneyRows({
+      data: {
+        results: [
+          { reservationNumber: { number: "AAA111COUNT" }, referenceNumber: "SHS ZZ1", branchCode: "9911", startDateTime: "2026-09-08T09:00:00", carClassCode: "ICAR" },
+          { nested: [{ confirmationNumber: "BBB222", ReferenceNumber: "SHS ZZ2" }] },
+        ],
+      },
+    });
+    assert.deepEqual(rows.map((r) => r.confirmation), ["AAA111", "BBB222"]);
+    assert.equal(rows[0].reference, "SHS ZZ1");
+    assert.equal(rows[0].branchCode, "9911");
+    assert.equal(rows[0].date, "2026-09-08");
+    assert.equal(rows[0].sipp, "ICAR");
+  });
+
+  test("dedupes on (confirmation, reference) so one journey is not counted twice", () => {
+    const dup = { reservationNumber: { number: "AAA111" }, referenceNumber: "SHS ZZ1" };
+    assert.equal(extractJourneyRows({ a: dup, b: { ...dup } }).length, 1);
+  });
+
+  test("filters to the expected confirmation, else to references carrying the LDAP", () => {
+    const rows = [
+      { confirmation: "AAA111", reference: "SHS ZZEXEC1", branchCode: "", date: "", sipp: "" },
+      { confirmation: "BBB222", reference: "SHS OTHER", branchCode: "", date: "", sipp: "" },
+    ];
+    assert.deepEqual(filterJourneyRows(rows, "BBB222", "ZZEXEC1").map((r) => r.confirmation), ["BBB222"]);
+    assert.deepEqual(filterJourneyRows(rows, "", "zzexec1").map((r) => r.confirmation), ["AAA111"]);
+    // Neither witness matches: hand back everything rather than silently claiming none.
+    assert.equal(filterJourneyRows(rows, "ZZZ", "NOBODY").length, 2);
+  });
+});
+
+describe("confirmation parsing", () => {
+  test("prefers data.reservationNumber.number, then digs for a confirmation", () => {
+    assert.equal(parseConfirmation({ data: { reservationNumber: { number: "AAA111" } } }), "AAA111");
+    assert.equal(parseConfirmation({ x: { confirmationNumber: "BBB222COUNT" } }), "BBB222");
+    assert.equal(parseConfirmation({ deep: [{ reservationNo: "CCC333" }] }), "CCC333");
+  });
+
+  test("NEVER falls back to a reference number", () => {
+    // referenceNumber is the QUOTE reference. Recording it as a confirmation makes
+    // every later readback fail to find a reservation that really does exist.
+    assert.equal(parseConfirmation({ data: { referenceNumber: "R-FAKE-1" } }), "");
+    assert.equal(parseConfirmation({ data: { reservationNumber: { number: "" } }, referenceNumber: "R-1" }), "");
+    assert.equal(parseConfirmation({}), "");
+    assert.equal(parseConfirmation({ data: { reservationNumber: { number: 0 } } }), "");
+  });
+});
+
+describe("request hash is byte-identical to the Python runner", () => {
+  const fixture = JSON.parse(
+    fs.readFileSync(path.join(process.cwd(), "tests", "fixtures", "etd-surgery", "request-hash.json"), "utf-8"),
+  );
+  for (const c of fixture.cases as any[]) {
+    test(`${c.input.branch || "(blank)"}/${c.input.sipp || "-"}/${c.input.date || "-"}`, () => {
+      assert.equal(bookingRequestHash(c.input), c.hash);
+    });
+  }
+});
+
+describe("intent addressing", () => {
+  const item = (over: Partial<QueueItem>): QueueItem =>
+    ({ intentId: 1, kind: "book", fencingToken: 1, workflowType: WORKFLOW_REQUEST, executionMode: "dry_run",
+       ldap: "ZZ1", requiresReconcile: false, facts: {}, preview: null, ...over } as QueueItem);
+
+  test("a cutover pins the branch holding the Holman agreement", () => {
+    const got = intentAddress(item({
+      workflowType: WORKFLOW_CUTOVER,
+      facts: { surveyBranch: { name: "Testville Central", city: "Testville", state: "OH" }, caseFacts: { rentingBranch: "9911" } },
+    }));
+    assert.equal(got.address, "Testville Central, Testville, OH");
+    assert.equal(got.code, "9911", "a swap must return to the renting branch, not the nearest one");
+    assert.equal(got.wantState, "OH");
+  });
+
+  test("a request geocodes the shop and pins nothing", () => {
+    const got = intentAddress(item({ facts: { requestSeed: { shopAddress: "100 Example Way", shopCity: "Testville", shopState: "oh" } } }));
+    assert.equal(got.address, "100 Example Way, Testville, oh");
+    assert.equal(got.code, "", "a new rental is not tied to an existing agreement");
+    assert.equal(got.wantState, "OH");
+  });
+
+  test("a request with no shop address falls back to the branch the tech reported", () => {
+    const got = intentAddress(item({ facts: { requestSeed: { reportedBranch: "Enterprise Testville" } } }));
+    assert.equal(got.address, "Enterprise Testville");
+  });
+});
+
+describe("class choice per workflow", () => {
+  const item = (over: Partial<QueueItem>): QueueItem =>
+    ({ intentId: 1, kind: "book", fencingToken: 1, workflowType: WORKFLOW_REQUEST, executionMode: "dry_run",
+       ldap: "ZZ1", requiresReconcile: false, facts: {}, preview: null, ...over } as QueueItem);
+
+  test("a cutover keeps the same vehicle", () => {
+    // The case feed carries the 4-letter coded make/model ("CHRY"/"PACI"), which is
+    // what MODEL_MAP is keyed on — spelled-out names are deliberately UNMAPPED.
+    const got = classForIntent(item({ workflowType: WORKFLOW_CUTOVER, facts: { caseFacts: { make: "CHRY", model: "PACI" } } }), CLASSES);
+    assert.equal(got.decision.mode, "same_vehicle");
+    assert.equal(got.decision.chosenSipp, "MVAR");
+    assert.equal(got.decision.mapped, true);
+  });
+
+  test("a spelled-out make/model parks the swap for a human instead of guessing a class", () => {
+    const got = classForIntent(item({ workflowType: WORKFLOW_CUTOVER, facts: { caseFacts: { make: "Chrysler", model: "Pacifica" } } }), CLASSES);
+    assert.equal(got.decision.mapped, false);
+    assert.equal(got.decision.match, "UNMAPPED");
+    assert.equal(got.pick, null, "a cutover NEVER falls back to a sedan — it must return the same vehicle");
+  });
+
+  test("an unset approved class defaults to a sedan via the ladder, not UNMAPPED", () => {
+    // ETD descriptions rarely contain the word "sedan", so a literal match would park
+    // every plain request for a human.
+    const got = classForIntent(item({ facts: { requestSeed: {} } }), CLASSES);
+    assert.equal(got.decision.mode, "approved_class");
+    assert.equal(got.decision.match, "sedan_ladder");
+    assert.equal(got.decision.chosenSipp, "FCAR");
+  });
+
+  test("underscored legacy labels still match (cargo_van == cargo van)", () => {
+    const vans: CarClass[] = [{ ...CLASSES[3], code: "CVAR", description: "Cargo Van" }];
+    const got = classForIntent(item({ facts: { requestSeed: { approvedVehicleClass: "cargo_van" } } }), vans);
+    assert.equal(got.decision.chosenSipp, "CVAR");
+    assert.equal(got.decision.match, "approved_label");
+  });
+
+  test("a named class that is not offered stays UNMAPPED rather than guessing", () => {
+    const got = classForIntent(item({ facts: { requestSeed: { approvedVehicleClass: "cargo van" } } }), CLASSES);
+    assert.equal(got.decision.mapped, false);
+    assert.equal(got.decision.match, "UNMAPPED");
+    assert.equal(got.pick, null);
+  });
+
+  test("the raw pick never leaks into the persisted decision", () => {
+    const got = classForIntent(item({ facts: { requestSeed: {} } }), CLASSES);
+    assert.ok(got.pick, "the caller still needs the pick for the payload");
+    assert.equal((got.decision as any)._pick, undefined);
+    assert.equal((got.decision as any).pick, undefined);
+  });
+});
+
+// --------------------------------------------------------------- lane tests
+
+describe("preview lane", () => {
+  test("quotes the shop, persists a reviewable preview and records the schedule evidence", async () => {
+    const ldap = `${LDAP_PREFIX}PRV`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.claimed, 1);
+    assert.equal(run.results[0].action, "PREV");
+    assert.ok(calls.some((c) => c.startsWith("quote:")), "a preview must actually quote");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "a preview must never commit");
+
+    // The quote pinned a branch, mapped a class, carried a ZIP and carried a date:
+    // every runner-owned gate code is clear, leaving only the environment's own.
+    const detail = run.results[0].detail ?? "";
+    for (const owned of RUNNER_OWNED) {
+      assert.ok(!detail.includes(owned), `a good quote must clear ${owned} (detail: ${detail})`);
+    }
+    assert.equal(run.results[0].status, "preview_required", "…and a synthetic LDAP still has no schedule");
+  });
+
+  test("a stale schedule watermark yields no date instead of guessing one", async () => {
+    const ldap = `${LDAP_PREFIX}STALE`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({
+      runnerId: "test-exec", intentId,
+      deps: { client, schedule: fakeSchedule({ fresh: false }) },
+    });
+
+    assert.equal(calls.filter((c) => c.startsWith("quote:")).length, 0, "a stale watermark must stop before quoting");
+    // Nothing was quoted, so every runner-owned gate code is unsatisfied — the preview
+    // is explicitly unbookable rather than dated by guesswork.
+    assert.match(run.results[0].detail ?? "", /no_date/);
+    assert.match(run.results[0].detail ?? "", /branch_not_pinned/);
+  });
+
+  test("a quote failure lands in the preview warnings, not in an exception", async () => {
+    const ldap = `${LDAP_PREFIX}QFAIL`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const client = {
+      async quote() { throw new Error("geocoder exploded"); },
+      timingSummary: () => "fake",
+    } as unknown as EtdClient;
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+    assert.equal(run.results[0].action, "PREV", "a failed quote is a reported preview, not a crashed pass");
+    assert.match(run.results[0].detail ?? "", /geocoder exploded/, "the staffer has to be told WHY there is no preview");
+    assert.match(run.results[0].detail ?? "", /branch_not_pinned/, "and the gate records it as unbookable");
+  });
+});
+
+describe("booking lane", () => {
+  // A preview as the preview lane would have persisted it. tpmsTruck and the ART unit
+  // must agree with the seeded facts: the orchestrator re-compares them at booking time
+  // and refuses on drift, which is what stops a reservation being booked against inputs
+  // that changed after the staffer reviewed them.
+  const preview = (over: Record<string, unknown> = {}) => ({
+    workflowType: WORKFLOW_REQUEST,
+    tpmsTruck: "012345",
+    artBlock: { unit: "8330" },
+    reservation: {
+      pickupDate: new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10),
+      pickupTime: "09:00:00",
+      returnDate: new Date(Date.now() + 10 * 86400000).toISOString().slice(0, 10),
+      returnTime: "09:00:00",
+      branchCode: "9911",
+      sipp: "ICAR",
+      intentReference: "SHSNX-TEST",
+      specialNotes: "Test note.",
+      bookingReferences: ["ZZ REF"],
+      ...over,
+    },
+  });
+
+  test("the executor books NOTHING when the server declines to authorize the attempt", async () => {
+    // The orchestrator re-verifies the schedule against Snowflake immediately before
+    // authorizing the external call, and a synthetic technician has no schedule — so
+    // op_open is refused here. That refusal is the whole safety property: the executor
+    // has a complete, drift-free preview and a willing ETD client, and still must not
+    // touch savedr without the server's authorization.
+    const ldap = `${LDAP_PREFIX}DARK`;
+    const { intentId } = await makeRequestIntent({
+      ldap, status: "confirmed", preview: preview(), eventDate: preview().reservation.pickupDate,
+    });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "HOLD");
+    assert.equal(run.results[0].status, "preview_required");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "no authorization, no reservation");
+    assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0, "and it stops before the ETD gates");
+    assert.equal((await attemptsFor(intentId)).length, 0, "an unauthorized booking leaves no attempt row");
+
+    // A hold is recoverable: the intent goes back to the staffer, not to a dead end.
+    const row = await loadIntentRow(intentId);
+    assert.equal(row.status, "preview_required");
+    assert.match(String(row.last_error ?? ""), /drift/i);
+  });
+
+  test("branch drift between preview and booking aborts before the attempt opens", async () => {
+    const ldap = `${LDAP_PREFIX}DRIFT`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    // The staffer reviewed 9911; the fresh quote comes back with a different branch.
+    const { client, calls } = fakeEtd({ branchCode: "7777" });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "ABRT");
+    assert.equal(run.results[0].status, "aborted_before_open");
+    assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0);
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
+  });
+
+  test("a class that is no longer offered aborts rather than substituting one", async () => {
+    const ldap = `${LDAP_PREFIX}NOCLS`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview({ sipp: "XXAR" }) });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+    assert.equal(run.results[0].status, "aborted_before_open");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
+  });
+
+  test("a pickup date that is no longer a working day aborts", async () => {
+    const ldap = `${LDAP_PREFIX}NOWD`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    const { client, calls } = fakeEtd();
+
+    // Nothing is a working day any more.
+    const run = await runBookingExecutor({
+      runnerId: "test-exec", intentId,
+      deps: { client, schedule: fakeSchedule({ workingFrom: 999 }) },
+    });
+    assert.equal(run.results[0].status, "aborted_before_open");
+    assert.equal(calls.filter((c) => c.startsWith("quote:")).length, 0, "the day check comes before the quote");
+  });
+
+  test("an incomplete preview aborts instead of booking a half-specified reservation", async () => {
+    const ldap = `${LDAP_PREFIX}INC`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: { reservation: { sipp: "ICAR" } } });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+    assert.equal(run.results[0].status, "aborted_before_open");
+    assert.equal(calls.length, 0, "nothing is asked of ETD without a complete preview");
+  });
+
+  test("a pre-commit search that already finds this intent's reservation books nothing", async () => {
+    const ldap = `${LDAP_PREFIX}DUPE`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    const { client, calls } = fakeEtd({
+      journeys: { data: [{ reservationNumber: { number: "ALREADY1" }, referenceNumber: `SHS ${ldap} SHSNX-TEST` }] },
+    });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "DUPE");
+    assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0);
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "a found reservation must never be booked again");
+    assert.equal((await attemptsFor(intentId)).length, 0, "no attempt is opened when the work is already done");
+  });
+
+  test("a pre-commit search FAILURE holds instead of booking on a blind spot", async () => {
+    const ldap = `${LDAP_PREFIX}BLIND`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    const { client, calls } = fakeEtd({ searchThrows: true });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "HOLD");
+    assert.equal(run.results[0].status, "search_failed");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
+  });
+
+  test("one claim never holds more than its limit, however many lanes have work", async () => {
+    // Lanes used to spend the budget each, so limit:20 could lease 80 intents that a
+    // serial pass would not reach for half an hour.
+    const a = await makeRequestIntent({ ldap: `${LDAP_PREFIX}LANEA`, status: "preview_pending" });
+    const b = await makeRequestIntent({ ldap: `${LDAP_PREFIX}LANEB`, status: "preview_pending" });
+    const c = await makeRequestIntent({
+      ldap: `${LDAP_PREFIX}LANEC`, status: "confirmed", preview: preview(),
+    });
+    const claimed = await claimBookingWork({ runnerId: "test-limit", limit: 2 });
+    const mine = claimed.filter((i) => [a.intentId, b.intentId, c.intentId].includes(i.intentId));
+    assert.ok(claimed.length <= 2, `claimed ${claimed.length} with limit 2`);
+    assert.ok(mine.length >= 1, "and it still claims work");
+  });
+
+  test("the attempt the executor would open is keyed by the cross-runner request hash", async () => {
+    // Both runners write into one attempt ledger, and the hash is what makes the second
+    // one recognise the first one's work. It is asserted here against the same inputs
+    // the booking lane derives it from, and against the Python output in the fixture
+    // suite above.
+    const p = preview().reservation;
+    assert.equal(
+      bookingRequestHash({ branch: p.branchCode, date: p.pickupDate, ldap: `${LDAP_PREFIX}DARK`, sipp: p.sipp }),
+      bookingRequestHash({ branch: "9911", date: p.pickupDate, ldap: `${LDAP_PREFIX}DARK`, sipp: "ICAR" }),
+    );
+  });
+
+  test("a live intent is skipped while the contract-block flag is disarmed", async () => {
+    // Defense in depth: claimBookingWork already hides live intents while disarmed, so
+    // this only fires if the flag flips mid-pass. The point is that it never commits.
+    if (isContractBlockLive()) return; // dev is deliberately unarmed; prod runs armed
+    const ldap = `${LDAP_PREFIX}LIVE`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", executionMode: "live", preview: preview() });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.claimed, 0, "a live intent is not even claimable while disarmed");
+    assert.equal(calls.length, 0);
+    assert.equal((await loadIntentRow(intentId)).status, "confirmed", "and it is left exactly as it was");
+  });
+});
+
+describe("reconcile / cancel lane", () => {
+  test("a cancel claim only reads back — it never books", async () => {
+    const ldap = `${LDAP_PREFIX}CXL`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "cancel_pending_readback", preview: { reservation: { intentReference: "SHSNX-CXL" } } });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "RECON");
+    assert.ok(calls.includes("search"));
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
+    assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0);
+  });
+
+  test("a readback whose search FAILED is reported as an error, never as 'no reservation'", async () => {
+    const ldap = `${LDAP_PREFIX}RBERR`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "cancel_pending_readback", preview: { reservation: { intentReference: "SHSNX-ERR" } } });
+    const { client } = fakeEtd({ searchThrows: true });
+
+    await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    const row = await loadIntentRow(intentId);
+    assert.notEqual(row.status, "cancelled", "a broken search must not be read as proof the reservation is gone");
+  });
+});
+
+describe("pass hygiene", () => {
+  test("an empty queue is a no-op, not an error", async () => {
+    const { client, calls } = fakeEtd();
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId: 2147483600, deps: { client, schedule: fakeSchedule() } });
+    assert.equal(run.claimed, 0);
+    assert.deepEqual(run.results, []);
+    assert.equal(calls.length, 0);
+  });
+
+  test("concurrent passes serialize instead of racing the same queue", async () => {
+    const ldap = `${LDAP_PREFIX}RACE`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client } = fakeEtd();
+    const deps = { client, schedule: fakeSchedule() };
+
+    const [a, b] = await Promise.all([
+      runBookingExecutor({ runnerId: "test-exec-a", intentId, deps }),
+      runBookingExecutor({ runnerId: "test-exec-b", intentId, deps }),
+    ]);
+
+    // One pass claims the intent; the other finds nothing left in that lane. What must
+    // never happen is both driving the same intent through ETD at once.
+    assert.equal(a.claimed + b.claimed, 1, "the intent is served exactly once");
+  });
+});
+
+describe("evidence redaction", () => {
+  // A savedr response and an ETD error body both carry the renter — and both end up in
+  // evidence rows and logs, which are neither a booking system nor a place for PII.
+  const savedr = {
+    success: true,
+    reservation: { confirmationNumber: "1234567890", status: "OPEN" },
+    driver: { firstName: "Dana", lastName: "Reyes", email: "dana.reyes@example.com", phone: "(214) 555-0142" },
+    pickup: { address: "9 Maple Street", postalCode: "44100" },
+  };
+
+  test("an unparsed response keeps its shape and its ids, not its people", () => {
+    const shape = redactedShape(savedr);
+    for (const leak of ["Dana", "Reyes", "dana.reyes@example.com", "555-0142", "9 Maple Street"]) {
+      assert.ok(!shape.includes(leak), `redactedShape leaked ${leak}: ${shape}`);
+    }
+    assert.match(shape, /reservation\.confirmationNumber:1234567890/, "the id a human needs survives");
+    assert.match(shape, /driver\.firstName:string/, "and the shape a developer needs survives");
+    assert.ok(shape.length <= 300);
+  });
+
+  test("unquoted PII is redacted too — a number is no less identifying", () => {
+    const shape = redactedShape({
+      driver: { phone: 2145550142, zip: 44100 },
+      pickup: { lat: 41.4993, lon: -81.6944 },
+      journeys: [{ id: "J-77", renter: "Dana Reyes", homePhone: 2145550142 }],
+      success: true,
+    });
+    for (const leak of ["2145550142", "44100", "41.4993", "-81.6944", "Dana"]) {
+      assert.ok(!shape.includes(leak), `redactedShape leaked ${leak}: ${shape}`);
+    }
+    assert.match(shape, /journeys\[0\]\.id:J-77/, "an array element's id is still recoverable");
+    assert.match(shape, /success:true/, "booleans are safe on their face");
+  });
+
+  test("an ETD error body is masked before it becomes evidence", () => {
+    const masked = safeErrorText(
+      '{"error":"RATE_UNAVAILABLE","message":"no rate","driver":{"firstName":"Dana","email":"dana.reyes@example.com","phone":"+1 214-555-0142"}}',
+    );
+    assert.match(masked, /RATE_UNAVAILABLE/, "the reason must survive — it is why we log at all");
+    assert.match(masked, /no rate/);
+    for (const leak of ["Dana", "dana.reyes@example.com", "214-555-0142"]) {
+      assert.ok(!masked.includes(leak), `safeErrorText leaked ${leak}: ${masked}`);
+    }
+  });
+
+  test("the HTTP-200 rejection ETD actually returns is masked on the same path", () => {
+    // ETD answers validation failures with 200 + success:false, so this — not a 4xx — is
+    // the rejection a staffer is most likely to be shown.
+    const msg = rejectionMessage("POST", "/api/reservation/savedr", {
+      success: false,
+      messages: ["Driver Dana Reyes (dana.reyes@example.com, 214-555-0142) is ineligible"],
+    });
+    assert.match(msg, /POST \/api\/reservation\/savedr rejected:/);
+    assert.match(msg, /ineligible/, "the reason survives");
+    for (const leak of ["Dana Reyes", "dana.reyes@example.com", "214-555-0142"]) {
+      assert.ok(!msg.includes(leak), `rejectionMessage leaked ${leak}: ${msg}`);
+    }
+  });
+});

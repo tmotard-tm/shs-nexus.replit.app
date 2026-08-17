@@ -1434,10 +1434,23 @@ export async function claimBookingWork(params: {
   runnerId: string;
   limit?: number;
   workflowType?: string;
+  /**
+   * Narrow the claim to ONE intent. Used by the in-server executor when a staff
+   * click should serve exactly the intent that was just created or confirmed,
+   * instead of draining whatever else the queue happens to hold. Purely a
+   * filter: every lane, lease, arming and fencing rule below still applies.
+   */
+  intentId?: number;
 }): Promise<QueueItem[]> {
   const limit = Math.max(1, Math.min(params.limit ?? 5, 20));
+  // The budget is TOTAL, not per lane. Spending it per lane let one call claim 4x the
+  // limit, and a runner that processes serially can then hold leases on work it will
+  // not reach for half an hour — the later intents are safe (op_open re-checks the
+  // fencing token) but frozen until the lease expires.
+  let remaining = limit;
   const items: QueueItem[] = [];
   const typeFilter = params.workflowType ? sql`AND workflow_type = ${params.workflowType}` : sql``;
+  const idFilter = params.intentId ? sql`AND id = ${params.intentId}` : sql``;
   // Master kill switch: while the flag is disarmed, live intents are invisible
   // to the runner. Re-arming resumes them exactly where they stood.
   const liveArmed = isContractBlockLive();
@@ -1450,7 +1463,15 @@ export async function claimBookingWork(params: {
   // The 'cancel' lane serves cancel_pending_readback intents (repair spec §4):
   // the runner runs a readback-ONLY pass so the server can prove whether an
   // active reservation exists before the terminal cancel write.
+  // …and one slot is RESERVED for the book lane. Lane order is a priority order, so a
+  // standing preview backlog would otherwise spend the whole budget every pass and no
+  // confirmed intent would ever be booked.
+  const bookReserve = limit >= 2 ? 1 : 0;
+
   for (const lane of ["verify", "cancel", "preview", "book"] as const) {
+    if (remaining <= 0) break;
+    const laneLimit = lane === "book" ? remaining : remaining - bookReserve;
+    if (laneLimit <= 0) continue;
     const statusPredicate =
       lane === "verify"
         ? sql`status = 'awaiting_verification' AND reservation_state = 'booked_unverified'`
@@ -1471,15 +1492,17 @@ export async function claimBookingWork(params: {
         SELECT id FROM vrm_rental_workflow_intents
         WHERE ${statusPredicate}
           ${typeFilter}
+          ${idFilter}
           AND (execution_mode <> 'live' OR ${liveArmed}::boolean)
           AND (claimed_by IS NULL OR lease_expires_at IS NULL OR lease_expires_at < now())
           AND (next_retry_at IS NULL OR next_retry_at <= now())
         ORDER BY id
-        LIMIT ${limit}
+        LIMIT ${remaining}
         FOR UPDATE SKIP LOCKED
       )
       RETURNING *
     `);
+    remaining -= (rows as any[]).length;
 
     for (const r of rows as any[]) {
       const facts = await fetchEligibilityFacts({
@@ -1629,7 +1652,12 @@ export type RunnerQuote = {
   pickupTime?: string | null;
   returnDate?: string | null;
   returnTime?: string | null;
-  offeredClasses?: string[];
+  /**
+   * What the branch actually offered. Both runners send `{code, description}`
+   * objects; the bare-string form is kept for previews persisted before that.
+   * Stored verbatim as evidence — nothing reads the elements.
+   */
+  offeredClasses?: Array<string | { code: string | null; description: string | null }>;
   warnings?: string[];
   scheduleEvidence?: { watermarkUtc?: string | null; checkedAt?: string | null } | null;
 };
