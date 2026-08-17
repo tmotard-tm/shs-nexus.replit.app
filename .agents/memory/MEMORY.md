@@ -111,3 +111,4 @@
 - [External-op authorization fencing](external-op-authorization-fence.md) — atomic gate+insert; one-open index; parent-first finalize; serialized monotonic recovery; kill-switch at filing boundary; bearer-only evidence routes.
 - [Create Vehicle wizard mirrors the gate](vehicle-create-wizard-gate-mirror.md) — one verdict drives button+text (two sources = the VIN-warning-that-never-blocked bug); failed check = warn not block; hold has a clock; pending ≠ success, recover by read-back never re-submit.
 - [Request booking vs cutover split](request-booking-vs-cutover.md) — request workflow never files a route block (cutover-only); born not_applicable, completes on verified reservation; branch intent surfaces on workflow_type.
+- [Cutover prod→dev pull](rental-cutover-prod-pull.md) — additive-upsert script only; intents tables are dev-only; copiers must skip GENERATED cols; refreshDevFromProd would wipe the fixtures.
