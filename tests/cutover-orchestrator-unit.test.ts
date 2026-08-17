@@ -27,6 +27,7 @@ import {
   BLOCK_START_TIME_TOKEN,
   QUIET_EXCEPTION_STATES,
   isContractBlockLive,
+  defaultExecutionMode,
   normalizeActivity,
   zip5,
   digitsOnly,
@@ -118,6 +119,21 @@ describe("small helpers", () => {
       assert.equal(isContractBlockLive(), false);
       process.env.VRM_CONTRACT_BLOCK_ENABLED = "1";
       assert.equal(isContractBlockLive(), true);
+    } finally {
+      if (saved === undefined) delete process.env.VRM_CONTRACT_BLOCK_ENABLED;
+      else process.env.VRM_CONTRACT_BLOCK_ENABLED = saved;
+    }
+  });
+
+  test("defaultExecutionMode follows the arming flag (armed = live is the normal mode)", () => {
+    const saved = process.env.VRM_CONTRACT_BLOCK_ENABLED;
+    try {
+      delete process.env.VRM_CONTRACT_BLOCK_ENABLED;
+      assert.equal(defaultExecutionMode(), "dry_run");
+      process.env.VRM_CONTRACT_BLOCK_ENABLED = "false";
+      assert.equal(defaultExecutionMode(), "dry_run");
+      process.env.VRM_CONTRACT_BLOCK_ENABLED = "true";
+      assert.equal(defaultExecutionMode(), "live");
     } finally {
       if (saved === undefined) delete process.env.VRM_CONTRACT_BLOCK_ENABLED;
       else process.env.VRM_CONTRACT_BLOCK_ENABLED = saved;

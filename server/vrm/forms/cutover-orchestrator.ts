@@ -71,6 +71,15 @@ export function isContractBlockLive(): boolean {
 }
 
 /**
+ * The execution mode used when a caller does not specify one: LIVE once the
+ * workflow is armed (owner-validated, production), dry_run while dark. An
+ * explicit executionMode from the caller always wins over this default.
+ */
+export function defaultExecutionMode(): "live" | "dry_run" {
+  return isContractBlockLive() ? "live" : "dry_run";
+}
+
+/**
  * 14-item absence list — the approved schedule policy (repair spec §8). ONLY
  * these ACTIVITY_TYPE_DESCRIPTION values mean the tech is NOT working that
  * day. Working-day signals observed in the live enumeration — huddles, part
@@ -1268,12 +1277,16 @@ export async function createIntent(params: {
   executionMode?: string;
   createdBy?: string | null;
 }): Promise<{ intent: any; created: boolean; failures?: EligibilityFailure[] }> {
-  const mode = params.executionMode ?? "dry_run";
+  // Mode default follows the arming flag: armed (validated workflow — prod)
+  // means LIVE is the normal mode for staff; disarmed (dark/dev) keeps the
+  // dry_run default and live intents cannot exist at all. An explicit
+  // executionMode from the caller always wins in both states.
+  const mode = params.executionMode ?? defaultExecutionMode();
   if (!EXECUTION_MODES.has(mode)) {
     throw new OrchestratorError("bad_mode", `execution_mode must be one of dry_run|test|live`, 400);
   }
   if (mode === "live" && !isContractBlockLive()) {
-    // DARK BUILD: live intents cannot exist until Tyler arms the flag.
+    // Disarmed: live intents cannot exist until the flag is armed.
     throw new OrchestratorError("live_disarmed", "VRM_CONTRACT_BLOCK_ENABLED is not armed; live intents are disabled", 403);
   }
   if (params.workflowType !== WORKFLOW_CUTOVER && params.workflowType !== WORKFLOW_REQUEST) {

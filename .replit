@@ -264,6 +264,7 @@ NEXUS_EXTERNAL_FLEET_READ_API_ENABLED = "true"
 [userenv.production]
 NEXUS_EXTERNAL_FLEET_READ_API_ENABLED = "true"
 LUCA_ROUTE_BLOCK_ENABLED = "true"
+VRM_CONTRACT_BLOCK_ENABLED = "true"
 
 [postMerge]
 path = "scripts/post-merge.sh"

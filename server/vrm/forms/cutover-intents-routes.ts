@@ -116,9 +116,13 @@ export function requireCronOrAdmin(req: any, res: any, next: any): void {
 }
 
 /**
- * LIVE-mode RBAC (repair spec §6): any session-lane mutation that creates or
- * advances a LIVE intent requires an admin/developer session. Dry-run/test
- * intents keep the normal VRM session gate. Exported for route auth tests.
+ * LIVE-mode RBAC (repair spec §6, dark phase only): while the arming flag is
+ * OFF, any session-lane mutation that creates or advances a LIVE intent
+ * requires an admin/developer session. Once VRM_CONTRACT_BLOCK_ENABLED is
+ * armed (owner's go-live decision), live is the workflow's normal operating
+ * mode and every VRM session may run it — the flag, not the role, is the
+ * authority. Dry-run/test intents keep the normal VRM session gate always.
+ * Exported for route auth tests.
  */
 export function isAdminSession(req: any): boolean {
   const role = String(req.user?.role ?? "");
@@ -127,6 +131,7 @@ export function isAdminSession(req: any): boolean {
 
 /** True = blocked (403 already sent). Unknown intent falls through to the handler's 404. */
 async function blockNonAdminLiveIntent(req: any, res: any, intentId: number): Promise<boolean> {
+  if (isContractBlockLive()) return false; // armed = live is normal ops for all VRM staff
   const { rows } = await db.execute(sql`
     SELECT execution_mode FROM vrm_rental_workflow_intents WHERE id = ${intentId} LIMIT 1
   `);
@@ -242,7 +247,7 @@ export function registerCutoverIntentRoutes(router: Router): void {
     try {
       const sourceId = String(req.body?.surveyResponseId ?? "").trim();
       if (!sourceId) return res.status(400).json({ message: "surveyResponseId required" });
-      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req)) {
+      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req) && !isContractBlockLive()) {
         return res.status(403).json({ message: "creating a LIVE intent requires an admin or developer session", code: "admin_required_live" });
       }
       const { intent, created } = await createIntent({
@@ -474,7 +479,7 @@ export function registerCutoverIntentRoutes(router: Router): void {
     try {
       const sourceId = String(req.params.id ?? "").trim();
       if (!sourceId) return res.status(400).json({ message: "request id required" });
-      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req)) {
+      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req) && !isContractBlockLive()) {
         return res.status(403).json({ message: "creating a LIVE intent requires an admin or developer session", code: "admin_required_live" });
       }
       const { intent, created } = await createIntent({

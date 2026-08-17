@@ -60,7 +60,7 @@ curl -X POST "$APP_URL/api/vrm/forms/rental-survey/cutover/morning-sweep" \
 | `ETD_USER` / `ETD_PASS` | booking runner | ETD portal login |
 | `NEXUS_CRON_SECRET` | runner + sweep HTTP | bearer for all runner/cron routes |
 | `DATABASE_URL` | server + sweep | already present |
-| `VRM_CONTRACT_BLOCK_ENABLED` | server | **ABSENT = disarmed (dark).** Set to `true` only when Tyler approves go-live; unset to stand down. Applies to live claims, confirms, ART filing, and msg1/msg2 sends. |
+| `VRM_CONTRACT_BLOCK_ENABLED` | server | **ABSENT = disarmed (dark).** ARMED `true` in the production deployment env (Tyler approved go-live 2026-08-16); unset to stand down. Armed also means: LIVE is the DEFAULT mode for staff intent creates (no explicit mode needed) and the dark-phase admin-only live RBAC stands down — the flag, not the role, is the authority. Dev stays unset (dry_run default; a db test enforces it). |
 
 ## Quiet-hours exception states (msg2)
 

@@ -207,6 +207,66 @@ describe("LIVE-mode RBAC (repair spec §6)", () => {
   });
 });
 
+describe("ARMED mode (VRM_CONTRACT_BLOCK_ENABLED=true): the flag, not the role, is the authority", () => {
+  const FLAG = "VRM_CONTRACT_BLOCK_ENABLED";
+  const arm = () => {
+    const saved = process.env[FLAG];
+    process.env[FLAG] = "true";
+    return () => {
+      if (saved === undefined) delete process.env[FLAG];
+      else process.env[FLAG] = saved;
+    };
+  };
+
+  test("armed: a plain session's explicit live create clears RBAC + kill switch and reaches source lookup", async () => {
+    const disarm = arm();
+    try {
+      for (const path of [
+        `${B}/intents`,
+        `/api/vrm/forms/rental-request/${crypto.randomUUID()}/booking-intent`,
+      ]) {
+        const body = path.endsWith("/booking-intent")
+          ? { executionMode: "live" }
+          : { surveyResponseId: crypto.randomUUID(), executionMode: "live" };
+        const res = await fetch(baseUrl + path, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        });
+        // 404 source_missing proves the request cleared BOTH the dark-phase
+        // RBAC gate and live_disarmed, and died only on the missing source —
+        // no intent row is ever written.
+        assert.equal(res.status, 404, `${path}: armed live create by a plain session must fall through to source lookup`);
+        assert.equal(((await res.json()) as any).code, "source_missing");
+      }
+    } finally {
+      disarm();
+    }
+  });
+
+  test("armed: a plain-session mutation on a live intent passes RBAC into handler validation", async () => {
+    const { rows } = await db.execute(sql`
+      INSERT INTO vrm_rental_workflow_intents
+        (workflow_type, source_id, source_revision, execution_mode, ldap, status, preview_version)
+      VALUES ('cutover', ${crypto.randomUUID()}, 0, 'live', 'ZZAUTHARMED', 'preview_ready', 1)
+      RETURNING id
+    `);
+    const id = (rows as any[])[0].id;
+    const disarm = arm();
+    try {
+      // cancellation-evidence has no external effect; preview_ready is not an
+      // evidence-recording state, so the handler's own validation must answer
+      // (409 bad_state), NOT the dark-phase admin gate (403).
+      const res = await fetch(`${baseUrl}${B}/intents/${id}/cancellation-evidence`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note: "armed-auth-test" }),
+      });
+      assert.equal(res.status, 409, "armed: plain session must clear RBAC and hit state validation");
+      assert.equal(((await res.json()) as any).code, "bad_state");
+    } finally {
+      disarm();
+    }
+  });
+});
+
 describe("quiet-state fallback settings route", () => {
   test("GET is session-open; POST is admin-only, validated, and persisted", async () => {
     const prior = ((await db.execute(sql`

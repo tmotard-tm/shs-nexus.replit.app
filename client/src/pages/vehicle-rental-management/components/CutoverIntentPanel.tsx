@@ -178,7 +178,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" disabled={!!busy} onClick={() => create()} style={btn}>
-              {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start booking workflow (dry run)" : "Start cutover workflow (dry run)"}
+              {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start booking workflow" : "Start cutover workflow"}
             </button>
             {isAdmin && (
               <button type="button" disabled={!!busy}
