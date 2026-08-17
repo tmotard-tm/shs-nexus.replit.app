@@ -39,3 +39,7 @@ is the only authenticated path available.
 **How to apply:** any task whose "manually verify in the UI" step is blocked by
 SSO — verify the data + predicate server-side instead, and say so in the
 completion notes.
+
+## Exact dev-session mechanics (verified 2026-08-16)
+Sessions are a CUSTOM table `sessions(id, user_id, username, expires_at)` — not connect-pg-simple. `requireAuth` reads a PLAIN `sessionId=<id>` cookie (no HMAC signing), looks up the row, then loads the user for `req.user`.
+**How to apply:** `INSERT INTO sessions SELECT '<sid>', id, username, now()+interval '10 min' FROM users LIMIT 1`, curl with `Cookie: sessionId=<sid>`, then `DELETE`. No SESSION_SECRET needed. There is an in-process session cache (~TTL), so reuse of a just-deleted sid can still authenticate briefly.
