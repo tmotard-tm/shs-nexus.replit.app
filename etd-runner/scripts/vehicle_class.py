@@ -207,7 +207,10 @@ def describe(make: str | None, model: str | None, year: str | None = None) -> st
 # Sedans, smallest to largest. FCAR is the ceiling: the SOP promises a
 # full-size sedan or smaller, so PCAR and LCAR are deliberately excluded even
 # though they are cars, because they cost more and nobody promised them.
-SEDAN_LADDER = ["FCAR", "SCAR", "ICAR", "CCAR", "ECAR"]
+# Smallest to largest, and walked in that order: take the smallest class the branch
+# offers. FCAR is the ceiling. Ordered largest-first until 2026-08-17, which handed a
+# full-size to everyone whose branch had one.
+SEDAN_LADDER = ["ECAR", "CCAR", "ICAR", "SCAR", "FCAR"]
 SEDAN_CODES = set(SEDAN_LADDER)
 
 HVAC_PATTERN = re.compile(r"hvac|refrig|heat|air\s*cond", re.I)

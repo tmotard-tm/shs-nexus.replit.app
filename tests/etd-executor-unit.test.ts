@@ -414,7 +414,11 @@ describe("class choice per workflow", () => {
     const got = classForIntent(item({ facts: { requestSeed: {} } }), CLASSES);
     assert.equal(got.decision.mode, "approved_class");
     assert.equal(got.decision.match, "sedan_ladder");
-    assert.equal(got.decision.chosenSipp, "FCAR");
+    // Smallest the branch offers, not largest (Tyler, 2026-08-17). The ladder was
+    // ordered FCAR-first until then, so every technician whose branch had one was
+    // handed a full-size, which is the opposite of right-sizing. CLASSES here offers
+    // ECAR, ICAR, FCAR and MVAR, so ECAR is the smallest sedan available.
+    assert.equal(got.decision.chosenSipp, "ECAR");
   });
 
   test("underscored legacy labels still match (cargo_van == cargo van)", () => {

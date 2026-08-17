@@ -201,9 +201,13 @@ export function describeVehicle(
   return parts.filter((p) => p).join(" ");
 }
 
-// Sedans, smallest to largest. FCAR is the ceiling: the SOP promises a
-// full-size sedan or smaller, so PCAR and LCAR are deliberately excluded.
-export const SEDAN_LADDER = ["FCAR", "SCAR", "ICAR", "CCAR", "ECAR"];
+// Sedans, smallest to largest, and walked in that order: take the smallest class
+// the branch actually offers. FCAR is the ceiling, so PCAR and LCAR are deliberately
+// excluded. Until 2026-08-17 this array was ordered largest-first, so the walk handed
+// out a full-size to everyone whose branch had one, which is the opposite of
+// right-sizing. `already_sedan` short-circuits before this, so a technician already in
+// a sedan class the branch offers keeps that exact class rather than being moved down.
+export const SEDAN_LADDER = ["ECAR", "CCAR", "ICAR", "SCAR", "FCAR"];
 export const SEDAN_CODES = new Set(SEDAN_LADDER);
 
 const HVAC_PATTERN = /hvac|refrig|heat|air\s*cond/i;
