@@ -14,8 +14,11 @@
  *   1. Every technician's block starts at 8:00 AM, EXACT. Filed with "Anytime",
  *      only 11 of the 136 blocks that landed came back at 08:00:00 — the rest
  *      scattered from 06:23 to 15:55, against a text promising 8:00 AM.
- *   2. LocationValue carries the ZIP5 of the branch the reservation was booked
- *      at. Not ZIP+4, not a street number, and never empty — no ZIP, no filing.
+ *   2. LocationValue carries the FULL ZIP of the branch the reservation was
+ *      booked at, including the +4 when the stored address has one (Tyler,
+ *      2026-08-17). Not a street number, and never empty — no ZIP, no filing.
+ *      Plenty of branch addresses carry no +4, so five digits is still valid
+ *      when that is all the address holds.
  */
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
@@ -26,7 +29,7 @@ import {
   type StandardActivityArgs,
 } from "../server/vrm/dca-task-client";
 import {
-  branchZip5,
+  branchZip,
   buildCutoverBlockArgs,
   type CutoverBlockInput,
 } from "../server/vrm/forms/cutover-block-args";
@@ -57,27 +60,27 @@ function wire(input: CutoverBlockInput): Record<string, any> {
   return (buildStandardActivityPayload(argsFor(input)).body as any).exportData[0];
 }
 
-describe("branchZip5", () => {
-  test("takes the trailing ZIP5 out of a ZIP+4 branch address", () => {
+describe("branchZip", () => {
+  test("keeps the +4 when the branch address carries one", () => {
     assert.equal(
-      branchZip5("EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805"),
-      "79904",
+      branchZip("EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805"),
+      "79904-2805",
     );
   });
 
   test("takes a plain trailing ZIP5", () => {
-    assert.equal(branchZip5("KAHULUI HANA HWY., 40 HANA HWY,KAHULUI,96732"), "96732");
+    assert.equal(branchZip("KAHULUI HANA HWY., 40 HANA HWY,KAHULUI,96732"), "96732");
   });
 
   test("is not fooled by a five-digit street number", () => {
-    assert.equal(branchZip5("11130 FUQUA ST, HOUSTON, 77034"), "77034");
+    assert.equal(branchZip("11130 FUQUA ST, HOUSTON, 77034"), "77034");
   });
 
   test("returns empty when the address carries no ZIP", () => {
-    assert.equal(branchZip5("SOME BRANCH, MAIN STREET, HOUSTON"), "");
-    assert.equal(branchZip5(""), "");
-    assert.equal(branchZip5(null), "");
-    assert.equal(branchZip5(undefined), "");
+    assert.equal(branchZip("SOME BRANCH, MAIN STREET, HOUSTON"), "");
+    assert.equal(branchZip(""), "");
+    assert.equal(branchZip(null), "");
+    assert.equal(branchZip(undefined), "");
   });
 });
 
@@ -131,22 +134,23 @@ describe("the lane's decision — 8:00 AM for every tech", () => {
 });
 
 describe("the lane's decision — reserved branch ZIP in LocationValue", () => {
-  test("LocationValue is the branch ZIP5 and LocationType is Supplied", () => {
+  test("LocationValue is the branch ZIP with its +4, and LocationType is Supplied", () => {
     const r = wire(candidate());
     assert.equal(r.LocationType, "Supplied");
-    assert.equal(r.LocationValue, "79904");
+    assert.equal(r.LocationValue, "79904-2805");
   });
 
-  test("a ZIP+4 never reaches LocationValue", () => {
+  test("the +4 survives all the way to the wire, untrimmed", () => {
     const r = wire(candidate());
-    assert.match(r.LocationValue, /^\d{5}$/);
+    assert.match(r.LocationValue, /^\d{5}(-\d{4})?$/);
+    assert.ok(r.LocationValue.includes("-"), "this fixture's address has a +4");
   });
 
-  test("real branch addresses each yield their own 5-digit LocationValue", () => {
+  test("real branch addresses each yield their own LocationValue", () => {
     const cases: Array<[string, string]> = [
-      ["EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805", "79904"],
-      ["FORT WORTH SOUTH FWY., 4851 SOUTH FRWY,FORT WORTH,76115-4003", "76115"],
-      ["FRONT ROYAL, 1500 N SHENANDOAH AVE,FRONT ROYAL,22630-3640", "22630"],
+      ["EL PASO DYER & TETONS, 8555 DYER STREET,EL PASO,79904-2805", "79904-2805"],
+      ["FORT WORTH SOUTH FWY., 4851 SOUTH FRWY,FORT WORTH,76115-4003", "76115-4003"],
+      ["FRONT ROYAL, 1500 N SHENANDOAH AVE,FRONT ROYAL,22630-3640", "22630-3640"],
       ["KAHULUI HANA HWY., 40 HANA HWY,KAHULUI,96732", "96732"],
       ["11130 FUQUA ST, HOUSTON, 77034", "77034"],
     ];
