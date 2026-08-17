@@ -765,7 +765,10 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         // Zip from the booked branch address ("...,VENTURA,93003-6653").
         // Structured location = drive time; Notes alone are invisible to the
         // scheduler.
-        const zipMatch = String(r.branch_address || "").match(/(\d{5}(?:-\d{4})?)\s*$/);
+        // ZIP5 only. The reference types LocationValue as "Zip code" and the
+        // orchestrator lane normalizes with zip5(); this lane was passing the
+        // full ZIP+4 straight off the branch address ("...,EL PASO,79904-2805").
+        const zipMatch = String(r.branch_address || "").match(/(\d{5})(?:-\d{4})?\s*$/);
         const out = await sendStandardActivity({
           techLdap: r.ldap,
           unit,
@@ -773,11 +776,20 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           date,
           durationMinutes: 30,
           locationZip: zipMatch ? zipMatch[1] : null,
-          // 8:00 AM like every other block, but this one's own note promises
-          // the technician the time can move if Enterprise has a conflict, so
-          // it asks for the slot rather than pinning it (pickup blocks use the
-          // "Exact" default).
-          startTimeRequest: "Anytime",
+          // "Exact", NOT "Anytime".
+          //
+          // 2026-08-17, measured against PRD_SERVICEPOWER SCH_ACTIVITIES_PROD:
+          // of the 136 blocks this lane filed that landed as "Vehicle - Change",
+          // only ELEVEN came back at 08:00:00. The rest were scattered from
+          // 06:23 to 15:55 because "Anytime" tells the optimizer that 08:00 is
+          // a hint it may move. The technician's text promised 8:00 AM, so
+          // every one of those had to be repaired by hand.
+          //
+          // The projectNotes below still tell the DCA a human may move the slot
+          // if Enterprise has a conflict — that is a human affordance and costs
+          // nothing. What must not happen is the optimizer silently relocating
+          // a block whose time we already texted to the technician.
+          startTimeRequest: "Exact",
           live,
           projectLabel: "Enterprise Contract Change",
           // Tyler 2026-08-13: short and labeled. The long instructions go in
