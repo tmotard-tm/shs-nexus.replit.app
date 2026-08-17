@@ -228,7 +228,7 @@ type ScheduleEvidence = {
 async function nextWorkingDay(
   ldap: string,
   readSchedule: NonNullable<ExecutorDeps["schedule"]>,
-  opts: { sameDay?: boolean } = {},
+  opts: { sameDay?: boolean; requestedAt?: string | null } = {},
 ): Promise<{ day: string | null; evidence: ScheduleEvidence }> {
   const from = etTodayISO();
   const checkedAt = new Date().toISOString();
@@ -241,17 +241,26 @@ async function nextWorkingDay(
   // and reported as four separate failures (no_date, quote_failed,
   // class_unmapped, branch_zip_missing) that were all the same cause.
   if (opts.sameDay) {
+    // The date the technician picked on the form, floored at today. Never the
+    // schedule's opinion: this lane files no route block, so there is nothing for a
+    // working day to protect, and the person filling in the form is the one who knows
+    // when they can collect a car.
+    const asked = String(opts.requestedAt ?? "").slice(0, 10);
+    const day = /^\d{4}-\d{2}-\d{2}$/.test(asked) && asked > from ? asked : from;
     return {
-      day: from,
+      day,
       evidence: {
         source: "in-process",
         fresh: true,
         watermarkUtc: null,
         watermarkAgeHours: null,
-        firstWorkingDay: from,
+        firstWorkingDay: day,
         minDate: from,
         checkedAt,
-        note: "same-day request: pickup is today, no schedule gate",
+        note:
+          `request pickup ${day}` +
+          (asked && asked !== day ? ` (form asked ${asked}, floored at today)` : "") +
+          "; no schedule gate",
       },
     };
   }
@@ -462,8 +471,10 @@ async function runPreview(
   readSchedule: NonNullable<ExecutorDeps["schedule"]>,
 ): Promise<ExecutorResult> {
   const { intentId, ldap } = item;
+  const requestedAt = (item.facts as any)?.requestSeed?.pickupAt ?? null;
   const { day: firstDay, evidence } = await nextWorkingDay(ldap, readSchedule, {
     sameDay: item.workflowType === WORKFLOW_REQUEST,
+    requestedAt,
   });
 
   const quote: RunnerQuote & Record<string, unknown> = {
@@ -485,7 +496,13 @@ async function runPreview(
 
   if (firstDay) {
     try {
-      const start = `${firstDay}T09:00:00`;
+      // The form's time too. 09:00 is only the fallback; every request so far asked
+      // for 08:00 and was booked at 09:00.
+      const askedTime = /T(\d{2}:\d{2}:\d{2})/.exec(String(requestedAt ?? ""))?.[1]
+        ?? / (\d{2}:\d{2}:\d{2})/.exec(String(requestedAt ?? ""))?.[1];
+      const start = `${firstDay}T${
+        item.workflowType === WORKFLOW_REQUEST && askedTime ? askedTime : "09:00:00"
+      }`;
       const end = fmtISO(addDaysDT(parseLocalDT(start), days));
       const { address, code, wantState } = intentAddress(item);
       if (!address) throw new Error("no branch/shop address seed on the intent facts");
