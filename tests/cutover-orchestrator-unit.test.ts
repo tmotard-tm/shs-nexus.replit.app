@@ -327,6 +327,19 @@ describe("display phase + completion", () => {
     assert.equal(completionSatisfied({ ...done, msg1_state: "pending" }), false);
     assert.equal(completionSatisfied({ ...done, msg2_state: "held" }), false);
     assert.equal(completionSatisfied({ ...done, reservation_state: "booked" }), false);
+    // REQUEST workflow: booking IS the lifecycle. Route blocks/texts are
+    // cutover-only (Tyler 2026-08-16) — verified reservation = complete,
+    // and no block phase may ever surface.
+    assert.equal(completionSatisfied({ workflow_type: WORKFLOW_REQUEST, reservation_state: "verified", block_state: "not_applicable" }), true);
+    assert.equal(completionSatisfied({ workflow_type: WORKFLOW_REQUEST, reservation_state: "booked" }), false);
+    assert.equal(
+      deriveDisplayPhase({ status: "reservation_verified", workflow_type: WORKFLOW_REQUEST, reservation_state: "verified", block_state: "not_applicable" }),
+      "wrapping_up",
+    );
+    assert.equal(
+      deriveDisplayPhase({ status: "awaiting_verification", workflow_type: WORKFLOW_REQUEST, reservation_state: "booked", block_state: "not_applicable" }),
+      "awaiting_verification",
+    );
   });
 });
 

@@ -320,6 +320,86 @@ describe("request lane source keying", () => {
     assert.ok(byId.sourceRow, "uuid key must keep working");
     assert.equal(String(byId.sourceRow.request_no), String(row.request_no));
   });
+
+  test("request intents never file a route block: legacy pending state normalizes to not_applicable, zero ART attempts", async () => {
+    const id = await insertIntent({ workflow_type: WORKFLOW_REQUEST, ldap: `${LDAP_PREFIX}RQBLK`, status: "reservation_verified" });
+    // Legacy shape from before the split: request row carrying cutover's
+    // default block_state. The filing lane must normalize, never file.
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET reservation_state = 'dry_run_validated', block_state = 'pending'
+      WHERE id = ${id}
+    `);
+    await fileContractBlock(id);
+    const row = (await db.execute(sql`
+      SELECT block_state, block_evidence FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows[0] as any;
+    assert.equal(row.block_state, "not_applicable", "route blocks are cutover-only");
+    assert.equal(row.block_evidence?.notApplicable, true);
+    const n = ((await db.execute(sql`
+      SELECT count(*)::int AS n FROM vrm_workflow_attempts WHERE intent_id = ${id} AND phase = 'art_block'
+    `)).rows[0] as any).n;
+    assert.equal(n, 0, "no ART attempt is ever opened for a request intent");
+  });
+
+  test("request booking completes on verified readback; duplicate and post-cancel postbacks never revive a terminal intent", async () => {
+    const ldap = `${LDAP_PREFIX}RQDONE`;
+    const id = await insertIntent({ workflow_type: WORKFLOW_REQUEST, ldap, status: "confirmed" });
+    const mine = (await claimBookingWork({ runnerId: "req-done-runner", limit: 50 })).find((i) => i.intentId === id);
+    assert.ok(mine, "claim must return the confirmed request fixture");
+
+    const verifiedPayload = {
+      expected: { confirmation: "REQ-C1" },
+      matches: [{ confirmation: "REQ-C1", reference: `SHS ${ldap} pickup` }],
+    };
+    const rb1 = await recordBookingPostback({
+      intentId: id, runnerId: "req-done-runner", fencingToken: mine!.fencingToken,
+      phase: "readback", payload: verifiedPayload,
+    });
+    assert.equal(rb1.accepted, true);
+    assert.equal(rb1.status, "completed", "a verified request booking completes immediately — no block, no texts");
+    let row = ((await db.execute(sql`
+      SELECT status, reservation_state, block_state FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.status, "completed");
+    assert.equal(row.reservation_state, "verified");
+    assert.equal(row.block_state, "not_applicable", "completion must not drag the request into block lanes");
+    const attempts = (((await db.execute(sql`
+      SELECT count(*)::int AS n FROM vrm_workflow_attempts WHERE intent_id = ${id} AND phase = 'art_block'
+    `)).rows as any[])[0]).n;
+    assert.equal(attempts, 0, "completed request has zero ART attempts");
+
+    // Duplicate delivery of the same readback: idempotent ACK, zero mutation.
+    const rb2 = await recordBookingPostback({
+      intentId: id, runnerId: "req-done-runner", fencingToken: mine!.fencingToken,
+      phase: "readback", payload: verifiedPayload,
+    });
+    assert.equal(rb2.accepted, true);
+    assert.equal(rb2.idempotent, true, "terminal postbacks must ACK idempotently");
+    assert.equal(rb2.status, "completed");
+    row = ((await db.execute(sql`SELECT status FROM vrm_rental_workflow_intents WHERE id = ${id}`)).rows as any[])[0];
+    assert.equal(row.status, "completed", "duplicate postback must never rewrite a terminal intent");
+
+    // Late postback after a cancellation: the cancel is final.
+    const id2 = await insertIntent({ workflow_type: WORKFLOW_REQUEST, ldap: `${LDAP_PREFIX}RQCXL`, status: "confirmed" });
+    const mine2 = (await claimBookingWork({ runnerId: "req-cxl-runner", limit: 50 })).find((i) => i.intentId === id2);
+    assert.ok(mine2, "claim must return the second request fixture");
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET status = 'cancelled' WHERE id = ${id2}`);
+    const rb3 = await recordBookingPostback({
+      intentId: id2, runnerId: "req-cxl-runner", fencingToken: mine2!.fencingToken,
+      phase: "readback",
+      payload: { expected: { confirmation: "REQ-C2" }, matches: [{ confirmation: "REQ-C2", reference: `SHS ${LDAP_PREFIX}RQCXL pickup` }] },
+    });
+    assert.equal(rb3.idempotent, true);
+    assert.equal(rb3.status, "cancelled");
+    const row2 = ((await db.execute(sql`
+      SELECT status, reservation_state FROM vrm_rental_workflow_intents WHERE id = ${id2}
+    `)).rows as any[])[0];
+    assert.equal(row2.status, "cancelled", "a verified readback must never revive a cancelled intent");
+    // reservation_state is born 'pending' (column default) — the point is the
+    // losing postback must never have stamped it 'verified'.
+    assert.notEqual(row2.reservation_state, "verified", "the loser CAS must not stamp verified state either");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -398,6 +398,7 @@ export function renderMsg2(f: { conf: string; branchName: string; branchAddress:
 
 export function deriveDisplayPhase(row: {
   status: string;
+  workflow_type?: string | null;
   reservation_state?: string | null;
   block_state?: string | null;
   msg1_state?: string | null;
@@ -407,6 +408,12 @@ export function deriveDisplayPhase(row: {
   if (TERMINAL_STATUSES.has(s)) return s;
   if (s === "manual_review" || s === "preview_required" || s === "booking_unknown" || s === "block_conflict_pending_readback") {
     return s;
+  }
+  // Rental-request BOOKING workflow: route blocks and tech texts are
+  // cutover-only (Tyler 2026-08-16). Booking is the whole lifecycle — never
+  // surface a block phase for a request.
+  if (row.workflow_type === WORKFLOW_REQUEST) {
+    return row.reservation_state === "verified" ? "wrapping_up" : s;
   }
   if (row.block_state === "manual_repair") return "block_manual_repair";
   if (row.reservation_state === "verified") {
@@ -418,11 +425,19 @@ export function deriveDisplayPhase(row: {
 }
 
 export function completionSatisfied(row: {
+  workflow_type?: string | null;
   reservation_state?: string | null;
   block_state?: string | null;
   msg1_state?: string | null;
   msg2_state?: string | null;
 }): boolean {
+  // The request workflow completes on its verified reservation alone: route
+  // blocks are cutover-only (Tyler 2026-08-16) and request SMS is a separate
+  // unapproved feature — if Tyler later approves request texts, their msg
+  // conditions join HERE.
+  if (row.workflow_type === WORKFLOW_REQUEST) {
+    return row.reservation_state === "verified";
+  }
   return (
     row.reservation_state === "verified" &&
     row.block_state === "verified" &&
@@ -1012,12 +1027,13 @@ export async function createIntent(params: {
     const { rows } = await db.execute(sql`
       INSERT INTO vrm_rental_workflow_intents
         (workflow_type, source_id, source_revision, execution_mode, ldap, tech_name,
-         truck_number, enterprise_case_id, status, eligibility, created_by)
+         truck_number, enterprise_case_id, status, eligibility, created_by, block_state)
       VALUES
         (${params.workflowType}, ${params.sourceId}, ${revision}, ${mode}, ${facts.ldap},
          ${facts.techName}, ${facts.tpmsTruck}, ${facts.caseKey},
          'created', ${JSON.stringify({ facts: publicFacts(facts), checkedAt: new Date().toISOString(), failures: [] })}::jsonb,
-         ${params.createdBy ?? null})
+         ${params.createdBy ?? null},
+         ${params.workflowType === WORKFLOW_REQUEST ? "not_applicable" : "pending"})
       ON CONFLICT (workflow_type, source_id, source_revision, execution_mode) DO NOTHING
       RETURNING *
     `);
@@ -1615,6 +1631,17 @@ export async function recordBookingPostback(params: {
     requireActiveLease: params.phase === "op_open",
   });
 
+  // Terminal intents ACK idempotently and mutate NOTHING: late or duplicate
+  // postbacks (runner retries, proxy replays) must never revive a
+  // completed/cancelled/abandoned intent. op_open keeps its hard 409 — it
+  // authorizes a NEW external call and must never look like a success.
+  if (TERMINAL_STATUSES.has(intent.status)) {
+    if (params.phase === "op_open") {
+      throw new OrchestratorError("bad_state", `op_open in status ${intent.status}`, 409);
+    }
+    return { accepted: true, status: intent.status, idempotent: true };
+  }
+
   if (params.phase === "op_open") {
     if (intent.status !== "booking") {
       throw new OrchestratorError("bad_state", `op_open in status ${intent.status}`, 409);
@@ -1763,22 +1790,48 @@ export async function recordBookingPostback(params: {
   }
 
   if (verdict.verdict === "verified") {
-    await touchIntent(intent.id, {
-      reservation_state: "verified",
-      status: "reservation_verified",
-      reservation_evidence: {
-        ...(intent.reservation_evidence ?? {}),
-        confirmation: expected.confirmation || strOrNull(matches[0]?.confirmation),
-        verifiedAt: new Date().toISOString(),
-        readback: verdict,
-        match: matches[0] ?? null,
-      },
-      last_error: null,
+    // CAS: advance only from the statuses a journey readback may legitimately
+    // move (normal verify, reconcile-directed retry, parked unknown). A rival
+    // writer — cancel, duplicate readback, sweep — makes this lose, and a
+    // loser must ACK idempotently without rewriting anything.
+    const verifiedEvidence = JSON.stringify({
+      ...(intent.reservation_evidence ?? {}),
+      confirmation: expected.confirmation || strOrNull(matches[0]?.confirmation),
+      verifiedAt: new Date().toISOString(),
+      readback: verdict,
+      match: matches[0] ?? null,
     });
+    const { rows: advanced } = await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET reservation_state = 'verified', status = 'reservation_verified',
+          reservation_evidence = ${verifiedEvidence}::jsonb, last_error = NULL, updated_at = now()
+      WHERE id = ${intent.id}
+        AND status IN ('awaiting_verification', 'booking', 'booking_unknown')
+      RETURNING id
+    `);
+    if (!(advanced as any[]).length) {
+      const cur = await loadIntent(intent.id);
+      return { accepted: true, status: cur.status, readback: verdict, idempotent: true };
+    }
     await mirrorCutoverSummary(intent.id);
     // Reservation verified → file the block, then evaluate message releases.
     await fileContractBlock(intent.id);
     await releaseMessagesIfEligible(intent.id);
+    // The REQUEST workflow ends here — a verified reservation is completion
+    // (no block, no texts). For cutover this check no-ops: its completion
+    // still demands block_verified + both texts, which take until morning.
+    // Guarded on the observed status so a concurrent cancel can never be
+    // overwritten back to completed.
+    const settled = await loadIntent(intent.id);
+    if (!TERMINAL_STATUSES.has(settled.status) && completionSatisfied(settled)) {
+      const { rows: done } = await db.execute(sql`
+        UPDATE vrm_rental_workflow_intents
+        SET status = 'completed', updated_at = now()
+        WHERE id = ${intent.id} AND status = ${settled.status}
+        RETURNING id
+      `);
+      if ((done as any[]).length) await mirrorCutoverSummary(intent.id);
+    }
     return { accepted: true, status: (await loadIntent(intent.id)).status, readback: verdict };
   }
 
@@ -2065,15 +2118,17 @@ export async function fileContractBlock(intentId: number, deps?: BlockReconcileD
   if (intent.reservation_state !== "verified" && !darkValidated) return;
   if (!["pending", "retry"].includes(intent.block_state)) return;
 
-  // Request-path ART rules (project label / 'Vehicle - Pickup' token /
-  // template) are NOT approved yet — park the block lane instead of filing a
-  // cutover-shaped block against a pickup. Messages stay pending too.
+  // Route blocks are CUTOVER-ONLY (Tyler 2026-08-16): a new-rental request
+  // protects no existing route — its workflow ends at a verified booking.
+  // New request intents are created with block_state='not_applicable' and
+  // never reach here; this branch just normalizes any legacy block-shaped
+  // request row. No filing, no attempt, ever.
   if (intent.workflow_type === WORKFLOW_REQUEST) {
     await touchIntent(intentId, {
-      block_state: "skipped_pending_rules",
+      block_state: "not_applicable",
       block_evidence: {
-        skipped: true,
-        reason: "request-path ART template/token not approved; filing disabled",
+        notApplicable: true,
+        reason: "route blocks are cutover-only; the request workflow never files one",
         at: new Date().toISOString(),
       },
     });
@@ -2612,9 +2667,15 @@ export async function morningSweep(): Promise<{
       }
 
       const final = await loadIntent(intent.id);
-      if (completionSatisfied(final)) {
-        await touchIntent(intent.id, { status: "completed" });
-        summary.completed++;
+      if (!TERMINAL_STATUSES.has(final.status) && completionSatisfied(final)) {
+        // CAS on the observed status: a cancel racing this sweep wins.
+        const { rows: done } = await db.execute(sql`
+          UPDATE vrm_rental_workflow_intents
+          SET status = 'completed', updated_at = now()
+          WHERE id = ${intent.id} AND status = ${final.status}
+          RETURNING id
+        `);
+        if ((done as any[]).length) summary.completed++;
       }
       await mirrorCutoverSummary(intent.id);
     } else if (verdict.verdict === "verification_pending") {

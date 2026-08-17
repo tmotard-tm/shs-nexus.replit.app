@@ -1,6 +1,9 @@
 /**
- * Cutover workflow panel + table pill, shared by RentalSurvey and
- * RentalRequests.
+ * Intent workflow panel + table pill, shared by RentalSurvey (CUTOVER
+ * workflow) and RentalRequests (rental BOOKING workflow). Both ride the same
+ * server-side safety machinery, but they are separate workflows: route
+ * blocks and technician texts are cutover-only — a request's lifecycle ends
+ * at its verified reservation, so no block/text rows or copy appear for it.
  *
  * Renders what the ORCHESTRATOR says and nothing more. The client never
  * decides eligibility, never labels a row clean, and never composes message
@@ -105,6 +108,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const [busy, setBusy] = useState<string>("");
   const [err, setErr] = useState<string>("");
   const [info, setInfo] = useState<string>("");
+  const isRequest = workflow === "request";
 
   const run = async (label: string, fn: () => Promise<any>) => {
     setBusy(label); setErr(""); setInfo("");
@@ -123,7 +127,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const create = () => run("create", () =>
     workflow === "survey"
       ? post(`${BASE}/intents`, { surveyResponseId: sourceId })
-      : post(`/api/vrm/forms/rental-request/${sourceId}/cutover-intent`, {}));
+      : post(`/api/vrm/forms/rental-request/${sourceId}/booking-intent`, {}));
 
   const status = String(intent?.status ?? "");
   const tone = intent ? phaseTone(intent) : null;
@@ -139,7 +143,9 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
 
   const doConfirm = () => {
     const msg = live
-      ? "LIVE intent: Confirm queues a REAL Enterprise reservation for the runner to book, then the route block and technician texts. Proceed?"
+      ? isRequest
+        ? "LIVE intent: Confirm queues a REAL Enterprise reservation for the runner to book. Proceed?"
+        : "LIVE intent: Confirm queues a REAL Enterprise reservation for the runner to book, then the route block and technician texts. Proceed?"
       : `${intent.execution_mode} intent: the runner will validate everything but commit nothing. Proceed?`;
     if (!window.confirm(msg)) return;
     run("confirm", () => post(`${BASE}/intents/${intent.id}/confirm`, { previewVersion: intent.preview_version }));
@@ -149,7 +155,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
     <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
         <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", flex: 1 }}>
-          Cutover workflow
+          {isRequest ? "Rental booking workflow" : "Cutover workflow"}
         </div>
         {intent && <IntentPill intent={intent} />}
       </div>
@@ -161,7 +167,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             queues a schedule-verified Enterprise quote for review. Nothing external happens before Confirm.
           </p>
           <button type="button" disabled={!!busy} onClick={create} style={btn}>
-            {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : "Start cutover workflow"}
+            {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start booking workflow" : "Start cutover workflow"}
           </button>
         </>
       ) : (
@@ -174,8 +180,14 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             ["Class", resv?.sipp ? `${resv.sipp}${resv.classDecision?.detail ? ` — ${resv.classDecision.detail}` : ""}` : ""],
             ["Confirmation", confirmation],
             ["Reservation", intent.reservation_state],
-            ["Route block", intent.block_state],
-            ["Text 1 / Text 2", `${intent.msg1_state ?? "—"} / ${intent.msg2_state ?? "—"}`],
+            // Route block + texts are cutover-only steps; a request's
+            // workflow has neither, so showing them would just confuse.
+            ...(isRequest
+              ? []
+              : ([
+                  ["Route block", intent.block_state],
+                  ["Text 1 / Text 2", `${intent.msg1_state ?? "—"} / ${intent.msg2_state ?? "—"}`],
+                ] as Array<[string, unknown]>)),
             ["Last error", intent.last_error],
           ] as Array<[string, unknown]>)
             .filter(([, v]) => String(v ?? "").trim() !== "")

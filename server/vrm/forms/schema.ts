@@ -785,6 +785,16 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_workflow_send_guards (intent_id, workflow_type, message_moment, execution_mode);
   `);
 
+  // Route blocks are CUTOVER-ONLY (Tyler 2026-08-16): the rental-request
+  // booking workflow never files one. Heal legacy block-shaped request rows
+  // so they can't enter block sweeps or read as "awaiting block" forever.
+  await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET block_state = 'not_applicable'
+    WHERE workflow_type = 'rental_request'
+      AND block_state IN ('pending','retry','filing','skipped_pending_rules')
+  `);
+
   // vrm_rental_cutover is DEMOTED to a tracking summary fed from intents.
   // These columns mirror the owning intent so CutoverTracking keeps reading
   // one row per tech without joining the intent table client-side.

@@ -383,11 +383,15 @@ export function registerCutoverIntentRoutes(router: Router): void {
   });
 
   // ------------------------------------------------------------------
-  // Rental-request parity lane (same orchestrator, request source)
+  // Rental-request BOOKING lane — its OWN workflow riding the shared intent
+  // safety machinery (eligibility → immutable preview → Confirm CAS → runner
+  // booking → journey readback). Route blocks and tech texts are
+  // CUTOVER-ONLY (Tyler 2026-08-16); a request completes on its verified
+  // reservation.
   // ------------------------------------------------------------------
 
-  /** Create an intent from an APPROVED rental request (parity hookup). */
-  router.post("/forms/rental-request/:id/cutover-intent", async (req, res) => {
+  /** Create a booking intent from an APPROVED rental request. */
+  router.post("/forms/rental-request/:id/booking-intent", async (req, res) => {
     try {
       const sourceId = String(req.params.id ?? "").trim();
       if (!sourceId) return res.status(400).json({ message: "request id required" });
