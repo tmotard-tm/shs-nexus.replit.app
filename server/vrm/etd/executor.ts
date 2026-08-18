@@ -904,8 +904,17 @@ async function runBook(
     return result("ABRT", "aborted_before_open", "preview incomplete");
   }
 
-  // 1. The confirmed date must still be a verified working day.
-  if (!(await isWorkingDay(ldap, pickup, readSchedule))) {
+  // 1. The confirmed date must still be a verified working day. CUTOVER ONLY.
+  //
+  // This is the THIRD home of the schedule gate. Making the preview-time and
+  // confirm-time ones cutover-only was not enough: a rental request got all the way
+  // to the commit and died here with "2026-08-18 no longer a working day", which is
+  // a true statement about ServicePower and an irrelevant one about a technician
+  // standing next to a dead van. A cutover pairs its reservation with a 30-minute
+  // route block, so the day has to be one the tech actually works. A request files
+  // no block and books a car for today. ServicePower has no say in it.
+  if (item.workflowType !== WORKFLOW_REQUEST
+      && !(await isWorkingDay(ldap, pickup, readSchedule))) {
     await post("op_result", {
       outcome: "aborted_before_open",
       evidence: { reason: `${pickup} no longer a verified working day` },
