@@ -21832,6 +21832,85 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  /**
+   * Mark a BYOV vehicle out of service in Holman.
+   *
+   * Operational sibling of unassign: run this AFTER the tech is unassigned, once
+   * they unenroll or are terminated. It never unassigns on its own — a truck that
+   * still shows a driver in Holman is refused (409) so the operator resolves that
+   * deliberately, rather than letting a lifecycle write quietly strip a live
+   * assignment.
+   *
+   * Defaults to a DRY RUN; the caller must send dryRun:false to actually write.
+   * Holman's 202 only means "queued", so a real write returns outcome
+   * "submitted" and settles later through the existing verification sweep — the
+   * cache is never mirrored off the submit response.
+   */
+  app.post("/api/holman/vehicles/out-of-service", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNumber, dryRun } = req.body ?? {};
+      if (!truckNumber || typeof truckNumber !== "string" || !truckNumber.trim()) {
+        return res.status(400).json({ message: "truckNumber is required" });
+      }
+
+      // Both gates decide on the CANONICAL number. Holman returns vehicle numbers
+      // unpadded while the cache and the fleet UI carry zero-padded forms
+      // ("088269"), so a raw prefix check would 400 valid BYOV trucks based only
+      // on how the caller spelled the number. The raw value is still what gets
+      // passed downstream, where exact Holman identity matters.
+      const { isByovEligibleForOutOfService, isExcludedFromOutOfService } = await import(
+        "./holman-oos-policy"
+      );
+      if (!isByovEligibleForOutOfService(truckNumber)) {
+        return res.status(400).json({
+          message: `Truck ${truckNumber} is not a BYOV vehicle — this out-of-service action is BYOV-only.`,
+        });
+      }
+
+      // A policy refusal is a deliberate answer, not a crash: surface it as a
+      // conflict rather than letting the service's throw surface as a 500.
+      if (isExcludedFromOutOfService(truckNumber)) {
+        return res.status(409).json({
+          message: `Truck ${truckNumber} is explicitly excluded from the out-of-service operation and cannot be marked out of service here.`,
+        });
+      }
+
+      // A session proves login, not authority. This is a live external write, so
+      // the caller is re-checked against the admin-grade user directory.
+      const operator = req.user?.username || "";
+      const { assertOperatorMayMarkOutOfService, markVehicleOutOfService } = await import(
+        "./holman-out-of-service-service"
+      );
+      try {
+        await assertOperatorMayMarkOutOfService(operator);
+      } catch (authErr: any) {
+        return res.status(403).json({ message: authErr.message });
+      }
+
+      const isDryRun = dryRun !== false;
+      const result = await markVehicleOutOfService({
+        truck: truckNumber.trim(),
+        operator,
+        dryRun: isDryRun,
+      });
+
+      // A dry run is a PREVIEW: it succeeded even when it reports the write would
+      // be refused, so it always answers 200 and the UI renders the verdict. Only
+      // a real attempt maps a refusal (assigned driver, active write-fence,
+      // pending submission) onto an HTTP conflict.
+      const status = isDryRun
+        ? 200
+        : result.outcome === "skipped"
+          ? 409
+          : result.outcome === "failed"
+            ? 502
+            : 200;
+      res.status(status).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/fleet-ops/update-address", requireAuth, async (req: any, res) => {
     try {
       const { truckNumber, ldapId, address, city, state, zip } = req.body;

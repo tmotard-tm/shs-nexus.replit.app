@@ -4,15 +4,40 @@ import { eq, and, inArray, desc, gte, lte, like, sql, isNull, or } from "drizzle
 import { holmanApiService } from "./holman-api-service";
 import { verifyFence, expireFence } from "./fleet-reconciliation/fences";
 import { toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
+import {
+  isOutOfServiceRecord,
+  oosVerificationExpired,
+  OOS_VERIFICATION_WINDOW_MS,
+} from "./holman-oos-policy";
 
 const HOLMAN_SUBMISSION_EXPIRY_MS = parseInt(process.env.HOLMAN_SUBMISSION_EXPIRY_MS || '1200000', 10); // default 20 minutes
 const PRE_EXPIRY_BUFFER_MS = 2 * 60 * 1000; // 2 minutes before expiry
 const POST_EXPIRY_BUFFER_MS = 2 * 60 * 1000; // 2 minutes after expiry
 
+// Lifecycle (out-of-service) changes are NOT applied by Holman in near-real-time the
+// way driver/assignment edits are. Measured against the live fleet, ~94% of all Holman
+// record changes land in two nightly batch windows (~00:xx and ~05:xx UTC); a record
+// submitted just after a window waits for the next one. The 20-minute default would
+// therefore mark every out-of-service submission "failed" many hours before Holman had
+// any opportunity to process it.
+//
+// The window is deliberately larger than a single cycle: an observed submit at 12:15Z
+// was not applied until ~05:2x two calendar days later (~41 hours). Expiring earlier
+// than that fails a valid in-flight write, and a failed row stops being polled — so the
+// late success would never be recorded. See OOS_VERIFICATION_WINDOW_MS.
+const HOLMAN_OOS_EXPIRY_MS = parseInt(
+  process.env.HOLMAN_OOS_EXPIRY_MS || String(OOS_VERIFICATION_WINDOW_MS),
+  10,
+); // default 72 hours
+
+function expiryMsForAction(action: string | null | undefined): number {
+  return action === 'out_of_service' ? HOLMAN_OOS_EXPIRY_MS : HOLMAN_SUBMISSION_EXPIRY_MS;
+}
+
 export class HolmanSubmissionService {
   async createSubmission(data: {
     holmanVehicleNumber: string;
-    action: 'assign' | 'unassign' | 'field_test' | 'district';
+    action: 'assign' | 'unassign' | 'field_test' | 'district' | 'out_of_service';
     enterpriseId?: string | null;
     submissionId?: string | null;
     correlationId?: string | null;
@@ -199,6 +224,29 @@ export class HolmanSubmissionService {
     }
   }
 
+  // ─── Live-confirmed out-of-service cache mirror ──────────────────────────────
+  // ONLY call this from points where LIVE Holman (custom-query) returned
+  // statusCode=2 for this vehicle — never off a 202 submit response (queued ≠
+  // applied) and never speculatively. The bulk sync writes the same fields on
+  // its own; this just heals the cache row immediately at a live-confirmed
+  // point so the card doesn't show "active" until the next sync.
+  // Never throws — cache mirroring must not fail a successful verification.
+  async mirrorVerifiedOutOfService(vehicleNumber: string, rawVehicle: any): Promise<void> {
+    try {
+      const canonical = (toCanonical(vehicleNumber) || '').trim();
+      const oosDate = String(rawVehicle?.outOfServiceDate ?? '').trim() || null;
+      const where = canonical
+        ? sql`UPPER(LTRIM(TRIM(${holmanVehiclesCache.holmanVehicleNumber}), '0')) = ${canonical.toUpperCase()}`
+        : eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber);
+      await db.update(holmanVehiclesCache)
+        .set({ statusCode: 2, outOfServiceDate: oosDate, lastLocalUpdateAt: new Date() })
+        .where(where);
+      console.log(`[HolmanVerify] Cache mirrored out-of-service for ${vehicleNumber} (live-confirmed statusCode=2)`);
+    } catch (e: any) {
+      console.warn(`[HolmanVerify] OOS cache mirror failed for ${vehicleNumber} (non-fatal):`, e?.message);
+    }
+  }
+
   // ─── Vehicle-lookup verification (primary strategy) ──────────────────────────
   // Holman's batch submission API returns 202 Accepted (async queue).
   // There is no per-vehicle status endpoint.  Holman's basic-query GET does not
@@ -247,6 +295,28 @@ export class HolmanSubmissionService {
           }
         } catch (liveErr: any) {
           console.warn(`[HolmanVerify] Live re-query failed for ${vehicleNumber}, falling back to cache:`, liveErr?.message);
+        }
+      }
+      // Live re-query for out-of-service submissions: the lifecycle statusCode
+      // in the custom-query response is authoritative. Only a positive
+      // statusCode=2 confirms; on probe failure or a still-active status this
+      // falls through to the cache-based check below (fed by fleet syncs).
+      if (submission.action === 'out_of_service') {
+        try {
+          const live = await holmanApiService.lookupVehicleByNumberChecked(vehicleNumber);
+          if (live.checked && live.found && live.vehicle) {
+            const raw: any = live.vehicle;
+            // Do NOT test statusCode alone: Holman nulls it once the vehicle
+            // leaves the active projection, so an applied change reads as
+            // "still active" and this sweep would never settle.
+            if (isOutOfServiceRecord(raw)) {
+              await this.mirrorVerifiedOutOfService(vehicleNumber, raw);
+              const dateNote = raw.outOfServiceDate ? `, outOfServiceDate=${raw.outOfServiceDate}` : '';
+              return { verified: true, newStatus: 'completed', message: `Confirmed out of service via live Holman (statusCode=${raw.statusCode ?? '—'}${dateNote})`, rawVehicle: raw };
+            }
+          }
+        } catch (liveErr: any) {
+          console.warn(`[HolmanVerify] Live OOS re-query failed for ${vehicleNumber}, falling back to cache:`, liveErr?.message);
         }
       }
       const [cached] = await db.select()
@@ -309,6 +379,17 @@ export class HolmanSubmissionService {
           return { verified: true, newStatus: 'completed', message: `Confirmed district ${target} via cache`, rawVehicle: cached };
         }
         return { verified: false, newStatus: 'pending', message: `Cache district="${cached.district ?? ''}" (last4=${current || '—'}), expected "${target}" — not yet applied` };
+      }
+
+      if (submission.action === 'out_of_service') {
+        // Cache row is post-submission (stale-cache guard above) so its
+        // statusCode reflects a fleet sync that ran AFTER the submit.
+        const cachedStatus = cached.statusCode == null ? null : Number(cached.statusCode);
+        if (isOutOfServiceRecord(cached)) {
+          console.log(`[HolmanVerify] Submission ${submission.id} — confirmed out of service from cache`);
+          return { verified: true, newStatus: 'completed', message: 'Confirmed out of service via cache', rawVehicle: cached };
+        }
+        return { verified: false, newStatus: 'pending', message: `Cache shows statusCode=${cachedStatus ?? '—'} — not yet out of service` };
       }
 
       return { verified: false, newStatus: 'pending', message: 'Awaiting fleet sync for verification' };
@@ -376,6 +457,17 @@ export class HolmanSubmissionService {
         message = success
           ? `Confirmed district ${target} via fleet sync (Holman prefix="${vehicle.prefix ?? ''}")`
           : `Fleet sync shows Holman prefix="${vehicle.prefix ?? ''}" (last4=${currentPrefix || '—'}), expected "${target || '—'}" — Holman may not have applied the change`;
+      } else if (action === 'out_of_service') {
+        // The full sync fetches statusCodes 0,1,2 so an OOS truck stays in the
+        // batch. Success is the durable outOfServiceDate signal, NOT statusCode
+        // alone — Holman nulls statusCode once the vehicle leaves the active
+        // projection. The sync writes statusCode/outOfServiceDate to the cache
+        // row, so no extra cache mirror is needed here.
+        const liveStatusCode = Number(vehicle.statusCode ?? vehicle.status_code);
+        success = isOutOfServiceRecord(vehicle);
+        message = success
+          ? `Confirmed out of service via fleet sync (outOfServiceDate=${(vehicle as any).outOfServiceDate ?? '—'})`
+          : `Fleet sync shows statusCode=${Number.isFinite(liveStatusCode) ? liveStatusCode : '—'} — Holman may still be processing`;
       } else {
         // field_test or other — just finding the vehicle is enough
         success = true;
@@ -432,7 +524,7 @@ export class HolmanSubmissionService {
     try {
       const vehicleNumber = submission.holmanVehicleNumber;
       const action = submission.action;
-      const opType = action === 'assign' || action === 'unassign' ? action : null;
+      const opType = action === 'assign' || action === 'unassign' || action === 'out_of_service' ? action : null;
       if (!opType) return;
 
       const submissionCreatedAt = submission.createdAt ? new Date(submission.createdAt) : null;
@@ -498,7 +590,7 @@ export class HolmanSubmissionService {
       const createdAtMs = submission?.createdAt
         ? new Date(submission.createdAt).getTime()
         : Date.now();
-      const expiryAt = createdAtMs + HOLMAN_SUBMISSION_EXPIRY_MS;
+      const expiryAt = createdAtMs + expiryMsForAction(submission?.action);
       const preExpiryAt = expiryAt - PRE_EXPIRY_BUFFER_MS;
       const postExpiryAt = expiryAt + POST_EXPIRY_BUFFER_MS;
       return { createdAtMs, expiryAt, preExpiryAt, postExpiryAt };
@@ -518,6 +610,11 @@ export class HolmanSubmissionService {
       message: string
     ) => {
       if (finalStatus === 'completed') {
+        // Persist the settle — without this the row stays 'pending' until the
+        // next fleet sync re-confirms it (verifyFromFleetData was the only
+        // path that wrote status='completed'), so the 90s sweep would keep
+        // re-verifying an already-confirmed submission.
+        await this.updateSubmissionStatus(submissionId, 'completed');
         const submission = await this.getSubmissionById(submissionId);
         if (submission) await this.propagateStatusToFleetLog(submission, 'completed', message);
       } else {
@@ -596,7 +693,7 @@ export class HolmanSubmissionService {
             }
             techDetail += '.';
           }
-          const failMsg = `Verification expired after ${HOLMAN_SUBMISSION_EXPIRY_MS / 60000} minutes.${techDetail} Last: ${message}`;
+          const failMsg = `Verification expired after ${Math.round(expiryMsForAction(submission.action) / 60000)} minutes.${techDetail} Last: ${message}`;
           console.error(`[HolmanVerify] Submission ${submissionId} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) expired without confirmation.${techDetail}`);
           await settleSubmission('failed', failMsg);
         }
@@ -628,7 +725,7 @@ export class HolmanSubmissionService {
       setTimeout(() => pollingAttempt(maxAttempts, delayMs), delayMs);
     };
 
-    console.log(`[HolmanVerify] Scheduling verification for ${submissionId} in ${delayMs}ms (expiry window: ${HOLMAN_SUBMISSION_EXPIRY_MS / 60000}min)`);
+    console.log(`[HolmanVerify] Scheduling verification for ${submissionId} in ${delayMs}ms (expiry window is action-dependent; see scheduleAll)`);
     scheduleAll();
   }
 
@@ -643,7 +740,7 @@ export class HolmanSubmissionService {
       return { checked: true, newStatus: 'completed', message: 'No submission ID' };
     }
     // For assign/unassign use vehicle lookup; for field_test keep legacy path
-    if (submission.action === 'assign' || submission.action === 'unassign' || submission.action === 'district') {
+    if (submission.action === 'assign' || submission.action === 'unassign' || submission.action === 'district' || submission.action === 'out_of_service') {
       const r = await this.verifyByVehicleLookup(submission);
       return { checked: r.verified, newStatus: r.newStatus === 'pending' ? 'processing' : r.newStatus, message: r.message };
     }
@@ -688,8 +785,11 @@ export class HolmanSubmissionService {
 
       if (newStatus === 'completed') {
         completed++;
+        // Persist the settle (see settleSubmission) — otherwise the row stays
+        // 'pending' and every subsequent sweep re-verifies it.
+        await this.updateSubmissionStatus(submission.id, 'completed');
         await this.propagateStatusToFleetLog(submission, 'completed', message);
-      } else if (ageMs > HOLMAN_SUBMISSION_EXPIRY_MS + POST_EXPIRY_BUFFER_MS) {
+      } else if (oosVerificationExpired(ageMs, expiryMsForAction(submission.action), POST_EXPIRY_BUFFER_MS)) {
         let techDetail = '';
         if (submission.action === 'assign' && submission.enterpriseId) {
           techDetail = ` Expected tech: "${submission.enterpriseId}"`;

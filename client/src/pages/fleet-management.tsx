@@ -21,7 +21,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, ChevronRight, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
-  UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
+  UserX, History, AlertTriangle, User, Package, Car, X, Gauge, Ban,
   UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download,
   Users, PhoneCall, ClipboardList
 } from "lucide-react";
@@ -37,7 +37,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { useCostCenters, padDistrict } from "@/hooks/use-cost-centers";
 import { useHasPermission } from "@/hooks/use-permissions";
 import { type FleetVehicle } from "@/data/fleetData";
-import { getVehicleOwnership } from "@/lib/vehicle-utils";
+import { getVehicleOwnership, isBYOV } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, fetchZipCoords, haversineDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
 import { LicensePlate } from "@/components/license-plate";
 
@@ -529,6 +529,47 @@ export default function FleetManagement() {
       toast({
         title: "Holman Update Failed",
         description: error.message || "Failed to update vehicle assignment",
+        variant: "destructive",
+      });
+    },
+  });
+
+  // ── Mark a BYOV truck out of service in Holman ────────────────────────────
+  // Two-phase by design. The first call is a DRY RUN that returns a live Holman
+  // preview (current status, whether a driver is still attached); only an
+  // explicit confirm sends the write. Holman answers 202 = "queued", so a
+  // submitted truck is reported as pending verification rather than as done.
+  const [showOosDialog, setShowOosDialog] = useState(false);
+  const [oosPreview, setOosPreview] = useState<any>(null);
+  const [oosOutcome, setOosOutcome] = useState<any>(null);
+
+  const oosMutation = useMutation({
+    mutationFn: async ({ truckNumber, dryRun }: { truckNumber: string; dryRun: boolean }) => {
+      const response = await apiRequest('POST', '/api/holman/vehicles/out-of-service', { truckNumber, dryRun });
+      return { ...(await response.json()), dryRun };
+    },
+    onSuccess: (data: any) => {
+      if (data.dryRun) {
+        setOosPreview(data);
+        return;
+      }
+      setOosOutcome(data);
+      const good = data.outcome === 'submitted' || data.outcome === 'already_oos';
+      toast({
+        title: data.outcome === 'submitted'
+          ? "Queued in Holman"
+          : data.outcome === 'already_oos'
+            ? "Already out of service"
+            : "Not submitted",
+        description: data.reason,
+        variant: good ? undefined : "destructive",
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Out-of-service failed",
+        description: error.message || "Holman write failed",
         variant: "destructive",
       });
     },
@@ -2874,6 +2915,31 @@ export default function FleetManagement() {
                       <MapPin className="h-4 w-4 mr-1.5" />Update District
                     </Button>
                   )}
+                  {/* BYOV only. Deliberately stays VISIBLE but disabled while a tech is
+                      still attached, so the reason is discoverable rather than the
+                      button silently not existing. */}
+                  {isBYOV(selectedVehicle.vehicleNumber) && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full text-amber-700 border-amber-300 hover:bg-amber-50 dark:text-amber-300 dark:border-amber-700 dark:hover:bg-amber-950"
+                      disabled={!!selectedVehicle.tpmsAssignedTechId?.trim() || !!selectedVehicle.holmanTechAssigned?.trim()}
+                      title={
+                        selectedVehicle.tpmsAssignedTechId?.trim() || selectedVehicle.holmanTechAssigned?.trim()
+                          ? "Unassign the tech first — marking out of service never removes a driver"
+                          : undefined
+                      }
+                      onClick={() => {
+                        setOosPreview(null);
+                        setOosOutcome(null);
+                        setShowOosDialog(true);
+                        oosMutation.mutate({ truckNumber: selectedVehicle.vehicleNumber, dryRun: true });
+                      }}
+                      data-testid="button-mark-out-of-service"
+                    >
+                      <Ban className="h-4 w-4 mr-1.5" />Mark Out of Service
+                    </Button>
+                  )}
                 </div>
 
                 <Separator />
@@ -3874,6 +3940,93 @@ export default function FleetManagement() {
       </Dialog>
 
       {/* Update District Modal (Task #453) */}
+      {/* Mark out of service — live preview first, then an explicit confirm. */}
+      <Dialog
+        open={showOosDialog}
+        onOpenChange={(o) => { if (!o) { setShowOosDialog(false); setOosPreview(null); setOosOutcome(null); } }}
+      >
+        <DialogContent className="max-w-lg" data-testid="dialog-out-of-service">
+          <DialogHeader>
+            <DialogTitle>Mark Out of Service in Holman</DialogTitle>
+            <DialogDescription>
+              Sets the Holman lifecycle status to out of service. Use this after the tech is
+              unassigned — it never removes a driver on its own.
+            </DialogDescription>
+          </DialogHeader>
+
+          {oosMutation.isPending && !oosPreview && !oosOutcome && (
+            <div className="text-sm text-muted-foreground">Checking the live Holman record…</div>
+          )}
+
+          {oosPreview && !oosOutcome && (
+            <div className="space-y-2 text-sm" data-testid="oos-preview">
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Truck</span>
+                <span className="font-medium">{oosPreview.holmanNumber || oosPreview.truck}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Driver in Holman</span>
+                {/* liveDriverDetail is a raw diagnostic string ('clientData2="—"…'),
+                    useful in the reason line below but not as a field value. */}
+                <span className="font-medium">
+                  {oosPreview.decision === "assigned_driver"
+                    ? oosPreview.liveDriverDetail
+                    : "Unassigned"}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">VIN verified</span>
+                <span className="font-medium">{oosPreview.vinVerified ? "Yes" : "No"}</span>
+              </div>
+              <div
+                className={`rounded-md p-2 ${
+                  oosPreview.outcome === "would_submit"
+                    ? "bg-muted"
+                    : "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+                }`}
+              >
+                {oosPreview.reason}
+              </div>
+            </div>
+          )}
+
+          {oosOutcome && (
+            <div className="space-y-2 text-sm" data-testid="oos-outcome">
+              <div className="rounded-md bg-muted p-2">{oosOutcome.reason}</div>
+              {oosOutcome.outcome === "submitted" && (
+                <p className="text-muted-foreground">
+                  Holman accepted this as <strong>queued</strong>, not applied. It is verified
+                  automatically once Holman processes the change, which can take up to ~2 days.
+                </p>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setShowOosDialog(false); setOosPreview(null); setOosOutcome(null); }}
+              data-testid="button-oos-close"
+            >
+              {oosOutcome ? "Close" : "Cancel"}
+            </Button>
+            {!oosOutcome && (
+              <Button
+                variant="destructive"
+                disabled={oosMutation.isPending || oosPreview?.outcome !== "would_submit"}
+                onClick={() =>
+                  selectedVehicle &&
+                  oosMutation.mutate({ truckNumber: selectedVehicle.vehicleNumber, dryRun: false })
+                }
+                data-testid="button-oos-confirm"
+              >
+                {oosMutation.isPending ? "Submitting…" : "Mark Out of Service"}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showDistrictDialog} onOpenChange={(o) => { if (!o) { setShowDistrictDialog(false); setDistrictResult(null); setDistrictTpmsConflict(null); } }}>
         <DialogContent>
           <DialogHeader>

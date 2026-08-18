@@ -24,3 +24,21 @@ Deliberate cross-surface DIFFERENCES (Tyler, 2026-08-07 — do NOT "fix" these a
 - Two "new hire" windows coexist on purpose: exec bucket = ≤60 days (label carries "(≤60 days)"), board filter = ≤270 days (label carries "(≤9 mo)"). Labels self-describe; keep windows out of shared code.
 
 **Cross-board sync + audit (2026-08-11):** every board/list mutation must loop the shared `LIST_QUERY_KEYS` from `client/src/pages/vehicle-rental-management/lib/query-keys.ts` (master / by-region / queue) — board-local invalidation reintroduces drift. Action audit appends to `vrm_rental_operation_actions` are best-effort try/catch (never block the route); settings flips log under `case_key='_global'` (never matches a real case, so it stays out of case timelines). Ready-verified route body is `{key, verified}` at POST /rental-operations/queue/ready-verified — NOT /master/:caseKey/…; unknown API paths return the SPA index.html with HTTP 200, so a "200" from curl is not proof the route exists.
+
+## This suite is flaky under live-data timing
+
+The master-vs-by-region row comparison and the queue-chip check read real rows and
+can take ~50s. When those live lookups race or time out, the suite fails with
+`master row NNNNN missing reconciledShop` or `chip shopName ≠ board` (chip shows a
+vendor, board shows null) — and passes cleanly on an immediate re-run with no code
+change in between.
+
+**Why it matters:** these two assertions are the ones that fire on an unrelated task's
+validation run, so the first instinct is "I broke the shop reconciliation." Check what
+the test actually imports before believing that: it pulls
+`server/vrm/rental-operations/routes`, not the top-level `server/routes.ts`.
+
+**How to apply:** re-run the suite once before investigating. A stable failure across
+runs is a real regression; a failure that clears on re-run is this flake. The
+underlying fix is to make those two assertions independent of live lookup latency
+rather than to loosen them.
