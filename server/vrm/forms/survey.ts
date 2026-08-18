@@ -427,7 +427,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * quiet-hours floor still applies on top, so nobody west of Eastern gets it
    * before 07:00 local.
    */
-  router.post("/forms/rental-survey/remind", async (req, res) => {
+  router.post("/forms/rental-survey/remind", requireCronOrStaff, async (req, res) => {
     try {
       const confirm = req.body?.confirm === true;
       const base = String(req.body?.baseUrl || "https://SHS-Nexus.replit.app").replace(/\/+$/, "");
@@ -463,15 +463,32 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         }
       }
 
+      // Roster status is re-read HERE, not trusted from issue time. A token minted
+      // on 8/12 to an active technician does not stay valid as a mandate after they
+      // go on leave, and `issue` already states the rule this inherits: someone
+      // terminated or on leave holding an open rental is a recovery case for a
+      // human, not a survey. Observed live: SWHITAK moved to status 'L' between
+      // issue and the first reminder and would have been told "I need it from you
+      // today". `includeInactive: true` is the deliberate override.
+      const includeInactive = req.body?.includeInactive === true;
       const { rows } = await db.execute(sql`
-        SELECT token, ldap, phone, tech_name, truck_number, sent_at
-          FROM vrm_form_tokens
-         WHERE form_type = 'rental_tech_survey'
-           AND submitted_at IS NULL
-           AND COALESCE(batch, '') <> 'TEST'
-           AND upper(COALESCE(ldap, '')) <> 'ZZTEST'
-           AND expires_at > now()
-         ORDER BY ldap
+        SELECT t.token, t.ldap, t.phone, t.tech_name, t.truck_number, t.sent_at,
+               COALESCE(a.employment_status, '?') AS employment_status
+          FROM vrm_form_tokens t
+          LEFT JOIN LATERAL (
+            SELECT employment_status FROM all_techs
+             WHERE upper(tech_racfid) = upper(t.ldap)
+             ORDER BY (employment_status = 'A') DESC,
+                      effective_date DESC NULLS LAST,
+                      synced_at DESC NULLS LAST
+             LIMIT 1
+          ) a ON true
+         WHERE t.form_type = 'rental_tech_survey'
+           AND t.submitted_at IS NULL
+           AND COALESCE(t.batch, '') <> 'TEST'
+           AND upper(COALESCE(t.ldap, '')) <> 'ZZTEST'
+           AND t.expires_at > now()
+         ORDER BY t.ldap
          LIMIT ${limit}
       `);
 
@@ -490,6 +507,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             phone,
             phoneCorrected: !!overrides[ldap],
             neverSentFirstTime: t.sent_at == null,
+            employmentStatus: t.employment_status,
             category: "rental_management",
             body:
               `${first}, this is Tyler with Sears Fleet. This one is a requirement, not a `
@@ -506,17 +524,28 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         })
         .filter((r) => r.phone.length === 10);
 
-      const skippedNoPhone = (rows as any[]).length - recipients.length;
+      const skippedNoPhone =
+        (rows as any[]).length -
+        (rows as any[]).filter((t) => {
+          const ldap = String(t.ldap || "").toUpperCase();
+          const ph = overrides[ldap] ?? String(t.phone || "").replace(/\D/g, "").replace(/^1/, "");
+          return ph.length === 10;
+        }).length;
+
+      const inactive = recipients.filter((r) => r.employmentStatus !== "A");
+      const sendList = includeInactive ? recipients : recipients.filter((r) => r.employmentStatus === "A");
 
       if (!confirm) {
         return res.json({
           dryRun: true,
           scheduledFor: scheduledFor.toISOString(),
           eligible: (rows as any[]).length,
-          willSend: recipients.length,
+          willSend: sendList.length,
           skippedNoPhone,
+          skippedNotActive: includeInactive ? 0 : inactive.length,
+          notActive: inactive.map((r) => ({ ldap: r.ldap, name: r.name, employmentStatus: r.employmentStatus })),
           note: "Nothing was sent. Re-POST with {confirm:true} to schedule.",
-          recipients,
+          recipients: sendList,
         });
       }
 
@@ -530,11 +559,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           category: "rental_management",
           confirm: true,
           scheduledFor: scheduledFor.toISOString(),
-          messages: recipients.map((r) => ({ ldap: r.ldap, phone: r.phone, body: r.body })),
+          messages: sendList.map((r) => ({ ldap: r.ldap, phone: r.phone, body: r.body })),
         }),
       });
       const result = await out.json().catch(() => ({}));
-      res.json({ dryRun: false, scheduledFor: scheduledFor.toISOString(), requested: recipients.length, result });
+      res.json({
+        dryRun: false,
+        scheduledFor: scheduledFor.toISOString(),
+        requested: sendList.length,
+        skippedNotActive: includeInactive ? 0 : inactive.length,
+        result,
+      });
     } catch (error: any) {
       console.error("[survey] remind failed:", error?.message || error);
       res.status(500).json({ message: error?.message || "remind failed" });

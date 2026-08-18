@@ -524,7 +524,9 @@ export function renderRequestMsg1(f: {
     `SHS Fleet: your rental is booked. Confirmation ${f.conf}. ` +
     `Pick up ${when} at Enterprise ${f.branchName}, ${addr}.${branchLine} ` +
     `Bring your driver's license, give them the confirmation number, and sign nothing that asks you to pay. ` +
-    `It is billed direct to Sears - decline all insurance and upgrades.` +
+    `It is billed direct to Sears - decline all insurance and upgrades. ` +
+    `ALREADY IN A RENTAL you got through Holman? Do not start a second one. Take that vehicle to this same ` +
+    `branch and have them swap it onto this new reservation number.` +
     `${back} If the branch cannot find the reservation or turns you away, reply here before you leave.`
   );
 }

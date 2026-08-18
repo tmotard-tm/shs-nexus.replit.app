@@ -869,6 +869,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // time, with no button in the app either. The route re-enforces the
         // bearer with requireCronOrStaff.
         || (req.method === "POST" && req.path === "/forms/rental-survey/file-route-blocks")
+        // Survey reminder to non-responders. Session-only meant the ONLY way to fire
+        // it was a fetch typed into a browser console, which is exactly the manual
+        // step this app exists to remove. Same bearer convention, and the route
+        // re-enforces it with requireCronOrStaff.
+        || (req.method === "POST" && req.path === "/forms/rental-survey/remind")
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")
         // Cutover workflow intents: the same outside-the-box Python runner
         // claims preview/booking work, posts quotes and booking outcomes back,

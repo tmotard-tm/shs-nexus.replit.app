@@ -218,6 +218,42 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const canRetry = ["manual_review", "booking_unknown", "block_conflict_pending_readback"].includes(status);
   const canCancel = !!intent && !TERMINAL.has(status) && !IN_FLIGHT.has(status);
 
+  // Pre-reservation only. Anything past these has already touched ETD, and a second
+  // pass would be a second car. No intent at all is bookable too: that is a request
+  // whose first auto-book died before createIntent, which is where the two new hires
+  // refused by the old TPMS gate ended up.
+  const BOOKABLE_REQUEST_STATUSES: ReadonlySet<string> = new Set([
+    "created", "preview_pending", "preview_ready", "preview_required", "confirmed",
+  ]);
+  const canBookRequest = isRequest && (!intent || BOOKABLE_REQUEST_STATUSES.has(status));
+
+  /**
+   * The whole chain in one press: adopt or create the intent, quote, confirm, book in
+   * ETD, text the technician. The server refuses anything that already holds a
+   * reservation, so pressing twice cannot make two cars.
+   */
+  const bookNow = () =>
+    run("book", async () => {
+      const r = await fetch(`/api/vrm/forms/rental-request/${sourceId}/book`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: "{}",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || "book failed");
+      return { ...j, note: "Booking started. It takes 20-30s; reopen to see the result." };
+    });
+
+  const bookButton = (
+    <button type="button" disabled={!!busy}
+            title="Quote, confirm, book in ETD, then text the technician. Safe to press again - a request that already holds a reservation is refused, never booked twice."
+            onClick={bookNow}
+            style={{ ...btn, color: colors.green, borderColor: colors.green, fontWeight: 700 }}>
+      {busy === "book" ? <Loader2 size={13} className="animate-spin" /> : "Book it now"}
+    </button>
+  );
+
   const doConfirm = () => {
     const msg = live
       ? isRequest
@@ -245,10 +281,17 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
 
       {!intent ? (
         isRequest ? (
-          <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: 0 }}>
-            Approving this request books the reservation and texts the technician. Nothing to
-            start here.
-          </p>
+          <>
+            {/* "Nothing to start here" was true only while approve was reaching the
+                server. A request whose auto-book died before createIntent shows no
+                intent at all, and this branch previously left the operator with a
+                sentence and no way to act on it. */}
+            <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: "0 0 8px" }}>
+              Approving this request books the reservation and texts the technician. If it is
+              still sitting here unbooked, the first attempt did not finish; run it again.
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{bookButton}</div>
+          </>
         ) : (
         <>
           <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: "0 0 8px" }}>
@@ -406,6 +449,10 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                 {busy === "re-preview" ? <Loader2 size={13} className="animate-spin" /> : "Re-run preview"}
               </button>
             )}
+            {/* Every other control here is gated on !isRequest, so before this a
+                request stuck at preview_pending had NO control at all and could only be
+                moved by pressing APPROVE again, which re-texts the technician. */}
+            {canBookRequest && bookButton}
             {canRetry && (
               <button type="button" disabled={!!busy}
                       onClick={() => window.confirm("Staff retry: the orchestrator re-reconciles before anything is re-attempted. Proceed?") &&

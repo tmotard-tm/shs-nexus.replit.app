@@ -1092,6 +1092,42 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 // Admin surface
 // ---------------------------------------------------------------------------
 export function registerRentalRequestAdminRoutes(router: Router): void {
+  /**
+ * Finish an approved request that never got booked.
+ *
+ * The decide route runs this chain on APPROVE, but a row that is ALREADY approved has
+ * no way back into it: pressing APPROVE again is the only path, and that re-sends the
+ * technician's "we are booking now" acknowledgement every press. Five requests sat at
+ * preview_pending with no control in the panel able to move them.
+ *
+ * Deliberately NOT a new booking path. It calls exactly what approve calls, so the
+ * adopt-or-create logic, the already-booked refusal and the failure reporting are the
+ * same code and cannot drift.
+ */
+  router.post("/forms/rental-request/:requestNo/book", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
+      const { rows } = await db.execute(sql`
+        SELECT status, etd_booked_at FROM vrm_rental_request WHERE request_no = ${no}
+      `);
+      const row = (rows as any[])[0];
+      if (!row) return res.status(404).json({ message: "request not found" });
+      if (row.etd_booked_at != null) {
+        return res.status(409).json({ message: "This request is already booked." });
+      }
+      if (String(row.status) !== "approved") {
+        return res.status(409).json({ message: `Request is ${row.status}. Approve it first.` });
+      }
+      // Same fire-and-forget shape as the decide route: the ETD chain costs 20-30s and
+      // the button must not hang on it. Every failure lands on the row's etd_error.
+      void autoBookApprovedRequest(no);
+      res.json({ ok: true, started: true, requestNo: no });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "book failed" });
+    }
+  });
+
   /** Refresh the BYOV mirror on demand. Also safe to call from a scheduler. */
   router.post("/forms/rental-request/sync-byov", async (_req, res) => {
     try {
