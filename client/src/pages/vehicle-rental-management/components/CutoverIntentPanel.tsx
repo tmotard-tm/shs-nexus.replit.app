@@ -427,6 +427,37 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             </div>
           ) : null}
 
+          {/* The request lane showed NOTHING about the technician's text, so a booked
+              row gave no way to tell whether the person had actually been told. The
+              runner sends its own SMS outside the intent, so this reads the recorded
+              send rather than assuming msg1_state means anything on its own. */}
+          {isRequest && intent ? (
+            <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 12 }}>
+              {(() => {
+                const m1 = intent?.reservation_evidence?.msg1;
+                const st = String(intent?.msg1_state ?? "");
+                if (m1?.at) {
+                  const when = String(m1.at).slice(11, 16);
+                  const ph = String(m1.phone ?? "");
+                  const nice = ph.length === 10 ? `${ph.slice(0,3)}-${ph.slice(3,6)}-${ph.slice(6)}` : ph;
+                  return <span style={{ color: colors.greenDeep, fontWeight: 700 }}>
+                    ✓ Text sent {when}{nice ? ` to ${nice}` : ""}
+                  </span>;
+                }
+                if (st === "sent" || st === "queued" || st === "released") {
+                  return <span style={{ color: colors.greenDeep, fontWeight: 700 }}>✓ Text sent</span>;
+                }
+                if (st === "skipped_already_notified") {
+                  return <span style={{ color: colors.inkMuted }}>Text skipped — technician already notified</span>;
+                }
+                if (st === "blocked") {
+                  return <span style={{ color: colors.red, fontWeight: 700 }}>⚠ Text BLOCKED — nobody told this technician</span>;
+                }
+                return <span style={{ color: colors.amber, fontWeight: 700 }}>⚠ Text not sent yet</span>;
+              })()}
+            </div>
+          ) : null}
+
           {!isRequest && intent?.preview?.messages ? (
             <div style={{ marginTop: 8, padding: 8, background: colors.background, borderRadius: 8 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 4 }}>

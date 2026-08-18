@@ -25,6 +25,7 @@ import {
   requestPreview,
   confirmIntent,
   verifyRequestOnCommitEvidence,
+  adoptRunnerBooking,
   WORKFLOW_REQUEST,
 } from "./cutover-orchestrator";
 import { runBookingExecutor } from "../etd/executor";
@@ -1483,12 +1484,29 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
         RETURNING request_no, status, COALESCE(pickup_at, appointment_at) AS appointment_at, shop_name
       `);
+      // Same reconcile on the happy path, so a runner booking leaves ONE truth behind
+      // it rather than a booked row beside a stalled intent.
+      if ((rows as any[]).length) {
+        await adoptRunnerBooking(no, ref, resId || null,
+          req.body?.alreadyNotified === true ? { alreadyNotified: "runner" } : undefined);
+      }
       if (!(rows as any[]).length) {
         const { rows: cur } = await db.execute(sql`
-          SELECT status, etd_reference, etd_booked_at FROM vrm_rental_request WHERE request_no = ${no}
+          SELECT status, etd_reference, etd_reservation_id, etd_booked_at
+            FROM vrm_rental_request WHERE request_no = ${no}
         `);
         const c = (cur as any[])[0];
         if (!c) return res.status(404).json({ message: "request not found" });
+        // Already booked is not nothing to do. The runner writes this table but never
+        // the intent, so a replay is the natural moment to reconcile the two. Without
+        // it a live reservation keeps showing "Needs re-preview" in the panel.
+        if (c.etd_booked_at && strTrim(c.etd_reference)) {
+          const adopted = await adoptRunnerBooking(
+            no, String(c.etd_reference), c.etd_reservation_id ?? null,
+            req.body?.alreadyNotified === true ? { alreadyNotified: "runner-backfill" } : undefined,
+          );
+          if (adopted) return res.json({ ok: true, reconciled: true, etdReference: c.etd_reference });
+        }
         return res.status(409).json({
           message: `not writable: status is '${c.status}'` +
                    (c.etd_booked_at ? ` and it already booked as ${c.etd_reference}` : ""),
@@ -1843,6 +1861,10 @@ async function liveIntentForRequest(requestNo: number): Promise<any | null> {
  * executor and then has to read back what the executor wrote; the in-memory copy it
  * started with is a snapshot from before the quote ran.
  */
+function strTrim(v: unknown): string {
+  return String(v ?? "").trim();
+}
+
 async function readIntentRow(intentId: number): Promise<any | null> {
   const { rows } = await db.execute(sql`
     SELECT * FROM vrm_rental_workflow_intents WHERE id = ${intentId} LIMIT 1

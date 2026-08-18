@@ -3824,6 +3824,108 @@ export async function verifyRequestOnCommitEvidence(
   return true;
 }
 
+/**
+ * Adopt a reservation the RUNNER created onto the intent it belongs to.
+ *
+ * `book_request.py` books outside the intent state machine and writes only
+ * `vrm_rental_request`. The intent it was created from never learns the reservation
+ * exists, so it sits wherever the last preview left it. On 2026-08-18 that meant
+ * ELEVEN requests carrying live confirmation numbers whose panel read "Needs
+ * re-preview", which is worse than useless: it is a booked technician displayed as a
+ * broken one.
+ *
+ * Idempotent. Safe to call for a request that is already reconciled, and safe to call
+ * repeatedly. `alreadyNotified` suppresses msg1 for the case where the technician was
+ * told out of band, exactly as verifyRequestOnCommitEvidence does.
+ */
+export async function adoptRunnerBooking(
+  requestNo: number,
+  confirmation: string,
+  quoteRef?: string | null,
+  opts?: { alreadyNotified?: string },
+): Promise<boolean> {
+  const conf = strOrNull(confirmation);
+  if (!conf) return false;
+  const { rows } = await db.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents
+     WHERE workflow_type = ${WORKFLOW_REQUEST}
+       AND source_id = ${String(requestNo)}
+       AND status NOT IN ('cancelled', 'abandoned')
+     ORDER BY id DESC
+     LIMIT 1
+  `);
+  const intent = (rows as any[])[0];
+  if (!intent) return false;
+  if (intent.reservation_state === "verified") return false;
+
+  const notifiedBy = strOrNull(opts?.alreadyNotified);
+  const evidence = JSON.stringify({
+    ...(intent.reservation_evidence ?? {}),
+    confirmation: conf,
+    verifiedBy: "runner_commit",
+    verifiedAt: new Date().toISOString(),
+    ...(quoteRef ? { raw: { quoteReference: quoteRef } } : {}),
+    ...(notifiedBy ? { alreadyNotified: { by: notifiedBy, at: new Date().toISOString() } } : {}),
+  });
+  const { rows: advanced } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+       SET reservation_state = 'verified',
+           status = 'reservation_verified',
+           reservation_evidence = ${evidence}::jsonb,
+           msg1_state = ${notifiedBy ? sql`'skipped_already_notified'` : sql`msg1_state`},
+           last_error = NULL,
+           claimed_by = NULL,
+           lease_expires_at = NULL,
+           updated_at = now()
+     WHERE id = ${intent.id}
+       AND reservation_state <> 'verified'
+       AND status NOT IN ('cancelled', 'abandoned', 'completed')
+     RETURNING id
+  `);
+  if (!(advanced as any[]).length) return false;
+  await mirrorCutoverSummary(intent.id);
+
+  // Did this technician ALREADY get a confirmation text?
+  //
+  // The runner sends its own SMS the moment it books, entirely outside the intent's
+  // message state. So msg1_state sat at 'pending' for thirteen technicians who had
+  // already been texted, and the panel could not show that a single one of them had
+  // been told. Worse, releasing msg1 here would text every one of them a second time.
+  // Look for the real message before deciding.
+  const { rows: prior } = await db.execute(sql`
+    SELECT m.phone_digits,
+           to_char(m.created_at, 'YYYY-MM-DD"T"HH24:MI:SS') AS at
+      FROM fs_comms_messages m
+     WHERE m.direction = 'outbound'
+       AND m.body ILIKE '%rental is booked%'
+       AND m.created_at > now() - interval '3 days'
+       AND regexp_replace(coalesce(m.phone_digits, ''), '[^0-9]', '', 'g') IN (
+             regexp_replace(coalesce((SELECT phone FROM fs_comms_contacts
+                                       WHERE upper(ldap) = upper(${intent.ldap}) LIMIT 1), ''), '[^0-9]', '', 'g'),
+             regexp_replace(coalesce((SELECT mobile_phone FROM vrm_rental_request
+                                       WHERE request_no = ${requestNo}), ''), '[^0-9]', '', 'g'))
+     ORDER BY m.created_at DESC
+     LIMIT 1
+  `);
+  const already = (prior as any[])[0];
+  if (already) {
+    await touchIntent(intent.id, {
+      msg1_state: "sent",
+      reservation_evidence: {
+        ...(JSON.parse(evidence) as Record<string, unknown>),
+        msg1: { at: already.at, phone: already.phone_digits, by: "runner_sms" },
+      },
+    });
+  } else {
+    await releaseMessagesIfEligible(intent.id);
+  }
+  const settled = await loadIntent(intent.id);
+  if (!TERMINAL_STATUSES.has(settled.status) && completionSatisfied(settled)) {
+    if (await finalizeCompletion(intent.id, settled.status)) await mirrorCutoverSummary(intent.id);
+  }
+  return true;
+}
+
 export async function retryIntent(
   intentId: number,
   requestedBy: string,
