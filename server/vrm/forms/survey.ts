@@ -747,7 +747,11 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           ON cut.ldap = upper(s.ldap) AND cut.reservation_status = 'booked'
         WHERE s.has_rental
           AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
-          AND COALESCE(s.van_status,'') <> 'unknown_escalate'
+          -- No van_status gate (Tyler, 2026-08-17): every rental on the Holman
+          -- book runs the whole flow. van_status says whether the survey could
+          -- work out what happened to the VAN; it says nothing about whether
+          -- the rental should still bill through Holman. Gating on it stranded
+          -- 26 of 71 booked technicians with a reservation and no block.
           AND a.employment_status = 'A'
           AND (${onlyLdaps.length === 0}
                OR upper(s.ldap) = ANY(string_to_array(${onlyLdaps.join(",")}, ',')))

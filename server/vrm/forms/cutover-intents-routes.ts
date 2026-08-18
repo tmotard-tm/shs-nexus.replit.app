@@ -419,7 +419,11 @@ export function registerCutoverIntentRoutes(router: Router): void {
     try {
       const intentId = intentIdParam(req);
       if (await blockNonAdminLiveIntent(req, res, intentId)) return;
-      res.json(await retryIntent(intentId, actor(req)));
+      // alreadyNotified: the technician already has the confirmation (ETD texts it to
+      // their carrier gateway directly), so verify and close the request WITHOUT
+      // releasing our own message. Request lane only; ignored elsewhere.
+      const alreadyNotified = req.body?.alreadyNotified === true;
+      res.json(await retryIntent(intentId, actor(req), { alreadyNotified }));
     } catch (e: any) {
       sendOrchestratorError(res, e);
     }

@@ -520,6 +520,7 @@ async function runPreview(
         branchCode: q.branch_code,
         branchName: q.branch_name,
         branchAddress: q.branch_address,
+        branchPhone: q.branch_phone ?? null,
         branchZip: branchZip(q),
         branchPinned: !!q.branch_pinned,
         journeyId: q.journey_id,

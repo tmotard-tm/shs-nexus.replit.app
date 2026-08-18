@@ -391,17 +391,59 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   return { status: "sent", messageId: message.id, threadId: thread.id, segments };
 }
 
+/**
+ * Supervisors are not technicians, so the contact sync that fills
+ * fs_comms_contacts does not reliably carry a row — or a phone — for them.
+ * vrm_profitability_snapshot already resolves supervisor contact as
+ * override > TPMS at write time, so read it rather than drop the CC.
+ *
+ * fsDb and db are separate drizzle handles over the SAME database (see
+ * server/fleet-scope-db.ts), so this reaches the VRM table without pulling
+ * the VRM schema into the generic comms module.
+ */
+async function supervisorPhoneFromSnapshot(managerLdap: string): Promise<string | null> {
+  try {
+    const res: any = await fsDb.execute(sql`
+      select supervisor_phone
+      from vrm_profitability_snapshot
+      where upper(supervisor_ldap) = ${managerLdap.toUpperCase()}
+        and coalesce(supervisor_phone, '') <> ''
+      limit 1
+    `);
+    const phone = res?.rows?.[0]?.supervisor_phone;
+    return phone ? String(phone) : null;
+  } catch (e: any) {
+    console.warn("[Fleet-Comms] supervisor phone fallback failed:", e?.message);
+    return null;
+  }
+}
+
 async function sendManagerCc(techContact: CommsContact, input: SendMessageInput): Promise<void> {
   if (!techContact.managerLdap) return;
   const mgr = await getContactByLdap(techContact.managerLdap);
-  const mgrPhone = mgr?.phone;
+  let mgrPhone: string | null = mgr?.phone ?? null;
+  if (normalizeDigits(mgrPhone).length < 10) {
+    mgrPhone = await supervisorPhoneFromSnapshot(techContact.managerLdap);
+  }
   const mgrDigits = normalizeDigits(mgrPhone);
-  if (!mgrPhone || mgrDigits.length < 10) return;
+  if (!mgrPhone || mgrDigits.length < 10) {
+    // Loud on purpose: a silent return here is indistinguishable from a
+    // delivered CC when someone later asks whether the supervisor was told.
+    console.warn(
+      `[Fleet-Comms] manager-CC SKIPPED for ${techContact.ldap}: no phone for supervisor ${techContact.managerLdap}`,
+    );
+    return;
+  }
   if (await isOptedOut(mgrDigits)) return;
 
   const ccBody = `[CC re: ${techContact.name || techContact.ldap}] ${input.body}`;
   const thread = await getOrCreateTechThread(techContact.ldap, techContact);
-  const quietUntil = input.force ? null : getNextAllowedSendTime(mgr?.primaryState ?? "");
+  // A supervisor with no contact row has no primary_state either. The tech's
+  // state is a better quiet-hours proxy than falling through to the
+  // America/New_York default: a TX supervisor must not be texted before 9 AM.
+  const quietUntil = input.force
+    ? null
+    : getNextAllowedSendTime(mgr?.primaryState ?? techContact.primaryState ?? "");
   if (quietUntil) {
     await enqueue({
       ldap: techContact.ldap,

@@ -247,7 +247,11 @@ LEFT JOIN vrm_rental_operations_cases c
       AND upper(c.ticket_status) = 'OPEN'
 WHERE s.has_rental
   AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
-  AND s.van_status IN ('in_shop', 'decommissioned', 'totaled')
+  -- Every van_status is in scope (Tyler, 2026-08-17): the cutover moves BILLING,
+  -- and whether the technician has their van back has no bearing on whether their
+  -- rental should still be paid through Holman. Restricting this to
+  -- in_shop/decommissioned/totaled held back 53 technicians, 33 unknown_escalate
+  -- and 20 with_me, who were all sitting on the open book.
   AND r.employment_status = 'A'
   AND r.district IS NOT NULL
   AND tp.tpms_van IS NOT NULL
@@ -922,11 +926,14 @@ def main() -> None:
             classes = q.get("classes") or []
             if not classes:
                 raise RuntimeError("ETD offered no vehicle classes at that branch")
-            # Match the vehicle they already have. Taking classes[0] would put
-            # everyone in an economy car, which is a swap for almost all of
-            # them and wrong for every HVAC technician in the pool.
-            sel = choose_class(r["veh_make"], r["veh_model"], classes,
-                               r.get("job_title"), r.get("tech_says_vehicle"))
+            # Book the SAME vehicle they already have (Tyler, 2026-08-17). This is a
+            # billing changeover: the contract moves, the car does not. Make and model
+            # only — never the feed's class, which is stale and wrong, never the job
+            # title, and no right-sizing. That is a separate programme and mixing it in
+            # produced "VEHICLE CHANGE REQUIRED" notes telling branches to pull a
+            # replacement car nobody asked for.
+            sel = choose_same_vehicle(r["veh_make"], r["veh_model"], classes,
+                                      r.get("tech_says_vehicle"))
             if not sel["pick"]:
                 raise RuntimeError(
                     f"cannot match their vehicle ({vehicle_label(r)}): {sel['note']}")

@@ -267,6 +267,8 @@ export type QuoteResult = {
   branch_code: string;
   branch_name: string;
   branch_address: string;
+  /** Branch counter phone. ETD carries it as `telephone`, formatted "(+1)7574651000". */
+  branch_phone: string | null;
   site: Json;
   classes: CarClass[];
 };
@@ -540,6 +542,18 @@ export class EtdClient {
    * it is camelCase. All-PascalCase binds partially and returns an empty class list
    * with hasErrors:false.
    */
+  /**
+   * ETD hands branch numbers back as "(+1)7574651000". A technician needs ten digits
+   * they can tap, so anything that is not a clean US number is dropped rather than
+   * put in front of them half-formatted.
+   */
+  static usPhone(raw: unknown): string | null {
+    const d = String(raw ?? "").replace(/\D/g, "");
+    const ten = d.length === 11 && d.startsWith("1") ? d.slice(1) : d;
+    if (ten.length !== 10) return null;
+    return `${ten.slice(0, 3)}-${ten.slice(3, 6)}-${ten.slice(6)}`;
+  }
+
   static branchSite(branch: Json): Json {
     return {
       Name: `${branch.customerFacingBranchName},${branch.fullAddress}`,
@@ -667,6 +681,7 @@ export class EtdClient {
       branch_code: String(branch?.branchCode ?? ""),
       branch_name: branch?.customerFacingBranchName ?? "",
       branch_address: branch?.fullAddress ?? "",
+      branch_phone: EtdClient.usPhone(branch?.telephone),
       site,
       classes: await this.carClasses(
         journeyId,

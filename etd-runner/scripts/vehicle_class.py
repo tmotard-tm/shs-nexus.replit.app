@@ -220,6 +220,17 @@ def is_hvac(job_title: str | None) -> bool:
     return bool(HVAC_PATTERN.search(job_title or ""))
 
 
+def _above_minivan(r):
+    """Minivan is the ceiling (Tyler, 2026-08-17).
+
+    The size-up walk must never climb past MVAR into a full-size or passenger van: it
+    is outside policy, and those classes are not in the captured savedr template, so
+    the booking refuses rather than upgrading.
+    """
+    m = _rank("MVAR")
+    return r[0] == m[0] and r[1] > m[1]
+
+
 def choose(make: str | None, model: str | None, offered: list,
            job_title: str | None = None, tech_desc: str | None = None) -> dict:
     """Reserve a sedan, unless they are HVAC and need their current size.
@@ -255,7 +266,8 @@ def choose(make: str | None, model: str | None, offered: list,
                         "note": f"HVAC: kept {code} to match their {describe(make, model)}"}
         # Nearest size up in the same body style, never smaller.
         target = _rank(current_code)
-        same_body = sorted([(c, _rank(c)) for c in by_code if _rank(c)[0] == target[0]],
+        same_body = sorted([(c, _rank(c)) for c in by_code
+                            if _rank(c)[0] == target[0] and not _above_minivan(_rank(c))],
                            key=lambda x: x[1][1])
         up = [x for x in same_body if x[1][1] >= target[1]]
         if up:
@@ -355,7 +367,8 @@ def choose_same_vehicle(make: str | None, model: str | None, offered: list,
 
     # Nearest size UP in the same body style; never smaller, never cross-body.
     target = _rank(primary)
-    same_body = sorted([(c, _rank(c)) for c in by_code if _rank(c)[0] == target[0]],
+    same_body = sorted([(c, _rank(c)) for c in by_code
+                        if _rank(c)[0] == target[0] and not _above_minivan(_rank(c))],
                        key=lambda x: x[1][1])
     up = [x for x in same_body if x[1][1] >= target[1]]
     if up:

@@ -24,6 +24,7 @@ import {
   createIntent,
   requestPreview,
   confirmIntent,
+  verifyRequestOnCommitEvidence,
   WORKFLOW_REQUEST,
 } from "./cutover-orchestrator";
 import { runBookingExecutor } from "../etd/executor";
@@ -1687,28 +1688,71 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
     `);
   };
   try {
-    const { intent } = await createIntent({
-      workflowType: WORKFLOW_REQUEST,
-      sourceId: String(requestNo),
-      executionMode: "live",
-      createdBy: "auto-approve",
-    });
-    const previewed =
-      intent.status === "created" || intent.status === "preview_required"
-        ? await requestPreview(intent.id)
-        : intent;
-    if (previewed.status !== "preview_ready") {
-      await fail("preview", String(previewed.last_error ?? previewed.status));
+    // Adopt before creating. createIntent refuses a second live intent for the same
+    // LDAP (intent_conflict), which is right - two live intents mean two cars - but
+    // it also made Approve a ONE-SHOT: a request whose first pass died left an intent
+    // behind that the button could then never touch again, so the row sat approved
+    // and carless with nothing able to move it. Resume the intent that is there.
+    const existing = await liveIntentForRequest(requestNo);
+    if (existing) {
+      // Anything that already reached ETD is never re-driven. A second pass over a
+      // booked intent is how one click becomes two reservations.
+      if (existing.reservation_state === "booked_unverified" || existing.reservation_state === "verified") {
+        // It already has a car. The only work left is recognising that, which for
+        // this lane means verifying on the commit response.
+        if (!(await verifyRequestOnCommitEvidence(existing.id))) {
+          await fail("booking", `intent #${existing.id} already holds a reservation (${existing.reservation_state}); no second booking attempted`);
+        }
+        return;
+      }
+      if (!RESUMABLE_INTENT_STATUSES.has(String(existing.status))) {
+        await fail("auto-book", `intent #${existing.id} is at ${existing.status}; resolve it in the workflow panel before re-approving`);
+        return;
+      }
+    }
+
+    let cur =
+      existing ??
+      (
+        await createIntent({
+          workflowType: WORKFLOW_REQUEST,
+          sourceId: String(requestNo),
+          executionMode: "live",
+          createdBy: "auto-approve",
+        })
+      ).intent;
+
+    // requestPreview only QUEUES a preview: it writes preview_pending and returns
+    // the intent. BUILDING it (quote, eligibility, assembly) is the executor's
+    // preview lane. The old chain called requestPreview and then tested the result
+    // for preview_ready, so it always failed on the state it had itself just
+    // written, returned before confirming anything, and left every approved request
+    // parked at "Quoting..." forever - clean intent, no claim, no error, nothing to
+    // read. Each stage below drives its lane and then re-reads what it produced.
+    if (cur.status === "created" || cur.status === "preview_required") {
+      await requestPreview(cur.id);
+      cur = (await readIntentRow(cur.id)) ?? cur;
+    }
+    if (cur.status === "preview_pending") {
+      await runBookingExecutor({ runnerId: "nexus-autobook", intentId: cur.id, limit: 1 });
+      cur = (await readIntentRow(cur.id)) ?? cur;
+    }
+    if (cur.status === "preview_ready") {
+      await confirmIntent({
+        intentId: cur.id,
+        previewVersion: Number(cur.preview_version),
+        confirmedBy: "auto-approve",
+      });
+      cur = (await readIntentRow(cur.id)) ?? cur;
+    }
+    if (cur.status !== "confirmed") {
+      await fail("preview", String(cur.last_error ?? cur.status));
       return;
     }
-    await confirmIntent({
-      intentId: previewed.id,
-      previewVersion: Number(previewed.preview_version),
-      confirmedBy: "auto-approve",
-    });
+
     const run = await runBookingExecutor({
       runnerId: "nexus-autobook",
-      intentId: previewed.id,
+      intentId: cur.id,
       limit: 1,
     });
     const r = run.results?.[0];
@@ -1716,7 +1760,57 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
       await fail("booking", `${r.status}${r.detail ? `: ${r.detail}` : ""}`);
     }
   } catch (err: any) {
-    await fail("auto-book", String(err?.message ?? err));
+    // OrchestratorError carries the gate verdict in `extra.failures`. Recording only
+    // err.message left the card reading "eligibility gate failed" with no way to learn
+    // WHICH gate, which is the only question a staffer actually has.
+    const codes = Array.isArray(err?.extra?.failures)
+      ? err.extra.failures
+          .map((f: any) => (f?.detail ? `${f.code}: ${f.detail}` : String(f?.code ?? "?")))
+          .join("; ")
+      : "";
+    await fail("auto-book", codes ? `${err?.message ?? "failed"} (${codes})` : String(err?.message ?? err));
   }
+}
+
+/**
+ * The stages autoBookApprovedRequest is allowed to pick an existing intent up from.
+ * Everything outside this set has either reached ETD or been parked for a human, and
+ * a re-approve must not touch it.
+ */
+const RESUMABLE_INTENT_STATUSES: ReadonlySet<string> = new Set([
+  "created",
+  "preview_pending",
+  "preview_ready",
+  "preview_required",
+  "confirmed",
+]);
+
+/**
+ * The live, unfinished intent already bound to this request, if there is one.
+ * Newest first: a cancelled predecessor is terminal and correctly invisible here.
+ */
+async function liveIntentForRequest(requestNo: number): Promise<any | null> {
+  const { rows } = await db.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents
+    WHERE workflow_type = ${WORKFLOW_REQUEST}
+      AND source_id = ${String(requestNo)}
+      AND execution_mode = 'live'
+      AND status NOT IN ('completed', 'cancelled', 'abandoned')
+    ORDER BY id DESC
+    LIMIT 1
+  `);
+  return (rows as any[])[0] ?? null;
+}
+
+/**
+ * The intent row as it stands NOW. autoBookApprovedRequest hands the intent to the
+ * executor and then has to read back what the executor wrote; the in-memory copy it
+ * started with is a snapshot from before the quote ran.
+ */
+async function readIntentRow(intentId: number): Promise<any | null> {
+  const { rows } = await db.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents WHERE id = ${intentId} LIMIT 1
+  `);
+  return (rows as any[])[0] ?? null;
 }
 

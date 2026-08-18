@@ -220,6 +220,16 @@ export function isHvac(jobTitle: string | null | undefined): boolean {
  * Reserve a sedan, unless they are HVAC and need their current size.
  * Always reports whether this is a VEHICLE CHANGE for the technician.
  */
+/**
+ * Minivan is the ceiling (Tyler, 2026-08-17). The size-up walk must never climb past
+ * MVAR into a full-size or passenger van: it is outside policy, and those classes are
+ * not in the captured savedr template, so the booking refuses rather than upgrading.
+ */
+function aboveMinivan(r: [number, number]): boolean {
+  const m = rank("MVAR");
+  return r[0] === m[0] && r[1] > m[1];
+}
+
 export function choose(
   make: string | null | undefined,
   model: string | null | undefined,
@@ -268,6 +278,7 @@ export function choose(
     const sameBody = Object.keys(byCode)
       .map((c) => [c, rank(c)] as [string, [number, number]])
       .filter((x) => x[1][0] === target[0])
+      .filter((x) => !aboveMinivan(x[1]))
       .sort((a, b) => a[1][1] - b[1][1]);
     const up = sameBody.filter((x) => x[1][1] >= target[1]);
     if (up.length) {
@@ -373,6 +384,7 @@ export function chooseSameVehicle(
   const sameBody = Object.keys(byCode)
     .map((c) => [c, rank(c)] as [string, [number, number]])
     .filter((x) => x[1][0] === target[0])
+    .filter((x) => !aboveMinivan(x[1]))
     .sort((a, b) => a[1][1] - b[1][1]);
   const up = sameBody.filter((x) => x[1][1] >= target[1]);
   if (up.length) {

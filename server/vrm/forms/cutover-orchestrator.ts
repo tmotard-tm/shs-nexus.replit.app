@@ -468,23 +468,64 @@ export function renderRequestSpecialNotes(f: { truck: string | null; ldap: strin
  * technician is waiting on a car, so this is the whole message: number, where,
  * when, what to bring, and that they must not pay.
  */
+/**
+ * ETD returns an address as one comma-jammed uppercase run with a ZIP+4 and no state:
+ * "635 S BAY RD,DOVER,19901-4601". A technician has to read this on a phone and get to
+ * it, so it is spaced, title-cased and trimmed to a 5-digit ZIP. Nothing is invented -
+ * if ETD did not give us a state, none is added.
+ */
+export function formatBranchAddress(raw: string | null | undefined): string {
+  const s = String(raw ?? "").trim();
+  if (!s) return "";
+  // `length <= 2` would have preserved RD/ST/DR/LN as shouty abbreviations. Only a
+  // single character (the N/S/E/W directionals) is kept verbatim; a two-letter segment
+  // standing alone is a state code and stays uppercase.
+  const titled = (w: string) =>
+    /\d/.test(w) || w.length === 1 ? w : w[0] + w.slice(1).toLowerCase();
+  return s
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      if (/^\d{5}(-\d{4})?$/.test(part)) return part.slice(0, 5);
+      if (/^[A-Za-z]{2}$/.test(part)) return part.toUpperCase();
+      return part.split(/\s+/).map(titled).join(" ");
+    })
+    .join(", ");
+}
+
+/** 2026-08-18 -> "Tue 8/18". The day name matters when someone is stranded. */
+function usDayDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso));
+  if (!m) return usDate(iso);
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  return `${day} ${usDate(iso)}`;
+}
+
 export function renderRequestMsg1(f: {
   conf: string;
   branchName: string;
   branchAddress: string;
+  branchPhone?: string | null;
   pickupDate?: string | null;
   pickupTime?: string | null;
   returnDate?: string | null;
 }): string {
   const when = f.pickupDate
-    ? `${usDate(f.pickupDate)}${f.pickupTime ? ` from ${usTime(f.pickupTime)}` : ""}`
+    ? `${usDayDate(f.pickupDate)}${f.pickupTime ? ` from ${usTime(f.pickupTime)}` : ""}`
     : "today";
-  const back = f.returnDate ? ` Return by ${usDate(f.returnDate)}.` : "";
+  const addr = formatBranchAddress(f.branchAddress);
+  const back = f.returnDate
+    ? ` Return by ${usDayDate(f.returnDate)} - reply here if you need it longer, do not extend it yourself.`
+    : "";
+  const branchLine = f.branchPhone ? ` Branch: ${f.branchPhone}.` : "";
   return (
     `SHS Fleet: your rental is booked. Confirmation ${f.conf}. ` +
-    `Pick up ${when} at Enterprise ${f.branchName}, ${f.branchAddress}. ` +
-    `Walk in and bring your driver's license. Billed direct to Sears, do not pay.` +
-    `${back} Questions? Reply here.`
+    `Pick up ${when} at Enterprise ${f.branchName}, ${addr}.${branchLine} ` +
+    `Bring your driver's license, give them the confirmation number, and sign nothing that asks you to pay. ` +
+    `It is billed direct to Sears - decline all insurance and upgrades.` +
+    `${back} If the branch cannot find the reservation or turns you away, reply here before you leave.`
   );
 }
 
@@ -687,11 +728,21 @@ export function evaluateEligibility(f: EligibilityFacts): { ok: boolean; failure
     if (f.roster.dropped) failures.push({ code: "roster_dropped", detail: "dropped_from_source_at is set" });
     if (!f.roster.districtNo) failures.push({ code: "district_missing", detail: "no district_no on roster" });
   }
-  // 5. TPMS truck
-  if (!f.tpmsTruck) {
-    failures.push({ code: "tpms_truck_missing", detail: "no tpms_tech_profiles.truck_no" });
-  } else if (f.truckContradiction) {
-    failures.push({ code: "tpms_truck_contradiction", detail: f.truckContradiction });
+  // 5. TPMS truck. A CUTOVER requirement and ONLY a cutover requirement: that lane
+  // rewrites an existing rental billed against a specific truck, so the truck has to
+  // be known and has to agree. A rental request is the opposite case. Its commonest
+  // reason is literally "new hire, no vehicle", where there is no assigned truck to
+  // find and TPMS is correctly silent. Gating requests on it refused every new hire
+  // before an intent could even be created, so the card showed an approved request
+  // with no workflow attached and nothing anywhere said why. The truck is still
+  // carried when we have one (the request's own truck_number wins, TPMS is the
+  // fallback) and the special notes read "SHS TRUCK n/a" when we do not.
+  if (isCutover) {
+    if (!f.tpmsTruck) {
+      failures.push({ code: "tpms_truck_missing", detail: "no tpms_tech_profiles.truck_no" });
+    } else if (f.truckContradiction) {
+      failures.push({ code: "tpms_truck_contradiction", detail: f.truckContradiction });
+    }
   }
   // 6. exactly one open Enterprise case (cutover)
   if (isCutover) {
@@ -1766,6 +1817,8 @@ export type RunnerQuote = {
   branchCode: string | null;
   branchName: string | null;
   branchAddress: string | null;
+  /** Branch counter phone, already normalised to 000-000-0000, or null. */
+  branchPhone?: string | null;
   branchZip: string | null;
   branchPinned: boolean;
   pickupDate: string; // YYYY-MM-DD (runner's schedule-gated choice)
@@ -1987,6 +2040,7 @@ export async function persistPreviewFromRunner(params: {
         conf,
         branchName,
         branchAddress,
+        branchPhone: params.quote.branchPhone ?? null,
         pickupDate: requestedDate,
         pickupTime: params.quote.pickupTime ?? null,
         returnDate: params.quote.returnDate ?? null,
@@ -2009,6 +2063,7 @@ export async function persistPreviewFromRunner(params: {
       branchCode: params.quote.branchCode,
       branchName: params.quote.branchName,
       branchAddress: params.quote.branchAddress,
+      branchPhone: params.quote.branchPhone ?? null,
       branchZip: params.quote.branchZip,
       branchZip5: zip5(params.quote.branchZip),
       branchPinned: params.quote.branchPinned,
@@ -2620,6 +2675,14 @@ export async function recordBookingPostback(params: {
     return { accepted: true, status: "confirmed", readback: verdict };
   }
 
+  // A REQUEST that already holds a confirmation must never park here. The journey
+  // search cannot see a future-dated reservation at all, so its verdict says nothing
+  // about whether the car exists. Verify on the commit response, which is this lane's
+  // rule everywhere else.
+  if (intent.workflow_type === WORKFLOW_REQUEST && (await verifyRequestOnCommitEvidence(intent.id))) {
+    return { accepted: true, status: (await loadIntent(intent.id)).status, readback: verdict };
+  }
+
   await touchIntent(intent.id, {
     status: "manual_review",
     last_error: `journey readback ${verdict.verdict}: ${verdict.reason} (${searchNote})`,
@@ -3194,6 +3257,7 @@ export async function releaseMessagesIfEligible(intentId: number): Promise<void>
         conf,
         branchName,
         branchAddress,
+        branchPhone: strOrNull(resv.branchPhone),
         pickupDate: strOrNull(resv.pickupDate),
         pickupTime: strOrNull(resv.pickupTime),
         returnDate: strOrNull(resv.returnDate),
@@ -3299,8 +3363,15 @@ export async function releaseMessagesIfEligible(intentId: number): Promise<void>
   }
 
   // ---- Message 2 (morning reminder) — durable HELD intent --------------------
+  // CUTOVER ONLY. renderMsg2 says "today's 8:00 AM block" and "you keep your current
+  // vehicle; billing-only change" - both false for a request, where there is no block
+  // and the technician has no vehicle to keep. releaseMsg2IfDue gates on
+  // block_state = 'verified', which a request (born 'not_applicable') never reaches,
+  // so it never sent; it did park a wrong-lane HELD row in fs_comms_send_queue.
+  // completionSatisfied already states the rule: a request completes on its verified
+  // reservation alone. Build nothing.
   const i2 = await loadIntent(intentId);
-  if (i2.msg2_state === "pending" && (i2.msg1_state === "sent" || i2.msg1_state === "queued" || i2.msg1_state === "released")) {
+  if (!isRequest && i2.msg2_state === "pending" && (i2.msg1_state === "sent" || i2.msg1_state === "queued" || i2.msg1_state === "released")) {
     // Target: morning of the event date; the sweep re-computes the compliant
     // time at release. Placeholder scheduled_for = event date 06:45 ET.
     const eventISO = i2.event_date ? String(i2.event_date).slice(0, 10) : etTodayISO();
@@ -3631,9 +3702,91 @@ export async function morningSweep(): Promise<{
 // Staff actions: retry / cancel
 // ---------------------------------------------------------------------------
 
-export async function retryIntent(intentId: number, requestedBy: string): Promise<any> {
+/**
+ * Request-lane verification on the commit response.
+ *
+ * ETD's /api/myjourney/search ignores both SearchCriteria and Period and returns only
+ * past-dated journeys, so a future pickup is NEVER in the result set and
+ * identifyJourneyRows can never match it. A cutover can afford to wait for that
+ * readback; a request cannot, because the technician has no van today. For this lane
+ * the savedr response carrying a confirmation number IS the proof, and it is recorded
+ * as exactly that ("commit_response") rather than passed off as a readback.
+ *
+ * `alreadyNotifiedBy` closes out a technician who was ALREADY told out of band. ETD
+ * emails every confirmation to the technician's <phone>@tmomail.net as well as to us,
+ * and T-Mobile delivers that as a text, so a tech can easily know before we send
+ * anything. Without this the only choices were a duplicate text or a request row left
+ * reading 'approved' with no reference. It suppresses msg1 by moving msg1_state off
+ * 'pending' (the only value releaseMessagesIfEligible acts on) and records who said so.
+ *
+ * Idempotent and CAS-guarded. Returns true only when it actually promoted the intent.
+ */
+export async function verifyRequestOnCommitEvidence(
+  intentId: number,
+  opts?: { alreadyNotifiedBy?: string },
+): Promise<boolean> {
+  const intent = await loadIntent(intentId);
+  if (intent.workflow_type !== WORKFLOW_REQUEST) return false;
+  if (intent.reservation_state !== "booked_unverified") return false;
+  const confirmation = strOrNull(intent.reservation_evidence?.confirmation);
+  if (!confirmation) return false;
+  const quoteRef = strOrNull(intent.reservation_evidence?.raw?.quoteReference);
+  const notifiedBy = strOrNull(opts?.alreadyNotifiedBy);
+
+  const evidence = JSON.stringify({
+    ...(intent.reservation_evidence ?? {}),
+    confirmation,
+    verifiedBy: "commit_response",
+    verifiedAt: new Date().toISOString(),
+    ...(notifiedBy
+      ? { alreadyNotified: { by: notifiedBy, at: new Date().toISOString() } }
+      : {}),
+  });
+  const { rows: advanced } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET reservation_state = 'verified',
+        status = 'reservation_verified',
+        reservation_evidence = ${evidence}::jsonb,
+        msg1_state = ${notifiedBy ? sql`'skipped_already_notified'` : sql`msg1_state`},
+        last_error = NULL,
+        claimed_by = NULL,
+        lease_expires_at = NULL,
+        updated_at = now()
+    WHERE id = ${intentId}
+      AND workflow_type = ${WORKFLOW_REQUEST}
+      AND reservation_state = 'booked_unverified'
+      AND status NOT IN ('completed', 'cancelled', 'abandoned')
+    RETURNING id
+  `);
+  if (!(advanced as any[]).length) return false;
+
+  // Close the request row too, so the queue and the card both read 'booked' instead
+  // of an approved row that silently already has a car.
+  await db.execute(sql`
+    UPDATE vrm_rental_request
+       SET status = 'booked',
+           etd_reference = ${confirmation},
+           etd_reservation_id = COALESCE(etd_reservation_id, ${quoteRef}),
+           etd_booked_at = COALESCE(etd_booked_at, now()),
+           etd_error = NULL,
+           updated_at = now()
+     WHERE request_no = ${Number(intent.source_id)}
+  `);
+  await mirrorCutoverSummary(intentId);
+  await releaseMessagesIfEligible(intentId);
+  return true;
+}
+
+export async function retryIntent(
+  intentId: number,
+  requestedBy: string,
+  opts?: { alreadyNotified?: boolean },
+): Promise<any> {
   const intent = await loadIntent(intentId);
   if (TERMINAL_STATUSES.has(intent.status)) throw new OrchestratorError("terminal", "intent is terminal", 409);
+  // Staff assertion that this technician already has the confirmation from somewhere
+  // else. Only meaningful on the request lane, where the commit response is the proof.
+  const notifiedOpt = opts?.alreadyNotified ? { alreadyNotifiedBy: requestedBy } : undefined;
 
   switch (intent.status) {
     case "preview_required":
@@ -3649,6 +3802,11 @@ export async function retryIntent(intentId: number, requestedBy: string): Promis
           await releaseMessagesIfEligible(intentId);
         }
       } else if (intent.reservation_state === "unknown" || intent.reservation_state === "booked_unverified") {
+        // A REQUEST already holding a confirmation is proven. Ordering another journey
+        // readback for it only reproduces the same dead "none" and drops it straight
+        // back into manual review, which is how three technicians ended up holding real
+        // reservations behind a red MANUAL REVIEW badge. Verify on the commit response.
+        if (await verifyRequestOnCommitEvidence(intentId, notifiedOpt)) break;
         // Must reconcile via readback — make it claimable, op_open stays blocked
         // by the unfinished-attempt guard until a readback resolves it.
         await touchIntent(intentId, { status: "booking", claimed_by: null, lease_expires_at: null, next_retry_at: null, last_error: `reconcile requested by ${requestedBy}` });
@@ -3666,6 +3824,9 @@ export async function retryIntent(intentId: number, requestedBy: string): Promis
       if (intent.reservation_state !== "booked_unverified") {
         throw new OrchestratorError("bad_state", "dark-parked validation intents have no reservation to verify", 409);
       }
+      // Same rule as manual_review above: a request's proof is its commit response,
+      // not a journey search that structurally cannot see a future pickup.
+      if (await verifyRequestOnCommitEvidence(intentId, notifiedOpt)) break;
       // Booked but never verified (runner died before its readback): surrender
       // the claim so the recovery lane readbacks it on the next poll.
       await touchIntent(intentId, { claimed_by: null, lease_expires_at: null, next_retry_at: null, last_error: `readback reconcile requested by ${requestedBy}` });

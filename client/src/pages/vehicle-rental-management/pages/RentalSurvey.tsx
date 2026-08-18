@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X, Send, Loader2, EyeOff,
+  ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X, Send, Loader2, EyeOff, Car,
 } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
 import CutoverIntentPanel, { IntentPill } from "../components/CutoverIntentPanel";
@@ -428,6 +428,10 @@ export default function RentalSurvey() {
 
   const [hideCompleted, setHideCompleted] = useState(true);
   const [hideBackInVan, setHideBackInVan] = useState(true);
+  // Keep-only, not hide: the yes-answers are the population a cutover wave is drawn
+  // from, and the screen previously could only isolate the inverse. Default OFF so no
+  // one else's default view moves.
+  const [inRentalOnly, setInRentalOnly] = useState(false);
   const [detail, setDetail] = useState<SurveyRow | null>(null);
 
   const { data, isLoading, error } = useQuery<{ responses: SurveyRow[] }>({
@@ -539,13 +543,25 @@ export default function RentalSurvey() {
       : 0),
     [filteredAll, hideBackInVan, hideCompleted],
   );
+  // Counted after BOTH hide toggles, same convention as hiddenBackInVan, so the three
+  // tallies never double-count a row and always add up to what was removed.
+  const hiddenNotInRental = useMemo(
+    () => (inRentalOnly
+      ? filteredAll.filter((r) => r.has_rental !== true
+          && !(hideCompleted && r.cutover_status === "complete")
+          && !(hideBackInVan && isBackInOwnVan(r))).length
+      : 0),
+    [filteredAll, inRentalOnly, hideCompleted, hideBackInVan],
+  );
   const filtered = useMemo(
     () => filteredAll.filter((r) => {
       if (hideCompleted && r.cutover_status === "complete") return false;
       if (hideBackInVan && isBackInOwnVan(r)) return false;
+      // Strictly true. A null has_rental is "never answered", which is not a yes.
+      if (inRentalOnly && r.has_rental !== true) return false;
       return true;
     }),
-    [filteredAll, hideCompleted, hideBackInVan],
+    [filteredAll, hideCompleted, hideBackInVan, inRentalOnly],
   );
 
   const accessors: Record<string, (r: Row) => unknown> = {
@@ -692,6 +708,15 @@ export default function RentalSurvey() {
           <EyeOff size={13} /> Hide back in own van
         </button>
 
+        <button type="button" onClick={() => setInRentalOnly((v) => !v)}
+          title="Show ONLY technicians who answered Yes to being in a rental. Rows that answered No, and rows that never answered, are both removed."
+          style={{ ...ctrl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+                   background: inRentalOnly ? colors.accentLight : colors.surface,
+                   color: inRentalOnly ? colors.accent : colors.ink,
+                   fontWeight: inRentalOnly ? 700 : 400 }}>
+          <Car size={13} /> In a rental only
+        </button>
+
         <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
           {sorted.length} shown of {base.length}
           {hiddenCompleted > 0 && (
@@ -702,6 +727,11 @@ export default function RentalSurvey() {
           {hiddenBackInVan > 0 && (
             <span style={{ color: colors.green }}>
               {"  ·  "}{hiddenBackInVan} back in own van hidden
+            </span>
+          )}
+          {hiddenNotInRental > 0 && (
+            <span style={{ color: colors.accent }}>
+              {"  ·  "}{hiddenNotInRental} not in a rental hidden
             </span>
           )}
         </span>
@@ -715,8 +745,8 @@ export default function RentalSurvey() {
       {sorted.length === 0 ? (
         <div style={{ fontFamily: fonts.dmSans, color: colors.inkMuted, padding: "40px 0" }}>
           {rows.length === 0 ? "No survey responses yet."
-            : hiddenCompleted + hiddenBackInVan > 0 && filtered.length === 0
-            ? `All ${hiddenCompleted + hiddenBackInVan} matching rows are hidden by the hide toggles — turn them off to see them.`
+            : hiddenCompleted + hiddenBackInVan + hiddenNotInRental > 0 && filtered.length === 0
+            ? `All ${hiddenCompleted + hiddenBackInVan + hiddenNotInRental} matching rows are hidden by the toggles — turn them off to see them.`
             : "No rows match the current filters."}
         </div>
       ) : (

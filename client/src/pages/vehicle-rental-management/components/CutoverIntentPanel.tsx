@@ -414,6 +414,18 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                 {busy === "retry" ? <Loader2 size={13} className="animate-spin" /> : "Retry (staff)"}
               </button>
             )}
+            {/* ETD texts the confirmation straight to the technician's carrier gateway,
+                so they often already know. This closes the request out on the reservation
+                we can prove, and sends nothing. */}
+            {isRequest && canRetry && intent?.reservation_state === "booked_unverified" && (
+              <button type="button" disabled={!!busy}
+                      title="Marks the reservation verified and closes the request without texting. Use when the technician has already been given the confirmation."
+                      onClick={() => window.confirm("This technician already has the confirmation? The reservation will be verified and the request closed, and NO text will be sent.") &&
+                        run("notified", () => post(`${BASE}/intents/${intent.id}/retry`, { alreadyNotified: true }))}
+                      style={btn}>
+                {busy === "notified" ? <Loader2 size={13} className="animate-spin" /> : "Already notified (no text)"}
+              </button>
+            )}
             {canCancel && (
               <button type="button" disabled={!!busy}
                       onClick={() => window.confirm("Cancel this workflow? If a live reservation may exist, the workflow waits for ETD readback proof before it closes.") &&
