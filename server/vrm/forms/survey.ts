@@ -19,6 +19,7 @@ import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { sendStandardActivity } from "../dca-task-client";
 import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
+import { requireCronOrStaff } from "./cutover-intents-routes";
 import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 import { buildCutoverBlockArgs } from "./cutover-block-args";
 
@@ -711,7 +712,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * either off the project name carries a TEST prefix and the receiving system
    * does not process it.
    */
-  router.post("/forms/rental-survey/file-route-blocks", async (req, res) => {
+  router.post("/forms/rental-survey/file-route-blocks", requireCronOrStaff, async (req, res) => {
     try {
       const dryRun = req.body?.dryRun !== false;
       const limit = Math.min(Number(req.body?.limit) || 500, 500);
