@@ -172,7 +172,16 @@ export function registerCommsRoutes(app: Router): void {
     if (!isInternalCron(req)) return res.status(403).json({ message: "Forbidden" });
     try {
       const result = await processSendQueue(200, "scheduled_dispatcher");
-      res.json({ success: true, ...result });
+      // Truck-maintenance sweep rides this tick (Task #664). The dispatcher
+      // already calls this route on every run, and an autoscale instance only
+      // runs work while a request is open — so the sweep piggybacks here
+      // instead of depending on a new scheduler entry or an in-process timer.
+      // It runs AFTER the drain (the queue is the priority on this tick), is a
+      // no-op outside its ET window or once the day is claimed, and can never
+      // fail this response.
+      const { runMaintenanceSweepTick } = await import("../truck-maintenance/engine");
+      const maintenance = await runMaintenanceSweepTick("comms_cron_tick");
+      res.json({ success: true, ...result, maintenance });
     } catch (e: any) {
       res.status(500).json({ success: false, message: e?.message });
     }

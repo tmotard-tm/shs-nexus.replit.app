@@ -134,14 +134,14 @@ describe("buildStandardActivityPayload dark-launch contract (offline)", () => {
     }
   });
 
-  test("pickup blocks pin the slot: StartTimeRequest defaults to Exact", () => {
+  test("pickup blocks pin the slot: StartTimeRequest echoes the 08:00 start", () => {
     const row = (buildStandardActivityPayload(args).body.exportData as any[])[0];
-    assert.equal(row.StartTimeRequest, "Exact");
-    assert.equal(ROUTE_BLOCK_START_TIME_REQUEST, "Exact");
-    assert.ok(
-      ["Anytime", "Exact", "AsSoonAsPossible"].includes(String(row.StartTimeRequest)),
-      "StartTimeRequest must stay inside the documented enum",
-    );
+    // The documented way to pin a slot is an HH:MM request echoed in StartTime.
+    // "Exact" (asserted here before) was invented locally and is not a value the
+    // reference accepts.
+    assert.equal(row.StartTimeRequest, ROUTE_BLOCK_START_TIME);
+    assert.equal(ROUTE_BLOCK_START_TIME_REQUEST, ROUTE_BLOCK_START_TIME);
+    assert.equal(row.StartTimeRequest, row.StartTime, "a pinned request must match the start it pins");
   });
 
   /*

@@ -44,7 +44,8 @@ import {
   Eye,
   User as UserIcon,
   Search,
-  Wrench
+  Wrench,
+  Gauge
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PAGES, CATEGORIES, getPagesByCategory, type PageCategory } from "@shared/page-registry";
@@ -376,6 +377,20 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
               >
                 <Wrench className="h-4 w-4" />
                 Vehicle Creation
+              </Link>
+            </DropdownMenuItem>
+          )}
+
+          {user.role === 'developer' && (
+            <DropdownMenuItem asChild>
+              <Link
+                href="/truck-maintenance"
+                onClick={handleNavClick}
+                className="flex items-center gap-3 cursor-pointer"
+                data-testid="link-nav-truck-maintenance"
+              >
+                <Gauge className="h-4 w-4" />
+                Truck Maintenance
               </Link>
             </DropdownMenuItem>
           )}

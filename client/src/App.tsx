@@ -70,6 +70,7 @@ import Reporting from "@/pages/reporting";
 import PoHistoryDashboard from "@/pages/po-history-dashboard";
 import CommunicationHub from "@/pages/communication-hub";
 import FleetCommunications from "@/pages/fleet-communications";
+import TruckMaintenance from "@/pages/truck-maintenance";
 import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
 import NexusFlowcharts from "@/pages/nexus-flowcharts";
@@ -517,6 +518,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <FleetCommunications />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/truck-maintenance">
+        <ProtectedRoute>
+          <MainContent>
+            <TruckMaintenance />
           </MainContent>
         </ProtectedRoute>
       </Route>

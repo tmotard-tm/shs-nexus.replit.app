@@ -378,6 +378,22 @@ async function runStartupBootstrap() {
     console.error("⚠️ Fleet Communications startup init failed:", error?.message || error);
   }
 
+  // Truck Maintenance SMS + 4-hour booking workflow (Task #664) — ensure the
+  // fs_truck_maintenance_* tables exist and start the best-effort in-process
+  // secondary sweep. Post-listen for the same autoscale reason as the block
+  // above. The durable cadence is the cron route
+  // (POST /api/fs/truck-maintenance/cron/sweep, server/run-truck-maintenance.ts);
+  // in-process timers alone do not reliably fire on autoscale.
+  try {
+    const { initTruckMaintenanceSchema } = await import("./truck-maintenance/schema-init");
+    await initTruckMaintenanceSchema();
+    const { startInProcessMaintenanceSweep } = await import("./truck-maintenance/engine");
+    startInProcessMaintenanceSweep();
+    log("✅ Truck Maintenance: schema ensured + in-process secondary sweep started");
+  } catch (error: any) {
+    console.error("⚠️ Truck Maintenance startup init failed:", error?.message || error);
+  }
+
   // LUCA → FleetScope write-back (Phase 3 of the LUCA plan) — polls LIVHR's
   // escalation outbox and lands LUCA's shop-call outcomes on fs_trucks so
   // humans follow up on the same record LUCA acted on. Gated by

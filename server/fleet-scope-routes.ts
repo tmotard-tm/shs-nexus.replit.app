@@ -28,6 +28,7 @@ import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 import { getNexusUnassignedVehicles, getOccupiedTruckSet, checkTruckAssignedNexus } from "./spares-pool";
 import { getTodaysQueueCached } from "./todays-queue";
 import { registerCommsRoutes } from "./fleet-comms/routes";
+import { registerTruckMaintenanceRoutes } from "./truck-maintenance/routes";
 import { fetchRentalRoster } from "./vrm/snowflake-queries";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
 import { parqApi } from "./fleet-scope-pmf-api";
@@ -16610,6 +16611,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // Master Fleet Communications Module (Task #524) — mounted under /api/fs/comms/*.
   registerCommsRoutes(app);
+
+  // Truck Maintenance SMS + booking workflow — /api/fs/truck-maintenance/*.
+  registerTruckMaintenanceRoutes(app);
 
   return app;
 }

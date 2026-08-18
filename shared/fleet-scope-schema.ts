@@ -1574,6 +1574,7 @@ export const COMMS_CATEGORIES = [
   "offboarding",
   "loa_rental",
   "samsara",
+  "truck_maintenance",
   "general_fleet",
 ] as const;
 export type CommsCategory = (typeof COMMS_CATEGORIES)[number];
@@ -1587,6 +1588,7 @@ export const COMMS_CATEGORY_LABELS: Record<CommsCategory, string> = {
   offboarding: "Offboarding",
   loa_rental: "LOA Rental",
   samsara: "Samsara",
+  truck_maintenance: "Truck Maintenance",
   general_fleet: "General Fleet",
 };
 

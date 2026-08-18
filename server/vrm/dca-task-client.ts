@@ -270,6 +270,16 @@ export interface StandardActivityArgs {
   projectLabel?: string;
   /** Overrides truckNumber as the unique discriminator in projectName. */
   projectKey?: string;
+  /**
+   * ActivityType on the exported row. Defaults to
+   * RENTAL_RETURN_ACTIVITY_TYPE so every existing caller is unchanged.
+   *
+   * A different KIND of block (e.g. a routine-maintenance slot) is a
+   * different activity type upstream, and the value is owner-confirmed data,
+   * not something to guess: callers that pass this must gate their own live
+   * filing on having had it confirmed by the DCA side.
+   */
+  activityType?: string;
   /** Project-level note. Defaults to the rental-return wording. */
   projectNotes?: string;
   /** Row-level Notes the technician and dispatcher read. */
@@ -358,7 +368,7 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
     exportData: [
       {
         TechnicianId: args.techLdap,
-        ActivityType: RENTAL_RETURN_ACTIVITY_TYPE,
+        ActivityType: (args.activityType ?? "").trim() || RENTAL_RETURN_ACTIVITY_TYPE,
         Date: args.date,
         // REQUIRED, HH:MM. Never send "" — see ROUTE_BLOCK_START_TIME.
         StartTime: HHMM.test((args.startTime ?? "").trim())
