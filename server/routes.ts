@@ -874,6 +874,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // step this app exists to remove. Same bearer convention, and the route
         // re-enforces it with requireCronOrStaff.
         || (req.method === "POST" && req.path === "/forms/rental-survey/remind")
+        // Finish an approved rental request, and staff-retry a workflow intent. Both
+        // were session-only, which meant the only way to move a stuck request was a
+        // person clicking one row at a time in a drawer. Same bearer convention as
+        // every other booking endpoint on this list; the routes keep their own
+        // already-booked and status guards, so a bearer cannot double-book.
+        || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/book$/.test(req.path))
+        || (req.method === "POST" && /^\/forms\/rental-survey\/cutover\/intents\/\d+\/retry$/.test(req.path))
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")
         // Cutover workflow intents: the same outside-the-box Python runner
         // claims preview/booking work, posts quotes and booking outcomes back,

@@ -551,10 +551,18 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
 
       const key = process.env.COMMS_SEND_API_KEY;
       if (!key) return res.status(500).json({ message: "COMMS_SEND_API_KEY is not configured." });
-      const port = process.env.PORT || 5000;
-      const out = await fetch(`http://127.0.0.1:${port}/comms/api/send-batch`, {
+      // Path and header BOTH matter, and getting either wrong fails silently. The
+      // comms router is mounted under /api/fs, and the gate reads x-comms-api-key.
+      // A wrong path does not 404: the SPA fallback answers 200 with HTML, so a
+      // bare `.json().catch(() => ({}))` turns a total non-send into a clean-looking
+      // success. That is exactly what happened on the first live run of this route
+      // (2026-08-18): it reported requested:55 and queued nothing. Treat a non-JSON
+      // body as failure, never as success.
+      const selfPort = process.env.PORT || "5000";
+      const host = process.env.COMMS_SEND_BASE_URL || `http://localhost:${selfPort}`;
+      const resp = await fetch(`${host}/api/fs/comms/api/send-batch`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": key },
+        headers: { "Content-Type": "application/json", "x-comms-api-key": key },
         body: JSON.stringify({
           category: "rental_management",
           confirm: true,
@@ -562,12 +570,27 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           messages: sendList.map((r) => ({ ldap: r.ldap, phone: r.phone, body: r.body })),
         }),
       });
-      const result = await out.json().catch(() => ({}));
+      const ctype = resp.headers.get("content-type") || "";
+      if (!ctype.includes("application/json")) {
+        return res.status(502).json({
+          message: `comms returned ${resp.status} ${ctype || "no content-type"} - not JSON. Route or host wrong. NOTHING was scheduled.`,
+        });
+      }
+      const result = await resp.json();
+      if (!resp.ok) {
+        return res.status(502).json({ message: "comms rejected the batch; nothing scheduled", detail: result });
+      }
+      // Report what the queue actually accepted, not what we asked for.
+      const DELIVERABLE = new Set(["sent", "queued"]);
+      const rlist = (result?.results || []) as any[];
+      const accepted = rlist.filter((r) => DELIVERABLE.has(String(r?.status || "").toLowerCase())).length;
       res.json({
         dryRun: false,
         scheduledFor: scheduledFor.toISOString(),
         requested: sendList.length,
+        accepted,
         skippedNotActive: includeInactive ? 0 : inactive.length,
+        summary: result?.summary ?? null,
         result,
       });
     } catch (error: any) {

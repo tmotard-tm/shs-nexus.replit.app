@@ -438,6 +438,21 @@ def set_driver(model: dict, user: dict, ldap: str, tech_name: str, truck: str) -
 
     first = str(user.get("firstName") or "").strip()
     last = str(user.get("lastName") or "").strip()
+
+    # A profile name is only usable if ETD will actually accept it. Some
+    # profiles were provisioned with the LDAP sitting in the name field, and
+    # ETD rejects the whole reservation with "LASTNAME CANNOT CONTAIN DIGITS |
+    # LASTNAME INCLUDES INVALID CHARACTERS". Treat those exactly like a missing
+    # name so the roster fallback below takes over, rather than sending a value
+    # we already know will be refused.
+    def _etd_usable(v: str) -> bool:
+        return bool(v) and not any(ch.isdigit() for ch in v) and all(
+            ch.isalpha() or ch in " -'." for ch in v
+        )
+
+    if not (_etd_usable(first) and _etd_usable(last)):
+        first, last = "", ""
+
     if not (first and last):
         # Fall back to the survey name. "SCOTT,CORNELIUS" is surname-first;
         # "ALONSO CHAVIRA" is not. Handle both rather than silently producing

@@ -63,9 +63,25 @@ const PHASE_TONE: Record<string, Tone> = {
   failed: { label: "Workflow failed", fg: colors.red, bg: colors.redLight },
 };
 
+/**
+ * A rental request has no route block and no second text, so the cutover vocabulary
+ * lies on this lane. "Wrapping up" and "Workflow complete" both describe a multi-step
+ * cutover winding down; on a request the reservation IS the outcome and the only thing
+ * the reader wants to know is whether the technician has a car. Say that.
+ */
+const REQUEST_PHASE_LABEL: Record<string, string> = {
+  wrapping_up: "BOOKED",
+  completed: "BOOKED",
+  awaiting_verification: "Booking…",
+};
+
 export function phaseTone(intent: any): Tone {
   const p = String(intent?.displayPhase ?? intent?.status ?? "");
-  return PHASE_TONE[p] ?? { label: p || "—", fg: colors.inkMuted, bg: colors.background };
+  const base = PHASE_TONE[p] ?? { label: p || "—", fg: colors.inkMuted, bg: colors.background };
+  if (String(intent?.workflow_type ?? "") === "rental_request" && REQUEST_PHASE_LABEL[p]) {
+    return { ...base, label: REQUEST_PHASE_LABEL[p] };
+  }
+  return base;
 }
 
 /** Small pill for table cells; shows workflow phase + non-live mode. */

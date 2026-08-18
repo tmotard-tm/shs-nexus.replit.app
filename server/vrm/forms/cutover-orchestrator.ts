@@ -2200,9 +2200,23 @@ export async function confirmIntent(params: {
   const confirmEventISO = intent.event_date
     ? String(intent.event_date).slice(0, 10)
     : String(intent.preview?.reservation?.pickupDate ?? "").slice(0, 10);
-  const sched = confirmEventISO
-    ? await recheckScheduleDay(intent.ldap, confirmEventISO)
-    : { ok: false, detail: "intent has no event date to re-verify" };
+  // CUTOVER ONLY, for the same reason the preview-time schedule gate is cutover only.
+  // A cutover pairs its reservation with a 30-minute route block, so the day has to be
+  // one the technician actually works and the snapshot has to be fresh. A rental
+  // request books a car for someone standing next to a dead van today and files no
+  // block: ServicePower has no say in it.
+  //
+  // This is the SECOND home of that gate. Making the preview-time one cutover-only was
+  // not enough - every request still built a clean preview and then died here with
+  // "input drift at confirm: schedule: watermark ... is 27.7h old", which reads like a
+  // data problem and is really a lane problem. Observed live 2026-08-18 on all six
+  // pending requests, blocked by a ServicePower snapshot 1.7h past its limit.
+  const scheduleGatedAtConfirm = intent.workflow_type !== WORKFLOW_REQUEST;
+  const sched = !scheduleGatedAtConfirm
+    ? { ok: true, detail: "" }
+    : confirmEventISO
+      ? await recheckScheduleDay(intent.ldap, confirmEventISO)
+      : { ok: false, detail: "intent has no event date to re-verify" };
   if (!sched.ok) drifts.push(`schedule: ${sched.detail}`);
   if (drifts.length) {
     await touchIntent(intent.id, {
@@ -2455,6 +2469,19 @@ export async function recordBookingPostback(params: {
         `);
         await mirrorCutoverSummary(intent.id);
         await releaseMessagesIfEligible(intent.id);
+        // The request lane ends HERE. completionSatisfied already says so - a request
+        // completes on its verified reservation alone, with no block and no second
+        // text - but only the journey-readback path ever called finalizeCompletion,
+        // and a request never takes that path. So a booked request parked at
+        // reservation_verified forever, which deriveDisplayPhase renders as
+        // "Wrapping up": permanently amber-to-green limbo on a job that was finished
+        // the moment Enterprise returned a confirmation number.
+        const settledReq = await loadIntent(intent.id);
+        if (!TERMINAL_STATUSES.has(settledReq.status) && completionSatisfied(settledReq)) {
+          if (await finalizeCompletion(intent.id, settledReq.status)) {
+            await mirrorCutoverSummary(intent.id);
+          }
+        }
       }
     } else if (outcome === "failed_clean") {
       // Proven no reservation was created (validation-gate failure before the
