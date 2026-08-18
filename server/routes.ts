@@ -863,6 +863,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // block are one queryable record instead of a JSON file on one laptop.
         || (req.method === "POST" && req.path === "/forms/rental-survey/record-booking")
         || (req.method === "POST" && req.path === "/forms/rental-survey/ams-status")
+        // Route blocks: the same runner files the 30-minute Enterprise
+        // contract-change block after it books. Session-only meant a block could
+        // only ever be filed by hand from a browser console, one technician at a
+        // time, with no button in the app either. The route re-enforces the
+        // bearer with requireCronOrStaff.
+        || (req.method === "POST" && req.path === "/forms/rental-survey/file-route-blocks")
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")
         // Cutover workflow intents: the same outside-the-box Python runner
         // claims preview/booking work, posts quotes and booking outcomes back,
