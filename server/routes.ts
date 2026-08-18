@@ -1,3 +1,13 @@
+import { execSync as __buildExec } from "child_process";
+/** Resolved ONCE at module load, inside whatever process is actually running. */
+const BUILD_COMMIT: string = (() => {
+  try {
+    return __buildExec("git rev-parse --short HEAD", { encoding: "utf8", timeout: 3000 }).trim();
+  } catch {
+    return "unknown";
+  }
+})();
+const BUILD_BOOTED_AT: string = new Date().toISOString();
 import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
@@ -821,6 +831,21 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // /api/vrm/repair-tracker/full also accepts a Bearer token via the
     // VRM_REPAIR_TRACKER_API_KEY secret for server-to-server consumers.
     // Every other /api/vrm/* route still requires a session.
+    /**
+     * What commit is this process actually serving?
+     *
+     * Three separate times on 2026-08-18 a change was committed to the box, the file
+     * tree went clean, and the running deployment kept serving the previous build - so
+     * "published" and "deployed" quietly diverged and we each inferred the wrong one
+     * from git. Reading HEAD proves what is on disk, never what is running. This reads
+     * the SHA ONCE at module load, inside the deployed process, so a mismatch against
+     * `git rev-parse HEAD` is proof the deployment is stale. Public and read-only: it
+     * exposes a commit hash and nothing else.
+     */
+    app.get("/api/build-stamp", (_req, res) => {
+      res.json({ commit: BUILD_COMMIT, bootedAt: BUILD_BOOTED_AT });
+    });
+
     app.use("/api/vrm", (req, res, next) => {
       if (req.method === "GET" && req.path === "/repair-tracker/full") {
         return requireAuthOrRepairTrackerApiKey(req, res, next);

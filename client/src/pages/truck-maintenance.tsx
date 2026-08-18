@@ -764,6 +764,254 @@ export default function TruckMaintenance() {
           )}
         </CardContent>
       </Card>
+
+      {/* Fleet roster — read-only, daily self-refreshing (Task #680) */}
+      <FleetRosterCard />
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- *
+ * Fleet roster (Task #680)
+ *
+ * Read-only by contract: every eligible truck (BYOV and AMS In Repair /
+ * Declined Repair / Sent To Auction excluded) with the SAME reconciled
+ * odometer and TPMS technician the maintenance sweep computes. There is no
+ * edit affordance anywhere — the values refresh themselves from the source
+ * tables, and "Refresh now" only re-reads.
+ * -------------------------------------------------------------------------- */
+
+interface RosterTruck {
+  truckNumber: string;
+  vin: string | null;
+  odometer: number;
+  odometerDate: string | null;
+  odometerSource: string | null;
+  amsStatus: string | null;
+  ldap: string | null;
+  techName: string | null;
+  district: string | null;
+}
+
+interface FleetRoster {
+  trucks: RosterTruck[];
+  excluded: { byov: number; amsBlocked: number; amsUnknown: number };
+  odometerRefreshedAt: string | null;
+  techRefreshedAt: string | null;
+  generatedAt: string;
+}
+
+type RosterError = Error & { warming?: boolean };
+
+type RosterSortKey = "truck" | "odometer" | "tech";
+
+const ROSTER_PAGE_SIZE = 100;
+
+function FleetRosterCard() {
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<RosterSortKey>("truck");
+  const [sortAsc, setSortAsc] = useState(true);
+  const [page, setPage] = useState(0);
+
+  const rosterQuery = useQuery<FleetRoster, RosterError>({
+    queryKey: ["/api/fs/truck-maintenance/roster"],
+    // The server answers 503 {warming:true} while the AMS status map warms (a
+    // cold build takes minutes) — poll through THAT, and only that. Any other
+    // failure (500, network) gets a couple of retries and then a real error,
+    // so a genuine outage never masquerades as an endless loading state.
+    queryFn: async () => {
+      const res = await fetch("/api/fs/truck-maintenance/roster", { credentials: "include" });
+      if (!res.ok) {
+        let body: any = null;
+        try { body = await res.json(); } catch { /* non-JSON error body */ }
+        const err: RosterError = new Error(body?.message || `HTTP ${res.status}`);
+        err.warming = body?.warming === true;
+        throw err;
+      }
+      return res.json();
+    },
+    retry: (failureCount, error) => (error.warming ? failureCount < 4 : failureCount < 2),
+    retryDelay: (attempt) => Math.min(15_000 * (attempt + 1), 60_000),
+    refetchInterval: (query) => {
+      const err = query.state.error;
+      if (err?.warming) return 30_000; // keep polling while the map warms
+      if (query.state.status === "error") return false; // hard error: stop, show it
+      return 15 * 60_000; // loaded: sources refresh daily, 15 min is plenty
+    },
+    staleTime: 5 * 60_000,
+  });
+
+  const roster = rosterQuery.data;
+
+  const filtered = (() => {
+    if (!roster) return [];
+    const q = search.trim().toLowerCase();
+    let rows = roster.trucks;
+    if (q) {
+      rows = rows.filter((t) =>
+        t.truckNumber.toLowerCase().includes(q)
+        || (t.ldap ?? "").toLowerCase().includes(q)
+        || (t.techName ?? "").toLowerCase().includes(q)
+        || (q === "unassigned" && !t.ldap),
+      );
+    }
+    const dir = sortAsc ? 1 : -1;
+    rows = [...rows].sort((a, b) => {
+      if (sortKey === "odometer") return (a.odometer - b.odometer) * dir;
+      if (sortKey === "tech") {
+        // Unassigned sorts last regardless of direction — staff scan for names.
+        const an = a.techName ?? a.ldap;
+        const bn = b.techName ?? b.ldap;
+        if (!an && !bn) return a.truckNumber.localeCompare(b.truckNumber, undefined, { numeric: true });
+        if (!an) return 1;
+        if (!bn) return -1;
+        return an.localeCompare(bn) * dir;
+      }
+      return a.truckNumber.localeCompare(b.truckNumber, undefined, { numeric: true }) * dir;
+    });
+    return rows;
+  })();
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / ROSTER_PAGE_SIZE));
+  const safePage = Math.min(page, pageCount - 1);
+  const pageRows = filtered.slice(safePage * ROSTER_PAGE_SIZE, (safePage + 1) * ROSTER_PAGE_SIZE);
+
+  function sortBy(key: RosterSortKey) {
+    if (sortKey === key) setSortAsc((v) => !v);
+    else {
+      setSortKey(key);
+      setSortAsc(true);
+    }
+    setPage(0);
+  }
+
+  const sortIndicator = (key: RosterSortKey) => (sortKey === key ? (sortAsc ? " ↑" : " ↓") : "");
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-start justify-between space-y-0 gap-4 flex-wrap">
+        <div>
+          <CardTitle className="flex items-center gap-2">
+            <Gauge className="h-4 w-4" />
+            Fleet roster
+          </CardTitle>
+          <CardDescription>
+            Every eligible truck with its current odometer and assigned technician — the same values the
+            maintenance sweep uses. BYOV, In Repair, Declined Repair and Sent To Auction trucks are excluded.
+            Read-only: the values refresh themselves daily from the source systems.
+          </CardDescription>
+          {roster ? (
+            <p className="text-xs text-muted-foreground mt-2" data-testid="text-roster-freshness">
+              {roster.trucks.length.toLocaleString()} trucks
+              {" · "}excluded: {roster.excluded.byov.toLocaleString()} BYOV, {roster.excluded.amsBlocked.toLocaleString()} repair/auction, {roster.excluded.amsUnknown.toLocaleString()} unreadable AMS status
+              {" · "}odometer data as of {fmtDate(roster.odometerRefreshedAt)}
+              {" · "}tech assignments as of {fmtDate(roster.techRefreshedAt)}
+            </p>
+          ) : null}
+        </div>
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+            placeholder="Search truck # or technician…"
+            className="h-8 w-56 rounded-md border border-input bg-background px-3 text-sm"
+            data-testid="input-roster-search"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => rosterQuery.refetch()}
+            disabled={rosterQuery.isFetching}
+            data-testid="button-roster-refresh"
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${rosterQuery.isFetching ? "animate-spin" : ""}`} />
+            Refresh now
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {rosterQuery.isLoading ? (
+          <Skeleton className="h-64 w-full" />
+        ) : rosterQuery.isError && rosterQuery.error?.warming ? (
+          <p className="text-sm text-muted-foreground flex items-center gap-2 py-6 justify-center" data-testid="text-roster-warming">
+            <RefreshCw className="h-4 w-4 animate-spin" />
+            AMS status data is still loading — the roster appears automatically once the repair/auction
+            exclusions can be applied (usually a few minutes).
+          </p>
+        ) : rosterQuery.isError ? (
+          <p className="text-sm text-red-700 flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            {rosterQuery.error?.message || "Could not load the fleet roster."}
+          </p>
+        ) : !roster || roster.trucks.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-8 text-center">No eligible trucks found.</p>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="cursor-pointer select-none" onClick={() => sortBy("truck")} data-testid="header-roster-truck">
+                      Truck{sortIndicator("truck")}
+                    </TableHead>
+                    <TableHead className="cursor-pointer select-none" onClick={() => sortBy("tech")} data-testid="header-roster-tech">
+                      Technician{sortIndicator("tech")}
+                    </TableHead>
+                    <TableHead>District</TableHead>
+                    <TableHead className="cursor-pointer select-none text-right" onClick={() => sortBy("odometer")} data-testid="header-roster-odometer">
+                      Current odometer{sortIndicator("odometer")}
+                    </TableHead>
+                    <TableHead>Reading date / source</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {pageRows.map((t) => (
+                    <TableRow key={t.truckNumber} data-testid={`row-roster-${t.truckNumber}`}>
+                      <TableCell className="font-medium">{t.truckNumber}</TableCell>
+                      <TableCell>
+                        {t.ldap ? (
+                          <>
+                            {t.ldap}
+                            {t.techName
+                              ? <div className="text-xs text-muted-foreground">{t.techName}</div>
+                              : null}
+                          </>
+                        ) : (
+                          <Badge variant="outline" className="bg-slate-100 text-slate-600 border-slate-200">
+                            Unassigned
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell>{t.district ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMiles(t.odometer)}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {t.odometerDate ? String(t.odometerDate).slice(0, 10) : "—"}
+                        {t.odometerSource ? <div>{t.odometerSource}</div> : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            {pageCount > 1 ? (
+              <div className="flex items-center justify-between mt-3 text-sm">
+                <span className="text-muted-foreground">
+                  {filtered.length.toLocaleString()} trucks · page {safePage + 1} of {pageCount}
+                </span>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" disabled={safePage === 0} onClick={() => setPage(safePage - 1)} data-testid="button-roster-prev">
+                    Previous
+                  </Button>
+                  <Button variant="outline" size="sm" disabled={safePage >= pageCount - 1} onClick={() => setPage(safePage + 1)} data-testid="button-roster-next">
+                    Next
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

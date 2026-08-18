@@ -68,6 +68,7 @@ import {
 import {
   buildEligibilityContext,
   evaluateCandidate,
+  isBlockingAmsStatus,
   loadTechAssignments,
   resolveTechRacf,
   type EligibilityContext,
@@ -2135,6 +2136,224 @@ export async function getApproachingThresholdTrucks(
       district: assignment?.district ?? null,
     };
   });
+}
+
+/* ------------------------------------------------------------------------ *
+ * Fleet roster — the read-only "whole fleet at a glance" view (Task #680).
+ * ------------------------------------------------------------------------ */
+
+export interface RosterTruck {
+  truckNumber: string;
+  vin: string | null;
+  odometer: number;
+  odometerDate: string | null;
+  odometerSource: string | null;
+  amsStatus: string | null;
+  ldap: string | null;
+  techName: string | null;
+  district: string | null;
+}
+
+export interface FleetRoster {
+  trucks: RosterTruck[];
+  excluded: { byov: number; amsBlocked: number; amsUnknown: number };
+  /** Newest write time on the reconciled-odometer source rows. */
+  odometerRefreshedAt: string | null;
+  /** Newest sync time on the TPMS assignment mirror rows. */
+  techRefreshedAt: string | null;
+  generatedAt: string;
+}
+
+export class AmsMapWarmingError extends Error {
+  constructor() {
+    super("AMS truck-status data is still loading — the roster will appear once the repair/auction exclusions can be applied (usually a few minutes)");
+    this.name = "AmsMapWarmingError";
+  }
+}
+
+/**
+ * Decide how a roster request should treat the AMS truck-status cache.
+ * Pure so it can be unit-tested; getFleetRoster owns the actual state.
+ *
+ *  - "serve"      — cache is usable, build the roster from it
+ *  - "warming"    — a build is in flight, answer 503 {warming:true}
+ *  - "start_warm" — no cache and nothing in flight: kick a build, then warming
+ *  - "failed"     — the last build FAILED recently and no build is running;
+ *                   this is a real error, not an endless warming state
+ */
+export function decideRosterAmsAction(s: {
+  cacheReady: boolean;
+  buildInFlight: boolean;
+  lastFailureAt: number | null;
+  now: number;
+  failureCooldownMs: number;
+}): "serve" | "warming" | "start_warm" | "failed" {
+  if (s.cacheReady) return "serve";
+  if (s.buildInFlight) return "warming";
+  if (s.lastFailureAt != null && s.now - s.lastFailureAt < s.failureCooldownMs) return "failed";
+  return "start_warm";
+}
+
+export interface RosterAmsFacts {
+  /** VIN (upper-cased) → resolved status label, from the bulk cache. */
+  statusByVin: Record<string, string | null>;
+  /** VIN → VehicleInRepair where the bulk rows carried the flag. Absent = unknown. */
+  inRepairByVin: Record<string, boolean>;
+}
+
+/**
+ * Pure roster row construction — the exclusion rules, mirroring the
+ * eligibility gate's truck-level checks and its fail-closed posture:
+ *   - BYOV, decided on the RAW number (padding first hides 5-digit BYOVs)
+ *   - AMS status In Repair / Declined Repair / Sent To Auction
+ *   - AMS VehicleInRepair === true wherever the bulk build captured the flag
+ *   - FAIL CLOSED on unreadable AMS facts: no VIN, VIN absent from the bulk
+ *     map, or an unresolvable status — excluded and counted as amsUnknown,
+ *     never silently listed (the gate blocks these trucks the same way).
+ */
+export function buildRosterRows(
+  candidates: Array<{
+    truckNumber: string;
+    displayNumber: string;
+    vin: string | null;
+    odometer: number;
+    odometerDate: string | null;
+    odometerSource: string | null;
+  }>,
+  assignments: Map<string, { ldap: string | null; name: string | null; district: string | null }>,
+  ams: RosterAmsFacts,
+): { trucks: RosterTruck[]; excluded: FleetRoster["excluded"] } {
+  const excluded = { byov: 0, amsBlocked: 0, amsUnknown: 0 };
+  const trucks: RosterTruck[] = [];
+  for (const c of candidates) {
+    // Same rule as evaluateCandidate: prefix check on the raw/display number.
+    if (/^88/.test((c.displayNumber || c.truckNumber).trim())) {
+      excluded.byov++;
+      continue;
+    }
+    const vin = c.vin ? c.vin.trim().toUpperCase() : null;
+    if (!vin || !(vin in ams.statusByVin)) {
+      excluded.amsUnknown++;
+      continue;
+    }
+    const amsStatus = ams.statusByVin[vin] ?? null;
+    if (amsStatus == null || amsStatus.trim() === "" || amsStatus.trim().toLowerCase() === "unknown") {
+      excluded.amsUnknown++;
+      continue;
+    }
+    if (isBlockingAmsStatus(amsStatus) || ams.inRepairByVin[vin] === true) {
+      excluded.amsBlocked++;
+      continue;
+    }
+    const assignment = assignments.get(c.truckNumber) ?? null;
+    trucks.push({
+      truckNumber: c.displayNumber || c.truckNumber,
+      vin: c.vin,
+      odometer: c.odometer,
+      odometerDate: c.odometerDate,
+      odometerSource: c.odometerSource,
+      amsStatus,
+      ldap: assignment?.ldap ?? null,
+      techName: assignment?.name ?? null,
+      district: assignment?.district ?? null,
+    });
+  }
+  return { trucks, excluded };
+}
+
+// Roster-side view of the AMS warm lifecycle. warmAmsTruckStatusCache logs
+// and swallows its own failures, so the roster tracks the outcome itself:
+// after a failed build (and until the cooldown lapses or a new build starts)
+// requests get a REAL error instead of an eternal {warming:true}.
+const ROSTER_AMS_FAILURE_COOLDOWN_MS = 2 * 60_000;
+let rosterAmsWarmInFlight = false;
+let rosterAmsLastFailure: { at: number; message: string } | null = null;
+
+/**
+ * The roster reuses the sweep's exact reads — loadOdometerCandidates() for
+ * the reconciled odometer and loadTechAssignments() for the TPMS technician —
+ * so a truck shown here always agrees with what the sweep would compute.
+ * Exclusion rules live in buildRosterRows above.
+ *
+ * The AMS map's cold build takes minutes (AMS pagination + the Snowflake
+ * supplement), so the roster never awaits it inline: it serves from the
+ * warmed cache, answers AmsMapWarmingError (→503) while a build runs, and
+ * surfaces a real error when the last build failed.
+ */
+export async function getFleetRoster(): Promise<FleetRoster> {
+  const {
+    getAmsTruckStatusMapCachedOnly,
+    getAmsInRepairMapCachedOnly,
+    isAmsTruckStatusCacheStale,
+    warmAmsTruckStatusCache,
+  } = await import("../ams-truck-status-cache");
+
+  const startWarm = () => {
+    rosterAmsWarmInFlight = true;
+    // warmAmsTruckStatusCache never rejects (it logs internally), so probe the
+    // cache afterwards to learn whether the build actually produced data.
+    warmAmsTruckStatusCache()
+      .then(() => {
+        const map = getAmsTruckStatusMapCachedOnly();
+        if (!map || Object.keys(map).length === 0) {
+          rosterAmsLastFailure = { at: Date.now(), message: "AMS truck-status build completed without data" };
+        } else {
+          rosterAmsLastFailure = null;
+        }
+      })
+      .catch((err: any) => {
+        rosterAmsLastFailure = { at: Date.now(), message: err?.message || String(err) };
+      })
+      .finally(() => {
+        rosterAmsWarmInFlight = false;
+      });
+  };
+
+  const amsMap = getAmsTruckStatusMapCachedOnly();
+  const cacheReady = !!amsMap && Object.keys(amsMap).length > 0;
+  const action = decideRosterAmsAction({
+    cacheReady,
+    buildInFlight: rosterAmsWarmInFlight,
+    lastFailureAt: rosterAmsLastFailure?.at ?? null,
+    now: Date.now(),
+    failureCooldownMs: ROSTER_AMS_FAILURE_COOLDOWN_MS,
+  });
+  if (action === "start_warm") {
+    startWarm();
+    throw new AmsMapWarmingError();
+  }
+  if (action === "warming") throw new AmsMapWarmingError();
+  if (action === "failed") {
+    throw new Error(
+      `AMS truck-status data could not be loaded (${rosterAmsLastFailure?.message || "build failed"}) — the roster cannot apply the repair/auction exclusions`,
+    );
+  }
+  if (isAmsTruckStatusCacheStale() && !rosterAmsWarmInFlight) {
+    // Serve the last-good map now; refresh behind the scenes for the next read.
+    startWarm();
+  }
+
+  const candidates = await loadOdometerCandidates();
+  const assignments = await loadTechAssignments(candidates.map((c) => c.truckNumber));
+  const { trucks, excluded } = buildRosterRows(candidates, assignments, {
+    statusByVin: amsMap!,
+    inRepairByVin: getAmsInRepairMapCachedOnly() ?? {},
+  });
+
+  const fresh: any = await db.execute(sql`
+    SELECT
+      (SELECT max(updated_at) FROM holman_vehicles_cache WHERE odometer IS NOT NULL) AS odo,
+      (SELECT max(updated_at) FROM tpms_tech_profiles) AS tech
+  `);
+  const row = (fresh.rows ?? fresh ?? [])[0] ?? {};
+
+  return {
+    trucks,
+    excluded,
+    odometerRefreshedAt: row.odo ? new Date(row.odo).toISOString() : null,
+    techRefreshedAt: row.tech ? new Date(row.tech).toISOString() : null,
+    generatedAt: new Date().toISOString(),
+  };
 }
 
 /**

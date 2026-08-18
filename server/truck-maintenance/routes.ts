@@ -34,6 +34,7 @@ import {
   SETTING_LAST_SWEEP_DATE,
   getSetting,
   getApproachingThresholdTrucks,
+  getFleetRoster,
   isCycleOpeningPaused,
   recordConfirmedSlot,
   retryCycle,
@@ -187,6 +188,31 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
       });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "approaching query failed" });
+    }
+  });
+
+  /**
+   * Fleet roster — read-only (Task #680).
+   *
+   * Every eligible truck (BYOV and AMS In Repair / Declined Repair / Sent To
+   * Auction excluded) with its reconciled odometer and TPMS technician, from
+   * the SAME reads the sweep performs. The underlying sources refresh on
+   * their existing daily cadences; this route always reads current rows and
+   * reports how fresh each source is. There is deliberately no write path.
+   */
+  app.get("/truck-maintenance/roster", requireStaff, async (_req, res) => {
+    try {
+      const roster = await getFleetRoster();
+      res.json(roster);
+    } catch (err: any) {
+      // Only the identified "AMS map still warming" condition is a retryable
+      // 503 the client polls through. Everything else (DB down, TPMS read
+      // failure, a code bug) is a real error and must surface as one —
+      // otherwise a permanent failure looks like an endless loading state.
+      if (err?.name === "AmsMapWarmingError") {
+        return res.status(503).json({ warming: true, message: err?.message });
+      }
+      res.status(500).json({ warming: false, message: err?.message || "roster failed" });
     }
   });
 

@@ -9,6 +9,10 @@ const amsApiService = new AmsApiService();
 
 let cache: { data: Record<string, string | null>; builtAt: number } | null = null;
 let oosCache: { data: Record<string, string | null>; builtAt: number } | null = null;
+// VIN → VehicleInRepair, captured from the bulk AMS rows WHEN the field is
+// present and parseable. AMS only guarantees this flag on the per-VIN
+// endpoint, so absence from this map means "not bulk-visible", not false.
+let inRepairCache: { data: Record<string, boolean>; builtAt: number } | null = null;
 const TTL_MS = 30 * 60 * 1000;
 
 async function build(): Promise<Record<string, string | null>> {
@@ -37,6 +41,7 @@ async function build(): Promise<Record<string, string | null>> {
 
   const result: Record<string, string | null> = {};
   const oosByVin: Record<string, string | null> = {};
+  const inRepairByVin: Record<string, boolean> = {};
   const pageSize = 500;
   let offset = 0;
   let totalFetched = 0;
@@ -100,6 +105,18 @@ async function build(): Promise<Record<string, string | null>> {
         v.outOfService ??
         null;
       oosByVin[vin] = oosRaw == null ? null : String(oosRaw).trim();
+      // Tri-state parse of the in-repair flag: only a value we can positively
+      // read as true/false lands in the map; anything else stays absent
+      // (= unknown), because the per-VIN endpoint is the only guaranteed
+      // carrier of this field.
+      const irRaw = v.VehicleInRepair ?? v.InRepair ?? v.inRepair ?? v.IsInRepair;
+      if (irRaw === true || irRaw === 1) inRepairByVin[vin] = true;
+      else if (irRaw === false || irRaw === 0) inRepairByVin[vin] = false;
+      else if (typeof irRaw === "string") {
+        const s = irRaw.trim().toLowerCase();
+        if (["y", "yes", "true", "1", "t"].includes(s)) inRepairByVin[vin] = true;
+        else if (["n", "no", "false", "0", "f"].includes(s)) inRepairByVin[vin] = false;
+      }
     }
 
     totalFetched += rows.length;
@@ -192,6 +209,7 @@ async function build(): Promise<Record<string, string | null>> {
   }
 
   oosCache = { data: oosByVin, builtAt: Date.now() };
+  inRepairCache = { data: inRepairByVin, builtAt: Date.now() };
   return result;
 }
 
@@ -246,6 +264,15 @@ export function getAmsTruckStatusMapCachedOnly():
   | Record<string, string | null>
   | null {
   return cache?.data ?? null;
+}
+
+/**
+ * VIN → VehicleInRepair from the last bulk build, cached-only. A VIN missing
+ * from this map is UNKNOWN (the bulk AMS rows do not reliably carry the
+ * flag), never an implied false — callers decide their own failure posture.
+ */
+export function getAmsInRepairMapCachedOnly(): Record<string, boolean> | null {
+  return inRepairCache?.data ?? null;
 }
 
 // Per-VIN fallback cache for VINs that don't appear in the bulk map.

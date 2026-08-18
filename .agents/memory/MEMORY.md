@@ -120,4 +120,5 @@
 - [CAS claims need crash recovery](cas-claim-crash-recovery.md) — a `pending` claim over an external side effect strands the row forever unless it is timestamped and recovered evidence-first (adopt what landed, release only when nothing did).
 - [AMS in-repair read source](ams-vehicle-inrepair-read.md) — GET /api/v1/vehicles/{VIN} returns VehicleInRepair + TruckStatus together; the client's repair surface is otherwise write-only, so it reads as unqueryable.
 - [Publish proposes DROP for boot-DDL tables](publish-drops-boot-ddl-tables.md) — publish diffs dev DB vs prod DB (tablesFilter does NOT protect fs_*); a dev app still on pre-merge code looks like "tables removed" → restart dev before publishing.
+- [AMS bulk VehicleInRepair capture](ams-bulk-inrepair-flag.md) — bulk rows DO carry the flag (tri-state cache map); label-only "In Repair" under-excludes ~700 trucks; fail closed+visible on unknown AMS facts; only an active build may say "warming".
 - [Odometer cycle & dry-run semantics](odometer-cycle-dry-run-semantics.md) — seed-never-fire on first sight, forward-only watermark, and NEVER stamp sent_at on a dry run or arming the gate goes silently dead.

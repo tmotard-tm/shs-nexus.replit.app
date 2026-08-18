@@ -612,3 +612,125 @@ test("employment status must be an explicit A", () => {
   }
   assert.equal(classifyEligibility(eligibleFacts({ employmentStatus: "a" })).eligible, true, "case-insensitive");
 });
+
+/* ------------------------------------------------------- fleet roster -- */
+
+import {
+  buildRosterRows,
+  decideRosterAmsAction,
+} from "../server/truck-maintenance/engine";
+
+function rosterCandidate(over: Partial<{
+  truckNumber: string; displayNumber: string; vin: string | null;
+  odometer: number; odometerDate: string | null; odometerSource: string | null;
+}> = {}) {
+  return {
+    truckNumber: "012345",
+    displayNumber: "12345",
+    vin: "1FTNE24W64HA00001",
+    odometer: 50_000,
+    odometerDate: "2026-08-01",
+    odometerSource: "telematics",
+    ...over,
+  };
+}
+
+test("roster: BYOV excluded on the RAW number, even 5-digit", () => {
+  const ams = { statusByVin: { X: "Assigned to Tech" }, inRepairByVin: {} };
+  const r = buildRosterRows(
+    [
+      rosterCandidate({ truckNumber: "088144", displayNumber: "88144", vin: "X" }),
+      rosterCandidate({ truckNumber: "881440", displayNumber: "881440", vin: "X" }),
+    ],
+    new Map(),
+    ams,
+  );
+  assert.equal(r.trucks.length, 0);
+  assert.equal(r.excluded.byov, 2);
+});
+
+test("roster: all three blocking AMS status labels excluded", () => {
+  for (const label of ["In Repair", "Declined Repair", "Sent To Auction"]) {
+    const r = buildRosterRows(
+      [rosterCandidate({ vin: "V1" })],
+      new Map(),
+      { statusByVin: { V1: label }, inRepairByVin: {} },
+    );
+    assert.equal(r.trucks.length, 0, `${label} must exclude`);
+    assert.equal(r.excluded.amsBlocked, 1, `${label} counted as blocked`);
+  }
+});
+
+test("roster: VehicleInRepair flag true excludes even with a benign label", () => {
+  const r = buildRosterRows(
+    [rosterCandidate({ vin: "V1" })],
+    new Map(),
+    { statusByVin: { V1: "Assigned to Tech" }, inRepairByVin: { V1: true } },
+  );
+  assert.equal(r.trucks.length, 0);
+  assert.equal(r.excluded.amsBlocked, 1);
+});
+
+test("roster: unknown flag with a benign label is included (flag absent = unknown, label is bulk authority)", () => {
+  const r = buildRosterRows(
+    [rosterCandidate({ vin: "V1" })],
+    new Map(),
+    { statusByVin: { V1: "Assigned to Tech" }, inRepairByVin: {} },
+  );
+  assert.equal(r.trucks.length, 1);
+});
+
+test("roster: missing/unreadable AMS facts FAIL CLOSED and are counted", () => {
+  const ams = { statusByVin: { KNOWN: "Assigned to Tech", NULLSTATUS: null as string | null, UNK: "Unknown" }, inRepairByVin: {} };
+  const r = buildRosterRows(
+    [
+      rosterCandidate({ vin: null }),                 // no VIN at all
+      rosterCandidate({ vin: "MISSING" }),            // VIN absent from map
+      rosterCandidate({ vin: "NULLSTATUS" }),         // VIN present, status null
+      rosterCandidate({ vin: "UNK" }),                // unresolvable label
+      rosterCandidate({ vin: "known" }),              // case-normalized, readable
+    ],
+    new Map(),
+    ams,
+  );
+  assert.equal(r.trucks.length, 1);
+  assert.equal(r.excluded.amsUnknown, 4);
+});
+
+test("roster: unassigned trucks are kept with null tech fields; assigned get TPMS fields", () => {
+  const assignments = new Map([
+    ["012345", { ldap: "jdoe", name: "J. Doe", district: "8320" }],
+  ]);
+  const r = buildRosterRows(
+    [rosterCandidate(), rosterCandidate({ truckNumber: "099999", displayNumber: "99999", vin: "V2" })],
+    assignments,
+    { statusByVin: { "1FTNE24W64HA00001": "Assigned to Tech", V2: "Spare" }, inRepairByVin: {} },
+  );
+  assert.equal(r.trucks.length, 2);
+  const assigned = r.trucks.find((t) => t.truckNumber === "12345")!;
+  assert.equal(assigned.ldap, "jdoe");
+  assert.equal(assigned.district, "8320");
+  const spare = r.trucks.find((t) => t.truckNumber === "99999")!;
+  assert.equal(spare.ldap, null);
+  assert.equal(spare.techName, null);
+});
+
+test("roster AMS action: ready cache serves regardless of other state", () => {
+  assert.equal(decideRosterAmsAction({ cacheReady: true, buildInFlight: true, lastFailureAt: 0, now: 1, failureCooldownMs: 999 }), "serve");
+});
+
+test("roster AMS action: build in flight → warming", () => {
+  assert.equal(decideRosterAmsAction({ cacheReady: false, buildInFlight: true, lastFailureAt: null, now: 0, failureCooldownMs: 999 }), "warming");
+});
+
+test("roster AMS action: recent failure with no build running is a REAL error, not eternal warming", () => {
+  assert.equal(decideRosterAmsAction({ cacheReady: false, buildInFlight: false, lastFailureAt: 1_000, now: 60_000, failureCooldownMs: 120_000 }), "failed");
+});
+
+test("roster AMS action: failure past cooldown → start a fresh warm", () => {
+  assert.equal(decideRosterAmsAction({ cacheReady: false, buildInFlight: false, lastFailureAt: 1_000, now: 200_000, failureCooldownMs: 120_000 }), "start_warm");
+});
+
+test("roster AMS action: cold and idle → start warm", () => {
+  assert.equal(decideRosterAmsAction({ cacheReady: false, buildInFlight: false, lastFailureAt: null, now: 0, failureCooldownMs: 120_000 }), "start_warm");
+});
