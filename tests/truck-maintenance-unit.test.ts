@@ -14,8 +14,11 @@ import test from "node:test";
 import {
   MAINTENANCE_BLOCK_DURATION_MIN,
   MAINTENANCE_TRIGGER_MILES,
+  MAINTENANCE_WINDOW_DAYS,
+  buildMaintenanceConfirmationMessage,
   buildMaintenanceMessage,
   getMaintenanceActivityType,
+  getMaintenanceApproachingMiles,
   getMaintenanceBookingLeadDays,
   isMaintenanceActivityTypeConfirmed,
   isMaintenanceBookingLive,
@@ -33,7 +36,9 @@ import {
   classifyTextClaim,
   computeBookingDueAt,
   computeWatermarkAdvance,
+  computeWindowEnd,
   isPlausibleOdometer,
+  isWindowStale,
   resolveBookingDate,
   shouldOpenCycle,
   shouldRunDailySweep,
@@ -191,6 +196,98 @@ test("the SMS body is exactly the approved wording", () => {
     + "We ask you bring it in to your nearest Pep Boys repair shop or equivalent shop in order "
     + "to get its maintenance service done.",
   );
+});
+
+/* ------------------------------------------ Task #676: window math ---- */
+
+test("MAINTENANCE_WINDOW_DAYS is 8 (per spec)", () => {
+  assert.equal(MAINTENANCE_WINDOW_DAYS, 8);
+});
+
+test("computeWindowEnd adds exactly MAINTENANCE_WINDOW_DAYS calendar days", () => {
+  const end = computeWindowEnd("2026-08-18");
+  assert.equal(end, "2026-08-26", "8 days after 2026-08-18 is 2026-08-26");
+});
+
+test("computeWindowEnd works across month boundaries", () => {
+  assert.equal(computeWindowEnd("2026-08-27"), "2026-09-04");
+  assert.equal(computeWindowEnd("2026-12-28"), "2027-01-05");
+  // leap year
+  assert.equal(computeWindowEnd("2024-02-23"), "2024-03-02");
+});
+
+test("computeWindowEnd accepts a custom days override", () => {
+  assert.equal(computeWindowEnd("2026-08-18", 0), "2026-08-18");
+  assert.equal(computeWindowEnd("2026-08-18", 1), "2026-08-19");
+  assert.equal(computeWindowEnd("2026-08-18", 14), "2026-09-01");
+});
+
+test("isWindowStale: a future window end is not stale", () => {
+  assert.equal(isWindowStale("2099-12-31"), false);
+  assert.equal(isWindowStale(null), false);
+  assert.equal(isWindowStale(undefined), false);
+});
+
+test("isWindowStale: a past window end is stale", () => {
+  // Inject a fixed today date so the test is deterministic.
+  assert.equal(isWindowStale("2020-01-01", "2026-08-18"), true);
+  // today exactly = stale (end has passed)
+  assert.equal(isWindowStale("2026-08-17", "2026-08-18"), true);
+});
+
+test("isWindowStale: the same day as today is NOT stale", () => {
+  assert.equal(isWindowStale("2026-08-18", "2026-08-18"), false);
+});
+
+/* ---------------------------------- Task #676: confirmation message --- */
+
+test("the confirmation SMS body is verbatim per the spec", () => {
+  const body = buildMaintenanceConfirmationMessage("Monday, September 1 at 08:00 AM");
+  assert.equal(
+    body,
+    "Your Truck Maintenance slot is scheduled for Monday, September 1 at 08:00 AM — "
+    + "You are required to bring you Sears van to the nearest PepBoys or equivalent shop "
+    + "for an oil change and general maintenance service. "
+    + "You can also call Holman at 1-800-CAR-CARE  to be directed to the nearest Pepboys "
+    + "or equivalent repair shop. ",
+  );
+});
+
+test("the confirmation message interpolates the date/time verbatim", () => {
+  const dt = "Tuesday, September 2 at 09:30 AM";
+  const body = buildMaintenanceConfirmationMessage(dt);
+  assert.ok(body.startsWith(`Your Truck Maintenance slot is scheduled for ${dt}`));
+});
+
+/* ---------------------------------- Task #676: approaching threshold -- */
+
+test("getMaintenanceApproachingMiles defaults to 500", () => {
+  const saved = process.env.TRUCK_MAINTENANCE_APPROACHING_MILES;
+  try {
+    delete process.env.TRUCK_MAINTENANCE_APPROACHING_MILES;
+    assert.equal(getMaintenanceApproachingMiles(), 500);
+  } finally {
+    if (saved === undefined) delete process.env.TRUCK_MAINTENANCE_APPROACHING_MILES;
+    else process.env.TRUCK_MAINTENANCE_APPROACHING_MILES = saved;
+  }
+});
+
+test("getMaintenanceApproachingMiles is configurable within 50–2000", () => {
+  const saved = process.env.TRUCK_MAINTENANCE_APPROACHING_MILES;
+  try {
+    process.env.TRUCK_MAINTENANCE_APPROACHING_MILES = "750";
+    assert.equal(getMaintenanceApproachingMiles(), 750);
+
+    // Out of range values fall back to default.
+    process.env.TRUCK_MAINTENANCE_APPROACHING_MILES = "10";
+    assert.equal(getMaintenanceApproachingMiles(), 500, "below 50 → default");
+
+    process.env.TRUCK_MAINTENANCE_APPROACHING_MILES = "9999";
+    assert.equal(getMaintenanceApproachingMiles(), 500, "above 2000 → default");
+  } finally {
+    if (saved === undefined) delete process.env.TRUCK_MAINTENANCE_APPROACHING_MILES;
+    else process.env.TRUCK_MAINTENANCE_APPROACHING_MILES = saved;
+  }
 });
 
 /* ------------------------------------------------------- eligibility ----- */

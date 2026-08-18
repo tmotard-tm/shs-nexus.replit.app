@@ -21,7 +21,9 @@ import { db } from "../db";
 import {
   MAINTENANCE_BLOCK_DURATION_MIN,
   MAINTENANCE_TRIGGER_MILES,
+  MAINTENANCE_WINDOW_DAYS,
   getMaintenanceActivityType,
+  getMaintenanceApproachingMiles,
   getMaintenanceBookingLeadDays,
   isMaintenanceActivityTypeConfirmed,
   isMaintenanceBookingLive,
@@ -31,7 +33,9 @@ import { EXCLUSION_LABELS } from "./eligibility";
 import {
   SETTING_LAST_SWEEP_DATE,
   getSetting,
+  getApproachingThresholdTrucks,
   isCycleOpeningPaused,
+  recordConfirmedSlot,
   retryCycle,
   runDailySweep,
   runMaintenancePipeline,
@@ -133,15 +137,22 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
       const openOnly = String(req.query.openOnly ?? "") === "true";
 
       const rows: any = await db.execute(sql`
-        SELECT id, truck_number, vin, ldap, tech_name, district, status,
+        SELECT id, truck_number, vin, ldap, enterprise_id, tech_name, district, status,
                odometer_at_trigger, watermark_at_trigger, miles_since_watermark,
                odometer_source, odometer_date, exclusion_reason, exclusion_detail,
                eligibility_checked_at, text_status, text_body, text_detail,
                text_claimed_at, texted_at,
+               to_char(trigger_date, 'YYYY-MM-DD') AS trigger_date,
+               to_char(booking_window_start, 'YYYY-MM-DD') AS booking_window_start,
+               to_char(booking_window_end, 'YYYY-MM-DD') AS booking_window_end,
                booking_due_at, booking_date, booking_status, booking_project_name,
                booking_project_id, booking_detail, booking_claimed_at, booking_attempted_at,
                booking_test_status, booking_test_detail, booking_test_project_name, booking_test_at,
-               booked_at, attempts, last_error,
+               booked_at, confirmation_status,
+               to_char(confirmed_slot_date::date, 'YYYY-MM-DD') AS confirmed_slot_date,
+               confirmed_slot_time,
+               follow_up_claimed_at, follow_up_sent_at, follow_up_message_id, follow_up_detail,
+               attempts, last_error,
                opened_at, closed_at, updated_at
           FROM fs_truck_maintenance_cycles
          WHERE (${status} = '' OR status = ${status})
@@ -152,6 +163,57 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
       res.json({ cycles: (rows.rows ?? []) });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "cycle list failed" });
+    }
+  });
+
+  /**
+   * Approaching-threshold view — read-only.
+   *
+   * Returns trucks within N miles of the 5,500-mile trigger that have no open
+   * cycle yet, enriched with the currently-assigned technician from TPMS.
+   * N defaults to 500 (TRUCK_MAINTENANCE_APPROACHING_MILES env).
+   */
+  app.get("/truck-maintenance/approaching", requireStaff, async (req: any, res) => {
+    try {
+      const overrideMiles = req.query.miles !== undefined
+        ? Number.parseInt(String(req.query.miles), 10)
+        : undefined;
+      const approachingMiles = Number.isFinite(overrideMiles!) ? overrideMiles! : getMaintenanceApproachingMiles();
+      const trucks = await getApproachingThresholdTrucks(approachingMiles);
+      res.json({
+        approachingMiles,
+        triggerMiles: MAINTENANCE_TRIGGER_MILES,
+        trucks,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "approaching query failed" });
+    }
+  });
+
+  /**
+   * Record the DCA-confirmed slot on a booked cycle, unlocking the
+   * confirmation follow-up text. The next pipeline sweep picks up any cycle
+   * with `confirmation_status = 'confirmed'` and sends the SMS.
+   *
+   * Body: { slotDate: "YYYY-MM-DD", slotTime?: "HH:MM", force?: boolean }
+   */
+  app.post("/truck-maintenance/cycles/:id/confirm", requireStaff, async (req: any, res) => {
+    try {
+      const id = Number.parseInt(String(req.params.id), 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: "bad cycle id" });
+      const slotDate = String(req.body?.slotDate ?? "").trim();
+      const slotTime = req.body?.slotTime ? String(req.body.slotTime).trim() : null;
+      if (!slotDate) return res.status(400).json({ message: "slotDate is required (YYYY-MM-DD)" });
+      const result = await recordConfirmedSlot(id, {
+        slotDate,
+        slotTime,
+        actor: actorOf(req),
+        force: req.body?.force === true,
+      });
+      if (!result.ok) return res.status(409).json({ message: result.error });
+      res.json({ success: true, cycleId: id, slotDate, slotTime });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "confirm slot failed" });
     }
   });
 

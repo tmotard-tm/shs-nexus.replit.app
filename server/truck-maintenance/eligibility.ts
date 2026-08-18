@@ -64,7 +64,7 @@ export const EXCLUSION_LABELS: Record<ExclusionCode, string> = {
   no_contact: "No communications contact for the technician",
   no_phone: "No reachable phone on file",
   opted_out: "Technician opted out of SMS",
-  no_racf: "No active RACF id for the technician (cannot file a route block)",
+  no_racf: "Technician employment status could not be verified (active status required to file a block)",
 };
 
 export interface EligibilityFacts {

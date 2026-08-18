@@ -239,7 +239,7 @@ function defaultSubmitterEmail(): string {
 }
 
 export interface StandardActivityArgs {
-  /** TechnicianId. RACF string, NOT employee_id — see the identity note in the spec. */
+  /** TechnicianId. Enterprise ID (LDAP) of the technician the activity is booked for. */
   techLdap: string;
   /** Unit = district_no. Required by the payload. */
   unit: string;
@@ -286,6 +286,21 @@ export interface StandardActivityArgs {
   rowNotes?: string;
   submittedBy?: string | null;
   submitterEmail?: string | null;
+  /**
+   * Override for the window start date sent as RequestedStartDate.
+   * When provided, RequestedCompletionDate is set to `requestedEndDate` (if
+   * given) or this value, and endDateFixed is cleared so the scheduler may
+   * pick any slot in the window. When absent, the existing behaviour (start
+   * = end = `date`, endDateFixed = true) is preserved.
+   */
+  requestedStartDate?: string;
+  /**
+   * End of the scheduling window. Used as RequestedCompletionDate; only
+   * meaningful when requestedStartDate is also provided. When the start and
+   * end differ, endDateFixed is set to false (the scheduler picks within the
+   * window). When absent, endDateFixed remains true.
+   */
+  requestedEndDate?: string;
   /**
    * When false, the project name is prefixed TEST. The receiving system does
    * not process TEST projects, and no SMS may ever be sent for one. This is
@@ -387,10 +402,18 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
         CheckFrozen: "TRUE",
         // `Date` alone does NOT pin the day. RequestedStartDate is the hard
         // boundary the DCA cannot schedule before; RequestedCompletionDate is
-        // only a target unless endDateFixed is true. Pin all three.
-        RequestedStartDate: args.date,
-        RequestedCompletionDate: args.date,
-        endDateFixed: true,
+        // only a target unless endDateFixed is true.
+        //
+        // Window mode (requestedStartDate + requestedEndDate): the caller
+        // provides a scheduling window and the DCA picks a concrete slot
+        // within it. endDateFixed is false so the system can place the block
+        // anywhere between start and end.
+        //
+        // Pinned mode (default, no window dates): start = end = Date and
+        // endDateFixed = true, exactly as before.
+        RequestedStartDate: args.requestedStartDate ?? args.date,
+        RequestedCompletionDate: args.requestedEndDate ?? args.requestedStartDate ?? args.date,
+        endDateFixed: args.requestedEndDate ? false : true,
         RepeatOnDays: "",
         StartTimeRequest: args.startTimeRequest ?? ROUTE_BLOCK_START_TIME_REQUEST,
         Unit: args.unit,

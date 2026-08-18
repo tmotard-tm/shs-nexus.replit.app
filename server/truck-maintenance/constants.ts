@@ -1,5 +1,7 @@
 /**
- * Truck Maintenance SMS + 4-hour booking workflow — tunables and gates.
+ * Truck Maintenance SMS + 4-hour booking workflow — tunables, gates, and
+ * messages. Task #676 additions: Enterprise-ID-based booking, 8-day request
+ * window, approaching-threshold view, and confirmation follow-up text.
  *
  * Routine preventive maintenance is driven by the odometer: when a truck's
  * reconciled odometer runs MAINTENANCE_TRIGGER_MILES past the mileage at its
@@ -35,6 +37,14 @@ export const ODOMETER_MAX = 600_000;
 export const MAINTENANCE_BLOCK_DURATION_MIN = 240;
 
 /**
+ * How wide the scheduling window is. RequestedStartDate = trigger date,
+ * RequestedEndDate = trigger date + this many days. The DCA scheduler picks
+ * a concrete slot within the window; no single day is locked in by the
+ * filing.
+ */
+export const MAINTENANCE_WINDOW_DAYS = 8;
+
+/**
  * "A few days after the text." The booking is filed this many days after the
  * heads-up SMS actually went out (never after a dry-run preview).
  */
@@ -44,8 +54,27 @@ export function getMaintenanceBookingLeadDays(): number {
   return 3;
 }
 
+/**
+ * How many miles below the 5,500-mile trigger the approaching-threshold
+ * early-warning view shows. A truck whose odometer-minus-watermark is
+ * >= (MAINTENANCE_TRIGGER_MILES - N) but < MAINTENANCE_TRIGGER_MILES is
+ * "approaching". Default 500 miles; range clamped 50–2,000.
+ */
+export function getMaintenanceApproachingMiles(): number {
+  const raw = Number.parseInt((process.env.TRUCK_MAINTENANCE_APPROACHING_MILES ?? "").trim(), 10);
+  if (Number.isFinite(raw) && raw >= 50 && raw <= 2_000) return raw;
+  return 500;
+}
+
 /** Project-name prefix, and therefore the upstream 409 duplicate key. */
 export const MAINTENANCE_PROJECT_LABEL = "Truck Maintenance";
+
+/**
+ * Per-message label in the Fleet Communications inbox for the confirmation
+ * follow-up text. Separate from the heads-up category so opt-out and history
+ * queries can distinguish the two message types.
+ */
+export const MAINTENANCE_CONFIRMATION_COMMS_CATEGORY = "truck_maintenance_confirmation";
 
 /** Per-message label in the Fleet Communications inbox. */
 export const MAINTENANCE_COMMS_CATEGORY = "truck_maintenance";
@@ -128,6 +157,24 @@ export function buildMaintenanceMessage(enterpriseId: string, truckNumber: strin
     + `We will be booking a 4 hour 'Truck Maintenance' slot for you in the coming days. `
     + `We ask you bring it in to your nearest Pep Boys repair shop or equivalent shop in order `
     + `to get its maintenance service done.`
+  );
+}
+
+/**
+ * Confirmation follow-up text sent once the booked slot is confirmed with a
+ * concrete date and time. Wording is verbatim from the task spec (Luca,
+ * 2026-08-18) — do not paraphrase.
+ *
+ * @param dateTime  Human-readable representation of the confirmed slot, e.g.
+ *                  "Monday, September 1 at 08:00 AM". The caller formats it.
+ */
+export function buildMaintenanceConfirmationMessage(dateTime: string): string {
+  return (
+    `Your Truck Maintenance slot is scheduled for ${dateTime} — `
+    + `You are required to bring you Sears van to the nearest PepBoys or equivalent shop `
+    + `for an oil change and general maintenance service. `
+    + `You can also call Holman at 1-800-CAR-CARE  to be directed to the nearest Pepboys `
+    + `or equivalent repair shop. `
   );
 }
 

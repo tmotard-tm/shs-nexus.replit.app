@@ -124,6 +124,61 @@ ALTER TABLE "fs_truck_maintenance_cycles"
 ALTER TABLE "fs_truck_maintenance_cycles"
   ADD COLUMN IF NOT EXISTS "booking_test_at" timestamp;
 
+-- The Enterprise ID the activity is booked under. Stored explicitly so the
+-- booking step has a stable identity even if the TPMS assignment changes
+-- between the text and the filing. Distinct from ldap in name for clarity:
+-- ldap is the lookup key; enterprise_id is the value sent to the DCA API.
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "enterprise_id" varchar(60);
+
+-- The trigger date is the ET calendar day on which the odometer threshold was
+-- crossed and the heads-up text went out. It anchors the scheduling window:
+--   booking_window_start = trigger_date
+--   booking_window_end   = trigger_date + MAINTENANCE_WINDOW_DAYS
+-- Stored on the cycle (not recomputed) so retries all produce the same project
+-- name and the same window — a re-computed date would defeat the upstream 409.
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "trigger_date" date;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "booking_window_start" date;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "booking_window_end" date;
+
+-- Confirmation follow-up state.
+--
+--   null                 — booking not yet confirmed; follow-up not sent.
+--   confirmed            — a confirmed slot (date + time) has been recorded;
+--                          ready for the follow-up text sweep to pick up.
+--                          Also the state after a dry-run pass: the sweep will
+--                          retry the real send once the live gate is armed.
+--                          IMPORTANT: a dry-run sweep must NOT advance this to
+--                          follow_up_sent, or the tech never receives the text.
+--   follow_up_sent       — the confirmation SMS was actually sent or queued
+--                          (only set when the comms lane returned "sent" or
+--                          "queued"); never re-sent on re-runs.
+--   follow_up_failed     — the send was attempted and failed; retryable.
+--   follow_up_skipped    — opted out / no phone at follow-up time; informational.
+--
+-- A booked cycle without confirmation_status stays visible on the monitoring
+-- screen as "booked — awaiting confirmation" so operators can see it.
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "confirmation_status" text;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "confirmed_slot_date" text;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "confirmed_slot_time" text;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "follow_up_sent_at" timestamp;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "follow_up_message_id" text;
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "follow_up_detail" text;
+-- CAS claim for the confirmation send. Set before calling the comms provider,
+-- cleared once the result is persisted. A claim older than TEXT_CLAIM_STALE_MS
+-- without a follow_up_sent_at is treated as orphaned and released by recovery.
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "follow_up_claimed_at" timestamp;
+
 CREATE TABLE IF NOT EXISTS "fs_truck_maintenance_settings" (
   "key" text PRIMARY KEY,
   "value" text,

@@ -28,14 +28,22 @@ import {
   PlayCircle,
   RefreshCw,
   ShieldAlert,
+  TrendingUp,
 } from "lucide-react";
 
 /**
- * Truck Maintenance monitoring screen (Task #664).
+ * Truck Maintenance monitoring screen (Task #664 + #676).
  *
  * Read-only by design: staff MONITOR this workflow, they do not drive it. The
  * only writes are the three a human genuinely needs — retry one failed cycle,
  * pause cycle-opening, and run the sweep now.
+ *
+ * Task #676 additions:
+ *  - The Cycle table now shows the Enterprise ID, the 8-day scheduling window,
+ *    and the confirmation follow-up state.
+ *  - A new "Approaching threshold" section below the cycle table shows trucks
+ *    within N miles of the 5,500-mile trigger that do not yet have an open
+ *    cycle, so staff can see who is coming up before any text goes out.
  *
  * The page leads with the gates, because "why has nothing gone out?" is nearly
  * always answered by a gate rather than by the cycle table.
@@ -64,6 +72,8 @@ interface Cycle {
   truck_number: string;
   vin: string | null;
   ldap: string | null;
+  /** Enterprise ID used as TechnicianId in the DCA booking payload. */
+  enterprise_id: string | null;
   tech_name: string | null;
   district: string | null;
   status: string;
@@ -78,6 +88,9 @@ interface Cycle {
   text_body: string | null;
   text_detail: string | null;
   texted_at: string | null;
+  trigger_date: string | null;
+  booking_window_start: string | null;
+  booking_window_end: string | null;
   booking_due_at: string | null;
   booking_date: string | null;
   booking_status: string | null;
@@ -89,10 +102,29 @@ interface Cycle {
   booking_test_project_name: string | null;
   booking_test_at: string | null;
   booked_at: string | null;
+  confirmation_status: string | null;
+  confirmed_slot_date: string | null;
+  confirmed_slot_time: string | null;
+  follow_up_claimed_at: string | null;
+  follow_up_sent_at: string | null;
   attempts: number;
   last_error: string | null;
   opened_at: string;
   closed_at: string | null;
+}
+
+interface ApproachingTruck {
+  truckNumber: string;
+  vin: string | null;
+  odometer: number;
+  watermark: number;
+  milesSinceWatermark: number;
+  milesRemaining: number;
+  odometerDate: string | null;
+  odometerSource: string | null;
+  ldap: string | null;
+  techName: string | null;
+  district: string | null;
 }
 
 function fmtDate(ts: string | null): string {
@@ -162,6 +194,14 @@ function GateCard(props: {
 export default function TruckMaintenance() {
   const { toast } = useToast();
   const [showClosed, setShowClosed] = useState(false);
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [slotDate, setSlotDate] = useState("");
+  const [slotTime, setSlotTime] = useState("");
+
+  const approachingQuery = useQuery<{ trucks: ApproachingTruck[]; approachingMiles: number; triggerMiles: number }>({
+    queryKey: ["/api/fs/truck-maintenance/approaching"],
+    refetchInterval: 120_000,
+  });
 
   const statusQuery = useQuery<WorkflowStatus>({
     queryKey: ["/api/fs/truck-maintenance/status"],
@@ -183,6 +223,7 @@ export default function TruckMaintenance() {
   function invalidate() {
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/status"] });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/cycles"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/approaching"] });
   }
 
   const pauseMutation = useMutation({
@@ -237,6 +278,29 @@ export default function TruckMaintenance() {
       });
     },
     onError: (e: any) => toast({ title: "Retry failed", description: e?.message, variant: "destructive" }),
+  });
+
+  const confirmSlotMutation = useMutation({
+    mutationFn: async (args: { id: number; slotDate: string; slotTime?: string }) => {
+      const res = await apiRequest(
+        "POST",
+        `/api/fs/truck-maintenance/cycles/${args.id}/confirm`,
+        { slotDate: args.slotDate, slotTime: args.slotTime || null },
+      );
+      if (!res.ok) {
+        const body = await res.json();
+        throw new Error(body?.message ?? `HTTP ${res.status}`);
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      invalidate();
+      setConfirmingId(null);
+      setSlotDate("");
+      setSlotTime("");
+      toast({ title: "Confirmed slot recorded", description: "The follow-up text will be sent on the next sweep." });
+    },
+    onError: (e: any) => toast({ title: "Could not record slot", description: e?.message, variant: "destructive" }),
   });
 
   const status = statusQuery.data;
@@ -415,8 +479,14 @@ export default function TruckMaintenance() {
                         {c.district ? <div className="text-xs text-muted-foreground">Unit {c.district}</div> : null}
                       </TableCell>
                       <TableCell>
-                        {c.ldap ?? "—"}
+                        {/* Enterprise ID is the identifier the booking is filed
+                            under (TechnicianId in the DCA payload). Rendered
+                            prominently so staff can match it to DCA records. */}
+                        {c.enterprise_id ?? c.ldap ?? "—"}
                         {c.tech_name ? <div className="text-xs text-muted-foreground">{c.tech_name}</div> : null}
+                        {c.enterprise_id && c.enterprise_id !== c.ldap && c.ldap
+                          ? <div className="text-xs text-muted-foreground">ldap: {c.ldap}</div>
+                          : null}
                       </TableCell>
                       <TableCell><StatusBadge status={c.status} /></TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -446,13 +516,37 @@ export default function TruckMaintenance() {
                         {c.booking_status === "unknown" || c.booking_status === "needs_review" ? (
                           <span className="text-purple-800 font-medium">{c.booking_status}</span>
                         ) : (c.booking_status ?? "—")}
-                        {c.booking_date ? <div className="text-muted-foreground">for {c.booking_date}</div> : null}
+                        {/* Scheduling window (Task #676) */}
+                        {c.booking_window_start && c.booking_window_end
+                          ? (
+                            <div className="text-muted-foreground">
+                              window: {String(c.booking_window_start).slice(0, 10)} –{" "}
+                              {String(c.booking_window_end).slice(0, 10)}
+                            </div>
+                          )
+                          : c.booking_date
+                            ? <div className="text-muted-foreground">for {c.booking_date}</div>
+                            : null}
                         {c.booking_project_name
                           ? <div className="text-muted-foreground">{c.booking_project_name}</div>
                           : null}
                         {!c.booking_status && c.booking_due_at
                           ? <div className="text-muted-foreground">due {fmtDate(c.booking_due_at)}</div>
                           : null}
+                        {/* Confirmation follow-up state (Task #676) */}
+                        {c.confirmation_status === "follow_up_sent"
+                          ? (
+                            <div className="text-green-700">
+                              ✓ confirmation texted{c.follow_up_sent_at ? ` ${fmtDate(c.follow_up_sent_at)}` : ""}
+                            </div>
+                          )
+                          : c.confirmation_status === "confirmed"
+                            ? <div className="text-amber-700">slot confirmed — text pending</div>
+                            : c.confirmation_status === "follow_up_failed"
+                              ? <div className="text-red-700">confirmation text failed</div>
+                              : c.booking_status === "filed_live" || c.booking_status === "duplicate"
+                                ? <div className="text-muted-foreground">awaiting slot confirmation</div>
+                                : null}
                         {/* TEST evidence is shown separately because it is a
                             separate upstream row — it never stands in for the
                             real block and never blocks it. */}
@@ -485,7 +579,61 @@ export default function TruckMaintenance() {
                         ) : "—"}
                       </TableCell>
                       <TableCell className="text-right">
-                        {c.closed_at ? (
+                        {/* Booked cycles are closed — show the confirm-slot
+                            form instead of retry (which would double-book). */}
+                        {(c.booking_status === "filed_live" || c.booking_status === "duplicate") ? (
+                          <div className="space-y-1">
+                            {c.confirmation_status === "follow_up_sent" || c.follow_up_sent_at ? (
+                              <span className="text-xs text-green-700">✓ follow-up sent</span>
+                            ) : confirmingId === c.id ? (
+                              <div className="space-y-1 text-left" data-testid={`confirm-form-${c.id}`}>
+                                <input
+                                  type="date"
+                                  value={slotDate}
+                                  onChange={(e) => setSlotDate(e.target.value)}
+                                  className="text-xs border rounded px-1 py-0.5 w-28"
+                                />
+                                <input
+                                  type="time"
+                                  value={slotTime}
+                                  onChange={(e) => setSlotTime(e.target.value)}
+                                  placeholder="HH:MM (opt)"
+                                  className="text-xs border rounded px-1 py-0.5 w-24"
+                                />
+                                <div className="flex gap-1 justify-end">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => { setConfirmingId(null); setSlotDate(""); setSlotTime(""); }}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      if (!slotDate) return;
+                                      confirmSlotMutation.mutate({ id: c.id, slotDate, slotTime: slotTime || undefined });
+                                    }}
+                                    disabled={!slotDate || confirmSlotMutation.isPending}
+                                    data-testid={`button-confirm-submit-${c.id}`}
+                                  >
+                                    Save
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => { setConfirmingId(c.id); setSlotDate(c.confirmed_slot_date ?? ""); setSlotTime(c.confirmed_slot_time ?? ""); }}
+                                data-testid={`button-record-slot-${c.id}`}
+                              >
+                                <CalendarClock className="h-3 w-3 mr-1" />
+                                {c.confirmed_slot_date ? "Update slot" : "Record slot"}
+                              </Button>
+                            )}
+                          </div>
+                        ) : c.closed_at ? (
                           <span className="text-xs text-muted-foreground">closed</span>
                         ) : (
                           <div className="flex justify-end gap-1">
@@ -536,6 +684,77 @@ export default function TruckMaintenance() {
                             ) : null}
                           </div>
                         )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Approaching threshold — read-only early-warning view (Task #676) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Approaching threshold
+          </CardTitle>
+          <CardDescription>
+            Trucks within{" "}
+            {approachingQuery.data ? fmtMiles(approachingQuery.data.approachingMiles) : "500"} miles of the{" "}
+            {approachingQuery.data ? fmtMiles(approachingQuery.data.triggerMiles) : "5,500"}-mile trigger that do not
+            yet have an open cycle. Purely informational — no texts or bookings originate from this view.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {approachingQuery.isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : approachingQuery.isError ? (
+            <p className="text-sm text-red-700 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Could not load approaching trucks.
+            </p>
+          ) : !approachingQuery.data || approachingQuery.data.trucks.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No trucks approaching the threshold right now.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Truck</TableHead>
+                    <TableHead>Technician</TableHead>
+                    <TableHead>District</TableHead>
+                    <TableHead className="text-right">Current odometer</TableHead>
+                    <TableHead className="text-right">Since service</TableHead>
+                    <TableHead className="text-right">Miles remaining</TableHead>
+                    <TableHead>Reading date</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {approachingQuery.data.trucks.map((t) => (
+                    <TableRow key={t.truckNumber}>
+                      <TableCell className="font-medium">{t.truckNumber}</TableCell>
+                      <TableCell>
+                        {t.ldap ?? "—"}
+                        {t.techName
+                          ? <div className="text-xs text-muted-foreground">{t.techName}</div>
+                          : null}
+                      </TableCell>
+                      <TableCell>{t.district ?? "—"}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMiles(t.odometer)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMiles(t.milesSinceWatermark)}</TableCell>
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {fmtMiles(t.milesRemaining)}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {t.odometerDate ? String(t.odometerDate).slice(0, 10) : "—"}
+                        {t.odometerSource
+                          ? <div>{t.odometerSource}</div>
+                          : null}
                       </TableCell>
                     </TableRow>
                   ))}

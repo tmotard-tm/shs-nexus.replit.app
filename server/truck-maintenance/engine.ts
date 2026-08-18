@@ -48,15 +48,19 @@ import { toCanonical } from "../vehicle-number-utils";
 import {
   MAINTENANCE_BLOCK_DURATION_MIN,
   MAINTENANCE_COMMS_CATEGORY,
+  MAINTENANCE_CONFIRMATION_COMMS_CATEGORY,
   MAINTENANCE_PROJECT_LABEL,
   MAINTENANCE_PROJECT_NOTES,
   MAINTENANCE_START_TIME,
   MAINTENANCE_TRIGGER_MILES,
+  MAINTENANCE_WINDOW_DAYS,
   ODOMETER_MAX,
   ODOMETER_MIN,
+  buildMaintenanceConfirmationMessage,
   buildMaintenanceMessage,
   buildMaintenanceRowNotes,
   getMaintenanceActivityType,
+  getMaintenanceApproachingMiles,
   getMaintenanceBookingLeadDays,
   isMaintenanceBookingLive,
   isMaintenanceSmsLive,
@@ -67,6 +71,7 @@ import {
   loadTechAssignments,
   resolveTechRacf,
   type EligibilityContext,
+  type TechAssignment,
   type TruckCandidate,
 } from "./eligibility";
 
@@ -160,6 +165,32 @@ export function computeBookingDueAt(textedAt: Date, leadDays: number = getMainte
   const due = new Date(textedAt.getTime());
   due.setUTCDate(due.getUTCDate() + leadDays);
   return due;
+}
+
+/**
+ * Compute the end of the scheduling window: trigger date + MAINTENANCE_WINDOW_DAYS.
+ * All arithmetic is UTC so it cannot drift across a timezone boundary.
+ */
+export function computeWindowEnd(
+  triggerDate: string,
+  days: number = MAINTENANCE_WINDOW_DAYS,
+): string {
+  const d = new Date(`${triggerDate.slice(0, 10)}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * True when the end of the scheduling window has already passed today.
+ * A stale window is flagged for human review rather than silently re-filed
+ * under dates that have passed.
+ */
+export function isWindowStale(
+  windowEnd: string | null | undefined,
+  today: string = todayInET(),
+): boolean {
+  if (!windowEnd) return false;
+  return String(windowEnd).slice(0, 10) < today;
 }
 
 /* ------------------------------------------------------------------------ *
@@ -340,6 +371,8 @@ export interface CycleRow {
   truck_number: string;
   vin: string | null;
   ldap: string | null;
+  /** Enterprise ID used as TechnicianId in the DCA booking payload. */
+  enterprise_id: string | null;
   tech_name: string | null;
   district: string | null;
   status: string;
@@ -356,6 +389,15 @@ export interface CycleRow {
   text_detail: string | null;
   text_claimed_at: Date | string | null;
   texted_at: Date | string | null;
+  /**
+   * The ET calendar day on which the threshold was crossed and the heads-up
+   * text went out. Anchors the scheduling window:
+   *   booking_window_start = trigger_date
+   *   booking_window_end   = trigger_date + MAINTENANCE_WINDOW_DAYS
+   */
+  trigger_date: string | null;
+  booking_window_start: string | null;
+  booking_window_end: string | null;
   booking_due_at: Date | string | null;
   booking_date: string | null;
   booking_status: string | null;
@@ -369,6 +411,15 @@ export interface CycleRow {
   booking_project_id: string | null;
   booking_detail: string | null;
   booked_at: Date | string | null;
+  /** null = no confirmed slot yet; see schema-init for valid values. */
+  confirmation_status: string | null;
+  confirmed_slot_date: string | null;
+  confirmed_slot_time: string | null;
+  /** CAS claim stamp — set before the comms provider call, cleared after. */
+  follow_up_claimed_at: Date | string | null;
+  follow_up_sent_at: Date | string | null;
+  follow_up_message_id: string | null;
+  follow_up_detail: string | null;
   attempts: number;
   last_error: string | null;
   opened_at: Date | string;
@@ -428,12 +479,14 @@ async function markExcluded(cycle: CycleRow, code: string, detail: string | null
 async function clearExclusion(cycle: CycleRow, assignment: {
   ldap: string | null; name: string | null; district: string | null;
 }): Promise<void> {
+  // enterprise_id = ldap: the TPMS ldapId IS the Enterprise ID.
   await db.execute(sql`
     UPDATE fs_truck_maintenance_cycles
        SET status = CASE WHEN status = 'excluded' THEN 'open' ELSE status END,
            exclusion_reason = NULL,
            exclusion_detail = NULL,
            ldap = ${assignment.ldap},
+           enterprise_id = ${assignment.ldap},
            tech_name = ${assignment.name},
            district = ${assignment.district},
            eligibility_checked_at = now(),
@@ -568,6 +621,14 @@ async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): 
 
   if (result.status === "sent" || result.status === "queued") {
     const leadDays = getMaintenanceBookingLeadDays();
+    // Record the trigger date NOW — the ET day the threshold was confirmed and
+    // the text went out. The booking window is anchored on this date:
+    //   RequestedStartDate = trigger_date
+    //   RequestedEndDate   = trigger_date + MAINTENANCE_WINDOW_DAYS
+    // Storing it here (not at booking time) means retries always produce the
+    // same window, and the project name embeds the same anchor date.
+    const triggerDate = todayInET();
+    const windowEnd = computeWindowEnd(triggerDate);
     await db.execute(sql`
       UPDATE fs_truck_maintenance_cycles
          SET status = 'texted',
@@ -576,6 +637,9 @@ async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): 
              text_detail = ${result.reason ?? null},
              text_claimed_at = NULL,
              texted_at = now(),
+             trigger_date = ${triggerDate}::date,
+             booking_window_start = ${triggerDate}::date,
+             booking_window_end = ${windowEnd}::date,
              booking_due_at = now() + (${leadDays}::text || ' days')::interval,
              last_error = NULL,
              updated_at = now()
@@ -659,31 +723,50 @@ async function runBookingStep(args: {
   /** true = POST with a TEST prefix regardless of the live gate (smoke test). */
   testFiling?: boolean;
 }): Promise<BookingOutcome> {
-  const { cycle, ldap, truckNumber } = args;
+  const { cycle, truckNumber } = args;
 
-  // Re-checked here even though eligibility already blocked on it: days pass
-  // between the text and the filing, and a technician can leave in between.
-  const { racf, employmentStatus, error: racfError } = await resolveTechRacf(ldap);
-  if (racfError || !racf) {
-    const detail = racfError
-      ? `RACF lookup failed for ${ldap} (${racfError}) — not filing`
-      : `no RACF id for ${ldap} — cannot file a route block`;
+  // Enterprise ID: the TPMS ldapId stored on the cycle is the canonical
+  // technician identifier and is the value sent to the DCA API as TechnicianId.
+  // Fail visibly rather than falling back to RACF or truck number.
+  const enterpriseId = (cycle.enterprise_id || cycle.ldap || "").trim();
+  if (!enterpriseId) {
+    const detail = `no Enterprise ID recorded for cycle ${cycle.id} — cannot file a route block`;
+    await markFailed(cycle.id, detail);
+    return { action: "failed", detail };
+  }
+
+  // Employment status is still checked: the tech must be active to receive a
+  // block. The lookup key is the Enterprise ID (same as what tech_racfid holds).
+  const { employmentStatus, error: racfError } = await resolveTechRacf(enterpriseId);
+  if (racfError) {
+    const detail = `employment status lookup failed for ${enterpriseId} (${racfError}) — not filing`;
     await markFailed(cycle.id, detail);
     return { action: "failed", detail };
   }
   // Explicit "A" required: an absent or unknown status is not a green light.
   if ((employmentStatus || "").trim().toUpperCase() !== "A") {
-    const detail = `${ldap} employment status is ${employmentStatus || "unknown"} (not active) — not filing`;
+    const detail = `${enterpriseId} employment status is ${employmentStatus || "unknown"} (not active) — not filing`;
     await markFailed(cycle.id, detail);
     return { action: "failed", detail };
   }
 
   const unit = (args.district || cycle.district || "").trim();
   if (!unit) {
-    const detail = `no district/unit for ${ldap} — the payload requires Unit`;
+    const detail = `no district/unit for ${enterpriseId} — the payload requires Unit`;
     await markFailed(cycle.id, detail);
     return { action: "failed", detail };
   }
+
+  // Scheduling window: anchored on the trigger date (the ET day the text went
+  // out). The booking always uses this date as the project-name discriminator
+  // so retries produce an identical name and the upstream 409 guard holds.
+  const triggerDateRaw = cycle.trigger_date
+    ? String(cycle.trigger_date).slice(0, 10)
+    : null;
+  // fall back to nextBusinessDay only when the cycle pre-dates the trigger_date
+  // column (shouldn't happen after the first real sweep, but defensive).
+  const windowStart = triggerDateRaw || nextBusinessDay(new Date());
+  const windowEnd = triggerDateRaw ? computeWindowEnd(triggerDateRaw) : windowStart;
 
   // ---------------------------------------------------------------------- //
   // The TEST hatch: a wire check, and NOTHING it does may touch the
@@ -693,9 +776,11 @@ async function runBookingStep(args: {
   // exists to prove.
   // ---------------------------------------------------------------------- //
   if (args.testFiling) {
-    const testDate = nextBusinessDay(new Date());
     const testPayload = {
-      ...buildBookingPayloadArgs({ racf, unit, truckNumber, date: testDate }),
+      ...buildBookingPayloadArgs({
+        enterpriseId, unit, truckNumber,
+        date: windowStart, windowStart, windowEnd,
+      }),
       live: false,
     };
     let testRes: Awaited<ReturnType<typeof sendStandardActivity>>;
@@ -730,10 +815,27 @@ async function runBookingStep(args: {
 
   const live = isMaintenanceBookingLive();
 
+  // Stale-window check BEFORE claiming: if the window end has passed, the
+  // dates the DCA would see are in the past. Flag for human review rather
+  // than silently filing a stale window.
+  if (!cycle.booking_attempted_at && isWindowStale(windowEnd)) {
+    const detail =
+      `booking window ${windowStart}–${windowEnd} has already passed — `
+      + "confirm whether the tech still needs this slot before filing a new window";
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles
+         SET booking_status = 'needs_review', booking_detail = ${detail},
+             status = 'needs_review', last_error = ${detail}, updated_at = now()
+       WHERE id = ${cycle.id} AND closed_at IS NULL
+    `);
+    return { action: "needs_review", detail };
+  }
+
   // Record the date + a 'pending' marker BEFORE filing. The date is frozen once
   // a POST has been attempted for this cycle, because the project name embeds
   // it and a re-dated name would slip past the upstream duplicate guard.
-  const claimed = await claimBooking(cycle.id, nextBusinessDay(new Date()));
+  // For maintenance, the project-name date = window start (trigger_date).
+  const claimed = await claimBooking(cycle.id, windowStart);
   if (!claimed) {
     return { action: "skipped", detail: "booking already claimed, filed, or the cycle is closed" };
   }
@@ -755,7 +857,16 @@ async function runBookingStep(args: {
     return { action: "needs_review", detail };
   }
 
-  const payloadArgs = { ...buildBookingPayloadArgs({ racf, unit, truckNumber, date }), live };
+  // Use the window derived from trigger_date; if there's no trigger_date (pre-
+  // migration cycle), fall back to the claimed date for both endpoints.
+  const effectiveWindowEnd = triggerDateRaw ? windowEnd : date;
+  const payloadArgs = {
+    ...buildBookingPayloadArgs({
+      enterpriseId, unit, truckNumber, date,
+      windowStart: date, windowEnd: effectiveWindowEnd,
+    }),
+    live,
+  };
 
   if (!live) {
     // Gate off: build and store the payload, POST nothing. The cycle stays
@@ -876,7 +987,7 @@ async function runBookingStep(args: {
 export interface ProcessOutcome {
   cycleId: number;
   truckNumber: string;
-  step: "excluded" | "text" | "booking" | "waiting" | "noop";
+  step: "excluded" | "text" | "booking" | "confirmation" | "waiting" | "noop";
   action: string;
   detail: string | null;
 }
@@ -951,7 +1062,21 @@ async function processCycle(
   const dueAt = cycle.booking_due_at ? new Date(cycle.booking_due_at) : null;
   const bookingTerminal = cycle.booking_status === "filed_live" || cycle.booking_status === "duplicate";
   if (bookingTerminal) {
-    return { cycleId: cycle.id, truckNumber: cycle.truck_number, step: "noop", action: "already_booked", detail: null };
+    // A successfully booked cycle is terminal for this pipeline path. The
+    // cycle is CLOSED (closed_at IS NOT NULL) the moment the booking lands, so
+    // it will not appear in listOpenCycles() on future sweeps.
+    //
+    // The confirmation follow-up is handled by a SEPARATE sweep in
+    // runMaintenancePipeline that queries listConfirmationPendingCycles() —
+    // closed booked rows where a confirmed_slot_date has been recorded but
+    // follow_up_sent_at is still null. Nothing to do here.
+    return {
+      cycleId: cycle.id,
+      truckNumber: cycle.truck_number,
+      step: "noop",
+      action: "already_booked",
+      detail: null,
+    };
   }
   // An unconfirmed filing is parked, not retried: the request left the box and
   // there is no way to ask upstream what became of it.
@@ -1019,6 +1144,7 @@ export interface PipelineSummary {
   seeded: number;
   triggered: number;
   opened: number;
+  confirmationFollowUpsSent: number;
   processed: number;
   texted: number;
   textDryRun: number;
@@ -1102,6 +1228,27 @@ export async function runMaintenancePipeline(opts: {
     }
   }
 
+  // Confirmation follow-up sweep — separate from the open-cycle loop because
+  // booked cycles are closed (closed_at IS NOT NULL) and never appear in
+  // listOpenCycles(). A closed booked cycle becomes processable here once an
+  // operator records a confirmed_slot_date via POST /cycles/:id/confirm.
+  const confirmationPending = await listConfirmationPendingCycles();
+  for (const cycle of confirmationPending) {
+    const ldap = cycle.enterprise_id || cycle.ldap || "";
+    try {
+      const confirmation = await runConfirmationFollowUp(cycle, ldap);
+      outcomes.push({
+        cycleId: cycle.id,
+        truckNumber: cycle.truck_number,
+        step: "confirmation",
+        action: confirmation.action,
+        detail: confirmation.detail,
+      });
+    } catch (err: any) {
+      errors.push(`confirmation cycle ${cycle.id}: ${err?.message || err}`);
+    }
+  }
+
   const count = (pred: (o: ProcessOutcome) => boolean) => outcomes.filter(pred).length;
   return {
     startedAt,
@@ -1116,6 +1263,9 @@ export async function runMaintenancePipeline(opts: {
     textDryRun: count((o) => o.step === "text" && o.action === "dry_run"),
     booked: count((o) => o.step === "booking" && (o.action === "filed_live" || o.action === "duplicate")),
     bookingDryRun: count((o) => o.step === "booking" && o.action === "dry_run"),
+    confirmationFollowUpsSent: count(
+      (o) => o.step === "confirmation" && (o.action === "sent" || o.action === "queued" || o.action === "dry_run"),
+    ),
     excluded: count((o) => o.step === "excluded"),
     failed: count((o) => o.action === "failed"),
     waiting: count((o) => o.step === "waiting"),
@@ -1426,18 +1576,31 @@ export async function reconcileStaleBookingClaim(
   return { action: "released", detail };
 }
 
-/** The payload arguments shared by the live, dry-run and TEST paths. */
+/**
+ * The payload arguments shared by the live, dry-run and TEST paths.
+ *
+ * Task #676: TechnicianId is now the technician's Enterprise ID (ldapId from
+ * TPMS), not their RACF id. The DCA comment in StandardActivityArgs has been
+ * updated accordingly. The window is RequestedStartDate=windowStart,
+ * RequestedEndDate=windowEnd, endDateFixed=false (scheduler picks the slot).
+ */
 function buildBookingPayloadArgs(args: {
-  racf: string;
+  enterpriseId: string;
   unit: string;
   truckNumber: string;
   date: string;
+  /** Scheduling window start (= trigger_date). */
+  windowStart?: string | null;
+  /** Scheduling window end (= trigger_date + MAINTENANCE_WINDOW_DAYS). */
+  windowEnd?: string | null;
 }) {
   return {
-    techLdap: args.racf,
+    techLdap: args.enterpriseId,     // Enterprise ID is TechnicianId
     unit: args.unit,
     truckNumber: args.truckNumber,
     date: args.date,
+    requestedStartDate: args.windowStart || undefined,
+    requestedEndDate: args.windowEnd || undefined,
     durationMinutes: MAINTENANCE_BLOCK_DURATION_MIN,
     startTime: MAINTENANCE_START_TIME,
     // Echo the HH:MM back as the request, the reference's own way of pinning a
@@ -1566,6 +1729,10 @@ export async function markBookingUnknown(
 /** Adopt a real send: its OWN timestamp drives the booking clock, not now(). */
 async function adoptTextEvidence(cycleId: number, hit: TextEvidence, detail: string): Promise<void> {
   const leadDays = getMaintenanceBookingLeadDays();
+  // Derive trigger_date from the adopted send timestamp (ET day).
+  const hitDate = new Date(hit.created_at);
+  const triggerDate = new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(hitDate);
+  const windowEnd = computeWindowEnd(triggerDate);
   await db.execute(sql`
     UPDATE fs_truck_maintenance_cycles
        SET status = 'texted',
@@ -1574,11 +1741,400 @@ async function adoptTextEvidence(cycleId: number, hit: TextEvidence, detail: str
            text_detail = ${detail},
            text_claimed_at = NULL,
            texted_at = ${hit.created_at},
+           trigger_date = COALESCE(trigger_date, ${triggerDate}::date),
+           booking_window_start = COALESCE(booking_window_start, ${triggerDate}::date),
+           booking_window_end = COALESCE(booking_window_end, ${windowEnd}::date),
            booking_due_at = ${hit.created_at}::timestamp + (${leadDays}::text || ' days')::interval,
            last_error = NULL,
            updated_at = now()
      WHERE id = ${cycleId} AND closed_at IS NULL AND text_status = 'pending'
   `);
+}
+
+/* ------------------------------------------------------------------------ *
+ * Step: the confirmation follow-up text
+ * ------------------------------------------------------------------------ */
+
+export interface ConfirmationOutcome {
+  action: "sent" | "queued" | "dry_run" | "skipped" | "failed" | "noop";
+  detail: string | null;
+}
+
+/**
+ * Send the one follow-up text the technician receives once the DCA has
+ * confirmed a concrete date and time for their Truck Maintenance slot.
+ *
+ * Safety contract (mirrors the heads-up SMS path):
+ *  - IDEMPOTENT: a single CAS-claim (follow_up_claimed_at) prevents two
+ *    concurrent sweeps from both sending the message. The claim is set before
+ *    the comms provider is called and cleared once the result is persisted.
+ *  - TRANSPORT-SAFE: if the provider call throws after Twilio accepted the
+ *    message, the function looks for evidence in the comms lane and adopts it
+ *    rather than blindly marking the send as failed (which would let a retry
+ *    re-send).
+ *  - DRY-RUN RETRYABLE: when the live gate is off the function records a
+ *    preview note but leaves confirmation_status as 'confirmed' so the next
+ *    sweep (once the gate is armed) can send the real text.
+ */
+async function runConfirmationFollowUp(
+  cycle: CycleRow,
+  ldap: string,
+): Promise<ConfirmationOutcome> {
+  // Already sent — strictly once per cycle.
+  if (cycle.follow_up_sent_at || cycle.confirmation_status === "follow_up_sent") {
+    return { action: "noop", detail: "confirmation follow-up already sent" };
+  }
+
+  const slotDate = (cycle.confirmed_slot_date || "").trim();
+  const slotTime = (cycle.confirmed_slot_time || "").trim();
+  if (!slotDate) {
+    return { action: "noop", detail: "no confirmed slot recorded — awaiting DCA readback" };
+  }
+
+  const enterpriseId = cycle.enterprise_id || ldap;
+  const dateTime = slotTime ? `${slotDate} at ${slotTime}` : slotDate;
+  const body = buildMaintenanceConfirmationMessage(dateTime);
+  const live = isMaintenanceSmsLive();
+
+  if (!live) {
+    // Gate is off: record a dry-run note but LEAVE confirmation_status as
+    // 'confirmed' so the next sweep (once the live gate is armed) actually
+    // sends the text. Writing 'follow_up_sent' here would suppress the real
+    // send permanently — the tech would never receive the required message.
+    let detail = "SMS gate off — confirmation follow-up dry run only";
+    try {
+      const preview = await sendMessage({
+        ldap: enterpriseId,
+        category: MAINTENANCE_CONFIRMATION_COMMS_CATEGORY,
+        body,
+        dryRun: true,
+        sentBy: null,
+        senderName: "Truck Maintenance",
+      });
+      detail = `SMS gate off — follow-up dry-run: ${preview.status}${preview.reason ? ` (${preview.reason})` : ""}`;
+    } catch { /* dry-run failure is recorded but never blocks */ }
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles
+         SET follow_up_detail = ${detail}, updated_at = now()
+       WHERE id = ${cycle.id}
+    `);
+    return { action: "dry_run", detail };
+  }
+
+  // ---------------------------------------------------------------------- //
+  // CAS claim — stamps follow_up_claimed_at before calling the comms
+  // provider. A stale claim (> TEXT_CLAIM_STALE_MS old) may be replaced by
+  // a fresh one; an active claim from another worker causes a skip.
+  // ---------------------------------------------------------------------- //
+  const claimResult: any = await db.execute(sql`
+    UPDATE fs_truck_maintenance_cycles
+       SET follow_up_claimed_at = now(), updated_at = now()
+     WHERE id = ${cycle.id}
+       AND follow_up_sent_at IS NULL
+       AND confirmation_status NOT IN ('follow_up_sent', 'follow_up_skipped')
+       AND (follow_up_claimed_at IS NULL
+            OR follow_up_claimed_at < now() - (${TEXT_CLAIM_STALE_MS / 1000}::text || ' seconds')::interval)
+     RETURNING id
+  `);
+  if (((claimResult.rows ?? claimResult ?? []) as any[]).length === 0) {
+    return { action: "noop", detail: "follow-up send already claimed by another worker" };
+  }
+
+  let result: Awaited<ReturnType<typeof sendMessage>>;
+  try {
+    result = await sendMessage({
+      ldap: enterpriseId,
+      category: MAINTENANCE_CONFIRMATION_COMMS_CATEGORY,
+      body,
+      sentBy: null,
+      senderName: "Truck Maintenance",
+      // The comms lane's 24h dedup is a second layer of protection but NOT the
+      // primary guard — the CAS claim is. skipRecentDuplicate is intentionally
+      // omitted here so that a stale-claim re-run after a transport error can
+      // still send (evidence adoption below guards against true re-sends).
+    });
+  } catch (err: any) {
+    // The throw may have happened AFTER the comms provider accepted the
+    // message. Check the comms lane before deciding this is a retryable
+    // failure — if the message landed, adopt it rather than allowing a retry.
+    const thrown = `follow-up send threw: ${err?.message || err}`;
+    let evidence: TextEvidence | null = null;
+    let evidenceError: string | null = null;
+    try {
+      evidence = await findConfirmationEvidence(enterpriseId, body);
+    } catch (lookupErr: any) {
+      evidenceError = lookupErr?.message || String(lookupErr);
+    }
+
+    if (evidence) {
+      const detail = `${thrown} — but the message reached the comms lane (${evidence.src}); adopted`;
+      await db.execute(sql`
+        UPDATE fs_truck_maintenance_cycles
+           SET confirmation_status = 'follow_up_sent',
+               follow_up_sent_at = ${evidence.created_at},
+               follow_up_message_id = COALESCE(follow_up_message_id, ${evidence.id}),
+               follow_up_claimed_at = NULL,
+               follow_up_detail = ${detail},
+               updated_at = now()
+         WHERE id = ${cycle.id}
+      `);
+      return { action: evidence.src === "queue" ? "queued" : "sent", detail };
+    }
+
+    if (evidenceError) {
+      // Cannot rule out a delivered message — leave the claim for stale-claim
+      // recovery rather than marking the cycle as retryable.
+      const detail = `${thrown} — comms lane unreadable (${evidenceError}); claim left for recovery`;
+      return { action: "skipped", detail };
+    }
+
+    // Nothing reached the lane — safe to mark retryable and clear the claim.
+    const detail = `${thrown} — nothing reached the comms lane`;
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles
+         SET confirmation_status = 'follow_up_failed',
+             follow_up_claimed_at = NULL,
+             follow_up_detail = ${detail},
+             updated_at = now()
+       WHERE id = ${cycle.id}
+    `);
+    return { action: "failed", detail };
+  }
+
+  if (result.status === "sent" || result.status === "queued") {
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles
+         SET confirmation_status = 'follow_up_sent',
+             follow_up_sent_at = now(),
+             follow_up_message_id = ${result.messageId ?? result.queueId ?? null},
+             follow_up_claimed_at = NULL,
+             follow_up_detail = ${result.reason ?? null},
+             updated_at = now()
+       WHERE id = ${cycle.id}
+    `);
+    return { action: result.status, detail: result.reason ?? null };
+  }
+
+  // Gate outcome: opted out, no phone, quiet hours, etc.
+  const detail = result.reason ?? result.status;
+  await db.execute(sql`
+    UPDATE fs_truck_maintenance_cycles
+       SET confirmation_status = 'follow_up_skipped',
+           follow_up_claimed_at = NULL,
+           follow_up_detail = ${detail},
+           updated_at = now()
+     WHERE id = ${cycle.id}
+  `);
+  return { action: "skipped", detail };
+}
+
+/**
+ * Look for evidence that the confirmation text actually reached the comms
+ * lane — used to adopt the message rather than re-sending after a transport
+ * failure. Mirrors findTextEvidence but scoped to the confirmation category.
+ */
+async function findConfirmationEvidence(ldap: string, body: string): Promise<TextEvidence | null> {
+  const evidence: any = await db.execute(sql`
+    SELECT id::text AS id, created_at, 'message' AS src
+      FROM fs_comms_messages
+     WHERE direction = 'outbound'
+       AND category = ${MAINTENANCE_CONFIRMATION_COMMS_CATEGORY}
+       AND lower(ldap) = lower(${ldap})
+       AND body = ${body}
+       AND created_at >= now() - interval '3 days'
+     UNION ALL
+    SELECT id::text AS id, created_at, 'queue' AS src
+      FROM fs_comms_send_queue
+     WHERE category = ${MAINTENANCE_CONFIRMATION_COMMS_CATEGORY}
+       AND lower(ldap) = lower(${ldap})
+       AND body = ${body}
+       AND status IN ('pending', 'claimed', 'sent')
+       AND created_at >= now() - interval '3 days'
+     ORDER BY created_at ASC
+     LIMIT 1
+  `);
+  return ((evidence as any).rows ?? [])[0] ?? null;
+}
+
+/* ------------------------------------------------------------------------ *
+ * Confirmation-pending sweep
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Booked cycles that have a confirmed slot recorded but have not yet received
+ * the follow-up text. These are CLOSED rows (closed_at IS NOT NULL), so they
+ * are invisible to listOpenCycles() and must be swept separately.
+ *
+ * A cycle belongs here when:
+ *  - It was filed with the DCA (booking_status filed_live or duplicate).
+ *  - An operator (or readback) set a concrete confirmed_slot_date.
+ *  - The follow-up text has not been sent or skipped yet.
+ */
+export async function listConfirmationPendingCycles(): Promise<CycleRow[]> {
+  // Exclude rows that have an active (non-stale) CAS claim so concurrent
+  // sweeps do not both select and send the same cycle. A claim is stale if
+  // it is older than TEXT_CLAIM_STALE_MS (15 min); stale rows are included
+  // here so that recovery can release them.
+  const staleCutoff = new Date(Date.now() - TEXT_CLAIM_STALE_MS).toISOString();
+  const r: any = await db.execute(sql`
+    SELECT id, truck_number, vin, ldap, enterprise_id, tech_name, district,
+           status, odometer_at_trigger, watermark_at_trigger, miles_since_watermark,
+           odometer_source, odometer_date, exclusion_reason, exclusion_detail,
+           text_status, text_body, text_message_id, text_detail,
+           text_claimed_at, texted_at,
+           to_char(trigger_date,       'YYYY-MM-DD') AS trigger_date,
+           to_char(booking_window_start,'YYYY-MM-DD') AS booking_window_start,
+           to_char(booking_window_end,  'YYYY-MM-DD') AS booking_window_end,
+           booking_due_at, booking_date, booking_status, booking_claimed_at,
+           booking_attempted_at, booking_test_status, booking_test_detail,
+           booking_test_project_name, booking_test_at,
+           booking_project_name, booking_project_id, booking_detail, booked_at,
+           confirmation_status,
+           to_char(confirmed_slot_date::date, 'YYYY-MM-DD') AS confirmed_slot_date,
+           confirmed_slot_time,
+           follow_up_claimed_at, follow_up_sent_at, follow_up_message_id, follow_up_detail,
+           attempts, last_error, opened_at, closed_at
+      FROM fs_truck_maintenance_cycles
+     WHERE booking_status IN ('filed_live', 'duplicate')
+       AND confirmed_slot_date IS NOT NULL
+       AND follow_up_sent_at IS NULL
+       AND confirmation_status NOT IN ('follow_up_sent', 'follow_up_skipped')
+       -- exclude rows with an active (non-stale) claim
+       AND (follow_up_claimed_at IS NULL OR follow_up_claimed_at < ${staleCutoff}::timestamptz)
+     ORDER BY booked_at ASC
+     LIMIT 200
+  `);
+  return (r.rows ?? r ?? []) as CycleRow[];
+}
+
+/* ------------------------------------------------------------------------ *
+ * Record a confirmed slot (operator input or readback)
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Record the DCA-confirmed date and time on a booked cycle, unlocking the
+ * follow-up text step. Safe to call repeatedly (COALESCE keeps the first
+ * non-null value unless `force` is set).
+ */
+export async function recordConfirmedSlot(
+  cycleId: number,
+  args: { slotDate: string; slotTime?: string | null; actor?: string | null; force?: boolean },
+): Promise<{ ok: boolean; error?: string }> {
+  const slotDate = (args.slotDate || "").trim();
+  if (!slotDate) return { ok: false, error: "slotDate is required" };
+
+  const r: any = await db.execute(sql`
+    UPDATE fs_truck_maintenance_cycles
+       SET confirmed_slot_date = ${slotDate},
+           confirmed_slot_time = ${args.slotTime ?? null},
+           confirmation_status = CASE
+             WHEN confirmation_status IN ('follow_up_sent', 'follow_up_skipped') AND NOT ${args.force ?? false}
+             THEN confirmation_status
+             ELSE 'confirmed'
+           END,
+           updated_at = now()
+     WHERE id = ${cycleId}
+       AND (booking_status = 'filed_live' OR booking_status = 'duplicate')
+     RETURNING id
+  `);
+  if (((r.rows ?? r ?? []) as any[]).length === 0) {
+    return { ok: false, error: `cycle ${cycleId} not found or not in a booked state` };
+  }
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------------ *
+ * Approaching-threshold view
+ * ------------------------------------------------------------------------ */
+
+export interface ApproachingTruck {
+  truckNumber: string;
+  vin: string | null;
+  odometer: number;
+  watermark: number;
+  milesSinceWatermark: number;
+  milesRemaining: number;
+  odometerDate: string | null;
+  odometerSource: string | null;
+  ldap: string | null;
+  techName: string | null;
+  district: string | null;
+}
+
+/**
+ * Read-only list of trucks that are within `approachingMiles` of firing the
+ * 5,500-mile trigger but have not yet opened a cycle. Purely informational —
+ * no texts, no bookings, no state changes.
+ *
+ * The same reconciled odometer + watermark data the sweep reads, so the
+ * numbers here are exactly what the engine will see on its next run.
+ */
+export async function getApproachingThresholdTrucks(
+  approachingMiles: number = getMaintenanceApproachingMiles(),
+): Promise<ApproachingTruck[]> {
+  const lowerBound = MAINTENANCE_TRIGGER_MILES - Math.abs(approachingMiles);
+  const r: any = await db.execute(sql`
+    SELECT hvc.holman_vehicle_number AS truck_number,
+           hvc.vin,
+           hvc.odometer,
+           hvc.odometer_date,
+           hvc.odometer_source,
+           wmk.last_service_odometer AS watermark,
+           (hvc.odometer - wmk.last_service_odometer)::int AS miles_since_watermark,
+           (${MAINTENANCE_TRIGGER_MILES} - (hvc.odometer - wmk.last_service_odometer))::int AS miles_remaining
+      FROM holman_vehicles_cache hvc
+      JOIN fs_truck_maintenance_watermarks wmk
+        ON wmk.truck_number = ltrim(hvc.holman_vehicle_number, '0')
+     WHERE hvc.odometer IS NOT NULL
+       AND COALESCE(hvc.is_active, true) = true
+       AND (hvc.odometer - wmk.last_service_odometer) >= ${lowerBound}
+       AND (hvc.odometer - wmk.last_service_odometer) < ${MAINTENANCE_TRIGGER_MILES}
+       AND NOT EXISTS (
+         SELECT 1 FROM fs_truck_maintenance_cycles cyc
+          WHERE cyc.truck_number = ltrim(hvc.holman_vehicle_number, '0')
+            AND cyc.closed_at IS NULL
+       )
+     ORDER BY (hvc.odometer - wmk.last_service_odometer) DESC
+     LIMIT 500
+  `);
+  const rows = (r.rows ?? r ?? []) as Array<{
+    truck_number: string;
+    vin: string | null;
+    odometer: number | string;
+    odometer_date: string | null;
+    odometer_source: string | null;
+    watermark: number | string;
+    miles_since_watermark: number | string;
+    miles_remaining: number | string;
+  }>;
+
+  // Enrich with live TPMS assignments for the "assigned tech" column.
+  const displayNumbers = rows.map((row) => row.truck_number);
+  const assignments = displayNumbers.length > 0
+    ? await loadTechAssignments(displayNumbers)
+    : new Map<string, TechAssignment>();
+
+  return rows.map((row) => {
+    const canonical = toCanonical(row.truck_number);
+    const assignment = assignments.get(canonical) ?? null;
+    return {
+      truckNumber: row.truck_number,
+      vin: row.vin,
+      odometer: typeof row.odometer === "string" ? Number.parseInt(row.odometer, 10) : row.odometer,
+      watermark: typeof row.watermark === "string" ? Number.parseInt(row.watermark, 10) : row.watermark,
+      milesSinceWatermark: typeof row.miles_since_watermark === "string"
+        ? Number.parseInt(row.miles_since_watermark, 10)
+        : row.miles_since_watermark,
+      milesRemaining: typeof row.miles_remaining === "string"
+        ? Number.parseInt(row.miles_remaining, 10)
+        : row.miles_remaining,
+      odometerDate: row.odometer_date,
+      odometerSource: row.odometer_source,
+      ldap: assignment?.ldap ?? null,
+      techName: assignment?.name ?? null,
+      district: assignment?.district ?? null,
+    };
+  });
 }
 
 /**
