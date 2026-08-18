@@ -1138,6 +1138,19 @@ export function registerCommsRoutes(app: Router): void {
     try {
       const { messages, category, force, allowDuplicate } = req.body || {};
       if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ message: "messages[] required" });
+      // Batch-level send time. sendMessage has always honoured scheduledFor (it queues
+      // for the LATER of this and the recipient's own quiet-hours floor) but this route
+      // never passed one, so a batch could only ever go out now-or-quiet-deferred. A
+      // caller that wants tomorrow morning needs to be able to say so.
+      const schedRaw = req.body?.scheduledFor;
+      let scheduledFor: Date | null = null;
+      if (schedRaw != null && schedRaw !== "") {
+        const d = new Date(String(schedRaw));
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({ message: "scheduledFor must be a parseable date/time" });
+        }
+        scheduledFor = d;
+      }
       if (messages.length > SEND_CAP) return res.status(400).json({ message: `Too many messages (max ${SEND_CAP})` });
       const defCat = category || apiDefaultCategory(req);
       for (let i = 0; i < messages.length; i++) {
@@ -1163,6 +1176,7 @@ export function registerCommsRoutes(app: Router): void {
           sentBy: a.id,
           senderName: a.name,
           dryRun: !live,
+          scheduledFor: m.scheduledFor ? new Date(String(m.scheduledFor)) : scheduledFor,
           // Machine callers retry on timeout; without this, a retried batch
           // re-texts every recipient (2026-08-14 duplicate-blast incident).
           // {"allowDuplicate":true} is the explicit escape hatch for an

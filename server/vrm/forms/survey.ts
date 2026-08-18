@@ -409,6 +409,138 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * MANDATORY reminder to everyone who was issued a survey token and never
+   * submitted it. This is the ONLY resend path: `send-chunk` filters on
+   * `sent_at IS NULL`, so it is structurally incapable of reaching a
+   * non-responder, and `issue` refuses anyone who already holds a token.
+   *
+   * Wording is deliberately different from first contact (Tyler, 2026-08-18).
+   * The first message asked; this one states a requirement, and it closes the
+   * loophole the first one left open: a technician who is no longer in a rental
+   * assumed the form did not apply to them, when their silence is exactly what
+   * keeps the agreement open and billing.
+   *
+   * DOES NOT SEND unless `confirm: true`. Defaults to a dry run that returns the
+   * full recipient list and the exact rendered body, same contract as `issue`.
+   * `scheduledFor` defaults to the next 08:00 ET; the recipient's own
+   * quiet-hours floor still applies on top, so nobody west of Eastern gets it
+   * before 07:00 local.
+   */
+  router.post("/forms/rental-survey/remind", async (req, res) => {
+    try {
+      const confirm = req.body?.confirm === true;
+      const base = String(req.body?.baseUrl || "https://SHS-Nexus.replit.app").replace(/\/+$/, "");
+      const limit = Math.min(Number(req.body?.limit) || 500, 500);
+      // Per-LDAP phone corrections for the handful whose number of record is
+      // provably wrong. Passed explicitly rather than guessed: a silent
+      // re-resolve would quietly move numbers we have evidence are working.
+      const overrides: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.body?.phoneOverrides ?? {})) {
+        const d = String(v).replace(/\D/g, "").replace(/^1/, "");
+        if (d.length === 10) overrides[String(k).toUpperCase()] = d;
+      }
+      const onlyLdaps: string[] = Array.isArray(req.body?.ldaps)
+        ? req.body.ldaps.map((x: any) => String(x).trim().toUpperCase()).filter(Boolean)
+        : [];
+
+      let scheduledFor: Date;
+      if (req.body?.scheduledFor) {
+        const d = new Date(String(req.body.scheduledFor));
+        if (Number.isNaN(d.getTime())) {
+          return res.status(400).json({ message: "scheduledFor must be a parseable date/time" });
+        }
+        scheduledFor = d;
+      } else {
+        // Next 08:00 America/New_York. -04:00 is EDT; this route is a
+        // same-week operational tool, not a date library.
+        const now = new Date();
+        const et = new Date(now.getTime() - 4 * 3600 * 1000);
+        const y = et.getUTCFullYear(), mo = et.getUTCMonth(), da = et.getUTCDate();
+        scheduledFor = new Date(Date.UTC(y, mo, da, 12, 0, 0)); // 08:00 ET
+        if (scheduledFor.getTime() <= now.getTime()) {
+          scheduledFor = new Date(scheduledFor.getTime() + 24 * 3600 * 1000);
+        }
+      }
+
+      const { rows } = await db.execute(sql`
+        SELECT token, ldap, phone, tech_name, truck_number, sent_at
+          FROM vrm_form_tokens
+         WHERE form_type = 'rental_tech_survey'
+           AND submitted_at IS NULL
+           AND COALESCE(batch, '') <> 'TEST'
+           AND upper(COALESCE(ldap, '')) <> 'ZZTEST'
+           AND expires_at > now()
+         ORDER BY ldap
+         LIMIT ${limit}
+      `);
+
+      const recipients = (rows as any[])
+        .filter((t) => !onlyLdaps.length || onlyLdaps.includes(String(t.ldap).toUpperCase()))
+        .map((t) => {
+          const raw = String(t.tech_name || "").trim().split(/\s+/)[0] || "there";
+          const first = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+          const ldap = String(t.ldap || "").toUpperCase();
+          const phone = overrides[ldap] ?? String(t.phone || "").replace(/\D/g, "").replace(/^1/, "");
+          const url = `${base}/rental-survey/${t.token}`;
+          return {
+            ldap,
+            name: String(t.tech_name || "").trim(),
+            truck_number: t.truck_number,
+            phone,
+            phoneCorrected: !!overrides[ldap],
+            neverSentFirstTime: t.sent_at == null,
+            category: "rental_management",
+            body:
+              `${first}, this is Tyler with Sears Fleet. This one is a requirement, not a `
+              + `request, and I need it from you today.\n\n`
+              + `Our records still show you in an Enterprise rental. Every technician on that `
+              + `report has to confirm their status before we can finish moving these rentals `
+              + `to Sears direct billing. It takes one minute: ${url}\n\n`
+              + `If you are NO LONGER in a rental, you still have to complete it. You are on `
+              + `the report either way, and your answer is the only thing that lets us close `
+              + `that agreement out. Until you do, it stays open and billing against Sears.\n\n`
+              + `Your LDAP is your Tech Hub login ID. Reply here only if the form will not `
+              + `open.`,
+          };
+        })
+        .filter((r) => r.phone.length === 10);
+
+      const skippedNoPhone = (rows as any[]).length - recipients.length;
+
+      if (!confirm) {
+        return res.json({
+          dryRun: true,
+          scheduledFor: scheduledFor.toISOString(),
+          eligible: (rows as any[]).length,
+          willSend: recipients.length,
+          skippedNoPhone,
+          note: "Nothing was sent. Re-POST with {confirm:true} to schedule.",
+          recipients,
+        });
+      }
+
+      const key = process.env.COMMS_SEND_API_KEY;
+      if (!key) return res.status(500).json({ message: "COMMS_SEND_API_KEY is not configured." });
+      const port = process.env.PORT || 5000;
+      const out = await fetch(`http://127.0.0.1:${port}/comms/api/send-batch`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": key },
+        body: JSON.stringify({
+          category: "rental_management",
+          confirm: true,
+          scheduledFor: scheduledFor.toISOString(),
+          messages: recipients.map((r) => ({ ldap: r.ldap, phone: r.phone, body: r.body })),
+        }),
+      });
+      const result = await out.json().catch(() => ({}));
+      res.json({ dryRun: false, scheduledFor: scheduledFor.toISOString(), requested: recipients.length, result });
+    } catch (error: any) {
+      console.error("[survey] remind failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "remind failed" });
+    }
+  });
+
   /** Send/response funnel plus the counts that drive the reservation queue. */
   router.get("/forms/rental-survey/stats", async (_req, res) => {
     try {
@@ -639,7 +771,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             + `It is VERY important that you complete this form TODAY. It only takes `
             + `one minute: ${url}`
             + ` We are creating the new reservations today and we cannot make yours `
-            + `without it. Your LDAP is your Tech Hub login, under Settings. Already `
+            + `without it. Your LDAP is your Tech Hub login ID. Already `
             + `out of a rental? Tell us there and you are done. Please reply only if `
             + `the form will not work.\n\n`
             + `On behalf of Rob Gerlach, thank you for being the hero of the home.`,
@@ -1122,7 +1254,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             + `It is VERY important that you complete this form TODAY. It only takes `
             + `one minute: ${base}/rental-survey/${t.token}`
             + ` We are creating the new reservations today and we cannot make yours `
-            + `without it. Your LDAP is your Tech Hub login, under Settings. Already `
+            + `without it. Your LDAP is your Tech Hub login ID. Already `
             + `out of a rental? Tell us there and you are done. Please reply only if `
             + `the form will not work.\n\n`
             + `On behalf of Rob Gerlach, thank you for being the hero of the home.`,

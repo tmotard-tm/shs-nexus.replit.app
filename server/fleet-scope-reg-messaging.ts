@@ -72,7 +72,10 @@ function getLocalTimeParts(tz: string, now: Date) {
     year: parseInt(get("year"), 10),
     month: parseInt(get("month"), 10),
     day: parseInt(get("day"), 10),
-    hour: parseInt(get("hour"), 10),
+    // % 24: hour12:false resolves to hourCycle h24, so midnight comes back as
+    // "24", not "00". Left raw, every 00:00-00:59 local hour reads as 24.x and
+    // trips the 21:00 evening-quiet comparison.
+    hour: parseInt(get("hour"), 10) % 24,
     minute: parseInt(get("minute"), 10),
     weekday: get("weekday"), // e.g. "Sun"
   };
@@ -87,7 +90,7 @@ export function localHourToUtc(tz: string, year: number, month: number, day: num
   const localHourAtCandidate = parseInt(
     new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(candidate),
     10
-  );
+  ) % 24; // h24 renders midnight as "24"; see getLocalTimeParts.
   // Adjust by the difference. The candidate UTC instant renders as an EARLIER
   // local hour in US timezones (e.g. 08:00 UTC = 4 AM ET), so we must ADD the
   // shortfall to move the instant forward to the desired local hour.
@@ -108,35 +111,28 @@ export function getNextAllowedSendTime(state: string): Date | null {
   const upperState = (state || "").toUpperCase();
   const tz = STATE_TZ_MAP[upperState] || "America/New_York";
 
-  const { year, month, day, hour, minute, weekday } = getLocalTimeParts(tz, now);
+  const { year, month, day, hour, minute } = getLocalTimeParts(tz, now);
   const localDecimalHour = hour + minute / 60;
 
-  let quietStart: number;
-  let quietEnd: number;
-
-  if (["FL", "CT", "MD", "OK"].includes(upperState)) {
-    quietStart = 20; // 8 PM
-    quietEnd = 8;    // 8 AM
-  } else if (upperState === "WA") {
-    quietStart = 20; // 8 PM
-    quietEnd = 8;
-  } else if (upperState === "TX") {
-    if (weekday === "Sun") {
-      quietStart = 21; // 9 PM
-      quietEnd = 12;   // noon
-    } else {
-      quietStart = 21; // 9 PM
-      quietEnd = 9;    // 9 AM
-    }
-  } else {
-    // Company policy (Tyler, Aug 14 2026): open the general send window at
-    // 7 AM local so operations can respond to techs first thing in the
-    // morning. NOTE: this is earlier than the TCPA presumptive 8 AM floor —
-    // an accepted business decision. States with explicit statutes above
-    // (FL/CT/MD/OK/WA 8 AM, TX 9 AM / noon Sun) keep their statutory windows.
-    quietStart = 21; // 9 PM (federal baseline)
-    quietEnd = 7;    // 7 AM (company policy; TCPA presumption is 8 AM)
-  }
+  // 7 AM to 9 PM local, every state, no weekday/weekend split
+  // (Tyler, 2026-08-18).
+  //
+  // This used to carve out FL/CT/MD/OK/WA at 8 AM and TX at 9 AM (noon on
+  // Sunday). Those are state TELEMARKETING curfews: they govern telephone
+  // solicitation, meaning messages that sell goods or services to a consumer.
+  // Fleet comms are operational messages to our own technicians about their
+  // route, their truck and their rental, and replies to messages those
+  // technicians sent us first. That is employment communication, not
+  // solicitation, so the curfews were being applied to traffic outside their
+  // scope.
+  //
+  // The cost was concrete rather than theoretical: a technician in Texas who
+  // texted us at 7:30 AM could not be answered until 9 AM, because an agent
+  // reply runs through this same gate as an outbound blast.
+  //
+  // 9 PM stays so nobody gets a route text at midnight.
+  const quietStart = 21; // 9 PM local
+  const quietEnd = 7;    // 7 AM local
 
   const inQuietHours = localDecimalHour >= quietStart || localDecimalHour < quietEnd;
   if (!inQuietHours) return null;
@@ -147,8 +143,17 @@ export function getNextAllowedSendTime(state: string): Date | null {
   let targetYear = year;
 
   if (localDecimalHour >= quietStart) {
-    // We're in the evening quiet period → next allowed time is quietEnd tomorrow
-    const tomorrow = new Date(Date.UTC(year, month - 1, day + 1));
+    // We're in the evening quiet period → next allowed time is quietEnd tomorrow.
+    //
+    // Derive tomorrow from the INSTANT, never from the local date parts.
+    // Date.UTC(year, month-1, day+1) builds UTC midnight of the local day after
+    // today, and every US zone is behind UTC, so reading it back locally lands
+    // on the same local day again (UTC midnight 8/18 is 7 PM 8/17 in New York,
+    // 5 PM 8/17 in Los Angeles). targetDay then stayed on today and this
+    // returned 07:00 TODAY — roughly 16 hours in the past for anyone already
+    // past 9 PM local. A past-due scheduledFor reads as ready to the drain, so
+    // evening-queued messages went out immediately in the middle of the night.
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const tParts = getLocalTimeParts(tz, tomorrow);
     targetYear = tParts.year;
     targetMonth = tParts.month;
