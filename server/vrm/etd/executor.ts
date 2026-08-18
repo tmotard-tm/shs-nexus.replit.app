@@ -232,7 +232,11 @@ type ScheduleEvidence = {
  * The later of a wanted wall-clock time and a safe lead margin from right now (ET),
  * rounded up to the next half hour. Returns HH:MM:SS. Never returns a time in the past.
  */
-export function notBeforeNowET(wanted: string, now: Date = new Date(), leadMinutes = 90): string {
+export function notBeforeNowET(
+  wanted: string,
+  now: Date = new Date(),
+  leadMinutes = 90,
+): { time: string; nextDay: boolean } {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: "America/New_York",
     hour: "2-digit",
@@ -246,13 +250,16 @@ export function notBeforeNowET(wanted: string, now: Date = new Date(), leadMinut
   let floorMin = hh * 60 + mm + leadMinutes;
   floorMin = Math.ceil(floorMin / 30) * 30;
   const use = Math.max(wantMin, floorMin);
-  // Past the end of the day there is nothing bookable today; hand back the latest
-  // sane slot rather than rolling into tomorrow silently, and let the empty quote
-  // speak for itself if the branch is shut.
-  const capped = Math.min(use, 18 * 60);
-  const H = String(Math.floor(capped / 60)).padStart(2, "0");
-  const M = String(capped % 60).padStart(2, "0");
-  return `${H}:${M}:00`;
+  // LAST_PICKUP is the latest slot a branch will realistically hand over a car.
+  // Capping at 18:00 and staying on today was the original behaviour and it produced
+  // a quote for 6pm at a branch that shuts at 5:30 - Enterprise returns an EMPTY class
+  // list for that, with no warning, which surfaced as `class_unmapped` and read as a
+  // vehicle problem rather than an opening-hours one. Roll the day instead.
+  const LAST_PICKUP = 16 * 60 + 30;
+  if (use > LAST_PICKUP) return { time: "09:00:00", nextDay: true };
+  const H = String(Math.floor(use / 60)).padStart(2, "0");
+  const M = String(use % 60).padStart(2, "0");
+  return { time: `${H}:${M}:00`, nextDay: false };
 }
 
 async function nextWorkingDay(
@@ -611,9 +618,13 @@ async function runPreview(
       // so an ET-derived time is never in the past locally; the worst case is booking a
       // technician later in their own day than strictly necessary, which is safe. The
       // hour is taken % 24 because Intl with hour12:false renders midnight as "24".
-      const start = `${firstDay}T${
-        firstDay === etTodayISO() ? notBeforeNowET(wanted) : wanted
-      }`;
+      // Only today's date needs flooring; a future date is already whatever the form
+      // asked for. If the floor pushes past the end of the working day, take the slot
+      // AND the day it belongs to.
+      const floored =
+        firstDay === etTodayISO() ? notBeforeNowET(wanted) : { time: wanted, nextDay: false };
+      const startDay = floored.nextDay ? addDaysISO(firstDay, 1) : firstDay;
+      const start = `${startDay}T${floored.time}`;
       const end = fmtISO(addDaysDT(parseLocalDT(start), days));
       const { address, code, wantState } = intentAddress(item);
       if (!address) throw new Error("no branch/shop address seed on the intent facts");
