@@ -504,12 +504,38 @@ function usTime(t: string): string {
 }
 
 /** Draft bodies (plan §Messages). EXACT rendered text appears in Preview; live arming requires Tyler's approval. */
-export function renderMsg1(f: { conf: string; branchName: string; branchAddress: string }): string {
+/**
+ * The cutover instruction text, approved by Tyler 2026-08-17 and first sent to AELSER
+ * that evening. Three things the previous version got wrong and this fixes:
+ *
+ *   - the confirmation number was the literal string "(assigned at booking)"
+ *   - the branch was named but never addressed, so nobody could navigate to it
+ *   - it never said what happens at the counter, which is the technician's actual
+ *     question: do I lose my vehicle, do I pay, how long does this take
+ *
+ * `firstName` and `dayLabel` are passed in rather than derived here so the sender owns
+ * the technician's own name and their own block date.
+ */
+export function renderMsg1(f: {
+  conf: string;
+  branchName: string;
+  branchAddress: string;
+  firstName?: string;
+  dayLabel?: string;
+}): string {
+  const who = f.firstName ? `Hi ${f.firstName}, this is` : "This is";
+  const when = f.dayLabel ?? "Tomorrow";
   return (
-    `SHS Fleet: Your new Enterprise billing reservation is booked — confirmation ${f.conf}. ` +
-    `Tomorrow you have a 30-minute 8:00 AM route block to stop at Enterprise ${f.branchName}, ${f.branchAddress}. ` +
-    `You KEEP the vehicle you are driving — this is a billing changeover only: the branch will close your ` +
-    `current agreement and re-sign it under Sears direct billing. Questions? Reply here.`
+    `${who} Sears Fleet. ${when}, we have blocked the first 30 minutes of your route, ` +
+    `8:00 AM, for you to stop at Enterprise ${f.branchName}, ${f.branchAddress}. ` +
+    `Confirmation ${f.conf}.\n\n` +
+    `You keep the vehicle you are driving. This is a billing change only. The branch will ` +
+    `close your current Holman agreement and re-sign the same vehicle under Sears direct ` +
+    `billing. Bring your driver's license. There is nothing for you to pay and nothing to ` +
+    `hand back. It usually takes about 15 minutes.\n\n` +
+    `If you have any issue and need immediate help, reach out to an agent in Sasha. Reply ` +
+    `back here with an update once it is completed. This inbox is monitored throughout the ` +
+    `day but not constantly.`
   );
 }
 
