@@ -210,6 +210,16 @@ export function describeVehicle(
 export const SEDAN_LADDER = ["ECAR", "CCAR", "ICAR", "SCAR", "FCAR"];
 export const SEDAN_CODES = new Set(SEDAN_LADDER);
 
+/**
+ * Only when EVERY sedan rung is empty. Smallest first, so a full-size SUV or a
+ * minivan is genuinely the last thing reached rather than a convenient default
+ * (Tyler, 2026-08-18: "gated by what's available using the FSUV and larger only as
+ * a last resort"). Before this the ladder simply stopped at FCAR and a branch with
+ * no sedan produced REVIEW and no car, which is the worst outcome available: the
+ * lot has vehicles and the technician goes home.
+ */
+export const ESCALATION_LADDER = ["CFAR", "IFAR", "SFAR", "FFAR", "MVAR"];
+
 const HVAC_PATTERN = /hvac|refrig|heat|air\s*cond/i;
 
 export function isHvac(jobTitle: string | null | undefined): boolean {
@@ -329,9 +339,19 @@ export function choose(
     }
   }
 
+  // Every sedan rung empty. Take the smallest thing the branch DOES have rather than
+  // sending a stranded technician home, and say plainly that it is an escalation.
+  for (const code of ESCALATION_LADDER) {
+    if (code in byCode) {
+      return {
+        pick: byCode[code], code, match: "escalated_no_sedan", changes_vehicle: true,
+        note: `no sedan at or below full-size offered; escalated to ${code} (smallest available above the sedan ceiling)`,
+      };
+    }
+  }
   return {
-    pick: null, code: "", match: "NO_SEDAN", changes_vehicle: null,
-    note: "branch offered no sedan at or below full-size. REVIEW",
+    pick: null, code: "", match: "NO_VEHICLE", changes_vehicle: null,
+    note: "branch offered nothing on the sedan ladder or the escalation ladder. REVIEW",
   };
 }
 

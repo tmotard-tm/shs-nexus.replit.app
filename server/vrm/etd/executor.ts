@@ -62,7 +62,10 @@ import {
   type EtdCallLog,
   type QuoteResult,
 } from "./client";
-import { choose as chooseClass, chooseSameVehicle, type OfferedClass } from "./vehicle-class";
+import {
+  choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER,
+  type OfferedClass,
+} from "./vehicle-class";
 import {
   zipState,
   parseLocalDT,
@@ -365,9 +368,46 @@ export function intentAddress(item: QueueItem): {
     };
   }
   const rs = (facts.requestSeed || {}) as Record<string, any>;
-  let address = [rs.shopAddress, rs.shopCity, rs.shopState].filter(Boolean).join(", ");
+  let address = joinAddress([rs.shopAddress, rs.shopCity, rs.shopState, rs.shopPostal]);
   if (!address) address = String(rs.reportedBranch || "").trim();
   return { address, code: "", wantState: String(rs.shopState || "").trim().toUpperCase() };
+}
+
+/**
+ * Assemble an address a geocoder can actually read.
+ *
+ * Technicians type the town into the street box as well, and the city field arrives
+ * with its own trailing comma, so a plain join produced
+ * "8000 Stream Walk Ln, Manassas, Manassas,, VA" - a duplicated town and an empty
+ * component. That geocoded to VALENCIA, SPAIN, and because the branch search is pinned
+ * to countryCode=US it came back with a bare rejection and no reason text, which then
+ * surfaced as four unrelated-looking failures. Trim each part, drop empties, and drop
+ * any part already contained in what came before it.
+ */
+export function joinAddress(parts: Array<unknown>): string {
+  const out: string[] = [];
+  for (const raw of parts) {
+    const part = String(raw ?? "").replace(/^[\s,]+/, "").replace(/[\s,]+$/, "").trim();
+    if (!part) continue;
+    if (out.join(", ").toLowerCase().includes(part.toLowerCase())) continue;
+    out.push(part);
+  }
+  return out.join(", ");
+}
+
+/**
+ * Is this somewhere Enterprise US could plausibly be?
+ *
+ * Continental US plus Alaska and Hawaii, generously bounded. A sanity check on a
+ * geocode, not a geography lesson: its only job is to catch an address that resolved
+ * to another continent BEFORE we ask for branches near it.
+ */
+export function looksUnitedStates(lat: number, lon: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
+  const contiguous = lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66;
+  const alaska = lat >= 51 && lat <= 72 && lon >= -170 && lon <= -129;
+  const hawaii = lat >= 18 && lat <= 23 && lon >= -161 && lon <= -154;
+  return contiguous || alaska || hawaii;
 }
 
 function branchState(q: QuoteResult): string {
@@ -462,6 +502,25 @@ export function classForIntent(
     ? `approved class '${want}' matched ${String(pick.code)}`
     : `approved class '${want}' not offered at this branch`;
 
+  // HVAC comes from the ROSTER, not from a checkbox the technician ticks.
+  //
+  // The form's hvacCarveOut is self-declared and JGATES2, an HVAC Team Lead, left it
+  // blank and was approved for a sedan. The roster has always known his trade and
+  // isHvac() has always existed; this lane simply never asked. A sedan is the default
+  // for everyone else (Tyler's rule), but tools do not fit in a Mirage boot, so an
+  // HVAC technician goes up the escalation ladder first and only falls back to a
+  // sedan if the branch has nothing bigger.
+  const hvacByRoster = isHvac(String((facts.roster || {}).jobTitle ?? ""));
+  if (!pick && want === "sedan" && hvacByRoster) {
+    const big = ESCALATION_LADDER
+      .map((code) => offered.find((c) => String(c.code || "").toUpperCase() === code))
+      .find(Boolean) as OfferedClass | undefined;
+    if (big) {
+      pick = big;
+      match = "hvac_roster_escalated";
+      note = `roster job title is HVAC; took ${String(big.code)} rather than a sedan`;
+    }
+  }
   if (!pick && want === "sedan") {
     // ETD class descriptions rarely contain the literal word "sedan", so the default
     // would park EVERY plain request for a human. The sedan ladder (no job title — the
@@ -943,14 +1002,30 @@ async function runBook(
   }
 
   const gotBranch = String(q.branch_code || "");
-  const pick = (q.classes || []).find(
+  let pick = (q.classes || []).find(
     (c) => String(c.code || "").toUpperCase() === sipp.toUpperCase(),
   );
+  let sipp2 = sipp;
+  let substitution: string | null = null;
+  // The lot moves between the quote and the commit. Demanding the exact preview class
+  // still be there meant a sold-out Mirage aborted the whole booking (DWHITE0,
+  // 2026-08-18) even though the branch had other cars. Re-pick with the SAME rules and
+  // book the substitute; only a BRANCH change is still fatal, because that is a
+  // different place and the technician was told where to go.
+  if (gotBranch === wantBranch && !pick) {
+    const re = classForIntent(item, (q.classes || []) as CarClass[]);
+    if (re.pick) {
+      pick = re.pick as any;
+      sipp2 = String(re.pick.code || "");
+      substitution = `${sipp} sold out between quote and commit; re-picked ${sipp2} (${re.decision.detail ?? "same rules"})`;
+      console.log(`[etd-exec] SUBST #${intentId} ${ldap} ${substitution}`);
+    }
+  }
   if (gotBranch !== wantBranch || !pick) {
     const reason =
       gotBranch !== wantBranch
         ? `branch drift ${wantBranch}->${gotBranch}`
-        : `class ${sipp} no longer offered`;
+        : `class ${sipp} no longer offered and nothing on the ladder is available here`;
     await post("op_result", { outcome: "aborted_before_open", evidence: { reason } });
     return result("ABRT", "aborted_before_open", reason);
   }
@@ -1026,7 +1101,9 @@ async function runBook(
   // The account has no Truck Number field. Nothing may claim it does.
   stripTruckNumberReference(model);
 
-  const requestHash = bookingRequestHash({ branch: gotBranch, date: pickup, ldap, sipp });
+  // Keyed on what we are ACTUALLY booking, so a substitution is a different
+  // reservation and a repeat of the same one is caught.
+  const requestHash = bookingRequestHash({ branch: gotBranch, date: pickup, ldap, sipp: sipp2 });
 
   // What this pass actually put on the wire. Recorded with every failure so a refusal is
   // diagnosable from the ledger alone, without re-deriving the inputs from a preview that
@@ -1036,7 +1113,8 @@ async function runBook(
     quoteReference: q.reference,
     branchCode: gotBranch,
     branchName: clip(q.branch_name, 60),
-    sipp,
+    sipp: sipp2,
+    ...(substitution ? { substitution } : {}),
     pickupDate: pickup,
     start,
     end,

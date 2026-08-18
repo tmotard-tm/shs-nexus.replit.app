@@ -511,7 +511,29 @@ export class EtdClient {
     const hits: Json[] = res?.data?.data || [];
     if (!hits.length) throw new EtdError(`no place match for '${address}'`);
     const detail = await this.get("/api/places/" + hits[0].stationId);
-    return detail?.data;
+    const place = detail?.data;
+    // Where did that actually land?
+    //
+    // hits[0] was taken on trust. A garbled address ("8000 Stream Walk Ln, Manassas,
+    // Manassas,, VA") resolved to VALENCIA, SPAIN - 39.4738, -0.3756 - and since the
+    // branch search is pinned to countryCode=US it came back empty with no reason
+    // text. The operator then saw quote_failed, class_unmapped, branch_zip_missing
+    // and no_date, four errors that say nothing about the real cause. Catch it here.
+    const lat = Number(place?.latitude);
+    const lon = Number(place?.longitude);
+    const inUS =
+      Number.isFinite(lat) && Number.isFinite(lon) &&
+      ((lat >= 24 && lat <= 50 && lon >= -125 && lon <= -66) ||
+       (lat >= 51 && lat <= 72 && lon >= -170 && lon <= -129) ||
+       (lat >= 18 && lat <= 23 && lon >= -161 && lon <= -154));
+    if (!inUS) {
+      throw new EtdError(
+        `'${address}' resolved to ${lat}, ${lon}, which is not in the United States ` +
+        `(ETD matched "${String(place?.location ?? "?")}"). Fix the shop address or the ` +
+        `technician's reported branch on the request; Enterprise has no branch there.`,
+      );
+    }
+    return place;
   }
 
   /**

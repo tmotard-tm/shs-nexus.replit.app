@@ -661,7 +661,9 @@ export type EligibilityFacts = {
   otherNonterminalIntentId: number | null;
   cutoverAlreadyBooked: boolean;
   // roster
-  roster: { employmentStatus: string | null; dropped: boolean; districtNo: string | null; employeeId: string | null; techName: string | null } | null;
+  // jobTitle is the roster's trade and the ONLY trustworthy HVAC signal; the
+  // request form's hvacCarveOut checkbox is self-declared and JGATES2 left it blank.
+  roster: { employmentStatus: string | null; dropped: boolean; districtNo: string | null; employeeId: string | null; techName: string | null; jobTitle: string | null } | null;
   // tpms
   tpmsTruck: string | null;
   truckContradiction: string | null; // description when survey contradicts TPMS
@@ -876,7 +878,7 @@ export async function fetchEligibilityFacts(params: {
   let roster: EligibilityFacts["roster"] = null;
   if (ldap) {
     const { rows } = await db.execute(sql`
-      SELECT employment_status, dropped_from_source_at, district_no, employee_id, tech_name
+      SELECT employment_status, dropped_from_source_at, district_no, employee_id, tech_name, job_title
       FROM all_techs
       WHERE upper(tech_racfid) = ${ldap}
       ORDER BY (employment_status = 'A') DESC,
@@ -892,6 +894,11 @@ export async function fetchEligibilityFacts(params: {
         districtNo: r.district_no != null && String(r.district_no).trim() !== "" ? String(r.district_no).trim() : null,
         employeeId: r.employee_id ?? null,
         techName: r.tech_name ?? null,
+        // The roster knows the trade. The request lane used to read HVAC off a
+        // checkbox the TECHNICIAN ticks, so an HVAC Team Lead who left it blank was
+        // approved for a sedan (JGATES2, 2026-08-18). isHvac(jobTitle) already
+        // exists and the cutover lane already trusts it.
+        jobTitle: r.job_title ?? null,
       };
     }
   }
@@ -1766,6 +1773,28 @@ export async function openBookingAttempt(
   `);
   if ((open as any[]).length) {
     throw new OrchestratorError("unfinished_attempt", "an unfinished booking attempt exists; reconcile via readback first", 409);
+  }
+  // IDEMPOTENCY. The checks above stop two attempts running AT ONCE; nothing stopped a
+  // REPEAT after one already succeeded, and request_hash was written here and never
+  // read. Two sequential passes on the same intent therefore both committed and made
+  // DWHITE0 two reservations 26 seconds apart. ETD's own pre-commit duplicate search
+  // cannot cover this: /api/myjourney/search returns only past-dated journeys, so a
+  // future pickup is invisible to it. The guard has to live in our ledger.
+  const thisHash = strOrNull(payload?.requestHash);
+  if (thisHash) {
+    const { rows: done } = await db.execute(sql`
+      SELECT attempt_no FROM vrm_workflow_attempts
+       WHERE intent_id = ${intentId} AND phase = 'etd_booking'
+         AND request_hash = ${thisHash} AND outcome = 'booked'
+       LIMIT 1
+    `);
+    if ((done as any[]).length) {
+      throw new OrchestratorError(
+        "already_booked",
+        `this exact reservation (same branch, date, technician and class) already booked on attempt ${(done as any[])[0].attempt_no}; refusing to book it twice`,
+        409,
+      );
+    }
   }
   let inserted: any[];
   try {
