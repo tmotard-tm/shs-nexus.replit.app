@@ -1992,9 +1992,27 @@ export async function persistPreviewFromRunner(params: {
 
   if (failures.length) {
     if (deps?.beforeFinalWrite) await deps.beforeFinalWrite();
+    // On failure the preview object is NOT rewritten, so `preview` keeps whatever the
+    // last SUCCESSFUL run built. That made a failed run undiagnosable and actively
+    // misleading: the stored preview showed ECAR offered and mapped while the live
+    // failure said the class was unmapped, because the two came from different runs
+    // an hour apart. Record what THIS run's quote actually saw, beside the failure.
     const stamped = await touchIntent(intent.id, {
       status: "preview_required",
-      eligibility: { facts: publicFacts(facts), failures, checkedAt: new Date().toISOString() },
+      eligibility: {
+        facts: publicFacts(facts),
+        failures,
+        checkedAt: new Date().toISOString(),
+        attempted: {
+          branchCode: params.quote.branchCode ?? null,
+          branchName: params.quote.branchName ?? null,
+          pickupDate: strOrNull(params.quote.pickupDate),
+          returnDate: strOrNull(params.quote.returnDate),
+          offeredClasses: params.quote.offeredClasses ?? [],
+          classDecision: params.classDecision,
+          warnings: params.quote.warnings ?? [],
+        },
+      },
       last_error: failures.map((f) => f.code).join(","),
       ...releaseClaim,
     }, postbackGuard);

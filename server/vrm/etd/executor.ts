@@ -445,6 +445,15 @@ export function classForIntent(
       pick = lad.pick;
       match = "sedan_ladder";
       note = `sedan via ladder: ${lad.note}`;
+    } else {
+      // The ladder ran and found nothing. Its verdict is the accurate one and it
+      // means something quite different from the pre-ladder text: "sedan is not a
+      // class here" versus "this branch has no sedan free right now". Leaving the
+      // pre-ladder note in place sent an operator hunting a mapping bug when the
+      // real answer was availability. Name the codes that WERE offered so the next
+      // reader can see it without another query.
+      const codes = offered.map((c) => String(c.code || "?")).filter(Boolean);
+      note = `${lad.note} (branch offered: ${codes.length ? codes.join(", ") : "NOTHING - the quote returned no classes"})`;
     }
   }
 
