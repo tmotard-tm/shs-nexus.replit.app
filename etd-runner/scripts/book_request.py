@@ -51,6 +51,11 @@ from vehicle_class import choose as choose_class                 # noqa: E402
 # The proven payload surgery. Do not reimplement any of these.
 from book_cutover import (                                       # noqa: E402
     retarget, redate, relocate, set_driver, set_class, cron_secret,
+    # The account's additional-info contract. book_cutover has called these since
+    # 2026-08-17; this path never did, which is the whole reason every request
+    # commit came back REQUIRED FIELD MISSING: ADDITIONALINFO.
+    use_account_additional_info, strip_truck_number_reference,
+    assert_additional_info_complete,
 )
 
 REF = HERE / "reference"
@@ -109,6 +114,35 @@ def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str):
     return q, end, False
 
 
+def _floor_start(start_s: str, end_s: str, lead_minutes: int = 90):
+    """Push a past pickup forward to the next bookable half hour, keeping duration.
+
+    Returns (start, end) as ISO strings. A start already in the future is untouched.
+    """
+    start = datetime.fromisoformat(start_s)
+    end = datetime.fromisoformat(end_s)
+    span = end - start
+    # The box runs UTC; ETD reads the start as BRANCH-LOCAL wall clock. Using the
+    # box clock produced 17:00 and 17:30 pickups on the first pass - 5pm and 5:30pm
+    # local, at branches that close around then, for technicians who have been
+    # waiting since yesterday morning. Eastern is the reference: every US branch is
+    # at or west of it, so an ET-derived time is never in the past locally and lands
+    # in the afternoon rather than at closing.
+    try:
+        from zoneinfo import ZoneInfo
+        now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
+    except Exception:
+        now_et = datetime.utcnow() - timedelta(hours=4)
+    floor = now_et + timedelta(minutes=lead_minutes)
+    # round up to the next :00 or :30
+    add = (30 - floor.minute % 30) % 30
+    floor = (floor + timedelta(minutes=add)).replace(second=0, microsecond=0)
+    if start >= floor:
+        return start_s, end_s
+    return (floor.strftime("%Y-%m-%dT%H:%M:%S"),
+            (floor + span).strftime("%Y-%m-%dT%H:%M:%S"))
+
+
 def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
              old_j: str, old_r: str, confirm: bool) -> dict:
     no, ldap = r["request_no"], str(r["ldap"]).upper()
@@ -128,6 +162,19 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         address = str(r.get("tech_reported_branch") or "").strip()
     if not address:
         raise RuntimeError("no shop address and no reported branch on the request")
+
+    # ETD will not quote a start that has already passed: it answers with an EMPTY
+    # class list, at every duration and from every address, which reads exactly like
+    # "this branch has no cars" and surfaced on the Nexus side as `class_unmapped`.
+    # The queue hands us COALESCE(pickup_at, appointment_at) raw, and the request form
+    # stores 08:00 for everybody, so from mid-morning onward every single request in
+    # the queue is asking for a pickup in the past. Measured 2026-08-18: all 12 open
+    # requests, including two filed that same morning. Floor it, and carry the same
+    # shift into the end date so the rental keeps its agreed length.
+    start_dt_s, end_dt_s = _floor_start(r["start_dt"], r["end_dt"])
+    if start_dt_s != r["start_dt"]:
+        print(f"       start floored {r['start_dt']} -> {start_dt_s} (was in the past)")
+    r["start_dt"], r["end_dt"] = start_dt_s, end_dt_s
 
     q, booked_end, shortened = quote_with_fallback(etd, address, r["start_dt"], r["end_dt"])
     classes = q.get("classes") or []
@@ -200,6 +247,12 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     redate(model, start_dt, end_dt)
     relocate(model, q["branch"], q["place"])
     set_class(model, pick)
+    # Enterprise edits the account's required additional-info fields without telling
+    # anyone, and answers a stale block with one sentence naming no field:
+    # "REQUIRED FIELD MISSING: ADDITIONALINFO". The captured template is a snapshot
+    # and goes stale silently, so read the CURRENT field list off the account and let
+    # set_driver fill it, exactly as book_cutover has done since 2026-08-17.
+    use_account_additional_info(model, etd.account_additional_info_fields())
     set_driver(model, user, ldap, r.get("tech_name") or "", truck)
 
     # NEW rental wording. book_approved.py carried the cutover note, which told
@@ -219,6 +272,13 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         f"LDAP  = {ldap}",
         f"SHS Request  = {no}",
     ]
+
+    # Enterprise deleted the Truck Number reference field, so that label now points at
+    # nothing; the truck lives in the special notes above. Then refuse to commit while
+    # any mandatory field is still empty, BY NAME, rather than eating ETD's generic
+    # refusal again.
+    strip_truck_number_reference(model)
+    assert_additional_info_complete(model, ldap)
 
     for gate in ("/api/dailyrental/validateLocAddInfo", "/api/dailyrental/validate"):
         gr = etd.post(gate, model, mutating=False)

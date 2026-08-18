@@ -567,7 +567,23 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           category: "rental_management",
           confirm: true,
           scheduledFor: scheduledFor.toISOString(),
-          messages: sendList.map((r) => ({ ldap: r.ldap, phone: r.phone, body: r.body })),
+          // phoneLocked ONLY where a correction was actually supplied.
+          //
+          // send-batch resolves the destination from the LDAP and IGNORES an explicit
+          // `phone` unless phoneLocked is set, so `phoneOverrides` was inert: the
+          // 2026-08-18 reminder delivered PDOWDY at 317-974-0195 and TOMALI at
+          // 616-211-4183, the exact numbers the override existed to replace.
+          //
+          // Locking ALL of them would be the wrong fix. LDAP resolution reads
+          // fs_comms_contacts, which is the maintained directory and was RIGHT for the
+          // other 52 - it is why JSTILL0 got a working number and answered. Lock only
+          // the rows a human deliberately corrected, and let the directory serve the rest.
+          messages: sendList.map((r) => ({
+            ldap: r.ldap,
+            phone: r.phone,
+            ...(r.phoneCorrected ? { phoneLocked: true } : {}),
+            body: r.body,
+          })),
         }),
       });
       const ctype = resp.headers.get("content-type") || "";

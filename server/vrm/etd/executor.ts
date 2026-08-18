@@ -225,6 +225,33 @@ type ScheduleEvidence = {
  * the preview. A STALE watermark yields null: booking is hard-stopped until the next
  * schedule load rather than guessing a date the tech may not be working.
  */
+/**
+ * The later of a wanted wall-clock time and a safe lead margin from right now (ET),
+ * rounded up to the next half hour. Returns HH:MM:SS. Never returns a time in the past.
+ */
+export function notBeforeNowET(wanted: string, now: Date = new Date(), leadMinutes = 90): string {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "America/New_York",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(now);
+  const hh = Number(parts.find((x) => x.type === "hour")?.value ?? "0") % 24;
+  const mm = Number(parts.find((x) => x.type === "minute")?.value ?? "0");
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(wanted));
+  const wantMin = m ? Number(m[1]) * 60 + Number(m[2]) : 9 * 60;
+  let floorMin = hh * 60 + mm + leadMinutes;
+  floorMin = Math.ceil(floorMin / 30) * 30;
+  const use = Math.max(wantMin, floorMin);
+  // Past the end of the day there is nothing bookable today; hand back the latest
+  // sane slot rather than rolling into tomorrow silently, and let the empty quote
+  // speak for itself if the branch is shut.
+  const capped = Math.min(use, 18 * 60);
+  const H = String(Math.floor(capped / 60)).padStart(2, "0");
+  const M = String(capped % 60).padStart(2, "0");
+  return `${H}:${M}:00`;
+}
+
 async function nextWorkingDay(
   ldap: string,
   readSchedule: NonNullable<ExecutorDeps["schedule"]>,
@@ -509,8 +536,24 @@ async function runPreview(
       // for 08:00 and was booked at 09:00.
       const askedTime = /T(\d{2}:\d{2}:\d{2})/.exec(String(requestedAt ?? ""))?.[1]
         ?? / (\d{2}:\d{2}:\d{2})/.exec(String(requestedAt ?? ""))?.[1];
+      const wanted =
+        item.workflowType === WORKFLOW_REQUEST && askedTime ? askedTime : "09:00:00";
+      // nextWorkingDay floors the DATE to today but nothing floored the TIME, and the
+      // request form stores 08:00 for everyone. So from 08:00 local onward every
+      // request asked Enterprise to quote a pickup that had ALREADY HAPPENED, and ETD
+      // answers a past start with an empty class list - which surfaced as
+      // `class_unmapped` and looked for all the world like a vehicle-mapping bug. Two
+      // independent code paths hit it: the in-server preview and book_request.py, which
+      // reported "ETD offered no classes at any duration, from the shop address or the
+      // technician's reported branch". Proven 2026-08-18 with all 12 open requests
+      // carrying pickup_at in the past, including two created that same morning.
+      //
+      // ET is the floor reference on purpose. Every US branch is at or west of Eastern,
+      // so an ET-derived time is never in the past locally; the worst case is booking a
+      // technician later in their own day than strictly necessary, which is safe. The
+      // hour is taken % 24 because Intl with hour12:false renders midnight as "24".
       const start = `${firstDay}T${
-        item.workflowType === WORKFLOW_REQUEST && askedTime ? askedTime : "09:00:00"
+        firstDay === etTodayISO() ? notBeforeNowET(wanted) : wanted
       }`;
       const end = fmtISO(addDaysDT(parseLocalDT(start), days));
       const { address, code, wantState } = intentAddress(item);
