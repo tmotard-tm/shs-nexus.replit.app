@@ -1631,6 +1631,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       // starts on this date instead of the technician's own.
       const pickupAt = decision === "APPROVE"
         ? String(req.body?.pickupAt || "").trim().slice(0, 40) || null : null;
+      // Shape-check before this string reaches a ::timestamptz cast below —
+      // a malformed value would otherwise surface as a 500 from Postgres.
+      if (pickupAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(pickupAt)) {
+        return res.status(400).json({ message: "pickupAt must be YYYY-MM-DDTHH:MM" });
+      }
 
       // RETURN is "you have not given us enough to book this", which is a
       // different fact from "no". It must name what is missing, because a
@@ -1647,7 +1652,13 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const actor = (req as any).user?.username || (req as any).user?.email || "unknown";
 
       const { rows } = await db.execute(sql`
-        SELECT auto_decision FROM vrm_rental_request WHERE request_no = ${Number(req.params.requestNo)}
+        SELECT auto_decision,
+               -- Whether this approval carries a DIFFERENT pickup time than the row
+               -- holds. Compared in SQL so both sides normalize through timestamptz;
+               -- string-comparing "2026-08-18T16:00" against a serialized DB value
+               -- would report a change on every approve.
+               (${pickupAt}::timestamptz IS DISTINCT FROM pickup_at) AS pickup_changes
+        FROM vrm_rental_request WHERE request_no = ${Number(req.params.requestNo)}
       `);
       const cur = (rows as any[])[0];
       if (!cur) return res.status(404).json({ message: "request not found" });
@@ -1712,6 +1723,18 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
             + PUBLIC_REQUEST_URL;
       void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
 
+      // A preview quoted before this decision carries the OLD pickup time, and the
+      // booking chain commits from the stored preview, never re-deriving from the
+      // request row — so without this knock-back a re-approve with a new time would
+      // book the old one. Same discipline as the vehicle-class route. Only
+      // preview_pending/preview_ready are knocked back; an intent already at
+      // confirmed/booking is past the point where a retime can be honored, and
+      // yanking it there risks orphaning a real ETD reservation.
+      if (decision === "APPROVE" && pickupAt && cur.pickup_changes) {
+        await invalidateRequestPreviews(
+          String(no), `pickup time set to ${pickupAt} by ${actor}`);
+      }
+
       // APPROVE books it. The acknowledgement above promises a confirmation number
       // and a branch; this is what actually produces them.
       if (decision === "APPROVE") void autoBookApprovedRequest(no);
@@ -1764,6 +1787,15 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
         return;
       }
     }
+
+    // This attempt is now ACCEPTED (any existing intent is resumable, or a new one
+    // will be created). Clear the previous failure so the card reads "booking in
+    // progress" during the retry instead of still shouting the old reason — and so
+    // the page's fast outcome polling re-arms. A failure below re-writes it.
+    await db.execute(sql`
+      UPDATE vrm_rental_request SET etd_error = NULL, updated_at = now()
+       WHERE request_no = ${requestNo} AND etd_booked_at IS NULL AND etd_error IS NOT NULL
+    `);
 
     let cur =
       existing ??

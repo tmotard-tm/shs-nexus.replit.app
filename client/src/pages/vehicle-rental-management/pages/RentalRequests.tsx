@@ -38,6 +38,11 @@ interface Req {
   decided_by: string | null; decided_at: string | null; decision_note: string | null;
   actual_days_down: number | null; claim_variance_days: number | null;
   created_at: string;
+  // Booking outcome, written by the auto-book chain that Approve kicks off.
+  // etd_error is cleared on a retry and overwritten by the newest failure.
+  etd_booked_at?: string | null; etd_reference?: string | null;
+  etd_reservation_id?: string | null; etd_error?: string | null;
+  pickup_at?: string | null;
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -239,7 +244,16 @@ export default function RentalRequests() {
   const [classDraft, setClassDraft] = useState("sedan");
 
   const { data, isLoading, error } = useQuery<{ requests: Req[] }>({
-    queryKey: ["/api/vrm/forms/rental-request/list"], refetchInterval: 60_000,
+    queryKey: ["/api/vrm/forms/rental-request/list"],
+    // Approve fires a booking that takes 20-30s of ETD round trips. While any
+    // approved request is still unsettled (no confirmation, no error yet),
+    // poll fast so the drawer shows the outcome as it lands; otherwise amble.
+    refetchInterval: (query) => {
+      const reqs = query.state.data?.requests ?? [];
+      const settling = reqs.some((r) =>
+        r.status === "approved" && !r.etd_booked_at && !r.etd_error);
+      return settling ? 5_000 : 60_000;
+    },
   });
   const { data: stats } = useQuery<Record<string, any>>({
     queryKey: ["/api/vrm/forms/rental-request/stats"], refetchInterval: 60_000,
@@ -265,10 +279,16 @@ export default function RentalRequests() {
       if (!res.ok) throw new Error(j?.message || "decision failed");
       return j;
     },
-    onSuccess: () => {
-      setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00"); setDetail(null);
+    onSuccess: (_j, v) => {
+      setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00");
+      // APPROVE kicks off the booking — keep the drawer OPEN so the staffer
+      // watches the confirmation (or the failure reason) land, instead of
+      // closing on a request that still says nothing. Other verdicts are
+      // final; closing is the right acknowledgement.
+      if (v.decision !== "APPROVE") setDetail(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/stats"] });
+      refreshIntents();
     },
     onError: (e: any) => setActionErr(e.message),
   });
@@ -297,6 +317,16 @@ export default function RentalRequests() {
   });
 
   const rows = data?.requests ?? [];
+
+  // The drawer holds a SNAPSHOT of the row from the moment it was clicked.
+  // After Approve the booking lands on the server 20-30s later — without this
+  // sync the open drawer would keep saying nothing while the list underneath
+  // already knows the confirmation number (or the failure).
+  useEffect(() => {
+    if (!detail) return;
+    const fresh = rows.find((r) => r.request_no === detail.request_no);
+    if (fresh && JSON.stringify(fresh) !== JSON.stringify(detail)) setDetail(fresh);
+  }, [rows, detail]);
 
   // Latest booking-workflow intent per request (keyed by request_no).
   const sourceIds = useMemo(() => rows.map((r) => String(r.request_no)), [rows]);
@@ -697,6 +727,46 @@ export default function RentalRequests() {
                 </div>
               )}
             </div>
+
+            {/* The booking outcome, as the REQUEST ROW knows it. This is the
+                one place a failure that happened before any workflow intent
+                existed (eligibility gate, intent conflict) becomes visible —
+                the intent panel below can only show what an intent recorded. */}
+            {detail.etd_booked_at ? (
+              <div style={{ marginTop: 16, background: colors.greenLight, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.green }}>
+                  BOOKED{detail.etd_reference ? ` — CONFIRMATION ${detail.etd_reference}` : ""}
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                  Reserved {new Date(detail.etd_booked_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET.
+                  The technician was texted the confirmation number and branch.
+                </div>
+              </div>
+            ) : detail.etd_error ? (
+              <div style={{ marginTop: 16, background: colors.redLight, border: `1px solid ${colors.red}`, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.red }}>
+                  BOOKING FAILED
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3, wordBreak: "break-word" }}>
+                  {detail.etd_error}
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, marginTop: 4 }}>
+                  Fix the cause, then press APPROVE again — a request that already holds a
+                  reservation is refused, never booked twice. If the error says the workflow
+                  is parked, resolve it in the booking panel below first.
+                </div>
+              </div>
+            ) : detail.status === "approved" ? (
+              <div style={{ marginTop: 16, background: colors.accentLight, border: `1px solid ${colors.accent}`, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.accent }}>
+                  BOOKING IN PROGRESS…
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                  Quoting and reserving in Enterprise takes 20–30 seconds. The confirmation
+                  number (or the failure reason) will appear here — leave this open.
+                </div>
+              </div>
+            ) : null}
 
             {/* Booking workflow: only offered once the request is APPROVED
                 (the server's eligibility gate requires it anyway), or shown

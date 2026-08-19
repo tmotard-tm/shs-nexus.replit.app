@@ -124,3 +124,4 @@
 - [Publish proposes DROP for boot-DDL tables](publish-drops-boot-ddl-tables.md) — publish diffs dev DB vs prod DB (tablesFilter does NOT protect fs_*); a dev app still on pre-merge code looks like "tables removed" → restart dev before publishing.
 - [AMS bulk VehicleInRepair capture](ams-bulk-inrepair-flag.md) — bulk rows DO carry the flag (tri-state cache map); label-only "In Repair" under-excludes ~700 trucks; fail closed+visible on unknown AMS facts; only an active build may say "warming".
 - [Odometer cycle & dry-run semantics](odometer-cycle-dry-run-semantics.md) — seed-never-fire on first sight, forward-only watermark, and NEVER stamp sent_at on a dry run or arming the gate goes silently dead.
+- [Approved pickup time → ETD booking](request-pickup-time-flow.md) — quote-feeding request-row edits must invalidateRequestPreviews (commit books the stored preview); clear etd_error on accepted retry; preview_failed is a code, not a status.
