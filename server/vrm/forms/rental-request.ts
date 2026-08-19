@@ -1486,8 +1486,17 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       `);
       // Same reconcile on the happy path, so a runner booking leaves ONE truth behind
       // it rather than a booked row beside a stalled intent.
+      //
+      // adoptRunnerBooking returns true when an active intent exists and was
+      // advanced; in that case releaseMessagesIfEligible (inside adoptRunnerBooking)
+      // is the sole sender of the booked-SMS — it renders the canonical
+      // renderRequestMsg1 copy. The legacy notifyTech call below must NOT fire in
+      // that branch, or the technician receives two texts for one booking.
+      // When adoptRunnerBooking returns false (no intent — legacy runner path that
+      // pre-dates the orchestrator) the legacy notifyTech remains the fallback.
+      let orchestratorHandled = false;
       if ((rows as any[]).length) {
-        await adoptRunnerBooking(no, ref, resId || null,
+        orchestratorHandled = await adoptRunnerBooking(no, ref, resId || null,
           req.body?.alreadyNotified === true ? { alreadyNotified: "runner" } : undefined);
       }
       if (!(rows as any[]).length) {
@@ -1515,21 +1524,25 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       }
       const booked = (rows as any[])[0];
 
-      // The confirmation number is the whole point. Storing it and never
-      // telling the technician leaves them exactly where Holman left them:
-      // waiting for a phone call. This is the promise the submit screen makes.
-      void notifyTech(
-        no,
-        `Sears Fleet: your rental is booked. Confirmation ${ref || resId}.`
-        + (branch ? `\nPick up at Enterprise ${branch}.` : "")
-        + (booked?.appointment_at
-            ? `\nFrom ${new Date(booked.appointment_at).toLocaleDateString("en-US")}`
-              + (booked.shop_name ? `, when your van goes into ${booked.shop_name}.` : ".")
-            : "")
-        + `\nReturn it within 1 working day of your van being ready. `
-        + `If your van is still in the shop after 7 days, request an extension from Fleet.`,
-        "booked-notice",
-      );
+      // Only use the legacy notifyTech path when the orchestrator did not handle
+      // the notification (no active intent). When an intent exists,
+      // adoptRunnerBooking → releaseMessagesIfEligible sends the canonical
+      // renderRequestMsg1 text and this block must stay silent to avoid a
+      // duplicate. See: cutover-orchestrator.ts:adoptRunnerBooking.
+      if (!orchestratorHandled) {
+        void notifyTech(
+          no,
+          `SHS Fleet: your rental is booked. Confirmation ${ref || resId}.`
+          + (branch ? `\nPick up at Enterprise ${branch}.` : "")
+          + (booked?.appointment_at
+              ? `\nFrom ${new Date(booked.appointment_at).toLocaleDateString("en-US")}`
+                + (booked.shop_name ? `, when your van goes into ${booked.shop_name}.` : ".")
+              : "")
+          + `\nReturn it within 1 working day of your van being ready. `
+          + `If your van is still in the shop after 7 days, request an extension from Fleet.`,
+          "booked-notice",
+        );
+      }
       res.json({ ok: true, ...booked });
     } catch (e: any) {
       console.error("[rental-request] booked failed:", e?.message || e);
