@@ -99,7 +99,18 @@ def nexus(method: str, path: str, body=None):
                                  "Wrong host, or the route is not deployed.")
             return r.status, json.loads(raw)
     except urllib.error.HTTPError as e:
-        return e.code, json.loads(e.read().decode() or "{}")
+        try:
+            return e.code, json.loads(e.read().decode() or "{}")
+        except Exception:
+            return e.code, {"error": "non-JSON error body"}
+    except (urllib.error.URLError, TimeoutError, OSError) as e:
+        # Status 0 = "we never reached Nexus". This used to RAISE, straight past
+        # _post_booked's retry loop - which exists for exactly this failure - and out
+        # through _record_booking, leaving a live Enterprise reservation on a row still
+        # marked 'approved' for the next poll to book a second time. A dropped
+        # connection is the most likely reason a writeback fails, so it must be the
+        # one case the retry definitely handles.
+        return 0, {"error": f"network: {e}"}
 
 
 def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str,

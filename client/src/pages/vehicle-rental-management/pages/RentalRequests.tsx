@@ -229,10 +229,14 @@ const bookedWhen = (date?: string | null, time?: string | null) => {
   const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
   const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
   const t = /^(\d{1,2}):(\d{2})/.exec(String(time ?? ""));
-  const clock = t
-    ? ` ${+t[1] % 12 === 0 ? 12 : +t[1] % 12}:${t[2]} ${+t[1] < 12 ? "AM" : "PM"}`
-    : "";
-  return `${day} ${+m[2]}/${+m[3]},${clock}`.replace(",$", "");
+  const stamp = `${day} ${+m[2]}/${+m[3]}`;
+  // Build it conditionally rather than trimming afterwards. This used to end with
+  // .replace(",$", ""), and String.replace with a STRING pattern treats "$" as a
+  // literal character, not an end anchor - so it matched nothing and a booking with a
+  // date but no time rendered "Pick up Wed 8/19, at Enterprise ...".
+  return t
+    ? `${stamp}, ${+t[1] % 12 === 0 ? 12 : +t[1] % 12}:${t[2]} ${+t[1] < 12 ? "AM" : "PM"}`
+    : stamp;
 };
 
 /** What the technician was actually told, never an assumption. */

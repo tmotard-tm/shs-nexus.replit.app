@@ -918,6 +918,51 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * either off the project name carries a TEST prefix and the receiving system
    * does not process it.
    */
+  /**
+   * Booked reservations that have NO route block. Read-only.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * `file-route-blocks` writes a tracking row for every technician it is ASKED about,
+   * including refusals - but only for those. The caller chooses the candidate list, and
+   * on 2026-08-18 it applied a schedule filter and silently dropped the eight
+   * technicians who had no working day that week. They were left holding real, live,
+   * week-long Enterprise reservations (booked 08-18 09:00 through 08-25 09:00) with
+   * `route_block_status = 'pending'`, no block date, NO error, and no message of any
+   * kind. Nothing selects that state, so nothing would ever have looked at them again;
+   * the cars simply sat at the branches, billing, with the technicians unaware.
+   *
+   * A silent skip is the failure mode this whole lane cannot afford, so make the state
+   * queryable. This endpoint answers one question - "who has a car waiting and no
+   * block?" - and it should be checked after EVERY booking batch.
+   */
+  router.get("/forms/rental-survey/cutover/unblocked", requireCronOrStaff, async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT ldap, tech_name, truck_number, etd_reference,
+               branch_name, branch_address, vehicle_class,
+               route_block_status, route_block_error,
+               to_char(reservation_start, 'YYYY-MM-DD HH24:MI') AS reservation_start,
+               to_char(reservation_end,   'YYYY-MM-DD HH24:MI') AS reservation_end,
+               to_char(reserved_at, 'YYYY-MM-DD HH24:MI')       AS reserved_at,
+               reservation_start <= now()                       AS window_already_open
+          FROM vrm_rental_cutover
+         WHERE reservation_status = 'booked'
+           AND COALESCE(route_block_status, 'pending') <> 'filed'
+         ORDER BY reserved_at
+      `);
+      const list = rows as any[];
+      res.json({
+        count: list.length,
+        liveNow: list.filter((r) => r.window_already_open).length,
+        rows: list,
+      });
+    } catch (e: any) {
+      console.error("[survey] cutover/unblocked failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "unblocked query failed" });
+    }
+  });
+
   router.post("/forms/rental-survey/file-route-blocks", requireCronOrStaff, async (req, res) => {
     try {
       const dryRun = req.body?.dryRun !== false;

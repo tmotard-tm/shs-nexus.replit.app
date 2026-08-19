@@ -1441,7 +1441,16 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
           SET claimed_at = now(), claimed_by = ${runner}
           WHERE status = 'approved' AND etd_booked_at IS NULL
             AND COALESCE(pickup_at, appointment_at) IS NOT NULL
-            AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+            AND (claimed_at IS NULL
+                 OR claimed_at < now() - interval '30 minutes'
+                 -- A runner may always re-take its OWN lease. Without this the
+                 -- required workflow - dry run to show the batch, then re-run with
+                 -- --confirm to book it - is broken for thirty minutes, because the
+                 -- dry run leases every row and the confirm run then sees an empty
+                 -- queue. Mutual exclusion is between DIFFERENT runners; a runner
+                 -- racing itself is a separate concern and one process drains
+                 -- sequentially.
+                 OR claimed_by = ${runner})
           RETURNING request_no
         )
         SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
