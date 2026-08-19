@@ -98,6 +98,7 @@
 - [Ready→status self-heal](ready-status-self-heal.md) — edge-triggered ready writers strand conflicts; fix = level sweep on queue GET (guard-only, throttled+refund); Verify click now also sets Scheduling.
 - [VRM board read caching](vrm-board-read-caching.md) — heavy board reads serve-stale + bg rebuild; mutation busts ride the queue/PO-context invalidators one-way; cold concurrent builds can trip PG statement timeout.
 - [Partial boot migrations](partial-boot-migrations.md) — a transient Neon timeout aborts the sequential boot DDL chain, silently skipping later ALTERs; prod-500/dev-200 on the same input = schema drift, diff information_schema first.
+- [Publish bundle vs broken symlinks](publish-bundle-broken-symlinks.md) — dangling links (killed-chromium Singleton* under .config/chromium) abort the bundle phase; find via `find . -xtype l`, delete, republish.
 - [Publish liveness verification](publish-liveness-verification.md) — deploys/history.json entry ≠ promoted; /api route answering SPA HTML = route absent; boot-DDL tables missing in prod = module never booted there.
 - [Rental request/ETD pre-mortem debts](rental-request-etd-premortem.md) — open gaps: no booking claim/lease or state predicates, non-atomic token consume (dup bookings), over-broad cron bearer, prod-dead syncs, survey↛request seam.
 - [Drizzle sql-tag regex escaping](drizzle-sql-tag-regex-escaping.md) — `\D` inside a drizzle sql`` template cooks to literal `D`; write `\\D` or bind params; audit by running both variants against prod counts.
