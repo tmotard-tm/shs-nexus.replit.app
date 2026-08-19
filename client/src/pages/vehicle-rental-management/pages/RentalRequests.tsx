@@ -192,6 +192,32 @@ const counted = (rows: Req[], get: (r: Req) => string | null | undefined): Array
 
 const d10 = (v: string | null) => (v ? String(v).slice(0, 10) : "");
 
+// Default pickup for a freshly opened request: today in Eastern time, at the
+// top of the NEXT hour (3:xx pm ET -> 4:00 pm ET). Adding an hour to the
+// instant BEFORE reading the parts rolls the date correctly at 11 pm and
+// across DST changes. Intl with hour12:false can render midnight as "24" in
+// some engines — normalize it. Everything downstream (pickup_at storage, the
+// executor's notBeforeNowET floor) treats this as branch wall-clock time.
+const nextHourET = (): { date: string; time: string } => {
+  const fmt = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", hour12: false,
+  });
+  const read = (ms: number) => {
+    const parts = fmt.formatToParts(new Date(ms));
+    const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+    const hour = get("hour") === "24" ? "00" : get("hour");
+    return { date: `${get("year")}-${get("month")}-${get("day")}`, hour };
+  };
+  const now = Date.now();
+  let next = read(now + 60 * 60 * 1000);
+  // DST fall-back: the 1 AM hour repeats, so +1h can land on the SAME wall
+  // hour. Push one more hour so the default is always the next civil hour.
+  if (next.hour === read(now).hour) next = read(now + 2 * 60 * 60 * 1000);
+  return { date: next.date, time: `${next.hour}:00` };
+};
+
 // One normal form for class text everywhere ("cargo_van" -> "cargo van"), so
 // UI comparisons agree with what the server stores and the bookers match.
 const normCls = (s: string | null | undefined) =>
@@ -478,6 +504,12 @@ export default function RentalRequests() {
                 return (
                   <tr key={r.request_no} onClick={() => {
                         setDetail(r);
+                        // Pickup defaults to today (ET) at the next full hour,
+                        // so an approval books "come get it within the hour"
+                        // without anyone touching the pickers.
+                        const def = nextHourET();
+                        setPickupDate(def.date);
+                        setPickupTime(def.time);
                         // Maintenance arrives pre-denied: the standard response
                         // is already in the note box, so DENY is one click and
                         // the technician receives the exact script.
@@ -685,8 +717,9 @@ export default function RentalRequests() {
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
                         placeholder="Note (required if you overrule the engine)"
                         style={{ ...ctrl, width: "100%", resize: "vertical", marginBottom: 8 }} />
-              {/* Fleet controls when the rental actually starts. Blank = the
-                  technician's own date. */}
+              {/* Fleet controls when the rental actually starts. Prefilled to
+                  today (ET) at the next full hour when the request is opened;
+                  clearing the date falls back to the technician's own date. */}
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Pickup date

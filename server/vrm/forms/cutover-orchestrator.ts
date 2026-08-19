@@ -2405,9 +2405,17 @@ export async function recordBookingPostback(params: {
     // before the external call is authorized.
     const drifts = comparePreviewToFacts(intent.preview, facts);
     const openEventISO = intent.event_date ? String(intent.event_date).slice(0, 10) : "";
-    const sched = openEventISO
-      ? await recheckScheduleDay(intent.ldap, openEventISO)
-      : { ok: false, detail: "intent has no event date to re-verify" };
+    // CUTOVER ONLY - the FOURTH home of this gate, and the one an audit misses because
+    // it sits beside the same comparePreviewToFacts call as confirmIntent and only the
+    // message differs ("immediately before booking" vs "at confirm"). A cutover pairs
+    // its reservation with a route block so the day has to be one the technician works;
+    // a request files no block and books a car for someone standing next to a dead van.
+    const openScheduleGated = intent.workflow_type !== WORKFLOW_REQUEST;
+    const sched = !openScheduleGated
+      ? { ok: true, detail: "" }
+      : openEventISO
+        ? await recheckScheduleDay(intent.ldap, openEventISO)
+        : { ok: false, detail: "intent has no event date to re-verify" };
     if (!sched.ok) drifts.push(`schedule: ${sched.detail}`);
     if (drifts.length) {
       await touchIntent(intent.id, {
