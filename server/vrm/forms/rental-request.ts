@@ -1446,6 +1446,9 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         )
         SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
                r.shop_name, r.shop_address, r.shop_city, r.shop_state, r.shop_postal,
+               -- The state the branch MUST land in. A new hire has no shop, so their
+               -- home state is the only check available on a geocode that wandered.
+               r.home_state,
                r.tech_reported_branch,
                r.appointment_at,
                r.shop_estimated_days,

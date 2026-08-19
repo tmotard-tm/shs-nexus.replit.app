@@ -63,6 +63,11 @@ from book_cutover import (                                       # noqa: E402
     # commit came back REQUIRED FIELD MISSING: ADDITIONALINFO.
     use_account_additional_info, strip_truck_number_reference,
     assert_additional_info_complete,
+    # The wrong-state geocode guard the cutover lane has always run and this one
+    # never did. "8000 Stream Walk Ln, Manassas, Manassas,, VA" resolved to
+    # VALENCIA, SPAIN on 2026-08-18 and simply returned no branch, with no reason
+    # text. Deduping the address fixed that case; this catches the next one.
+    _guarded_quote,
 )
 
 REF = HERE / "reference"
@@ -97,14 +102,15 @@ def nexus(method: str, path: str, body=None):
         return e.code, json.loads(e.read().decode() or "{}")
 
 
-def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str):
+def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str,
+                        want_state: str = ""):
     """Quote the real dates, and only shorten if ETD offers nothing.
 
     Returns (quote, booked_end, shortened). `shortened` is True when the real
     duration produced no classes and a shorter one did, which is a fact Fleet
     has to know: the reservation will need extending.
     """
-    q = etd.quote(address=address, start=start, end=end)
+    q = _guarded_quote(etd, address, "", want_state, start, end)
     if q.get("classes"):
         return q, end, False
 
@@ -113,7 +119,7 @@ def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str):
         short_end = (start_dt + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
         if short_end >= end:
             continue
-        q2 = etd.quote(address=address, start=start, end=short_end)
+        q2 = _guarded_quote(etd, address, "", want_state, start, short_end)
         if q2.get("classes"):
             return q2, short_end, True
     # Genuinely nothing, at any duration. Now the empty list is about
@@ -359,7 +365,12 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         print(f"       start floored {r['start_dt']} -> {start_dt_s} (was in the past)")
     r["start_dt"], r["end_dt"] = start_dt_s, end_dt_s
 
-    q, booked_end, shortened = quote_with_fallback(etd, address, r["start_dt"], r["end_dt"])
+    # Which state the branch has to be in. The shop's state when we have one, the
+    # technician's home state otherwise - a new hire awaiting a vehicle has no shop.
+    want_state = str(r.get("shop_state") or r.get("home_state") or "").strip().upper()[:2]
+
+    q, booked_end, shortened = quote_with_fallback(
+        etd, address, r["start_dt"], r["end_dt"], want_state)
     classes = q.get("classes") or []
 
     # The technician told us the closest Enterprise branch when they filed.
@@ -371,7 +382,8 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     reported = str(r.get("tech_reported_branch") or "").strip()
     used_reported = False
     if not classes and reported:
-        q2, end2, short2 = quote_with_fallback(etd, reported, r["start_dt"], r["end_dt"])
+        q2, end2, short2 = quote_with_fallback(
+            etd, reported, r["start_dt"], r["end_dt"], want_state)
         if q2.get("classes"):
             q, booked_end, shortened = q2, end2, short2
             classes = q.get("classes")
