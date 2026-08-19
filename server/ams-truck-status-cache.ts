@@ -13,7 +13,65 @@ let oosCache: { data: Record<string, string | null>; builtAt: number } | null = 
 // present and parseable. AMS only guarantees this flag on the per-VIN
 // endpoint, so absence from this map means "not bulk-visible", not false.
 let inRepairCache: { data: Record<string, boolean>; builtAt: number } | null = null;
+// AMS fleet population captured from the same bulk page walk: every vehicle
+// row AMS returned, keyed by its digits-only vehicle number. `complete` is
+// true only when the pagination finished naturally (no page error broke the
+// walk) — a partial walk NEVER overwrites a previous complete population.
+let populationCache: {
+  data: { truckNumber: string; vin: string | null }[];
+  complete: boolean;
+  builtAt: number;
+} | null = null;
 const TTL_MS = 30 * 60 * 1000;
+
+/**
+ * Pure: pull the vehicle rows out of one AMS bulk page response.
+ * `malformed=true` means the payload was unrecognized (error-shaped object,
+ * null/undefined, or a primitive) — the page walk must be treated as
+ * TRUNCATED, never as a natural end of pagination. A recognized envelope
+ * with an empty array is a natural end (`malformed=false`).
+ */
+export function extractAmsPageRows(raw: unknown): { rows: any[]; malformed: boolean } {
+  if (Array.isArray(raw)) return { rows: raw, malformed: false };
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    const arr = [o.data, o.vehicles, o.results, o.items].find(Array.isArray) as any[] | undefined;
+    if (arr) return { rows: arr, malformed: false };
+    return { rows: [], malformed: true };
+  }
+  return { rows: [], malformed: true };
+}
+
+/**
+ * Pure: derive a fleet-population entry from one AMS vehicle row, or null
+ * when the row is not part of the current fleet. Rows with a SaleDate are
+ * sold/disposed history (AMS keeps them alongside the live fleet) and are
+ * excluded; unsold "Sent To Auction" / "Declined Repair" trucks stay in
+ * (status is irrelevant here). VIN-less rows still count — a row without a
+ * VIN is still a vehicle that exists in AMS.
+ */
+export function amsPopulationEntryFromRow(v: any): { truckNumber: string; vin: string | null } | null {
+  if (!v || typeof v !== "object") return null;
+  const saleDate = v.SaleDate ?? v.saleDate ?? null;
+  if (saleDate) return null;
+  const truckNumber = String(v.VehicleNumber ?? v.vehicleNumber ?? "").replace(/\D/g, "");
+  if (!truckNumber) return null;
+  const vin = String(v.VIN ?? v.vin ?? "").trim().toUpperCase() || null;
+  return { truckNumber, vin };
+}
+
+/**
+ * Pure: overwrite policy for the population cache. A complete walk always
+ * replaces; an incomplete (truncated) walk only lands when there is no
+ * previous population at all — a partial fleet must never clobber a
+ * last-good complete one.
+ */
+export function shouldReplacePopulation(
+  prev: { complete: boolean } | null,
+  nextComplete: boolean,
+): boolean {
+  return nextComplete || !prev;
+}
 
 async function build(): Promise<Record<string, string | null>> {
   console.log("[AMS TruckStatusMap] Building VIN→TruckStatus map...");
@@ -42,6 +100,10 @@ async function build(): Promise<Record<string, string | null>> {
   const result: Record<string, string | null> = {};
   const oosByVin: Record<string, string | null> = {};
   const inRepairByVin: Record<string, boolean> = {};
+  // Digits-only vehicle number → VIN (first sighting wins, but a row WITH a
+  // VIN replaces an earlier VIN-less sighting of the same number).
+  const popByNumber = new Map<string, string | null>();
+  let pageWalkFailed = false;
   const pageSize = 500;
   let offset = 0;
   let totalFetched = 0;
@@ -65,24 +127,19 @@ async function build(): Promise<Record<string, string | null>> {
       console.warn(
         `[AMS TruckStatusMap] AMS search error at offset ${offset}: ${err.message}`,
       );
+      pageWalkFailed = true;
       break;
     }
 
-    let rows: any[];
-    if (Array.isArray(raw)) {
-      rows = raw;
-    } else if (raw && typeof raw === "object") {
-      rows = Array.isArray(raw.data)
-        ? raw.data
-        : Array.isArray(raw.vehicles)
-          ? raw.vehicles
-          : Array.isArray(raw.results)
-            ? raw.results
-            : Array.isArray(raw.items)
-              ? raw.items
-              : [];
-    } else {
-      rows = [];
+    const { rows, malformed } = extractAmsPageRows(raw);
+    if (malformed) {
+      // Unrecognized payload (error-shaped object, null/undefined, primitive)
+      // is a FAILED walk, never a natural end of pagination — otherwise a
+      // truncated collection would masquerade as the complete fleet.
+      console.warn(
+        `[AMS TruckStatusMap] Unrecognized AMS page payload at offset ${offset} — treating walk as truncated`,
+      );
+      pageWalkFailed = true;
     }
 
     if (rows.length === 0) break;
@@ -90,6 +147,13 @@ async function build(): Promise<Record<string, string | null>> {
 
     for (const v of rows) {
       const vin = (v.VIN || v.vin || "").trim().toUpperCase();
+      // Population capture happens BEFORE the VIN gate (see helper docs:
+      // SaleDate rows are sold history and excluded; VIN-less rows count).
+      const popEntry = amsPopulationEntryFromRow(v);
+      if (popEntry) {
+        const existing = popByNumber.get(popEntry.truckNumber);
+        if (existing == null) popByNumber.set(popEntry.truckNumber, popEntry.vin);
+      }
       if (!vin) continue;
       const raw_status = v.TruckStatus ?? v.truckStatus ?? v.truck_status;
       result[vin] = resolveTruckStatusLabel(raw_status, lookupMap);
@@ -122,6 +186,23 @@ async function build(): Promise<Record<string, string | null>> {
     totalFetched += rows.length;
     if (rows.length < pageSize) break;
     offset += pageSize;
+  }
+
+  if (amsWorked && popByNumber.size > 0) {
+    const complete = !pageWalkFailed;
+    const popRows = Array.from(popByNumber, ([truckNumber, vin]) => ({ truckNumber, vin }));
+    if (shouldReplacePopulation(populationCache, complete)) {
+      populationCache = { data: popRows, complete, builtAt: Date.now() };
+      console.log(
+        `[AMS TruckStatusMap] AMS population captured: ${popRows.length} vehicles (complete=${complete})`,
+      );
+    } else {
+      // Partial page walk: keep the last-good (complete) population rather
+      // than clobbering it with a truncated fleet list.
+      console.warn(
+        `[AMS TruckStatusMap] Partial AMS page walk (${popRows.length} rows) — keeping last-good population (${populationCache.data.length} trucks)`,
+      );
+    }
   }
 
   if (amsWorked) {
@@ -234,11 +315,30 @@ function dedupedBuild(): Promise<Record<string, string | null>> {
   return buildPromise;
 }
 
+// Throttle for population-driven rebuilds: when the fleet population is
+// missing/incomplete but the status cache is still inside its 30-min TTL,
+// retry a full build at most this often (deduped while in flight).
+const POPULATION_RETRY_MS = 3 * 60 * 1000;
+let lastPopulationRetryAt = 0;
+
 export async function getAmsTruckStatusMap(): Promise<
   Record<string, string | null>
 > {
   const now = Date.now();
   if (!cache || now - cache.builtAt > TTL_MS) {
+    return dedupedBuild();
+  }
+  // The status cache is fresh, but the fleet population (built by the same
+  // walk) is missing or truncated — without this branch the Registrations tab
+  // would stay "warming" for the rest of the 30-min TTL.
+  if (
+    (!populationCache || !populationCache.complete) &&
+    now - lastPopulationRetryAt > POPULATION_RETRY_MS
+  ) {
+    lastPopulationRetryAt = now;
+    console.log(
+      "[AMS TruckStatusMap] Population missing/incomplete inside status TTL — retrying full build",
+    );
     return dedupedBuild();
   }
   const ageMin = Math.round((now - cache.builtAt) / 60000);
@@ -258,6 +358,28 @@ export async function getAmsOutOfServiceMap(): Promise<
   // Reuse the build pipeline — the truck-status build also populates oosCache
   await getAmsTruckStatusMap();
   return oosCache?.data ?? {};
+}
+
+/**
+ * AMS fleet population from the last successful bulk page walk, cached-only.
+ * `trucks` carries digits-only vehicle numbers plus the row VIN when AMS
+ * returned one. `complete` is false when the walk was truncated by a page
+ * error AND no complete walk has ever succeeded — callers should surface a
+ * "still building" state rather than trusting a truncated list as the fleet.
+ * null = no walk has produced any population yet (cache cold).
+ */
+export function getAmsPopulationCachedOnly(): {
+  trucks: { truckNumber: string; vin: string | null }[];
+  complete: boolean;
+  builtAt: number;
+} | null {
+  return populationCache
+    ? {
+        trucks: populationCache.data,
+        complete: populationCache.complete,
+        builtAt: populationCache.builtAt,
+      }
+    : null;
 }
 
 export function getAmsTruckStatusMapCachedOnly():

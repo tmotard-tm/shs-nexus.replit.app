@@ -112,6 +112,11 @@ interface RegistrationTruck {
   truckNumber: string;
   // AMS truck status when it is "Declined Repair" or "Sent To Auction"; null otherwise.
   amsAlert?: string | null;
+  // Full AMS status label for this truck (may be null while warming).
+  amsStatus?: string | null;
+  // True when the AMS status map is fresh but this truck's status still
+  // couldn't be resolved — surfaced visibly rather than silently blank.
+  amsStatusUnknown?: boolean;
   tagState: string;
   district: string;
   assignmentStatus: 'Assigned' | 'Unassigned';
@@ -161,6 +166,10 @@ interface RegistrationResponse {
   // False while the server's AMS truck-status cache is still warming (amsAlert
   // labels omitted); the query polls until this flips true.
   amsStatusReady?: boolean;
+  // False while the AMS fleet population (which now drives the truck list) is
+  // still building or was truncated — trucks may be empty/partial. The query
+  // polls faster and the UI shows a warming state instead of an empty fleet.
+  populationReady?: boolean;
   summary: {
     total: number;
     assigned: number;
@@ -458,8 +467,14 @@ export default function Registration() {
     // After a cold server start the AMS truck-status cache takes ~2 minutes to
     // warm and amsAlert labels are omitted (amsStatusReady=false). Poll until
     // the labels arrive, then stop.
-    refetchInterval: (query) =>
-      query.state.data && query.state.data.amsStatusReady === false ? 45_000 : false,
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d) return false;
+      // Population still building/truncated → poll fast (list is missing).
+      if (d.populationReady === false) return 15_000;
+      // Status labels still warming → poll slower.
+      return d.amsStatusReady === false ? 45_000 : false;
+    },
   });
 
   const { data: pmfStickersData } = useQuery<{ success: boolean; assetIds: string[] }>({
@@ -1194,6 +1209,20 @@ export default function Registration() {
           <RegConversations registrationData={data?.trucks || []} initialTruckNumber={convTruck ?? undefined} />
         ))}
 
+      {data && data.populationReady === false && (
+        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20" data-testid="banner-population-warming">
+          <CardContent className="p-4 flex items-center gap-3">
+            <RefreshCw className="w-4 h-4 text-blue-600 animate-spin" />
+            <div>
+              <p className="text-sm font-medium text-blue-700 dark:text-blue-300">Loading the AMS fleet list…</p>
+              <p className="text-xs text-blue-600/70 dark:text-blue-400/70">
+                The truck list now comes straight from AMS. It's still building (takes about 2 minutes after a restart) — this page refreshes automatically.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {activeView === "table" && data?.trucks && data.trucks.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="registration-risk-cards">
           <Card className="p-3 border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20" data-testid="card-reg-total">
@@ -1827,6 +1856,8 @@ export default function Registration() {
                                 <span className={`text-xs font-normal ${truck.amsAlert.toLowerCase().includes('auction') ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{truck.amsAlert}</span>
                               ) : rentalVehicleSet.has((truck.truckNumber.replace(/^0+/, '') || '0').padStart(5, '0')) ? (
                                 <span className="text-xs text-blue-600 dark:text-blue-400 font-normal">Rental</span>
+                              ) : truck.amsStatusUnknown ? (
+                                <span className="text-xs text-muted-foreground font-normal" title="AMS lists this truck but its status could not be resolved">AMS status unknown</span>
                               ) : null}
                             </div>
                           </TableCell>
