@@ -923,6 +923,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // after a booking batch, from wherever that batch was run.
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover/unblocked")
         || (req.method === "POST" && req.path === "/forms/rental-survey/cutover/morning-sweep")
+        // The ad-hoc engine trigger. CUTOVER-RUNBOOK.md documents this exact curl with
+        // the cron bearer as the way to drain the queue by hand, but the path was never
+        // added here, so it 401d and the documented procedure could not work.
+        || (req.method === "POST" && req.path === "/forms/rental-survey/cutover/intents/executor/run")
         || (req.method === "POST" && /^\/forms\/rental-survey\/cutover\/intents\/\d+\/(preview|booking-postback)$/.test(req.path))) {
         const t = req.headers["x-internal-cron"];
         if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)
