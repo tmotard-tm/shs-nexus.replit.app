@@ -528,6 +528,30 @@ export function classForIntent(
       note = `roster job title is HVAC; took ${String(big.code)} rather than a sedan`;
     }
   }
+  // A NAMED class the branch does not stock (minivan, cargo van, suv). Same rule as
+  // the sedan default now: never park a technician for a human when the lot has
+  // vehicles. Largest-first, because someone who asked for a minivan needs the space,
+  // and only then the sedan ladder.
+  if (!pick && want !== "sedan") {
+    const biggestFirst = [...ESCALATION_LADDER].reverse();
+    for (const code of biggestFirst) {
+      const hit = offered.find((c) => String(c.code || "").toUpperCase() === code);
+      if (hit) {
+        pick = hit;
+        match = "named_class_escalated";
+        note = `approved class '${want}' not offered; took ${code}, the largest available substitute`;
+        break;
+      }
+    }
+    if (!pick) {
+      const lad = chooseClass(null, null, offered, null);
+      if (lad.pick) {
+        pick = lad.pick;
+        match = "named_class_downgraded";
+        note = `approved class '${want}' not offered and nothing larger available; fell back to ${String(lad.pick.code)} — REVIEW whether this fits the job`;
+      }
+    }
+  }
   if (!pick && want === "sedan") {
     // ETD class descriptions rarely contain the literal word "sedan", so the default
     // would park EVERY plain request for a human. The sedan ladder (no job title — the
