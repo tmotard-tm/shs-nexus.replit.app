@@ -200,6 +200,31 @@ export function setDriver(
 
   let first = String(user.firstName ?? "").trim();
   let last = String(user.lastName ?? "").trim();
+
+  // A profile name is only usable if ETD will actually ACCEPT it.
+  //
+  // 92 of the 1,675 provisioned profiles carry the LDAP in the surname field
+  // (lastName === username), and 44 of those contain a digit. ETD rejects the whole
+  // reservation for those with "LASTNAME CANNOT CONTAIN DIGITS | LASTNAME INCLUDES
+  // INVALID CHARACTERS" - which is how request #23 (CMANN0, a new hire) failed on
+  // 2026-08-19 while ASAMAD0 and REVANS0, whose profiles are broken in exactly the
+  // same way, booked without trouble the day before.
+  //
+  // The difference was the lane, not the data: set_driver() in book_cutover.py has had
+  // this guard since 2026-08-13, and this function - the one the SERVER books through -
+  // never got it. Treat an unusable name exactly like a missing one so the roster
+  // fallback below takes over, instead of sending a value already known to be refused.
+  // Mirrors _etd_usable() in etd-runner/scripts/book_cutover.py; change both.
+  // No \p{L}: this tsconfig targets below ES6, so unicode property escapes do not
+  // compile. Negated class over Latin + Latin-1/Extended-A covers the accented
+  // surnames on the roster without needing the /u flag.
+  const etdUsable = (v: string) =>
+    !!v && !/\d/.test(v) && !/[^A-Za-z\u00C0-\u024F \-'.]/.test(v);
+  if (!(etdUsable(first) && etdUsable(last))) {
+    first = "";
+    last = "";
+  }
+
   if (!(first && last)) {
     // Fall back to the survey name. "SCOTT,CORNELIUS" is surname-first;
     // "ALONSO CHAVIRA" is not.
