@@ -381,8 +381,26 @@ export function intentAddress(item: QueueItem): {
   }
   const rs = (facts.requestSeed || {}) as Record<string, any>;
   let address = joinAddress([rs.shopAddress, rs.shopCity, rs.shopState, rs.shopPostal]);
-  if (!address) address = String(rs.reportedBranch || "").trim();
-  return { address, code: "", wantState: String(rs.shopState || "").trim().toUpperCase() };
+  if (!address) {
+    // No shop: a new hire awaiting a vehicle. Their typed branch is all we have, and it
+    // is free text - LGONZ15 typed the single word "Enterprise", which geocoded to
+    // Boston Logan International Airport and booked a California technician a car 3,000
+    // miles away on 2026-08-19. A string with no street number, no ZIP and no state
+    // names no place on earth; refuse it rather than let the geocoder pick.
+    const reported = String(rs.reportedBranch || "").trim();
+    const locatable = /\d/.test(reported) || /(^|[\s,])[A-Z]{2}([\s,]|$)/.test(reported.toUpperCase());
+    if (!locatable) {
+      throw new Error(
+        `the technician's reported branch (${JSON.stringify(reported)}) names no location - ` +
+        "no street number, ZIP or state - and there is no shop address to fall back on",
+      );
+    }
+    address = reported;
+  }
+  // shopState first, then the technician's home state. Never empty when we know either,
+  // because an empty wantState turns the wrong-geocode guard OFF entirely.
+  const want = String(rs.shopState || rs.homeState || "").trim().toUpperCase();
+  return { address, code: "", wantState: want.slice(0, 2) };
 }
 
 /**

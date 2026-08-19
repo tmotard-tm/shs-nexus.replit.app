@@ -905,6 +905,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // every other booking endpoint on this list; the routes keep their own
         // already-booked and status guards, so a bearer cannot double-book.
         || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/book$/.test(req.path))
+        // Release a request whose ETD reservation was cancelled. Same reasoning as
+        // /book: it is an operational action staff need from a script as well as the UI.
+        || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/release-booking$/.test(req.path))
         || (req.method === "POST" && /^\/forms\/rental-survey\/cutover\/intents\/\d+\/retry$/.test(req.path))
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover-status")
         // Cutover workflow intents: the same outside-the-box Python runner

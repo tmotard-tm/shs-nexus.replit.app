@@ -1553,6 +1553,11 @@ function publicFacts(f: EligibilityFacts): Record<string, unknown> {
             shopCity: strOrNull(f.sourceRow.shop_city),
             shopState: strOrNull(f.sourceRow.shop_state),
             shopPostal: strOrNull(f.sourceRow.shop_postal),
+            // The technician's OWN state, needed because a new hire has no shop at all
+            // and the wrong-geocode guard keyed only on shopState was therefore disabled
+            // for exactly the people with the least reliable address. LGONZ15 (home CA)
+            // was booked at Boston Logan on 2026-08-19 with the guard silently off.
+            homeState: strOrNull(f.sourceRow.home_state),
             reportedBranch: strOrNull(f.sourceRow.tech_reported_branch),
             approvedVehicleClass: strOrNull(f.sourceRow.approved_vehicle_class),
             truckNumber: strOrNull(f.sourceRow.truck_number),

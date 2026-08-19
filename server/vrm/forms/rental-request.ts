@@ -1751,6 +1751,86 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
   });
 
   /** Human decision. May overrule the engine, and must say why when it does. */
+  /**
+   * The ETD reservation for this request was cancelled. Let the request move again.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * /decide refuses any row whose status is 'booked' (`AND status <> 'booked'`), on the
+   * correct reasoning that flipping a booked request to DENY would leave a live rental
+   * against a denied request. But there was no way to tell the system the rental is no
+   * longer live, so once a booking was wrong the request was frozen forever and the
+   * message told staff to do something the app then would not let them act on.
+   *
+   * Rob hit this on 2026-08-19 with LGONZ15: a California technician booked at Boston
+   * Logan. He cancelled 2130366343 in ETD and still could not send the request back.
+   *
+   * Releasing requires naming the confirmation being released, so this cannot be used to
+   * clear the wrong row by accident, and the row goes back to 'pending' - NOT 'approved',
+   * which the booking queue would immediately pick up and book all over again.
+   */
+  router.post("/forms/rental-request/:requestNo/release-booking", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      if (!Number.isInteger(no)) return res.status(400).json({ message: "bad request number" });
+      const claimed = String(req.body?.cancelledReference ?? "").trim();
+      const reason = String(req.body?.reason ?? "").trim().slice(0, 300);
+      if (!claimed) {
+        return res.status(400).json({
+          message: "cancelledReference is required - name the confirmation number you "
+                 + "cancelled in ETD, so this cannot release the wrong booking.",
+        });
+      }
+      if (!reason) return res.status(400).json({ message: "reason is required" });
+      const actor = (req as any).user?.username || (req as any).user?.email || "unknown";
+
+      const { rows: cur } = await db.execute(sql`
+        SELECT status, etd_reference, etd_booked_at FROM vrm_rental_request
+         WHERE request_no = ${no}
+      `);
+      const row = (cur as any[])[0];
+      if (!row) return res.status(404).json({ message: "request not found" });
+      if (!row.etd_booked_at) {
+        return res.status(409).json({ message: "this request holds no booking to release" });
+      }
+      if (String(row.etd_reference ?? "").trim() !== claimed) {
+        return res.status(409).json({
+          message: `this request holds confirmation ${row.etd_reference}, not ${claimed}. `
+                 + "Check which reservation you cancelled.",
+        });
+      }
+
+      const note = `reservation ${claimed} cancelled in ETD and released by ${actor}: ${reason}`;
+      const { rows: upd } = await db.execute(sql`
+        UPDATE vrm_rental_request
+           SET status = 'pending',
+               etd_reference = NULL, etd_reservation_id = NULL, etd_booked_at = NULL,
+               etd_error = ${note},
+               claimed_at = NULL, claimed_by = NULL,
+               updated_at = now()
+         WHERE request_no = ${no} AND etd_reference = ${claimed}
+        RETURNING request_no, status
+      `);
+      if (!(upd as any[]).length) return res.status(409).json({ message: "nothing released" });
+
+      // Terminate the workflow intent too. Leaving it live would let the executor or the
+      // box runner adopt the request and book a second car for the same person.
+      await db.execute(sql`
+        UPDATE vrm_rental_workflow_intents
+           SET status = 'cancelled', reservation_state = 'cancelled',
+               last_error = ${note}, claimed_by = NULL, lease_expires_at = NULL,
+               updated_at = now()
+         WHERE workflow_type = ${WORKFLOW_REQUEST} AND source_id = ${String(no)}
+           AND status NOT IN ('cancelled', 'abandoned')
+      `);
+
+      res.json({ ok: true, requestNo: no, status: "pending", released: claimed, note });
+    } catch (e: any) {
+      console.error("[rental-request] release-booking failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "release failed" });
+    }
+  });
+
   router.post("/forms/rental-request/:requestNo/decide", async (req, res) => {
     try {
       const decision = String(req.body?.decision || "").toUpperCase();
