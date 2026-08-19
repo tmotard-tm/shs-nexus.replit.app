@@ -15,6 +15,7 @@
  */
 import type { Express, Router } from "express";
 import { db } from "../../db";
+import { getEtdToken, describeEtdToken } from "../etd/token";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { sendStandardActivity } from "../dca-task-client";
@@ -918,6 +919,36 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * either off the project name carries a TEST prefix and the receiving system
    * does not process it.
    */
+  /**
+   * Make sure a usable ETD token exists in the shared store, and say what is there.
+   *
+   * WHY THIS EXISTS
+   * ---------------
+   * Minting drives a real browser through Azure B2C, so it can only happen on a host
+   * with Chromium. The Replit box has neither the browsers nor the system libraries
+   * (`etd_token.py preflight` reports ETD_CHROMIUM_PATH unset), which means every
+   * runner on the box depends on the SERVER having minted into `vrm_etd_token`
+   * first - and the server only mints as a side effect of some other ETD call.
+   *
+   * When the queue is empty there is no such call, so a token cannot be obtained at
+   * all: the morning sweep returns "no calls", the executor claims 0 intents, and the
+   * box runner dies on an expired token with no way to refresh it. On 2026-08-19 that
+   * blocked the entire cutover backlog with no legitimate way forward.
+   *
+   * getEtdToken() already mints on demand and reuses a live token, so this is just the
+   * missing front door to it. It never returns the secret - describeEtdToken() reports
+   * length, age and remaining life only.
+   */
+  router.post("/forms/rental-survey/cutover/etd-token/ensure", requireCronOrStaff, async (_req, res) => {
+    try {
+      await getEtdToken();
+      res.json({ ok: true, token: await describeEtdToken() });
+    } catch (e: any) {
+      console.error("[survey] etd-token/ensure failed:", e?.message || e);
+      res.status(502).json({ ok: false, message: e?.message || "could not obtain an ETD token" });
+    }
+  });
+
   /**
    * Booked reservations that have NO route block. Read-only.
    *
