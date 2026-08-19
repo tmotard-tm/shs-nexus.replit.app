@@ -942,10 +942,11 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         SELECT ldap, tech_name, truck_number, etd_reference,
                branch_name, branch_address, vehicle_class,
                route_block_status, route_block_error,
-               to_char(reservation_start, 'YYYY-MM-DD HH24:MI') AS reservation_start,
-               to_char(reservation_end,   'YYYY-MM-DD HH24:MI') AS reservation_end,
+               -- reservation_start/_end are TEXT (ISO strings), not timestamps, so
+               -- to_char() on them is a type error. Only reserved_at is a real timestamp.
+               reservation_start, reservation_end,
                to_char(reserved_at, 'YYYY-MM-DD HH24:MI')       AS reserved_at,
-               reservation_start <= now()                       AS window_already_open
+               reservation_start::timestamp <= now()             AS window_already_open
           FROM vrm_rental_cutover
          WHERE reservation_status = 'booked'
            AND COALESCE(route_block_status, 'pending') <> 'filed'
