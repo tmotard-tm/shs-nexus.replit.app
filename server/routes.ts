@@ -918,6 +918,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // identity. morning-sweep alone also accepts an admin session.
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover/intents/booking-queue")
         || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover/schedule-check")
+        // Read-only: who holds a booked reservation with no route block. It has to be
+        // reachable from a script, because the whole point of it is to be run right
+        // after a booking batch, from wherever that batch was run.
+        || (req.method === "GET"  && req.path === "/forms/rental-survey/cutover/unblocked")
         || (req.method === "POST" && req.path === "/forms/rental-survey/cutover/morning-sweep")
         || (req.method === "POST" && /^\/forms\/rental-survey\/cutover\/intents\/\d+\/(preview|booking-postback)$/.test(req.path))) {
         const t = req.headers["x-internal-cron"];
