@@ -659,8 +659,11 @@ async function runPreview(
       classDecision = chosen.decision;
 
       Object.assign(quote, {
-        pickupDate: firstDay,
-        pickupTime: "09:00:00",
+        // The DAY and TIME actually quoted. `firstDay` is pre-roll and a hardcoded
+        // 09:00 was never true; the commit re-quotes from these, so a stale value here
+        // silently books a different reservation than the one that was priced.
+        pickupDate: startDay,
+        pickupTime: floored.time,
         returnDate: end.slice(0, 10),
         returnTime: "09:00:00",
         branchCode: q.branch_code,
