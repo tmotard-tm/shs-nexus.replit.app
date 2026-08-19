@@ -47,7 +47,14 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "scripts"))
 
 from etd import EtdClient                                        # noqa: E402
-from vehicle_class import choose as choose_class                 # noqa: E402
+from vehicle_class import (                                      # noqa: E402
+    choose as choose_class,
+    # The SAME table that reads a technician's free-text description. A Fleet
+    # pick of "minivan" has to go through it too: matched as raw text against
+    # "CHRYSLER PACIFICA OR SIMILAR" it can never hit, and request #19 sat open
+    # overnight reporting "minivan not offered" at a branch that had one.
+    desc_class, _rank, SEDAN_LADDER,
+)
 # The proven payload surgery. Do not reimplement any of these.
 from book_cutover import (                                       # noqa: E402
     retarget, redate, relocate, set_driver, set_class, cron_secret,
@@ -133,14 +140,179 @@ def _floor_start(start_s: str, end_s: str, lead_minutes: int = 90):
         now_et = datetime.now(ZoneInfo("America/New_York")).replace(tzinfo=None)
     except Exception:
         now_et = datetime.utcnow() - timedelta(hours=4)
-    floor = now_et + timedelta(minutes=lead_minutes)
-    # round up to the next :00 or :30
-    add = (30 - floor.minute % 30) % 30
-    floor = (floor + timedelta(minutes=add)).replace(second=0, microsecond=0)
+    # A branch's OPENING hour matters exactly as much as its closing one. Run at
+    # 01:55 ET the now+90m floor returns 03:30, and Enterprise answers a 3:30am
+    # pickup with the same EMPTY class list it answers a 6pm one with: the counter
+    # is shut. That empty list surfaced on the Nexus side as `class_unmapped` and
+    # read as "no cars", which is why four requests sat open overnight looking like
+    # a fleet problem. Mirrors notBeforeNowET() in server/vrm/etd/executor.ts;
+    # change both or they drift.
+    EARLIEST = 9 * 60
+    LAST_PICKUP = 16 * 60 + 30
+
+    floor_min = now_et.hour * 60 + now_et.minute + lead_minutes
+    floor_min = -(-floor_min // 30) * 30          # ceil to the next :00 or :30
+    today = now_et.date()
+
+    day = start.date() if start.date() > today else today
+    want_min = start.hour * 60 + start.minute
+    # The now-floor only constrains TODAY. A pickup already booked for a later day
+    # is bounded by opening hours alone.
+    use = max(want_min, EARLIEST) if day > today else max(want_min, floor_min, EARLIEST)
+    # Past the last realistic handover slot, roll the DAY rather than quoting a
+    # branch that has closed. Capping at 18:00 and staying put was the original
+    # behaviour and it produced the same empty class list from the other end.
+    if use > LAST_PICKUP:
+        day = day + timedelta(days=1)
+        use = EARLIEST
+
+    floor = datetime(day.year, day.month, day.day) + timedelta(minutes=use)
     if start >= floor:
         return start_s, end_s
     return (floor.strftime("%Y-%m-%dT%H:%M:%S"),
             (floor + span).strftime("%Y-%m-%dT%H:%M:%S"))
+
+
+def _join_address(*parts) -> str:
+    """Join address parts without repeating a segment the technician already typed.
+
+    The form asks for the shop address AND the city separately, and technicians
+    routinely type the city into both. Naive joining produced
+    "8000 Stream Walk Ln, Manassas, Manassas,, VA", which the US-pinned geocoder
+    resolved to VALENCIA, SPAIN - and then returned no branch, with no reason
+    text, which surfaced as branch_zip_missing + class_unmapped. Dedupe by
+    comma segment, case-insensitively, preserving the order typed.
+    """
+    seen, out = set(), []
+    for part in parts:
+        for seg in str(part or "").split(","):
+            seg = re.sub(r"\s+", " ", seg).strip(" 	.")
+            if not seg:
+                continue
+            key = seg.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(seg)
+    return ", ".join(out)
+
+
+def _norm(s) -> str:
+    """Loose text key: collapse whitespace, treat _ and - as spaces, lowercase."""
+    return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", str(s or ""))).strip().lower()
+
+
+def _clean_branch_address(raw: str) -> tuple:
+    """"Ashland (40D3),2101 WINCHESTER AVE,ASHLAND,41101-7745" -> (name, code, street).
+
+    The commit response prefixes the address with the branch's display name and code.
+    The preview stored the address WITHOUT that prefix, and the technician's message
+    formats whatever it is given, so leaving the prefix on would read
+    "at Enterprise Ashland, Ashland (40d3), 2101 Winchester Ave...".
+    """
+    parts = [p.strip() for p in str(raw or "").split(",") if p.strip()]
+    if not parts:
+        return "", "", ""
+    m = re.match(r"^(.*?)\s*\(([^)]+)\)$", parts[0])
+    if m:
+        return m.group(1).strip(), m.group(2).strip(), ",".join(parts[1:])
+    return "", "", ",".join(parts)
+
+
+def _pretty_phone(raw: str) -> str:
+    """"(+1)6063248829" -> "(606) 324-8829". Left as-is if it is not 10 digits."""
+    d = re.sub(r"\D", "", str(raw or ""))
+    if len(d) == 11 and d.startswith("1"):
+        d = d[1:]
+    return f"({d[:3]}) {d[3:6]}-{d[6:]}" if len(d) == 10 else str(raw or "").strip()
+
+
+def _facts_from_response(resp: dict, fallback: dict) -> dict:
+    """Rebuild the booked facts from the commit response, keeping the quote as backup."""
+    f = dict(fallback or {})
+    d = ((resp or {}).get("data") or {})
+    if not d:
+        return f
+    name, code, street = _clean_branch_address(d.get("branchAddress"))
+    if street:
+        f["branchAddress"] = street
+    if name:
+        f["branchName"] = name
+    if code:
+        f["branchCode"] = code
+    if d.get("branchTelephone"):
+        f["branchPhone"] = _pretty_phone(d.get("branchTelephone"))
+    dt = d.get("dateTime") or {}
+    for src, dst in (("startDate", "pickupDate"), ("startTime", "pickupTime"),
+                     ("endDate", "returnDate"), ("endTime", "returnTime")):
+        if dt.get(src):
+            f[dst] = str(dt[src])
+    cc = d.get("carClass") or {}
+    if cc.get("carClassCode"):
+        f["classCode"] = str(cc["carClassCode"])
+    if cc.get("carClass"):
+        f["classDescription"] = str(cc["carClass"])
+    f["factsFrom"] = "commit_response"
+    return f
+
+
+def _named_class_pick(wanted: str, classes: list):
+    """Resolve a class Fleet NAMED on the request to something this branch offers.
+
+    Fleet types a human word ("minivan"), ETD speaks SIPP codes ("MVAR") and
+    describes them by example ("CHRYSLER PACIFICA OR SIMILAR"). Comparing the two
+    as raw text is the bug that left request #19 unbooked overnight at a branch
+    whose class list literally contained MVAR.
+
+    Resolution order: a SIPP code typed straight in, then the description table
+    that already maps human words to codes, then a literal substring as a last
+    resort.
+
+    If the resolved class is not offered here, walk DOWN from it and never up.
+    Somebody who asked for a minivan asked for SPACE, so take the largest thing at
+    or below what they named, ending at the biggest sedan - not the smallest.
+    Minivan stays the ceiling (Tyler, 2026-08-17), so nothing above the named class
+    is ever considered, and the premium/luxury sedans the SOP does not promise
+    (PCAR, LCAR) stay out of it. Every downgrade says so in the note, by name, so
+    it lands on the request where Fleet can see it rather than in a log.
+    """
+    by_code: dict = {}
+    for c in classes or []:
+        code = str(c.get("code") or "").upper()
+        if code and code not in by_code:
+            by_code[code] = c
+
+    w = _norm(wanted)
+    code = w.upper() if re.fullmatch(r"[a-z]{4}", w or "") else ""
+    if not code:
+        code = desc_class(w)
+    if not code:
+        code = next((k for k, c in by_code.items()
+                     if w and w in _norm(c.get("description"))), "")
+    if not code:
+        return None, f"fleet-adjusted class '{w}' maps to no ETD class"
+
+    if code in by_code:
+        return by_code[code], f"fleet-adjusted class '{w}' -> {code}"
+
+    target = _rank(code)
+    # Same body style first, biggest that is still at or below what they named.
+    same_body = sorted([k for k in by_code
+                        if _rank(k)[0] == target[0] and _rank(k)[1] < target[1]],
+                       key=lambda k: -_rank(k)[1])
+    for k in same_body:
+        return (by_code[k],
+                f"fleet-adjusted class '{w}' ({code}) not offered here; "
+                f"took the next size down in the same body style, {k}")
+    # Then the sedan ladder from the TOP - largest sedan, not the ECAR default.
+    for k in reversed(SEDAN_LADDER):
+        if k in by_code:
+            return (by_code[k],
+                    f"DOWNGRADE: fleet-adjusted class '{w}' ({code}) is not offered at "
+                    f"this branch and nothing smaller in that body style is either; "
+                    f"took the largest sedan available, {k}")
+    return None, (f"fleet-adjusted class '{w}' ({code}) not offered at this branch "
+                  f"and no sedan either")
 
 
 def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
@@ -153,8 +325,8 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     if not user:
         raise RuntimeError(f"no ETD user for {username}; run reconcile_roster.py")
 
-    address = ", ".join([x for x in (r.get("shop_address"), r.get("shop_city"),
-                                     r.get("shop_state")) if x])
+    address = _join_address(r.get("shop_address"), r.get("shop_city"),
+                            r.get("shop_state"))
     if not address:
         # A no-van request (new hire awaiting a vehicle) legitimately has no
         # shop. The technician's reported branch IS the location then, which is
@@ -214,18 +386,16 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     # queue payloads without the field keep the old rule (non-sedan = human).
     # No match at this branch raises for a person — never a silent downgrade
     # to whatever ETD happened to offer.
-    def _norm(s) -> str:
-        return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", str(s or ""))).strip().lower()
     wanted = _norm(r.get("vehicle_class"))
     fleet_chose = str(r.get("vehicle_class_source") or "").strip().lower() == "fleet"
     if wanted and wanted != "sedan":
-        pick0 = next((c for c in classes
-                      if wanted in _norm(c.get("description"))
-                      or wanted == _norm(c.get("code"))), None)
-        sel = {"pick": pick0,
-               "note": (f"fleet-adjusted class '{wanted}' matched {str((pick0 or {}).get('code'))}"
-                        if pick0 else
-                        f"fleet-adjusted class '{wanted}' not offered at this branch")}
+        pick0, note0 = _named_class_pick(wanted, classes)
+        # 'code' is what the dry-run line, the reservation record and the note all
+        # read. Omitting it printed "None at Ashland" for a booking that had in fact
+        # picked MVAR correctly, which is the kind of display bug that gets a good
+        # booking cancelled by hand.
+        sel = {"pick": pick0, "note": note0,
+               "code": str((pick0 or {}).get("code") or "")}
     elif wanted == "sedan" and fleet_chose:
         # Explicit sedan: job title must NOT re-enter the decision. choose()
         # with no title takes the plain sedan ladder over the offered codes.
@@ -285,11 +455,38 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         if not (gr.get("success") or gr.get("succecss")):
             raise RuntimeError(f"{gate} rejected it: {json.dumps(gr)[:200]}")
 
+    # What we ACTUALLY booked, in the shape the intent's preview.reservation uses.
+    #
+    # The technician's confirmation text is rendered from intent.preview.reservation,
+    # NOT from the reservation the runner just created. Requests #20 and #21 therefore
+    # texted "Pick up today at Enterprise branch, ." because their previews had failed
+    # and left that object empty, and #22 texted "Tue 8/18" for a car booked on 8/19
+    # because its preview was a day stale. The runner is the only thing that knows what
+    # Enterprise actually agreed to, so it has to say so.
+    branch_obj = q.get("branch") or {}
+    booked_facts = {
+        "branchName": q.get("branch_name") or "",
+        "branchCode": q.get("branch_code") or "",
+        "branchAddress": q.get("branch_address") or "",
+        "branchPhone": (branch_obj.get("phoneNumber")
+                        or branch_obj.get("phone")
+                        or branch_obj.get("telephoneNumber") or None),
+        "branchPinned": bool(q.get("branch_pinned")),
+        "pickupDate": r["start_dt"][:10],
+        "pickupTime": r["start_dt"][11:19],
+        "returnDate": booked_end[:10],
+        "returnTime": booked_end[11:19],
+        "classCode": sel.get("code") or "",
+        "classDecision": sel.get("note") or "",
+        "shortened": bool(shortened),
+        "bookedBy": "book_request",
+    }
+
     out = {"request_no": no, "ldap": ldap, "branch_name": q.get("branch_name"),
            "branch_pinned": q.get("branch_pinned"), "class": sel.get("code"),
            "class_note": sel.get("note"), "start": r["start_dt"], "end": booked_end,
            "shortened": shortened, "reported_branch": reported,
-           "used_reported": used_reported}
+           "used_reported": used_reported, "booked_facts": booked_facts}
 
     if not confirm:
         out["dry_run"] = True
@@ -321,6 +518,12 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
 
     out["confirmation"] = conf
     out["reservation_id"] = resid
+    # Enterprise's OWN record of what it just booked outranks the quote we asked for.
+    # The commit response carries branchAddress, branchTelephone, carClass and the real
+    # dateTime block, so there is no window in which the message says one thing and the
+    # reservation says another. `reservationId` is genuinely null on this endpoint -
+    # that is ETD's behaviour, not a parse failure, so do not read a missing id as one.
+    out["booked_facts"] = _facts_from_response(resp, out["booked_facts"])
     return out
 
 
@@ -356,7 +559,11 @@ def drain(etd: EtdClient, template: dict, mapping: dict, old_j, old_r,
                 nexus("POST", f"/api/vrm/forms/rental-request/{r['request_no']}/booked",
                       {"etdReference": res["confirmation"],
                        "etdReservationId": res["reservation_id"],
-                       "branchName": res.get("branch_name") or ""})
+                       "branchName": res.get("branch_name") or "",
+                       # The facts the confirmation text is built from. Without this
+                       # the text is rendered off a preview that may be stale or, if
+                       # the preview never succeeded, entirely empty.
+                       "booked": res.get("booked_facts") or {}})
                 print(f"  BOOK {label:<18} conf {res['confirmation']}  {res['branch_name']}")
                 booked += 1
         except Exception as exc:

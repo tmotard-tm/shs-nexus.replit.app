@@ -63,7 +63,7 @@ import {
   type QuoteResult,
 } from "./client";
 import {
-  choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER,
+  choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER, descClass,
   type OfferedClass,
 } from "./vehicle-class";
 import {
@@ -249,7 +249,11 @@ export function notBeforeNowET(
   const wantMin = m ? Number(m[1]) * 60 + Number(m[2]) : 9 * 60;
   let floorMin = hh * 60 + mm + leadMinutes;
   floorMin = Math.ceil(floorMin / 30) * 30;
-  const use = Math.max(wantMin, floorMin);
+  // EARLIEST matters as much as LAST_PICKUP. Run at 01:08 the now+90m floor returns
+  // 03:00, and a 3am pickup gets exactly the same empty class list as a 6pm one: the
+  // branch is shut. Never ask for a car before the counter opens.
+  const EARLIEST = 9 * 60;
+  const use = Math.max(wantMin, floorMin, EARLIEST);
   // LAST_PICKUP is the latest slot a branch will realistically hand over a car.
   // Capping at 18:00 and staying on today was the original behaviour and it produced
   // a quote for 6pm at a branch that shuts at 5:30 - Enterprise returns an EMPTY class
@@ -500,14 +504,31 @@ export function classForIntent(
   // which is how the HVAC carve-out would silently go UNMAPPED. Normalise BOTH sides the
   // same way, and treat unset as the engine default: sedan (Tyler, 2026-08-16).
   const want = normLabel((facts.requestSeed || {}).approvedVehicleClass) || "sedan";
+  // Fleet types a human word. ETD speaks SIPP codes and describes each class by
+  // example, so "minivan" can never substring-match "CHRYSLER PACIFICA OR SIMILAR".
+  // Resolve the label to a code through the SAME table that reads a technician's own
+  // free-text description, THEN look at what the branch offers. Without this every
+  // named class fell straight through to UNMAPPED and then to "largest available
+  // substitute" - which would hand a full-size SUV to somebody whose branch had on
+  // the lot the exact minivan they asked for. (Request #19, 2026-08-19.)
+  //
+  // Deliberately NOT applied to the plain sedan default: descClass("sedan") is FCAR,
+  // and the sedan default must walk the ladder from the SMALLEST up (Tyler,
+  // 2026-08-17), never jump to full-size. Only a class Fleet NAMED resolves here.
+  const wantCode = want === "sedan"
+    ? ""
+    : (/^[a-z]{4}$/.test(want) ? want.toUpperCase() : descClass(want));
   let pick: OfferedClass | null =
-    offered.find(
+    (wantCode
+      ? offered.find((c) => String(c.code || "").toUpperCase() === wantCode) ?? null
+      : null)
+    ?? offered.find(
       (c) => normLabel(c.description).includes(want) || want === normLabel(c.code),
     ) ?? null;
   let match = pick ? "approved_label" : "UNMAPPED";
   let note = pick
-    ? `approved class '${want}' matched ${String(pick.code)}`
-    : `approved class '${want}' not offered at this branch`;
+    ? `approved class '${want}'${wantCode ? ` (${wantCode})` : ""} matched ${String(pick.code)}`
+    : `approved class '${want}'${wantCode ? ` (${wantCode})` : ""} not offered at this branch`;
 
   // HVAC comes from the ROSTER, not from a checkbox the technician ticks.
   //

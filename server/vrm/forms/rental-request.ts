@@ -1447,6 +1447,32 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
    * moves the request to `booked`; failure stores the error and LEAVES the row
    * approved so the next run retries it rather than losing it silently.
    */
+/**
+ * The only fields a runner may write into an intent's preview facts, length-capped.
+ *
+ * This object ends up rendered verbatim into a text message a technician receives, so
+ * it is a whitelist rather than a spread: an unbounded merge would let anything that
+ * can reach the internal-cron route rewrite the copy.
+ */
+const BOOKED_FACT_KEYS = [
+  "branchName", "branchCode", "branchAddress", "branchPhone", "branchPinned",
+  "pickupDate", "pickupTime", "returnDate", "returnTime",
+  "classCode", "classDescription", "classDecision", "shortened",
+  "bookedBy", "factsFrom",
+] as const;
+
+function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const src = raw as Record<string, unknown>;
+  const out: Record<string, any> = {};
+  for (const k of BOOKED_FACT_KEYS) {
+    const v = src[k];
+    if (v === undefined || v === null || v === "") continue;
+    out[k] = typeof v === "boolean" ? v : String(v).slice(0, 300);
+  }
+  return Object.keys(out).length ? out : null;
+}
+
   router.post("/forms/rental-request/:requestNo/booked", async (req, res) => {
     try {
       const no = Number(req.params.requestNo);
@@ -1457,7 +1483,16 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       // The branch is what the technician actually has to walk into, and
       // nearest_branch_name existed as a column that nothing ever wrote. The
       // runner knows it from the quote; take it while it is in hand.
-      const branch = String(req.body?.branchName || "").trim().slice(0, 200);
+      // The facts the runner actually booked, as opposed to whatever the PREVIEW
+      // happened to hold. The technician's confirmation text renders from
+      // intent.preview.reservation; when a preview had failed that object was empty
+      // and the text read "Pick up today at Enterprise branch, ." with no address,
+      // and when a preview was a day old the text named the wrong pickup date for a
+      // real reservation. The runner is the only thing that knows the truth.
+      const bookedFacts = sanitizeBookedFacts(req.body?.booked);
+      const branch = String(
+        req.body?.branchName || (bookedFacts?.branchName ?? "") || "",
+      ).trim().slice(0, 200);
 
       if (error) {
         // Never stamp an error onto a row that already booked. A late failure
@@ -1496,8 +1531,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       // pre-dates the orchestrator) the legacy notifyTech remains the fallback.
       let orchestratorHandled = false;
       if ((rows as any[]).length) {
-        orchestratorHandled = await adoptRunnerBooking(no, ref, resId || null,
-          req.body?.alreadyNotified === true ? { alreadyNotified: "runner" } : undefined);
+        orchestratorHandled = await adoptRunnerBooking(no, ref, resId || null, {
+          ...(req.body?.alreadyNotified === true ? { alreadyNotified: "runner" } : {}),
+          ...(bookedFacts ? { booked: bookedFacts } : {}),
+        });
       }
       if (!(rows as any[]).length) {
         const { rows: cur } = await db.execute(sql`
@@ -1512,7 +1549,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         if (c.etd_booked_at && strTrim(c.etd_reference)) {
           const adopted = await adoptRunnerBooking(
             no, String(c.etd_reference), c.etd_reservation_id ?? null,
-            req.body?.alreadyNotified === true ? { alreadyNotified: "runner-backfill" } : undefined,
+            {
+              ...(req.body?.alreadyNotified === true
+                ? { alreadyNotified: "runner-backfill" } : {}),
+              ...(bookedFacts ? { booked: bookedFacts } : {}),
+            },
           );
           if (adopted) return res.json({ ok: true, reconciled: true, etdReference: c.etd_reference });
         }

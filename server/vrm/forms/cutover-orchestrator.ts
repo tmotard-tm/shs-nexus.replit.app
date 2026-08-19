@@ -3879,7 +3879,7 @@ export async function adoptRunnerBooking(
   requestNo: number,
   confirmation: string,
   quoteRef?: string | null,
-  opts?: { alreadyNotified?: string },
+  opts?: { alreadyNotified?: string; booked?: Record<string, any> | null },
 ): Promise<boolean> {
   const conf = strOrNull(confirmation);
   if (!conf) return false;
@@ -3904,9 +3904,23 @@ export async function adoptRunnerBooking(
     ...(quoteRef ? { raw: { quoteReference: quoteRef } } : {}),
     ...(notifiedBy ? { alreadyNotified: { by: notifiedBy, at: new Date().toISOString() } } : {}),
   });
+  // Overwrite the preview's reservation facts with what was really booked, in the
+  // SAME statement that verifies the reservation - releaseMessagesIfEligible re-reads
+  // the intent immediately below and renders the technician's text from exactly this
+  // object. Merging after the release would be too late, and merging into a separate
+  // key would leave the renderer still reading the stale one.
+  const bookedFacts = opts?.booked && Object.keys(opts.booked).length ? opts.booked : null;
+  const previewSet = bookedFacts
+    ? sql`preview = COALESCE(preview, '{}'::jsonb) || jsonb_build_object(
+            'reservation',
+            COALESCE(preview -> 'reservation', '{}'::jsonb) || ${JSON.stringify(bookedFacts)}::jsonb
+          ),
+          event_date = COALESCE(event_date, ${strOrNull(bookedFacts.pickupDate)}::date),`
+    : sql``;
   const { rows: advanced } = await db.execute(sql`
     UPDATE vrm_rental_workflow_intents
-       SET reservation_state = 'verified',
+       SET ${previewSet}
+           reservation_state = 'verified',
            status = 'reservation_verified',
            reservation_evidence = ${evidence}::jsonb,
            msg1_state = ${notifiedBy ? sql`'skipped_already_notified'` : sql`msg1_state`},
