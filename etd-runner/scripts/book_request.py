@@ -197,6 +197,20 @@ def _join_address(*parts) -> str:
     return ", ".join(out)
 
 
+# Largest-first substitution ladder for a class Fleet NAMED that the branch does not
+# stock. Mirrors ESCALATION_LADDER + SEDAN_LADDER in
+# server/vrm/etd/vehicle-class.ts, so the two bookers cannot hand the same technician
+# different vehicles for the same request - which they did until 2026-08-19, one
+# walking up and the other down.
+#
+# Minivan is the ceiling (Tyler, 2026-08-17). Pickups are deliberately absent: an open
+# bed is not a substitute for enclosed space and the SOP never promised one. Premium
+# and luxury sedans (PCAR, LCAR) stay out for the same reason they are out of
+# SEDAN_LADDER - nobody promised them and they cost more.
+NAMED_DOWNGRADE = ["MVAR", "FFAR", "SFAR", "IFAR", "CFAR",
+                   "FCAR", "SCAR", "ICAR", "CCAR", "ECAR"]
+
+
 def _norm(s) -> str:
     """Loose text key: collapse whitespace, treat _ and - as spaces, lowercase."""
     return re.sub(r"\s+", " ", re.sub(r"[_-]+", " ", str(s or ""))).strip().lower()
@@ -295,24 +309,21 @@ def _named_class_pick(wanted: str, classes: list):
     if code in by_code:
         return by_code[code], f"fleet-adjusted class '{w}' -> {code}"
 
-    target = _rank(code)
-    # Same body style first, biggest that is still at or below what they named.
-    same_body = sorted([k for k in by_code
-                        if _rank(k)[0] == target[0] and _rank(k)[1] < target[1]],
-                       key=lambda k: -_rank(k)[1])
-    for k in same_body:
-        return (by_code[k],
-                f"fleet-adjusted class '{w}' ({code}) not offered here; "
-                f"took the next size down in the same body style, {k}")
-    # Then the sedan ladder from the TOP - largest sedan, not the ECAR default.
-    for k in reversed(SEDAN_LADDER):
+    # Not stocked here. Walk DOWN, and ACROSS body styles - a minivan request at a
+    # branch with no minivan should land on the biggest SUV on the lot, not skip
+    # every SUV and drop straight to a Corolla because a sedan happens to share a
+    # body letter with nothing.
+    # -1 when the named class sits ABOVE the ladder (RVAR cargo van, PPAR pickup):
+    # the walk then starts at MVAR, the top. Using 0 skipped the minivan entirely,
+    # which matters most for the HVAC carve-out - it names cargo van.
+    start = NAMED_DOWNGRADE.index(code) if code in NAMED_DOWNGRADE else -1
+    for k in NAMED_DOWNGRADE[start + 1:]:
         if k in by_code:
             return (by_code[k],
                     f"DOWNGRADE: fleet-adjusted class '{w}' ({code}) is not offered at "
-                    f"this branch and nothing smaller in that body style is either; "
-                    f"took the largest sedan available, {k}")
-    return None, (f"fleet-adjusted class '{w}' ({code}) not offered at this branch "
-                  f"and no sedan either")
+                    f"this branch; took the largest substitute available, {k}")
+    return None, (f"fleet-adjusted class '{w}' ({code}) is not offered at this branch "
+                  f"and neither is anything smaller")
 
 
 def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
@@ -497,34 +508,119 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         json.dumps(model, indent=1, default=str), encoding="utf-8")
 
     resp = etd.confirm_reservation(model, dry_run=False)
+    # ------------------------------------------------------------------------
+    # A REAL CAR IS NOW RESERVED AT ENTERPRISE. Nothing below this line may raise.
+    #
+    # Every exception out of this function ends in drain() posting {"error": ...},
+    # which leaves the row 'approved' - and an approved row is exactly what the next
+    # poll picks up and books AGAIN. A confirmation number that failed to parse used
+    # to do precisely that. Record the booking first, interpret it afterwards.
+    # ------------------------------------------------------------------------
+    out["commit_ok"] = True
+    try:
+        (REF / "savedr_responses").mkdir(exist_ok=True)
+        (REF / "savedr_responses" / f"req{no}_{ldap}.json").write_text(
+            json.dumps(resp, indent=1, default=str), encoding="utf-8")
+    except Exception as exc:
+        print(f"       WARNING: could not save the response file: {exc}")
 
-    (REF / "savedr_responses").mkdir(exist_ok=True)
-    (REF / "savedr_responses" / f"req{no}_{ldap}.json").write_text(
-        json.dumps(resp, indent=1, default=str), encoding="utf-8")
-
+    data = ((resp or {}).get("data") or {})
     # data.reservationNumber.number is the field the confirmation EMAIL calls
     # "your confirmation number". The top level carries a quote reference that
     # no branch can look up, which is how JABJ2WPW3J once got recorded as a
     # confirmation. The journey referenceNumber carries a COUNT suffix the
     # email does not show; strip it or the two can never be matched.
-    conf = str((((resp or {}).get("data") or {})
-                .get("reservationNumber") or {}).get("number") or "").strip()
-    if conf.upper().endswith("COUNT"):
-        conf = conf[:-5]
-    resid = str((((resp or {}).get("data") or {}) or {}).get("reservationId") or "")
-    if not conf:
-        raise RuntimeError(f"booked but the confirmation number did not parse; "
-                           f"see reference/savedr_responses/req{no}_{ldap}.json")
+    conf = ""
+    resid = ""
+    try:
+        conf = str((data.get("reservationNumber") or {}).get("number") or "").strip()
+        if conf.upper().endswith("COUNT"):
+            conf = conf[:-5]
+        # `reservationId` is NULL on this endpoint in every response ever captured -
+        # ETD's behaviour, not a parse bug - and reading it wrote NULL into
+        # etd_reservation_id for every booking this runner has ever made. `journeyUId`
+        # is the id ETD's OWN extend and cancel routes key on (etd/client.py
+        # extend_reservation / cancel_reservation), so it is the one worth keeping.
+        resid = str(data.get("journeyUId") or "")
+    except Exception as exc:
+        print(f"       WARNING: could not parse the confirmation: {exc}")
 
     out["confirmation"] = conf
     out["reservation_id"] = resid
+    if not conf:
+        out["parse_error"] = (f"committed but the confirmation number did not parse; "
+                              f"see reference/savedr_responses/req{no}_{ldap}.json")
     # Enterprise's OWN record of what it just booked outranks the quote we asked for.
     # The commit response carries branchAddress, branchTelephone, carClass and the real
     # dateTime block, so there is no window in which the message says one thing and the
-    # reservation says another. `reservationId` is genuinely null on this endpoint -
-    # that is ETD's behaviour, not a parse failure, so do not read a missing id as one.
-    out["booked_facts"] = _facts_from_response(resp, out["booked_facts"])
+    # reservation says another.
+    try:
+        out["booked_facts"] = _facts_from_response(resp, out["booked_facts"])
+    except Exception as exc:
+        print(f"       WARNING: could not read the booked facts off the response: {exc}")
     return out
+
+
+def _post_booked(request_no, body, attempts: int = 4):
+    """POST the writeback and keep trying. Returns (ok, status, payload).
+
+    A booking Enterprise accepted but Nexus never recorded is the worst state this
+    program can produce: the row stays 'approved', the technician is never told, and
+    the next poll books a SECOND car. One unchecked POST used to decide that.
+
+    A 409 is not a failure to retry - it means the row already moved on (someone else
+    recorded it, or a human denied it). Either way it is no longer bookable, which is
+    the property that actually matters here.
+    """
+    last = (0, None)
+    for i in range(attempts):
+        st, payload = nexus("POST", f"/api/vrm/forms/rental-request/{request_no}/booked", body)
+        if 200 <= st < 300 or st == 409:
+            return True, st, payload
+        last = (st, payload)
+        if i < attempts - 1:
+            time.sleep(2 ** i)
+    return False, last[0], last[1]
+
+
+def _record_booking(r: dict, res: dict, label: str) -> int:
+    """Get a committed reservation onto the row, or stop the runner trying."""
+    no = r["request_no"]
+    conf = res.get("confirmation") or ""
+    resid = res.get("reservation_id") or ""
+
+    if not conf and not resid:
+        # A car exists at Enterprise and we cannot name it. Posting an error here
+        # would leave the row approved and the next poll would book a second one, so
+        # stop and put a human on it instead.
+        print(f"  STOP {label:<18} COMMITTED AT ENTERPRISE BUT UNIDENTIFIABLE. "
+              f"{res.get('parse_error') or ''}")
+        print("       Do NOT re-run until someone has checked ETD for this technician.")
+        raise SystemExit(2)
+
+    ok, st, payload = _post_booked(no, {
+        "etdReference": conf,
+        "etdReservationId": resid,
+        "branchName": res.get("branch_name") or "",
+        # The facts the confirmation text is built from. Without these the text is
+        # rendered off a preview that may be stale or, when the preview never
+        # succeeded, entirely empty - which is what queued two technicians
+        # "Pick up today at Enterprise branch, ." on 2026-08-19.
+        "booked": res.get("booked_facts") or {},
+    })
+    if not ok:
+        print(f"  STOP {label:<18} WRITEBACK FAILED http {st}: {str(payload)[:160]}")
+        print(f"       Confirmation {conf or resid} IS LIVE AT ENTERPRISE and the row is "
+              f"still 'approved' - it WILL be booked again on the next pass.")
+        print("       Record it by hand, or fix Nexus, before re-running.")
+        raise SystemExit(2)
+
+    if res.get("parse_error"):
+        print(f"  BOOK {label:<18} journey {resid}  {res.get('branch_name')}"
+              f"   <- {res['parse_error']}")
+    else:
+        print(f"  BOOK {label:<18} conf {conf}  {res.get('branch_name')}")
+    return 1
 
 
 def drain(etd: EtdClient, template: dict, mapping: dict, old_j, old_r,
@@ -545,34 +641,28 @@ def drain(etd: EtdClient, template: dict, mapping: dict, old_j, old_r,
         label = f"#{r['request_no']} {r['ldap']}"
         try:
             res = book_one(etd, r, template, mapping, old_j, old_r, confirm)
-            if res.get("dry_run"):
-                warn = "  <- SHORTENED, needs extending" if res["shortened"] else ""
-                pin = "" if res.get("branch_pinned") else "  <- not the contract branch"
-                via = "  <- quoted from the TECH'S reported branch" if res.get("used_reported") else ""
-                print(f"  DRY  {label:<18} {res['class']} at {res['branch_name']}"
-                      f"  {res['start'][:10]}..{res['end'][:10]}{warn}{pin}{via}")
-                # The tech's answer against ETD's resolution. When they
-                # disagree, one is wrong; a human sees it BEFORE --confirm.
-                if res.get("reported_branch"):
-                    print(f"       tech says nearest: {res['reported_branch'][:70]}")
-            else:
-                nexus("POST", f"/api/vrm/forms/rental-request/{r['request_no']}/booked",
-                      {"etdReference": res["confirmation"],
-                       "etdReservationId": res["reservation_id"],
-                       "branchName": res.get("branch_name") or "",
-                       # The facts the confirmation text is built from. Without this
-                       # the text is rendered off a preview that may be stale or, if
-                       # the preview never succeeded, entirely empty.
-                       "booked": res.get("booked_facts") or {}})
-                print(f"  BOOK {label:<18} conf {res['confirmation']}  {res['branch_name']}")
-                booked += 1
         except Exception as exc:
             msg = str(exc)[:300]
             print(f"  FAIL {label:<18} {msg}")
-            # Record it and LEAVE the row approved so the next pass retries,
-            # rather than losing the failure silently.
+            # Nothing was committed, so leaving the row approved is right: the next
+            # pass retries it. Record the reason rather than losing it silently.
             nexus("POST", f"/api/vrm/forms/rental-request/{r['request_no']}/booked",
                   {"error": msg})
+            continue
+
+        if res.get("dry_run"):
+            warn = "  <- SHORTENED, needs extending" if res["shortened"] else ""
+            pin = "" if res.get("branch_pinned") else "  <- not the contract branch"
+            via = "  <- quoted from the TECH'S reported branch" if res.get("used_reported") else ""
+            print(f"  DRY  {label:<18} {res['class']} at {res['branch_name']}"
+                  f"  {res['start'][:10]}..{res['end'][:10]}{warn}{pin}{via}")
+            # The tech's answer against ETD's resolution. When they
+            # disagree, one is wrong; a human sees it BEFORE --confirm.
+            if res.get("reported_branch"):
+                print(f"       tech says nearest: {res['reported_branch'][:70]}")
+            continue
+
+        booked += _record_booking(r, res, label)
     return booked
 
 

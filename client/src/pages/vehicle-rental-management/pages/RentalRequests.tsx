@@ -43,6 +43,21 @@ interface Req {
   etd_booked_at?: string | null; etd_reference?: string | null;
   etd_reservation_id?: string | null; etd_error?: string | null;
   pickup_at?: string | null;
+  nearest_branch_name?: string | null;
+  // What Enterprise ACTUALLY sold, off the workflow intent, plus whether the
+  // technician was really told. pickup_at above is what was REQUESTED and routinely
+  // differs from what was booked - the booker floors a past pickup forward.
+  booked_facts?: BookedFacts | null;
+  msg1_state?: string | null;
+  intent_error?: string | null;
+}
+
+/** The reservation as Enterprise recorded it, mirrored onto the intent at booking. */
+interface BookedFacts {
+  branchName?: string | null; branchCode?: string | null; branchAddress?: string | null;
+  branchPhone?: string | null; pickupDate?: string | null; pickupTime?: string | null;
+  returnDate?: string | null; returnTime?: string | null;
+  classCode?: string | null; classDescription?: string | null;
 }
 
 const CATEGORY_LABEL: Record<string, string> = {
@@ -195,7 +210,41 @@ const counted = (rows: Req[], get: (r: Req) => string | null | undefined): Array
   return Array.from(m.entries()).sort((a, b) => b[1] - a[1]);
 };
 
-const d10 = (v: string | null) => (v ? String(v).slice(0, 10) : "");
+// Slicing the ISO string reads the UTC date, so anything submitted after 8 PM ET
+// displayed as TOMORROW. Fleet works in Eastern; format in Eastern.
+const etDate = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit",
+});
+const d10 = (v: string | null) => {
+  if (!v) return "";
+  const t = Date.parse(String(v));
+  return Number.isNaN(t) ? String(v).slice(0, 10) : etDate.format(new Date(t));
+};
+
+/** "2026-08-19" + "09:00:00" -> "Wed 8/19, 9:00 AM". Already branch wall-clock. */
+const bookedWhen = (date?: string | null, time?: string | null) => {
+  if (!date) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(date));
+  if (!m) return String(date);
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
+  const t = /^(\d{1,2}):(\d{2})/.exec(String(time ?? ""));
+  const clock = t
+    ? ` ${+t[1] % 12 === 0 ? 12 : +t[1] % 12}:${t[2]} ${+t[1] < 12 ? "AM" : "PM"}`
+    : "";
+  return `${day} ${+m[2]}/${+m[3]},${clock}`.replace(",$", "");
+};
+
+/** What the technician was actually told, never an assumption. */
+const MSG1_LABEL: Record<string, { text: string; tone: "ok" | "wait" | "bad" }> = {
+  sent: { text: "Technician texted.", tone: "ok" },
+  sent_duplicate: { text: "Technician texted.", tone: "ok" },
+  skipped_already_notified: { text: "Technician already had the confirmation.", tone: "ok" },
+  queued: { text: "Confirmation text QUEUED, not yet sent.", tone: "wait" },
+  released: { text: "Confirmation text released to the sender.", tone: "wait" },
+  pending: { text: "Confirmation text not sent yet.", tone: "wait" },
+  blocked: { text: "TEXT BLOCKED - the technician has NOT been told.", tone: "bad" },
+};
 
 // Default pickup for a freshly opened request: today in Eastern time, at the
 // top of the NEXT hour (3:xx pm ET -> 4:00 pm ET). Adding an hour to the
@@ -250,13 +299,24 @@ export default function RentalRequests() {
     // poll fast so the drawer shows the outcome as it lands; otherwise amble.
     refetchInterval: (query) => {
       const reqs = query.state.data?.requests ?? [];
+      // Bounded by recency. A single row that never settles - a booking parked for
+      // a human, say - used to pin the heaviest query on the page to a 5-second poll
+      // forever. Ten minutes is far longer than the 20-30s an ETD round trip takes.
       const settling = reqs.some((r) =>
-        r.status === "approved" && !r.etd_booked_at && !r.etd_error);
-      return settling ? 5_000 : 60_000;
+        r.status === "approved" && !r.etd_booked_at && !r.etd_error
+        && r.decided_at != null && Date.now() - Date.parse(r.decided_at) < 10 * 60_000);
+      return settling ? 5_000 : 30_000;
     },
   });
   const { data: stats } = useQuery<Record<string, any>>({
     queryKey: ["/api/vrm/forms/rental-request/stats"], refetchInterval: 60_000,
+  });
+  // The classes Fleet may approve, served by the API so the picker and the validator
+  // are the same list. It used to be a hardcoded array here, and nothing checked what
+  // was typed: an unbookable value was stored happily and only failed hours later,
+  // during the booking, with the technician already waiting.
+  const { data: classOpts } = useQuery<{ options: Array<{ label: string; sipp: string; note: string }> }>({
+    queryKey: ["/api/vrm/forms/rental-request/class-options"], staleTime: 60 * 60_000,
   });
   const { data: funnel } = useQuery<Record<string, any>>({
     queryKey: ["/api/vrm/forms/rental-request/funnel"], refetchInterval: 60_000,
@@ -675,6 +735,11 @@ export default function RentalRequests() {
                ["Shop", [detail.shop_name, detail.shop_city, detail.shop_state].filter(Boolean).join(", ")],
                ["Shop phone", detail.shop_phone],
                ["Goes in", d10(detail.appointment_at)],
+               ["Pickup requested", detail.pickup_at
+                 ? new Date(detail.pickup_at).toLocaleString("en-US", { timeZone: "America/New_York" }) + " ET"
+                 : ""],
+               ["Branch", [detail.booked_facts?.branchName ?? detail.nearest_branch_name,
+                           detail.booked_facts?.branchAddress].filter(Boolean).join(" — ")],
                ["Shop says days", detail.shop_estimated_days],
                ["Actual days down", detail.actual_days_down],
                ["Variance vs claim", detail.claim_variance_days],
@@ -706,18 +771,30 @@ export default function RentalRequests() {
                            onChange={(e) => setClassDraft(e.target.value)}
                            placeholder="sedan" style={{ ...ctrl, flex: 1 }} />
                     <datalist id="vrm-class-options">
-                      {["sedan", "suv", "minivan", "cargo van", "pickup truck"].map((c) => <option key={c} value={c} />)}
+                      {(classOpts?.options ?? []).map((c) => (
+                        <option key={c.label} value={c.label}>{c.note}</option>
+                      ))}
                     </datalist>
                     <button type="button"
                             disabled={classMut.isPending || !classDraft.trim()
-                              || normCls(classDraft) === (normCls(detail.approved_vehicle_class) || "sedan")}
+                              || normCls(classDraft) === (normCls(detail.approved_vehicle_class) || "sedan")
+                              || !(classOpts?.options ?? []).some((o) => o.label === normCls(classDraft))}
                             onClick={() => classMut.mutate({ requestNo: detail.request_no, vehicleClass: classDraft })}
                             style={{ ...ctrl, cursor: "pointer", fontWeight: 600 }}>
                       {classMut.isPending ? "Saving…" : "Save"}
                     </button>
                   </div>
                   <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "6px 0 0" }}>
-                    Books as written — sedan unless there is a reason to go bigger.
+                    {(() => {
+                      const opts = classOpts?.options ?? [];
+                      const hit = opts.find((o) => o.label === normCls(classDraft));
+                      if (!classDraft.trim()) return "Sedan unless there is a reason to go bigger.";
+                      if (!hit) {
+                        return `"${classDraft.trim()}" is not a class we can book. Valid: `
+                             + opts.map((o) => o.label).join(", ") + ".";
+                      }
+                      return hit.sipp ? `${hit.sipp} — ${hit.note}` : hit.note;
+                    })()}
                   </p>
                 </>
               ) : (
@@ -739,8 +816,45 @@ export default function RentalRequests() {
                 </div>
                 <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
                   Reserved {new Date(detail.etd_booked_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET.
-                  The technician was texted the confirmation number and branch.
+                  {(() => {
+                    const b = detail.booked_facts ?? undefined;
+                    const when = bookedWhen(b?.pickupDate, b?.pickupTime);
+                    const where = [b?.branchName ?? detail.nearest_branch_name, b?.branchAddress]
+                      .filter(Boolean).join(", ");
+                    if (!when && !where) return null;
+                    return (
+                      <> Pick up {when || "(no date recorded)"}
+                        {where ? ` at Enterprise ${where}` : ""}
+                        {b?.classCode ? ` — ${b.classCode}${b.classDescription ? ` (${b.classDescription})` : ""}` : ""}.
+                      </>
+                    );
+                  })()}
                 </div>
+                {/* What the technician was ACTUALLY told. This line used to assert
+                    "The technician was texted the confirmation number and branch."
+                    unconditionally, with nothing behind the claim - including for
+                    bookings whose text was still queued, or withheld outright. */}
+                {(() => {
+                  const st = String(detail.msg1_state ?? "");
+                  const info = MSG1_LABEL[st];
+                  const tone = info?.tone ?? "wait";
+                  const text = info?.text
+                    ?? (st ? `Text state: ${st}.` : "No confirmation text recorded for this booking.");
+                  return (
+                    <div style={{
+                      fontFamily: fonts.dmSans, fontSize: 12, marginTop: 4,
+                      fontWeight: tone === "bad" ? 700 : 500,
+                      color: tone === "ok" ? colors.green : tone === "bad" ? colors.red : colors.inkMuted,
+                    }}>
+                      {text}
+                    </div>
+                  );
+                })()}
+                {detail.intent_error ? (
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.red, marginTop: 4, wordBreak: "break-word" }}>
+                    {detail.intent_error}
+                  </div>
+                ) : null}
               </div>
             ) : detail.etd_error ? (
               <div style={{ marginTop: 16, background: colors.redLight, border: `1px solid ${colors.red}`, borderRadius: 10, padding: "10px 12px" }}>

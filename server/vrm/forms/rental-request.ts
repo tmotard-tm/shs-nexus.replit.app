@@ -29,6 +29,9 @@ import {
   WORKFLOW_REQUEST,
 } from "./cutover-orchestrator";
 import { runBookingExecutor } from "../etd/executor";
+// One list of bookable classes, shared by the picker route and the validator so
+// they cannot drift apart.
+import { REQUEST_CLASS_OPTIONS, resolveRequestClass } from "../etd/vehicle-class";
 
 // .b, 2026-08-14: the first five acknowledgements are now attested by ONE
 // checkbox listing them as bullets; the four terms of use stay individual.
@@ -1273,6 +1276,14 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * The classes Fleet may approve, served so the picker and the validator cannot
+   * disagree. The client used to hold its own hardcoded list.
+   */
+  router.get("/forms/rental-request/class-options", async (_req, res) => {
+    res.json({ options: REQUEST_CLASS_OPTIONS });
+  });
+
   router.get("/forms/rental-request/missing-reasons", async (_req, res) => {
     // The deny script rides along for the same reason the reasons do: the
     // review UI pre-fills it, the technician receives it, and served-not-
@@ -1297,9 +1308,28 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                pf.daily_ppt_profit     AS prof_ppt,
                pf.tenure_months        AS prof_tenure_months,
                pf.new_hire_exempt      AS prof_new_hire_exempt,
-               pf.synced_at            AS prof_synced_at
+               pf.synced_at            AS prof_synced_at,
+               -- What was ACTUALLY booked, and whether the technician was actually
+               -- told. The row itself only knows the REQUESTED pickup and a branch
+               -- name; the branch address, the real pickup datetime, the class
+               -- Enterprise gave, and the message state all live on the workflow
+               -- intent. Without them the page showed "BOOKED" beside a pickup time
+               -- Enterprise never agreed to, and asserted the technician had been
+               -- texted whether or not anything had been sent.
+               wi.resv                 AS booked_facts,
+               wi.msg1_state           AS msg1_state,
+               wi.intent_error         AS intent_error
         FROM vrm_rental_request r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
+        LEFT JOIN LATERAL (
+          SELECT i.preview -> 'reservation' AS resv,
+                 i.msg1_state,
+                 i.last_error AS intent_error
+            FROM vrm_rental_workflow_intents i
+           WHERE i.workflow_type = 'rental_request'
+             AND i.source_id = r.request_no::text
+           ORDER BY i.id DESC LIMIT 1
+        ) wi ON true
         LEFT JOIN LATERAL (
           SELECT * FROM vrm_profitability_snapshot p
           WHERE upper(p.tech_ldap) = upper(r.ldap)
@@ -1393,14 +1423,27 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       // reservation for the same technician. Claims older than 30 minutes are
       // reclaimable so a crashed runner does not park work forever.
       const runner = String((req as any).query?.runner || "runner").slice(0, 60);
-      await db.execute(sql`
-        UPDATE vrm_rental_request
-        SET claimed_at = now(), claimed_by = ${runner}
-        WHERE status = 'approved' AND etd_booked_at IS NULL
-          AND COALESCE(pickup_at, appointment_at) IS NOT NULL
-          AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
-      `);
+      // ONE statement: claim, then hand back exactly the rows this call claimed.
+      //
+      // The lease used to be two statements - an UPDATE keyed on `claimed_at` and a
+      // SELECT keyed on `claimed_by` - and the pair provided no mutual exclusion at
+      // all in the default configuration. RUNNER_NAME defaults to "book_request", so
+      // a second runner starting mid-flight had its UPDATE correctly match nothing
+      // (claimed_at was recent) and then its SELECT matched the SAME rows anyway on
+      // claimed_by = 'book_request'. Both processes then booked real cars for the
+      // same technician; DWHITE0 ended up with two reservations 26 seconds apart.
+      //
+      // A data-modifying CTE closes it: the JOIN can only see what RETURNING gives
+      // it, so a concurrent caller claims nothing and receives an empty queue.
       const { rows } = await db.execute(sql`
+        WITH leased AS (
+          UPDATE vrm_rental_request
+          SET claimed_at = now(), claimed_by = ${runner}
+          WHERE status = 'approved' AND etd_booked_at IS NULL
+            AND COALESCE(pickup_at, appointment_at) IS NOT NULL
+            AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+          RETURNING request_no
+        )
         SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
                r.shop_name, r.shop_address, r.shop_city, r.shop_state, r.shop_postal,
                r.tech_reported_branch,
@@ -1428,14 +1471,24 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                -- in a trunk. Sent as the raw title so the runner owns the mapping.
                a.job_title                                           AS job_title
         FROM vrm_rental_request r
+        JOIN leased l ON l.request_no = r.request_no
         LEFT JOIN all_techs a ON upper(a.tech_racfid) = upper(r.ldap)
-        WHERE r.status = 'approved'
-          AND r.etd_booked_at IS NULL
-          AND COALESCE(r.pickup_at, r.appointment_at) IS NOT NULL
-          AND r.claimed_by = ${runner}
         ORDER BY r.appointment_at
       `);
-      res.json({ queue: rows, count: (rows as any[]).length });
+      // Rows that are ready to book but held by somebody else's live lease. Without
+      // this the runner printed nothing and the row simply looked absent, which reads
+      // exactly like "no work to do" for up to thirty minutes.
+      const { rows: held } = await db.execute(sql`
+        SELECT request_no, ldap, claimed_by,
+               to_char(claimed_at + interval '30 minutes', 'HH24:MI:SS') AS lease_expires_utc
+          FROM vrm_rental_request
+         WHERE status = 'approved' AND etd_booked_at IS NULL
+           AND COALESCE(pickup_at, appointment_at) IS NOT NULL
+           AND claimed_at IS NOT NULL AND claimed_at >= now() - interval '30 minutes'
+           AND claimed_by IS DISTINCT FROM ${runner}
+         ORDER BY request_no
+      `);
+      res.json({ queue: rows, count: (rows as any[]).length, held });
     } catch (e: any) {
       console.error("[rental-request] booking-queue failed:", e?.message || e);
       res.status(500).json({ message: e?.message || "Failed to load booking queue." });
@@ -1499,7 +1552,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         // report from a retry would otherwise mark a live reservation as broken.
         await db.execute(sql`
           UPDATE vrm_rental_request
-          SET etd_error = ${error.slice(0, 500)}, claimed_at = NULL, updated_at = now()
+          SET etd_error = ${error.slice(0, 500)}, claimed_at = NULL, claimed_by = NULL, updated_at = now()
           WHERE request_no = ${no} AND etd_booked_at IS NULL
         `);
         return res.json({ ok: true, recorded: "error" });
@@ -1515,7 +1568,8 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         SET etd_reference = ${ref || null}, etd_reservation_id = ${resId || null},
             nearest_branch_name = COALESCE(${branch || null}, nearest_branch_name),
             etd_booked_at = now(), etd_error = NULL,
-            status = 'booked', claimed_at = NULL, updated_at = now()
+            status = 'booked', claimed_at = NULL, claimed_by = NULL,
+            updated_at = now()
         WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
         RETURNING request_no, status, COALESCE(pickup_at, appointment_at) AS appointment_at, shop_name
       `);
@@ -1612,6 +1666,17 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       const cls = String(req.body?.vehicleClass ?? "")
         .trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").slice(0, 40);
       if (!cls) return res.status(400).json({ message: "vehicleClass is required" });
+      // Refuse a class this system cannot book, HERE, while a human is looking at the
+      // screen. Until 2026-08-19 this accepted any 40 characters and stored them
+      // verbatim; the first anyone heard about an unbookable value was a failed
+      // booking hours later, with the technician already waiting.
+      if (resolveRequestClass(cls) === null) {
+        return res.status(400).json({
+          message: `'${cls}' is not a class we can book. Valid values: `
+                 + REQUEST_CLASS_OPTIONS.map((o) => o.label).join(", ") + ".",
+          options: REQUEST_CLASS_OPTIONS,
+        });
+      }
       const actor = (req as any).user?.username || (req as any).user?.email || "unknown";
 
       const inFlight = await requestBookingInFlight(String(no));

@@ -2512,12 +2512,20 @@ export async function recordBookingPostback(params: {
       if (verifiedOnCommit) {
         // Close the request row so the queue and the card both read 'booked'
         // instead of an approved row that silently already has a car.
+        // COALESCE, not overwrite. A blind write here would quietly replace the
+        // confirmation number of a row that ALREADY booked - which is precisely the
+        // evidence a double booking leaves behind, erased by the second write.
+        //
+        // etd_reservation_id used to receive the QUOTE reference. A quote reference
+        // is not a reservation id: no branch can look one up, and it made the column
+        // read as populated while holding the wrong concept. ETD's own identifier
+        // (journeyUId) comes in through the runner's writeback; the quote reference
+        // stays in reservation_evidence.raw where it belongs.
         await db.execute(sql`
           UPDATE vrm_rental_request
              SET status = 'booked',
-                 etd_reference = ${confirmation},
-                 etd_reservation_id = ${strOrNull(params.payload?.evidence?.quoteReference)},
-                 etd_booked_at = now(),
+                 etd_reference = COALESCE(nullif(trim(etd_reference), ''), ${confirmation}),
+                 etd_booked_at = COALESCE(etd_booked_at, now()),
                  etd_error = NULL,
                  updated_at = now()
            WHERE request_no = ${Number(intent.source_id)}
@@ -3333,9 +3341,35 @@ export async function releaseMessagesIfEligible(intentId: number): Promise<void>
 
   const preview = intent.preview ?? {};
   const conf = strOrNull(intent.reservation_evidence?.confirmation) ?? "(pending)";
-  const branchName = preview.reservation?.branchName ?? preview.reservation?.branchCode ?? "branch";
-  const branchAddress = preview.reservation?.branchAddress ?? "";
   const resv = (preview.reservation ?? {}) as Record<string, unknown>;
+
+  // A request's msg1 is the ONLY thing that tells a stranded technician where to
+  // collect their car. The `?? "branch"` / `?? ""` fallbacks below used to let an
+  // intent whose preview never built render anyway, and on 2026-08-19 that queued
+  // two technicians "Pick up today at Enterprise branch, ." - no branch, no address,
+  // no date, no return. A message nobody can act on is worse than no message: it
+  // reads as instructions and sends someone out with nowhere to go.
+  //
+  // Withhold instead. The reservation is real either way, and the row still shows
+  // BOOKED with its confirmation number for Fleet to work from.
+  if (isRequest) {
+    const missing = (["branchName", "branchAddress", "pickupDate"] as const)
+      .filter((k) => !strOrNull(resv[k] as any));
+    if (missing.length) {
+      // Deliberately last_error and NOT a status change: completionSatisfied()
+      // marks a request complete on reservation_state alone, so finalizeCompletion
+      // overwrites any status written here within seconds. last_error survives.
+      await touchIntent(intent.id, {
+        last_error: `msg1 withheld: booked facts missing (${missing.join(", ")}). `
+          + `The reservation IS real - the technician has NOT been told where to go.`,
+      });
+      return;
+    }
+  }
+
+  const branchName = strOrNull(resv.branchName as any)
+    ?? strOrNull(resv.branchCode as any) ?? "branch";
+  const branchAddress = strOrNull(resv.branchAddress as any) ?? "";
   const msg1Body = isRequest
     ? renderRequestMsg1({
         conf,
@@ -3846,11 +3880,12 @@ export async function verifyRequestOnCommitEvidence(
 
   // Close the request row too, so the queue and the card both read 'booked' instead
   // of an approved row that silently already has a car.
+  // Same rule as finalizeCommit: never overwrite a confirmation that is already on
+  // the row, and never put a quote reference in the reservation-id column.
   await db.execute(sql`
     UPDATE vrm_rental_request
        SET status = 'booked',
-           etd_reference = ${confirmation},
-           etd_reservation_id = COALESCE(etd_reservation_id, ${quoteRef}),
+           etd_reference = COALESCE(nullif(trim(etd_reference), ''), ${confirmation}),
            etd_booked_at = COALESCE(etd_booked_at, now()),
            etd_error = NULL,
            updated_at = now()

@@ -64,6 +64,7 @@ import {
 } from "./client";
 import {
   choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER, descClass,
+  NAMED_DOWNGRADE,
   type OfferedClass,
 } from "./vehicle-class";
 import {
@@ -554,22 +555,21 @@ export function classForIntent(
   // vehicles. Largest-first, because someone who asked for a minivan needs the space,
   // and only then the sedan ladder.
   if (!pick && want !== "sedan") {
-    const biggestFirst = [...ESCALATION_LADDER].reverse();
-    for (const code of biggestFirst) {
+    // Walk DOWN from what was NAMED, never up. Starting at the top of the ladder
+    // regardless of the request handed an "suv" a Chrysler Pacifica whenever the
+    // branch had one, and the runner meanwhile refused the booking outright: the
+    // same request produced two different vehicles depending on which booker ran.
+    // -1 when the named class sits ABOVE the ladder (cargo van, pickup) so the walk
+    // still starts at MVAR, the ceiling.
+    const from = wantCode ? NAMED_DOWNGRADE.indexOf(wantCode) : -1;
+    for (const code of NAMED_DOWNGRADE.slice(from + 1)) {
       const hit = offered.find((c) => String(c.code || "").toUpperCase() === code);
       if (hit) {
         pick = hit;
-        match = "named_class_escalated";
-        note = `approved class '${want}' not offered; took ${code}, the largest available substitute`;
-        break;
-      }
-    }
-    if (!pick) {
-      const lad = chooseClass(null, null, offered, null);
-      if (lad.pick) {
-        pick = lad.pick;
         match = "named_class_downgraded";
-        note = `approved class '${want}' not offered and nothing larger available; fell back to ${String(lad.pick.code)} — REVIEW whether this fits the job`;
+        note = `approved class '${want}'${wantCode ? ` (${wantCode})` : ""} not offered; `
+             + `took ${code}, the largest substitute at or below it`;
+        break;
       }
     }
   }

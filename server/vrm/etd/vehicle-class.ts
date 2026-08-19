@@ -220,6 +220,70 @@ export const SEDAN_CODES = new Set(SEDAN_LADDER);
  */
 export const ESCALATION_LADDER = ["CFAR", "IFAR", "SFAR", "FFAR", "MVAR"];
 
+/**
+ * Largest-first substitution ladder for a class Fleet NAMED that a branch does not
+ * stock. The named-class walk goes DOWN from what was asked for; the plain sedan
+ * default still walks UP from the smallest (SEDAN_LADDER). Stating the asymmetry
+ * here because it is the whole rule: somebody who named a minivan needs space, and
+ * somebody who said nothing gets the cheapest car that does the job.
+ *
+ * Mirrored verbatim by NAMED_DOWNGRADE in etd-runner/scripts/book_request.py. The two
+ * bookers resolved the same request in OPPOSITE directions until 2026-08-19 - the
+ * server took the largest class on the lot regardless of what was named, the runner
+ * refused outright - so which vehicle a technician got depended on which program
+ * happened to run. Change both or neither.
+ *
+ * Minivan is the ceiling (Tyler, 2026-08-17). Pickups are deliberately absent: an
+ * open bed is not a substitute for enclosed space. PCAR and LCAR stay out for the
+ * same reason they are out of SEDAN_LADDER - nobody promised them and they cost more.
+ */
+export const NAMED_DOWNGRADE = [...ESCALATION_LADDER].reverse()
+  .concat([...SEDAN_LADDER].reverse());
+
+/**
+ * The classes Fleet may actually approve on a rental request, and the ETD class each
+ * one means. This is the ONE list; the picker renders it and the API validates
+ * against it, so the two cannot drift.
+ *
+ * It exists because `approved_vehicle_class` was free text up to 40 characters with
+ * no validation anywhere. Whatever Fleet typed was stored verbatim and only failed
+ * hours later, at booking, in front of a technician standing next to a dead van -
+ * and "minivan" failed even when the branch had a minivan on the lot, because the
+ * word was being compared against "CHRYSLER PACIFICA OR SIMILAR" as raw text.
+ *
+ * `sedan` maps to no single code on purpose: it means the sedan LADDER, walked
+ * smallest-first, which is a different rule from naming a class outright.
+ */
+export const REQUEST_CLASS_OPTIONS: Array<{ label: string; sipp: string; note: string }> = [
+  { label: "sedan", sipp: "", note: "Default. Smallest sedan the branch stocks, up to full-size." },
+  { label: "suv", sipp: "IFAR", note: "Intermediate SUV (Nissan Rogue or similar)." },
+  { label: "minivan", sipp: "MVAR", note: "Chrysler Pacifica or similar. The policy ceiling." },
+  { label: "cargo van", sipp: "RVAR", note: "HVAC carve-out. Falls back to a minivan." },
+  { label: "pickup truck", sipp: "PPAR", note: "Rarely stocked; falls back to the largest SUV." },
+];
+
+/** Every SIPP code a request may legitimately name, directly or via a label. */
+export const REQUEST_CLASS_CODES = new Set<string>([
+  ...SEDAN_LADDER, ...ESCALATION_LADDER, "RVAR", "PPAR",
+]);
+
+/**
+ * Resolve what Fleet typed into a class this system can actually book.
+ * Returns "" for the sedan default (deliberately codeless), or null when the text
+ * means nothing to ETD - which is a 400, not a booking to discover later.
+ */
+export function resolveRequestClass(raw: string | null | undefined): string | null {
+  const t = String(raw ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  if (!t) return null;
+  if (t === "sedan") return "";
+  if (/^[a-z]{4}$/.test(t)) {
+    const up = t.toUpperCase();
+    return REQUEST_CLASS_CODES.has(up) ? up : null;
+  }
+  const code = descClass(t);
+  return code && REQUEST_CLASS_CODES.has(code) ? code : null;
+}
+
 const HVAC_PATTERN = /hvac|refrig|heat|air\s*cond/i;
 
 export function isHvac(jobTitle: string | null | undefined): boolean {
