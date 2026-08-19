@@ -65,7 +65,12 @@ _ZIP_STATE = [
     (900, 961, "CA"), (967, 968, "HI"), (970, 979, "OR"), (980, 994, "WA"),
     (995, 999, "AK"), (10, 27, "MA"), (28, 29, "RI"), (30, 38, "NH"),
     (39, 49, "ME"), (50, 59, "VT"), (60, 69, "CT"), (70, 89, "NJ"),
-    (100, 149, "NY"), (150, 196, "PA"), (197, 199, "DE"), (200, 205, "DC"),
+    (100, 149, "NY"), (150, 196, "PA"), (197, 199, "DE"), (200, 200, "DC"),
+    # 201xx is NORTHERN VIRGINIA, not DC (Manassas, Sterling/Dulles, Leesburg,
+    # Herndon, Reston). Lumping it into DC made the wrong-geocode guard refuse
+    # every booking in the DC-metro Virginia belt. Mirrors ZIP_STATE in
+    # server/vrm/etd/surgery.ts; change both.
+    (201, 201, "VA"), (202, 205, "DC"),
     (206, 219, "MD"), (220, 246, "VA"), (247, 268, "WV"), (270, 289, "NC"),
     (290, 299, "SC"), (300, 319, "GA"), (320, 349, "FL"), (350, 369, "AL"),
     (370, 385, "TN"), (386, 397, "MS"), (398, 399, "GA"), (400, 427, "KY"),
