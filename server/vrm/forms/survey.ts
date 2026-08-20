@@ -1053,24 +1053,27 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       const live = !dryRun && isRouteBlockLive();
 
       const { rows } = await db.execute(sql`
-        SELECT DISTINCT ON (upper(s.ldap))
-               upper(s.ldap)                                   AS ldap,
-               s.tech_name,
+        SELECT DISTINCT ON (upper(cut.ldap))
+               upper(cut.ldap)                                 AS ldap,
+               COALESCE(cut.tech_name, s.tech_name, a.tech_name) AS tech_name,
                COALESCE(NULLIF(btrim(cut.truck_number),''),
                         NULLIF(btrim(s.assigned_truck_number),''),
                         s.truck_number)                        AS truck_number,
                cut.branch_name, cut.branch_address, cut.etd_reference,
                NULLIF(btrim(a.district_no::text),'')           AS unit
-        FROM vrm_rental_tech_survey s
-        JOIN all_techs a ON upper(a.tech_racfid) = upper(s.ldap)
-        -- Reservation first, block second. A block sending a technician to a
-        -- branch with no reservation waiting is a wasted trip, so only booked
-        -- technicians are candidates, and the branch on the note is the branch
-        -- we booked, not the one the survey guessed.
-        JOIN vrm_rental_cutover cut
-          ON cut.ldap = upper(s.ldap) AND cut.reservation_status = 'booked'
-        WHERE s.has_rental
-          AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
+        -- 2026-08-20: this was rooted on vrm_rental_tech_survey WHERE s.has_rental,
+        -- the SAME structural defect the booking runner had. A technician who was
+        -- booked off the rental feed but never answered the survey could not get a
+        -- route block at all: on 2026-08-20 that was 70 of 83 booked-and-unblocked
+        -- technicians, each holding a real week-long reservation nobody could put
+        -- on a route. The reservation is the thing that makes a block necessary, so
+        -- the reservation is now the root and the survey only enriches.
+        FROM vrm_rental_cutover cut
+        JOIN all_techs a ON upper(a.tech_racfid) = upper(cut.ldap)
+        LEFT JOIN vrm_rental_tech_survey s ON upper(s.ldap) = upper(cut.ldap)
+        WHERE cut.reservation_status = 'booked'
+          AND upper(COALESCE(cut.ldap,'')) <> 'ZZTEST'
+          AND upper(COALESCE(cut.ldap,'')) <> 'ZZPROBE9'
           -- No van_status gate (Tyler, 2026-08-17): every rental on the Holman
           -- book runs the whole flow. van_status says whether the survey could
           -- work out what happened to the VAN; it says nothing about whether
@@ -1078,8 +1081,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           -- 26 of 71 booked technicians with a reservation and no block.
           AND a.employment_status = 'A'
           AND (${onlyLdaps.length === 0}
-               OR upper(s.ldap) = ANY(string_to_array(${onlyLdaps.join(",")}, ',')))
-        ORDER BY upper(s.ldap), s.created_at DESC
+               OR upper(cut.ldap) = ANY(string_to_array(${onlyLdaps.join(",")}, ',')))
+        ORDER BY upper(cut.ldap), s.created_at DESC NULLS LAST
         LIMIT ${limit}
       `);
 
