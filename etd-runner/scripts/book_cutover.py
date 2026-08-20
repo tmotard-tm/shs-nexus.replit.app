@@ -295,6 +295,22 @@ WHERE c.present_in_latest
         SELECT 1 FROM vrm_rental_cutover x
         WHERE upper(x.ldap) = r.ldap
           AND x.reservation_status = 'booked')
+  -- 2026-08-20, found by audit AFTER the fact: the guard above only looked at
+  -- its own table. vrm_rental_request is a SECOND booking lane that also writes
+  -- an etd_reference, and three technicians who already held a live request-lane
+  -- reservation from 08-18 were booked a second car at the same branch on 08-20
+  -- (BFOLKS, DMIDDL0, JGATES2). One technician, two cars, both billing.
+  -- Check BOTH lanes.
+  AND NOT EXISTS (
+        SELECT 1 FROM vrm_rental_request rq
+        WHERE upper(rq.ldap) = r.ldap
+          AND COALESCE(btrim(rq.etd_reference), '') <> '')
+  -- Truck numbers in the 088xxx block are BYOV technicians, who drive their own
+  -- vehicle. Four were booked week-long rentals on 08-20 (AAHMADZ, BWATKI7,
+  -- JCLEVID, PDOWDY). vrm_techs.byov_enrolled is not populated in this database
+  -- (1 true row out of the whole table), so the truck series is the only signal
+  -- available here. Excluded and surfaced rather than booked silently.
+  AND COALESCE(btrim(c.vehicle_number), '') NOT LIKE '088%'
   -- The technician's answer must not contradict TPMS. Silence is fine;
   -- disagreement is not, because one of the two names the wrong asset. A string
   -- of zeros is silence, not a second answer, hence the normalise-then-null.
