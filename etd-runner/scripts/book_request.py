@@ -353,15 +353,25 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     if not user:
         raise RuntimeError(f"no ETD user for {username}; run reconcile_roster.py")
 
-    address = _join_address(r.get("shop_address"), r.get("shop_city"),
-                            r.get("shop_state"))
+    # Fleet's branch wins over everything. A person typed it on the approval to
+    # book something the unattended guards refuse, so it also switches the state
+    # guard off below: second-guessing a human's explicit branch is the whole
+    # behaviour Tyler asked to remove on 2026-08-20.
+    fleet_branch = str(r.get("approved_branch") or "").strip()
+
+    address = fleet_branch
     if not address:
-        # A no-van request (new hire awaiting a vehicle) legitimately has no
-        # shop. The technician's reported branch IS the location then, which is
-        # exactly why the form demands it.
+        address = _join_address(r.get("shop_address"), r.get("shop_city"),
+                                r.get("shop_state"))
+    if not address:
+        # A no-van request (new hire awaiting a vehicle) and a BYOV technician
+        # both legitimately have no shop: BYOV means there is no company van to
+        # be in one. The technician's reported branch IS the location then.
         address = str(r.get("tech_reported_branch") or "").strip()
     if not address:
-        raise RuntimeError("no shop address and no reported branch on the request")
+        raise RuntimeError(
+            "no location to book from. Set a branch on the approval "
+            "(Fleet branch) and this will book.")
 
     # ETD will not quote a start that has already passed: it answers with an EMPTY
     # class list, at every duration and from every address, which reads exactly like
@@ -379,6 +389,12 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     # Which state the branch has to be in. The shop's state when we have one, the
     # technician's home state otherwise - a new hire awaiting a vehicle has no shop.
     want_state = str(r.get("shop_state") or r.get("home_state") or "").strip().upper()[:2]
+    if fleet_branch:
+        # Fleet named the branch. The state guard exists to catch a geocode that
+        # wandered off an address nobody checked; this address WAS checked, by a
+        # person, so refusing it here would be the tool overruling the operator.
+        print(f"       Fleet branch: {fleet_branch[:70]}  (state guard off)")
+        want_state = ""
 
     q, booked_end, shortened = quote_with_fallback(
         etd, address, r["start_dt"], r["end_dt"], want_state)

@@ -257,6 +257,19 @@ export async function initFormsSchema(): Promise<void> {
     ALTER TABLE vrm_rental_request
       ADD COLUMN IF NOT EXISTS return_at timestamptz;
   `);
+
+  // The branch Fleet chose. Free text, because Fleet types a real address or a
+  // branch name and the booker geocodes it the same way it geocodes any other.
+  //
+  // It exists so a person can book a one-off that the automatic guards refuse:
+  // a BYOV technician has no shop by definition, and a technician who typed
+  // "Enterprise" into the branch box gave us something that geocodes to an
+  // airport two thousand miles away. Both are correctly refused unattended and
+  // both are perfectly bookable once a human names the branch.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS approved_branch text;
+  `);
   await db.execute(sql`
     DELETE FROM vrm_rental_request a
     USING vrm_rental_request b

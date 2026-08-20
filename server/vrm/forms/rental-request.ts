@@ -1217,7 +1217,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "return_at", "accident_ok",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "return_at", "approved_branch", "accident_ok",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
@@ -1509,6 +1509,9 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                -- home state is the only check available on a geocode that wandered.
                r.home_state,
                r.tech_reported_branch,
+               -- Fleet's explicit branch pick. The booker prefers it over
+               -- everything and skips the state guard when it is set.
+               r.approved_branch,
                r.appointment_at,
                r.shop_estimated_days,
                COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,
@@ -1906,6 +1909,11 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       }
       // Fleet's return date. Same override shape as the pickup, and it is what
       // decides the number of days Enterprise bills for.
+      // Fleet's branch. Overrides the shop address AND the technician's own
+      // answer, and switches off the state guard, because a human typed it on
+      // purpose.
+      const approvedBranch = decision === "APPROVE"
+        ? String(req.body?.approvedBranch || "").trim().slice(0, 300) || null : null;
       const returnAt = decision === "APPROVE"
         ? String(req.body?.returnAt || "").trim().slice(0, 40) || null : null;
       if (returnAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(returnAt)) {
@@ -1992,6 +2000,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         SET status = ${nextStatus},
             pickup_at = COALESCE(${pickupAt}::timestamptz, pickup_at),
             return_at = COALESCE(${returnAt}::timestamptz, return_at),
+            approved_branch = COALESCE(${approvedBranch}, approved_branch),
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
               // string_to_array, not a bound JS array. Interpolating an array into

@@ -43,6 +43,10 @@ interface Req {
   etd_booked_at?: string | null; etd_reference?: string | null;
   etd_reservation_id?: string | null; etd_error?: string | null;
   pickup_at?: string | null;
+  // The branch the technician typed on the form. Shown as the placeholder on
+  // the Fleet branch box so the reviewer can see what they said before
+  // overriding it.
+  tech_reported_branch?: string | null;
   nearest_branch_name?: string | null;
   // What Enterprise ACTUALLY sold, off the workflow intent, plus whether the
   // technician was really told. pickup_at above is what was REQUESTED and routinely
@@ -292,6 +296,7 @@ export default function RentalRequests() {
   const [note, setNote] = useState("");
   const [pickupDate, setPickupDate] = useState("");
   const [pickupTime, setPickupTime] = useState("08:00");
+  const [approvedBranch, setApprovedBranch] = useState("");
   const [returnDate, setReturnDate] = useState("");
   const [returnTime, setReturnTime] = useState("08:00");
   // Mirrors the server's cap. Longer stays are extensions, not longer bookings.
@@ -338,10 +343,10 @@ export default function RentalRequests() {
   const MAINT_SCRIPT = reasonData?.maintenanceDenyScript ?? "";
 
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.message || "decision failed");
@@ -912,6 +917,18 @@ export default function RentalRequests() {
               {/* Fleet controls when the rental actually starts. Prefilled to
                   today (ET) at the next full hour when the request is opened;
                   clearing the date falls back to the technician's own date. */}
+              {/* Fleet's branch. Overrides the shop address and the technician's
+                  own answer, and turns off the state guard, so a one-off books
+                  even when the automatic checks would refuse it. */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Fleet branch
+                </span>
+                <input type="text" value={approvedBranch}
+                       onChange={(e) => setApprovedBranch(e.target.value)}
+                       placeholder={detail.tech_reported_branch || "Street, city, state. Overrides every guard."}
+                       style={{ ...ctrl, flex: 1 }} />
+              </div>
               <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Pickup date
@@ -969,7 +986,8 @@ export default function RentalRequests() {
                     <button key={d} type="button" disabled={decide.isPending}
                             onClick={() => decide.mutate({ requestNo: detail.request_no, decision: d, note,
                               pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
-                              returnAt: d === "APPROVE" && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null })}
+                              returnAt: d === "APPROVE" && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
+                              approvedBranch: d === "APPROVE" && approvedBranch.trim() ? approvedBranch.trim() : null })}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
                       {d}
                     </button>
