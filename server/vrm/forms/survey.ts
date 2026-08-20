@@ -936,13 +936,28 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * blocked the entire cutover backlog with no legitimate way forward.
    *
    * getEtdToken() already mints on demand and reuses a live token, so this is just the
-   * missing front door to it. It never returns the secret - describeEtdToken() reports
-   * length, age and remaining life only.
+   * missing front door to it. By default it does not return the secret; describeEtdToken()
+   * reports length, age and remaining life only.
+   *
+   * `?reveal=1` returns the bearer itself, and `?force=1` discards the cached token and
+   * mints a new one.
+   *
+   * Withholding the secret was right while every caller was a scheduler that only needed
+   * the mint to have happened. It is wrong for a person holding Postman or curl: a mint
+   * you cannot read leaves a prod DB query as the only route to a usable token, so every
+   * hourly expiry became a manual errand and the ETD collection could not stand alone.
+   * The gate is unchanged - requireCronOrStaff, the same authority that can already spend
+   * money through the booking routes - and the secret dies in about an hour.
    */
-  router.post("/forms/rental-survey/cutover/etd-token/ensure", requireCronOrStaff, async (_req, res) => {
+  router.post("/forms/rental-survey/cutover/etd-token/ensure", requireCronOrStaff, async (req, res) => {
     try {
-      await getEtdToken();
-      res.json({ ok: true, token: await describeEtdToken() });
+      const entry = await getEtdToken({ force: String(req.query.force || "") === "1" });
+      const body: Record<string, unknown> = { ok: true, token: await describeEtdToken() };
+      if (String(req.query.reveal || "") === "1") {
+        body.secret = entry.secret;
+        body.expiresAt = new Date(entry.expiresAt * 1000).toISOString();
+      }
+      res.json(body);
     } catch (e: any) {
       console.error("[survey] etd-token/ensure failed:", e?.message || e);
       res.status(502).json({ ok: false, message: e?.message || "could not obtain an ETD token" });

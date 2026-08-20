@@ -611,6 +611,22 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     return { code: 400, json: { success: false, message: "Please choose what is wrong with the vehicle." } };
   }
 
+  // AGE GATE. Enterprise does not rent to a driver under 21, so an under-21
+  // request can never become a reservation however it is approved. Refusing it
+  // at intake is the difference between the technician being told immediately
+  // who CAN help and the request sitting in the queue until it fails at booking
+  // time with a vendor error nobody can act on.
+  //
+  // Enforced here as well as on the form because this endpoint is public: the
+  // form's stop screen is a courtesy, this is the rule.
+  const over21 = bool(b.isOver21);
+  if (over21 === null) {
+    return {
+      code: 400,
+      json: { success: false, message: "Please tell us whether you are 21 or older." },
+    };
+  }
+
   // The engine no longer reads the BYOV mirror, but the ROW still records
   // is_byov: the reviewer sees the pill and weighs it. Refresh before reading
   // so what they see is today's enrollment, not a four-month-old table.
@@ -665,7 +681,12 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // against what Tyler actually decided. It is data, not a gate. `status` is a
   // constant here on purpose: there is no expression that can route a request
   // anywhere except to a human.
-  const status = "pending";
+  //
+  // The one exception is the age gate: an under-21 request lands terminal at
+  // 'denied' instead of pending. It is not a judgement call a human could
+  // reverse, because Enterprise will not rent to them at any price, and leaving
+  // it pending would put an unbookable row in front of a reviewer every day.
+  const status = over21 === false ? "denied" : "pending";
 
   const homeState = ctx.identity.homeState ?? (facts?.home_state ?? null);
   const shopState = s(b.shopState, 2);
@@ -720,6 +741,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ack_return_one_day, ack_accurate,
       ack_working_hours_only, ack_return_before_time_off, ack_extension_weekly, ack_discipline,
       approved_vehicle_class, reason_code, region_owner,
+      is_over_21,
       status, auto_decision, auto_reason, auto_rule, source
     ) VALUES (
       ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
@@ -739,6 +761,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${acks.ack_return_one_day}, ${acks.ack_accurate},
       ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_extension_weekly}, ${acks.ack_discipline},
       ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
+      ${over21},
       ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
     )
     RETURNING request_no
@@ -764,6 +787,24 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // technician "approved" before a person has looked would be a promise in
   // Fleet's name that nothing keeps — the exact failure the survey escalation
   // was reverted for on 2026-08-13.
+  // Named the only route that actually works for them. Telling an under-21
+  // technician "denied" and nothing else leaves them stranded with a dead van;
+  // Holman can place them through Avis or Hertz, which Enterprise cannot do.
+  if (over21 === false) {
+    return {
+      code: 200,
+      json: {
+        success: true,
+        requestNo,
+        decision: "DENIED_UNDER_21",
+        message: "Enterprise does not rent to drivers under 21, so Fleet cannot book this "
+               + "reservation. Contact Holman (ARI) instead. They are the only ones who can "
+               + "put you in a rental, through Avis or Hertz. Your request has been recorded "
+               + "and closed, and Fleet has been notified.",
+      },
+    };
+  }
+
   return {
     code: 200,
     json: {

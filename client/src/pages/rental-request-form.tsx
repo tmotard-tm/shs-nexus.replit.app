@@ -167,6 +167,7 @@ export default function RentalRequestForm() {
   const [symptom, setSymptom] = useState("");
   const [isTowed, setIsTowed] = useState("");
   const [areYouOkay, setAreYouOkay] = useState("");
+  const [isOver21, setIsOver21] = useState<"" | "yes" | "no">("");
 
   const [shopName, setShopName] = useState("");
   const [shopAddress, setShopAddress] = useState("");
@@ -217,6 +218,7 @@ export default function RentalRequestForm() {
         setSymptom(a.symptom || "");
         setIsTowed(a.isTowed || "");
         setAreYouOkay(a.areYouOkay || "");
+        setIsOver21(a.isOver21 || "");
         setShopName(a.shopName || "");
         setShopAddress(a.shopAddress || "");
         setShopCity(a.shopCity || "");
@@ -243,6 +245,11 @@ export default function RentalRequestForm() {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!identityOk) e.identityOk = "Please confirm your details.";
+    if (!isOver21) {
+      e.isOver21 = "Please answer.";
+    } else if (isOver21 === "no") {
+      e.isOver21 = "Enterprise cannot rent to drivers under 21. Contact Holman (ARI).";
+    }
     if (identityOk === "no") {
       const digits = correctedPhone.replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
       if (correctedPhone.trim() && digits.length !== 10) e.correctedPhone = "Enter a 10-digit mobile number.";
@@ -282,6 +289,9 @@ export default function RentalRequestForm() {
 
   const onSubmit = () => {
     setSubmitError("");
+    // Belt and braces. The button is not rendered at all when the answer is no,
+    // so reaching here would mean the state changed underneath us.
+    if (isOver21 === "no") return;
     if (!validate()) return;
     submitMutation.mutate({
       ldap,
@@ -290,6 +300,7 @@ export default function RentalRequestForm() {
       identityCorrection,
       correctedTruck, correctedPhone,
       problemCategory, symptom, isTowed, areYouOkay,
+      isOver21,
       shopName, shopAddress, shopCity, shopState, shopPhone, nearestBranch,
       noVehicle: isNoVan,
       appointmentAt: appointmentAt || null,
@@ -470,6 +481,48 @@ export default function RentalRequestForm() {
               </CardContent>
             </Card>
 
+            {/* Enterprise will not rent to a driver under 21, so this is asked
+                before the problem questions. An under-21 technician is stopped
+                here and sent to Holman rather than filling in a whole form that
+                could never become a reservation. */}
+            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">Driver eligibility</CardTitle>
+                <CardDescription>Enterprise requires every driver to be 21 or older.</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <Label>Are you 21 years of age or older?</Label>
+                <Select value={isOver21} onValueChange={(v) => { setIsOver21(v as "yes" | "no"); clearErr("isOver21"); }}>
+                  <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="yes">Yes</SelectItem><SelectItem value="no">No</SelectItem>
+                  </SelectContent>
+                </Select>
+                {fieldErrors.isOver21 && <p className="text-sm text-red-600">{fieldErrors.isOver21}</p>}
+              </CardContent>
+            </Card>
+
+            {isOver21 === "no" ? (
+              <Card className="rounded-xl border-red-300 bg-red-50 shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-base text-red-900">Stop. Fleet cannot book this rental.</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3 text-sm text-red-900">
+                  <p>
+                    Enterprise does not rent to drivers under 21. This request cannot become a
+                    reservation, no matter who approves it, so there is nothing further to fill in.
+                  </p>
+                  <p className="font-semibold">
+                    Contact Holman (ARI). They are the only ones who can put you in a rental,
+                    through Avis or Hertz.
+                  </p>
+                  <p>
+                    If you are not sure how to reach Holman, call your supervisor and tell them
+                    Enterprise refused on age.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (<>
             {/* Section B — the problem */}
             <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
               <CardHeader>
@@ -694,11 +747,10 @@ export default function RentalRequestForm() {
 
             {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
-            {(
-              <Button className="h-11 w-full bg-[#00529B] text-base hover:bg-[#003A70]" onClick={onSubmit} disabled={submitMutation.isPending}>
-                {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
-              </Button>
-            )}
+            <Button className="h-11 w-full bg-[#00529B] text-base hover:bg-[#003A70]" onClick={onSubmit} disabled={submitMutation.isPending}>
+              {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
+            </Button>
+            </>)}
           </>
         )}
         <p className="pt-3 text-center text-[11px] font-medium tracking-[0.14em] text-slate-400">

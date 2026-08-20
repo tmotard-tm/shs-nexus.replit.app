@@ -235,6 +235,16 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS claimed_at timestamptz,
       ADD COLUMN IF NOT EXISTS claimed_by text;
   `);
+
+  // Enterprise will not rent to a driver under 21. Recorded per REQUEST rather
+  // than per technician: it is an attestation made at submit time, and when a
+  // request is refused Fleet needs to see what the technician said on that
+  // request. Nullable on purpose, so rows that predate the question stay honest
+  // about never having been asked.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS is_over_21 boolean;
+  `);
   await db.execute(sql`
     DELETE FROM vrm_rental_request a
     USING vrm_rental_request b
