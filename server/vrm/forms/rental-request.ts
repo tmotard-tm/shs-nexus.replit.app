@@ -15,6 +15,9 @@
  */
 import type { Express, Router } from "express";
 import { db } from "../../db";
+// The canonical booked-SMS copy. Shared with the intent lane so a technician
+// gets the same words whichever path booked the car.
+import { renderRequestMsg1 } from "./cutover-orchestrator";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { regionForState, REGION_OWNER } from "../rental-operations/region";
@@ -1697,18 +1700,32 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // renderRequestMsg1 text and this block must stay silent to avoid a
       // duplicate. See: cutover-orchestrator.ts:adoptRunnerBooking.
       if (!orchestratorHandled) {
-        void notifyTech(
-          no,
-          `SHS Fleet: your rental is booked. Confirmation ${ref || resId}.`
-          + (branch ? `\nPick up at Enterprise ${branch}.` : "")
-          + (booked?.appointment_at
-              ? `\nFrom ${new Date(booked.appointment_at).toLocaleDateString("en-US")}`
-                + (booked.shop_name ? `, when your van goes into ${booked.shop_name}.` : ".")
-              : "")
-          + `\nReturn it within 1 working day of your van being ready. `
-          + `If your van is still in the shop after 7 days, request an extension from Fleet.`,
-          "booked-notice",
-        );
+        // Render from what the runner ACTUALLY booked, never from the row's
+        // pickup_at. A request whose pickup_at has passed is floored forward by the
+        // booker (and rolled to the next day past the last pickup slot), so the row
+        // still holds the rejected date. On 2026-08-20 that told AROTTER "From
+        // 8/19/2026" for a reservation starting 8/21. The runner posts the truth in
+        // `booked`; the intent lane already renders from it, so use the same
+        // renderer and the same words here.
+        const text = bookedFacts?.pickupDate
+          ? renderRequestMsg1({
+              conf: String(ref || resId),
+              branchName: String(bookedFacts.branchName ?? branch ?? ""),
+              branchAddress: String(bookedFacts.branchAddress ?? ""),
+              branchPhone: bookedFacts.branchPhone ?? null,
+              pickupDate: bookedFacts.pickupDate ?? null,
+              pickupTime: bookedFacts.pickupTime ?? null,
+              returnDate: bookedFacts.returnDate ?? null,
+            })
+          // Genuinely legacy caller: no facts posted, so there is nothing better to
+          // say than the confirmation number. Deliberately no date at all rather than
+          // a date we know may be wrong.
+          : `SHS Fleet: your rental is booked. Confirmation ${ref || resId}.`
+            + (branch ? ` Pick up at Enterprise ${branch}.` : "")
+            + ` Bring your driver's license and give them the confirmation number.`
+            + ` It is billed direct to Sears, so decline all insurance and upgrades.`
+            + ` Reply here if the branch cannot find the reservation.`;
+        void notifyTech(no, text, "booked-notice");
       }
       res.json({ ok: true, ...booked });
     } catch (e: any) {
@@ -2077,7 +2094,32 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
  * must not hang on it. Every failure is written to the request row so the card can say
  * WHY rather than sitting on 'approved' looking finished.
  */
+/**
+ * Hand back a claim this inline lane is no longer working.
+ *
+ * Scoped hard on purpose. Only a claim owned by `nexus-autobook`, and only from a
+ * status that has not reached ETD, is released. A box-runner claim or an intent that
+ * already holds a reservation is left alone: releasing either is how one approval
+ * becomes two cars.
+ */
+async function releaseInlineAutobookClaim(intentId: number): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+         SET claimed_by = NULL, lease_expires_at = NULL, updated_at = now()
+       WHERE id = ${intentId}
+         AND claimed_by = 'nexus-autobook'
+         AND status IN ('created', 'preview_pending', 'preview_ready')
+         AND reservation_state NOT IN ('booked_unverified', 'verified', 'unknown')
+    `);
+  } catch (e: any) {
+    // Never let cleanup mask the real outcome of the booking attempt.
+    console.error("[rental-request] releasing inline claim failed:", e?.message || e);
+  }
+}
+
 async function autoBookApprovedRequest(requestNo: number): Promise<void> {
+  let inlineIntentId: number | null = null;
   const fail = async (stage: string, detail: string) => {
     await db.execute(sql`
       UPDATE vrm_rental_request
@@ -2093,6 +2135,7 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
     // and carless with nothing able to move it. Resume the intent that is there.
     const existing = await liveIntentForRequest(requestNo);
     if (existing) {
+      inlineIntentId = Number(existing.id);
       // Anything that already reached ETD is never re-driven. A second pass over a
       // booked intent is how one click becomes two reservations.
       if (existing.reservation_state === "booked_unverified" || existing.reservation_state === "verified") {
@@ -2136,6 +2179,7 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
     // written, returned before confirming anything, and left every approved request
     // parked at "Quoting..." forever - clean intent, no claim, no error, nothing to
     // read. Each stage below drives its lane and then re-reads what it produced.
+    inlineIntentId = Number(cur.id);
     if (cur.status === "created" || cur.status === "preview_required") {
       await requestPreview(cur.id);
       cur = (await readIntentRow(cur.id)) ?? cur;
@@ -2176,6 +2220,11 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
           .join("; ")
       : "";
     await fail("auto-book", codes ? `${err?.message ?? "failed"} (${codes})` : String(err?.message ?? err));
+  } finally {
+    // The inline lane is done either way. Holding a 30 minute lease past the end of
+    // this function is what parked six requests on 2026-08-20 with a built preview,
+    // no error, and nothing able to move them.
+    if (inlineIntentId != null) await releaseInlineAutobookClaim(inlineIntentId);
   }
 }
 

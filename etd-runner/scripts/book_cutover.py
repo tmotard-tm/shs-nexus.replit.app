@@ -195,12 +195,25 @@ def record_results(results: list) -> None:
 # Anyone TPMS cannot name a van for is not booked. That is the point of
 # "confirmed" and it is why this is an inner join.
 SQL = """
+-- 2026-08-20, Tyler: "every person that's on the Holman book needs to have a
+-- booking in my system right now". This query used to be rooted on
+-- vrm_rental_tech_survey, so a technician who never answered the survey was
+-- structurally invisible and --only could not add them: 97 of the 111 still on
+-- the open book could not be reached at all. It is now rooted on the RENTAL
+-- FEED, which is the actual definition of "on the Holman book", and the survey
+-- is a LEFT JOIN that enriches rather than gates.
+--
+-- Identity comes from vrm_rental_identity_resolutions, the same resolver the
+-- survey issue route uses. Measured on 2026-08-20: 183 open Enterprise cases,
+-- 183 with a resolution row, 179 RESOLVED high/medium, 177 landing on an ACTIVE
+-- roster row. An independent name-first resolve of the same 183 also returned
+-- 177 active, so the two agree.
 WITH rost AS (
   -- One row per LDAP. Rehires carry both an A and a T row; joining raw
   -- double-counts them and picks a district at random.
   SELECT DISTINCT ON (upper(a.tech_racfid)) upper(a.tech_racfid) AS ldap,
          NULLIF(btrim(a.district_no::text),'') AS district,
-         a.employment_status, a.employee_id, a.job_title
+         a.employment_status, a.employee_id, a.job_title, a.tech_name
   FROM all_techs a
   ORDER BY upper(a.tech_racfid), (a.employment_status = 'A') DESC,
            a.last_known_truck_file_date DESC NULLS LAST
@@ -210,23 +223,36 @@ tp AS (
          NULLIF(btrim(t.truck_no::text),'') AS tpms_van
   FROM tpms_tech_profiles t
   ORDER BY upper(t.enterprise_id)
+),
+srv AS (
+  SELECT DISTINCT ON (upper(s.ldap)) upper(s.ldap) AS ldap,
+         s.tech_name             AS survey_name,
+         s.assigned_truck_number,
+         s.rental_branch_city, s.rental_branch_state, s.rental_branch_name,
+         s.rental_vehicle_desc, s.van_status
+  FROM vrm_rental_tech_survey s
+  WHERE upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
+  ORDER BY upper(s.ldap), s.created_at DESC
 )
-SELECT DISTINCT ON (upper(s.ldap))
-       upper(s.ldap)                                        AS ldap,
-       s.tech_name,
-       tp.tpms_van                                          AS truck_number,
-       NULLIF(btrim(s.assigned_truck_number),'')            AS tech_says_van,
-       NULLIF(btrim(COALESCE(s.rental_branch_city,'')),'')  AS tech_city,
-       NULLIF(btrim(COALESCE(s.rental_branch_state,'')),'') AS tech_state,
-       NULLIF(btrim(COALESCE(s.rental_branch_name,'')),'')  AS tech_branch_name,
+SELECT DISTINCT ON (r.ldap)
+       r.ldap                                               AS ldap,
+       -- set_driver() needs a name and only falls back to this when the ETD
+       -- profile carries none. The roster form is "LAST,FIRST"; set_driver
+       -- handles both that and "FIRST LAST".
+       COALESCE(srv.survey_name, r.tech_name)               AS tech_name,
+       -- TPMS first, per the truck-number rule. When TPMS has no row at all the
+       -- feed's own VEHICLE_NUMBER is the truck the Holman ticket is written
+       -- against, which is a better answer than dropping the technician.
+       COALESCE(tp.tpms_van, c.vehicle_number)              AS truck_number,
+       NULLIF(btrim(srv.assigned_truck_number),'')            AS tech_says_van,
+       NULLIF(btrim(COALESCE(srv.rental_branch_city,'')),'')  AS tech_city,
+       NULLIF(btrim(COALESCE(srv.rental_branch_state,'')),'') AS tech_state,
+       NULLIF(btrim(COALESCE(srv.rental_branch_name,'')),'')  AS tech_branch_name,
        c.feed_json->>'RENTING_BRANCH'                       AS feed_branch_code,
        c.feed_json->>'RENTING_CITY_NAME'                    AS feed_city,
        c.feed_json->>'RENTING_STATE'                        AS feed_state,
        c.vehicle_number                                     AS feed_truck,
        -- The handles the branch needs to CLOSE the rental this one replaces.
-       -- ECARS_2_0_TKT_NBR is Enterprise's own ticket for the existing
-       -- rental, so it is the one that actually finds the contract at the
-       -- counter; the Holman claim is what ARI bills against.
        NULLIF(btrim(c.feed_json->>'ECARS_2_0_TKT_NBR'),'')  AS ecars_ticket,
        NULLIF(btrim(c.feed_json->>'CLAIM_NUMBER'),'')       AS holman_claim,
        left(c.feed_json->>'RENTAL_START_DATE', 10)          AS rental_started,
@@ -237,43 +263,48 @@ SELECT DISTINCT ON (upper(s.ldap))
        NULLIF(btrim(c.feed_json->>'RENTED_VEH_MAKE'),'')    AS veh_make,
        NULLIF(btrim(c.feed_json->>'RENTED_VEH_MODEL'),'')   AS veh_model,
        NULLIF(btrim(c.feed_json->>'RENTED_VEH_YEAR'),'')    AS veh_year,
-       s.rental_vehicle_desc                                AS tech_says_vehicle,
+       srv.rental_vehicle_desc                              AS tech_says_vehicle,
        r.district,
        r.job_title,
-       s.van_status,
-       s.created_at
-FROM vrm_rental_tech_survey s
-JOIN rost r ON r.ldap = upper(s.ldap)
-JOIN tp    ON tp.ldap = upper(s.ldap)
-LEFT JOIN vrm_rental_identity_resolutions ir
-       ON r.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
-LEFT JOIN vrm_rental_operations_cases c
-       ON c.case_key = ir.case_key AND c.present_in_latest
-      AND upper(c.ticket_status) = 'OPEN'
-WHERE s.has_rental
-  AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
-  -- Every van_status is in scope (Tyler, 2026-08-17): the cutover moves BILLING,
-  -- and whether the technician has their van back has no bearing on whether their
-  -- rental should still be paid through Holman. Restricting this to
-  -- in_shop/decommissioned/totaled held back 53 technicians, 33 unknown_escalate
-  -- and 20 with_me, who were all sitting on the open book.
+       srv.van_status,
+       c.last_seen_at                                       AS created_at
+FROM vrm_rental_operations_cases c
+JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
+-- Accept either key: some resolution rows carry an LDAP where the employee_id
+-- belongs. Employee ids are numeric and racfids alphabetic, so only one side
+-- can ever match.
+JOIN rost r ON (r.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+             OR r.ldap = upper(COALESCE(ir.override_employee_id, ir.resolved_employee_id)))
+LEFT JOIN tp  ON tp.ldap  = r.ldap
+LEFT JOIN srv ON srv.ldap = r.ldap
+WHERE c.present_in_latest
+  AND upper(COALESCE(c.ticket_status,'')) = 'OPEN'
+  AND upper(COALESCE(c.rental_vendor,'')) LIKE 'ENTERPRISE%'
+  -- Never book a car for someone who has left. Terminated and on-leave
+  -- technicians holding an open rental are a vehicle-recovery problem.
   AND r.employment_status = 'A'
-  AND r.district IS NOT NULL
-  AND tp.tpms_van IS NOT NULL
+  -- REVIEW is excluded: that is a genuine same-name ambiguity and booking it
+  -- puts a stranger's name on a reservation.
+  AND (ir.override_employee_id IS NOT NULL
+       OR (ir.confidence IN ('high','medium') AND upper(ir.state) = 'RESOLVED'))
+  -- 2026-08-20: the old query had NO already-booked exclusion. It relied on the
+  -- operator passing --skip, and the pool genuinely contained 69 technicians who
+  -- already held a live reservation. Re-running it without --only would have
+  -- booked every one of them a second car.
+  AND NOT EXISTS (
+        SELECT 1 FROM vrm_rental_cutover x
+        WHERE upper(x.ldap) = r.ldap
+          AND x.reservation_status = 'booked')
   -- The technician's answer must not contradict TPMS. Silence is fine;
-  -- disagreement is not, because one of the two names the wrong asset.
-  --
-  -- 2026-08-16: normalise BEFORE the null test. btrim() only catches an empty
-  -- string, so '0', '0000', '00000000' and 'n/a' all read as a competing truck
-  -- number and hard-failed the equality test. That held 14 technicians out of
-  -- the 8/17 wave, $963/day, and on every one of them TPMS agreed EXACTLY with
-  -- the truck their rental is written against. A string of zeros is silence,
-  -- not a second answer.
-  AND (NULLIF(ltrim(regexp_replace(COALESCE(s.assigned_truck_number, ''),
-                                   '\\D', '', 'g'), '0'), '') IS NULL
-       OR ltrim(regexp_replace(s.assigned_truck_number, '\\D', '', 'g'), '0')
-        = ltrim(regexp_replace(tp.tpms_van,            '\\D', '', 'g'), '0'))
-ORDER BY upper(s.ldap), s.created_at DESC
+  -- disagreement is not, because one of the two names the wrong asset. A string
+  -- of zeros is silence, not a second answer, hence the normalise-then-null.
+  -- Written [^0-9] and not the backslash-D shorthand on purpose.
+  AND (NULLIF(ltrim(regexp_replace(COALESCE(srv.assigned_truck_number, ''),
+                                   '[^0-9]', '', 'g'), '0'), '') IS NULL
+       OR tp.tpms_van IS NULL
+       OR ltrim(regexp_replace(srv.assigned_truck_number, '[^0-9]', '', 'g'), '0')
+        = ltrim(regexp_replace(tp.tpms_van,               '[^0-9]', '', 'g'), '0'))
+ORDER BY r.ldap, c.last_seen_at DESC NULLS LAST
 """
 
 

@@ -316,7 +316,10 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                -- TPMS-verified current assignment (Tyler 2026-08-16): the page
                -- shows THIS as the assigned truck regardless of what the tech
                -- typed; their entered number stays as the rental-under number.
-               tpt.tpms_truck_number
+               tpt.tpms_truck_number,
+               -- Tyler 2026-08-20: the survey page drops technicians who have left
+               -- the Holman rental book. '' means off the book entirely.
+               COALESCE(hb.book_state, '') AS holman_book_state
         FROM vrm_rental_tech_survey r
         LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
         LEFT JOIN vrm_rental_cutover c ON c.ldap = upper(r.ldap)
@@ -360,6 +363,29 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                -- suppress a perfectly good on-file truck number.
                NULLIF(ltrim(regexp_replace(COALESCE(r.assigned_truck_number, ''), '[^0-9]', '', 'g'), '0'), ''),
                NULLIF(ltrim(regexp_replace(COALESCE(r.truck_number, ''), '[^0-9]', '', 'g'), '0'), ''))
+        -- Tyler 2026-08-20: is this technician still on the Holman rental book?
+        -- Derived at read time from the feed, never a row delete: the response
+        -- stays for audit and the page hides an off-book row by default.
+        LEFT JOIN LATERAL (
+          SELECT CASE
+                   WHEN bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN')   THEN 'open'
+                   WHEN bool_or(upper(COALESCE(c2.ticket_status, '')) = 'PENDED') THEN 'pended'
+                   ELSE ''
+                 END AS book_state
+          FROM vrm_rental_operations_cases c2
+          WHERE c2.present_in_latest
+            AND upper(COALESCE(c2.rental_vendor, '')) LIKE 'ENTERPRISE%'
+            AND (
+              upper(COALESCE(c2.enterprise_id_feed, '')) = upper(r.ldap)
+              OR NULLIF(ltrim(regexp_replace(COALESCE(c2.vehicle_number, ''), '[^0-9]', '', 'g'), '0'), '')
+                 IN (
+                   COALESCE(tpt.tpms_truck_number, '~'),
+                   COALESCE(NULLIF(ltrim(regexp_replace(COALESCE(r.assigned_truck_number, ''), '[^0-9]', '', 'g'), '0'), ''), '~'),
+                   COALESCE(NULLIF(ltrim(regexp_replace(COALESCE(r.truck_number, ''), '[^0-9]', '', 'g'), '0'), ''), '~'),
+                   COALESCE(NULLIF(ltrim(regexp_replace(COALESCE(r.rental_truck_number, ''), '[^0-9]', '', 'g'), '0'), ''), '~')
+                 )
+            )
+        ) hb ON TRUE
         ORDER BY r.created_at DESC
       `);
       res.json({ responses: rows });
@@ -1691,7 +1717,18 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                c.route_block_status,
                c.route_block_project_name, c.route_block_date, c.route_block_live,
                c.route_block_filed_at, c.route_block_error,
-               'complete' AS stage,
+               -- Tyler 2026-08-20: stage was hardcoded 'complete', so the facet
+               -- panel was one bucket and the two states that need action were
+               -- invisible. Derive it, and carry the Holman book state alongside:
+               -- a booked, blocked reservation whose technician is STILL on the
+               -- Holman open book has not been collected and is billing twice.
+               CASE
+                 WHEN c.route_block_status <> 'filed'
+                   OR c.route_block_live IS NOT TRUE           THEN 'no route block'
+                 WHEN COALESCE(hb.book_state, '') = 'open'     THEN 'not collected'
+                 ELSE 'complete'
+               END AS stage,
+               COALESCE(hb.book_state, '') AS holman_book_state,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
         LEFT JOIN LATERAL (
@@ -1722,9 +1759,28 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           ORDER BY s.created_at DESC
           LIMIT 1
         ) s ON true
+        -- Still on the Holman rental book? Matched on the cutover truck number and
+        -- on the feed's own enterprise id.
+        LEFT JOIN LATERAL (
+          SELECT CASE
+                   WHEN bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN')   THEN 'open'
+                   WHEN bool_or(upper(COALESCE(c2.ticket_status, '')) = 'PENDED') THEN 'pended'
+                   ELSE ''
+                 END AS book_state
+          FROM vrm_rental_operations_cases c2
+          WHERE c2.present_in_latest
+            AND upper(COALESCE(c2.rental_vendor, '')) LIKE 'ENTERPRISE%'
+            AND (
+              upper(COALESCE(c2.enterprise_id_feed, '')) = upper(c.ldap)
+              OR NULLIF(ltrim(regexp_replace(COALESCE(c2.vehicle_number, ''), '[^0-9]', '', 'g'), '0'), '')
+                 = NULLIF(ltrim(regexp_replace(COALESCE(c.truck_number, ''), '[^0-9]', '', 'g'), '0'), '')
+            )
+        ) hb ON TRUE
+        -- Widened 2026-08-20: previously this required a filed, live route block,
+        -- so a booked reservation with no block was absent from the page rather
+        -- than shown as a problem. That is how 8 technicians ended up holding a
+        -- week-long car nobody had told them about.
         WHERE c.reservation_status = 'booked'
-          AND c.route_block_status = 'filed'
-          AND c.route_block_live IS TRUE
         ORDER BY c.ldap
       `);
 
@@ -1742,6 +1798,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         by_stage: tally("stage"),
         by_reservation: tally("reservation_status"),
         by_route_block: tally("route_block_status"),
+        by_holman_book: tally("holman_book_state"),
         rows,
       });
     } catch (error: any) {

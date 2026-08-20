@@ -52,6 +52,8 @@ interface Row {
   supervisor_ldap?: string | null;
   supervisor_phone?: string | null;
   stage: string;
+  /** '' off the Holman book, 'open' still billing on it, 'pended' closing. */
+  holman_book_state?: string | null;
 }
 
 interface Payload {
@@ -59,6 +61,7 @@ interface Payload {
   by_stage: Record<string, number>;
   by_reservation: Record<string, number>;
   by_route_block: Record<string, number>;
+  by_holman_book?: Record<string, number>;
   rows: Row[];
 }
 
@@ -74,6 +77,10 @@ const VAN_STATUS_LABEL: Record<string, string> = {
 /** Stage drives the colour, so the meaning is the same everywhere on the page. */
 function stageTone(stage: string): { fg: string; bg: string } {
   if (stage === "complete") return { fg: colors.greenDeep, bg: colors.greenDeepLight };
+  // Added 2026-08-20 with the derived stage. Amber = the reservation exists but
+  // the technician is still billing on Holman, so nothing has actually moved.
+  if (stage === "not collected") return { fg: colors.amber, bg: colors.amberLight };
+  if (stage === "no route block") return { fg: colors.red, bg: colors.redLight };
   if (stage.startsWith("reserved")) return { fg: colors.blue, bg: colors.blueLight };
   if (stage.startsWith("reservation failed")) return { fg: colors.red, bg: colors.redLight };
   if (stage.startsWith("held")) return { fg: colors.amber, bg: colors.amberLight };
@@ -129,7 +136,7 @@ export default function CutoverTracking() {
       if (dayFilter.length && !dayFilter.includes(r.route_block_date || "(not scheduled)")) return false;
       if (!q) return true;
       return [r.ldap, r.tech_name, r.truck_number, r.branch_name, r.etd_reference,
-              r.rental_branch_city]
+              r.rental_branch_city, r.holman_book_state]
         .some((v) => String(v ?? "").toLowerCase().includes(q));
     });
     if (sort.col && sort.dir) {
@@ -187,8 +194,12 @@ export default function CutoverTracking() {
     URL.revokeObjectURL(url);
   }
 
-  const reserved = rows.filter((r) => r.reservation_status === "booked").length;
-  const blocked = rows.filter((r) => r.route_block_status === "filed").length;
+  // "reserved" used to be tautological: the SQL already required booked, so the
+  // card always equalled rows.length. Replaced with the number that needs work.
+  const blocked = rows.filter(
+    (r) => r.route_block_status === "filed" && r.route_block_live === true,
+  ).length;
+  const stillOnBook = rows.filter((r) => r.holman_book_state === "open").length;
 
   const card = {
     background: colors.surface, border: `1px solid ${colors.rule}`,
@@ -236,12 +247,12 @@ export default function CutoverTracking() {
   }
 
   const kpis = [
-    { label: "Complete records", value: rows.length, icon: CheckCircle2, tone: colors.greenDeep,
-      sub: "reserved and route-blocked" },
-    { label: "Reservation created", value: reserved, icon: CheckCircle2, tone: colors.blue,
-      sub: "ETD booking confirmed" },
+    { label: "Booked reservations", value: rows.length, icon: CheckCircle2, tone: colors.blue,
+      sub: "every ETD cutover booking on file" },
     { label: "Route block filed", value: blocked, icon: CalendarClock, tone: colors.purple,
-      sub: "on a real route" },
+      sub: `${rows.length - blocked} have no live block` },
+    { label: "Still on the Holman book", value: stillOnBook, icon: AlertTriangle, tone: colors.amber,
+      sub: "booked, but the car has not been collected" },
   ];
 
   return (
@@ -381,6 +392,7 @@ export default function CutoverTracking() {
                 ["van_status", "Why in a rental"], ["stage", "Stage"],
                 ["etd_reference", "Reservation"], ["branch_name", "Branch"],
                 ["route_block_status", "Route block"], ["route_block_date", "Block day"],
+                ["holman_book_state", "On Holman book"],
                 ["district", "Dist"], ["supervisor_name", "Supervisor"]]
                 .map(([col, label]) => (
                 <th key={col} style={th} onClick={() => toggleSort(col)}>
@@ -452,6 +464,15 @@ export default function CutoverTracking() {
                     {r.route_block_date
                       ? fmtDay(r.route_block_date)
                       : <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
+                  <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}>
+                    {r.holman_book_state === "open" ? (
+                      <span style={{ color: colors.amber, fontWeight: 700 }}>still billing</span>
+                    ) : r.holman_book_state === "pended" ? (
+                      <span style={{ color: colors.inkSoft }}>pended</span>
+                    ) : (
+                      <span style={{ color: colors.greenDeep }}>off the book</span>
+                    )}
                   </td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.district || "\u2014"}</td>
                   <td style={{ ...td, fontSize: 12 }} title={r.supervisor_ldap ?? ""}>

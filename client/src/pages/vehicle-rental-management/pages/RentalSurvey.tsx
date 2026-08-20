@@ -29,6 +29,8 @@ interface SurveyRow {
   ldap: string;
   tech_name: string | null;
   cutover_status?: string | null;
+  /** '' off the Holman book, 'open' still billing on it, 'pended' closing. */
+  holman_book_state?: string | null;
   cutover_reference?: string | null;
   district?: string | null;
   supervisor_name?: string | null;
@@ -428,6 +430,10 @@ export default function RentalSurvey() {
 
   const [hideCompleted, setHideCompleted] = useState(true);
   const [hideBackInVan, setHideBackInVan] = useState(true);
+  // Tyler 2026-08-20: take technicians off this page once they are no longer on
+  // the Holman rental book. The response row is never deleted; it is hidden, and
+  // the toggle brings it back. Default ON so the page shows only live work.
+  const [hideOffBook, setHideOffBook] = useState(true);
   // Keep-only, not hide: the yes-answers are the population a cutover wave is drawn
   // from, and the screen previously could only isolate the inverse. Default OFF so no
   // one else's default view moves.
@@ -553,15 +559,29 @@ export default function RentalSurvey() {
       : 0),
     [filteredAll, inRentalOnly, hideCompleted, hideBackInVan],
   );
+  // Counted last, same convention as the tallies above: a row already removed by
+  // an earlier toggle is not counted again here, so the numbers still add up.
+  const hiddenOffBook = useMemo(
+    () => (hideOffBook
+      ? filteredAll.filter((r) => r.holman_book_state === ""
+          && !(hideCompleted && r.cutover_status === "complete")
+          && !(hideBackInVan && isBackInOwnVan(r))
+          && !(inRentalOnly && r.has_rental !== true)).length
+      : 0),
+    [filteredAll, hideOffBook, hideCompleted, hideBackInVan, inRentalOnly],
+  );
   const filtered = useMemo(
     () => filteredAll.filter((r) => {
       if (hideCompleted && r.cutover_status === "complete") return false;
       if (hideBackInVan && isBackInOwnVan(r)) return false;
       // Strictly true. A null has_rental is "never answered", which is not a yes.
       if (inRentalOnly && r.has_rental !== true) return false;
+      // Strictly ''. An undefined value means the server predates this field, and
+      // hiding every row on an older deploy would empty the page.
+      if (hideOffBook && r.holman_book_state === "") return false;
       return true;
     }),
-    [filteredAll, hideCompleted, hideBackInVan, inRentalOnly],
+    [filteredAll, hideCompleted, hideBackInVan, inRentalOnly, hideOffBook],
   );
 
   const accessors: Record<string, (r: Row) => unknown> = {
@@ -708,6 +728,15 @@ export default function RentalSurvey() {
           <EyeOff size={13} /> Hide back in own van
         </button>
 
+        <button type="button" onClick={() => setHideOffBook((v) => !v)}
+          title="Hide technicians who are no longer on today's Holman rental report. Their response is kept, it is only hidden here."
+          style={{ ...ctrl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+                   background: hideOffBook ? colors.greenLight : colors.surface,
+                   color: hideOffBook ? colors.green : colors.ink,
+                   fontWeight: hideOffBook ? 700 : 400 }}>
+          <EyeOff size={13} /> Hide off the Holman book
+        </button>
+
         <button type="button" onClick={() => setInRentalOnly((v) => !v)}
           title="Show ONLY technicians who answered Yes to being in a rental. Rows that answered No, and rows that never answered, are both removed."
           style={{ ...ctrl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
@@ -732,6 +761,11 @@ export default function RentalSurvey() {
           {hiddenNotInRental > 0 && (
             <span style={{ color: colors.accent }}>
               {"  ·  "}{hiddenNotInRental} not in a rental hidden
+            </span>
+          )}
+          {hiddenOffBook > 0 && (
+            <span style={{ color: colors.green }}>
+              {"  ·  "}{hiddenOffBook} off the Holman book hidden
             </span>
           )}
         </span>

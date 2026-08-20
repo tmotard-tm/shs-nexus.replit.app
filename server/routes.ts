@@ -933,6 +933,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // Mint/refresh the shared ETD token. The BOX cannot mint (no Chromium), so
         // without this a runner whose token expired has no way to get a new one.
         || (req.method === "POST" && req.path === "/forms/rental-survey/cutover/etd-token/ensure")
+        // Tyler 2026-08-20: issuing and sending the rental survey was reachable ONLY
+        // from a browser session, so a script could not send the survey at all. /remind
+        // was already here and also texts technicians, so this is the same posture, not
+        // a new one. Without it, "send the surveys that need to go out" is a manual
+        // three-click operation on the Rental Survey page and cannot be driven from the
+        // same runner that does the booking.
+        || (req.method === "POST" && req.path === "/forms/rental-survey/issue")
+        || (req.method === "POST" && req.path === "/forms/rental-survey/pending")
+        || (req.method === "POST" && req.path === "/forms/rental-survey/send-chunk")
         || (req.method === "POST" && /^\/forms\/rental-survey\/cutover\/intents\/\d+\/(preview|booking-postback)$/.test(req.path))) {
         const t = req.headers["x-internal-cron"];
         if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)

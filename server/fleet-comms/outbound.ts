@@ -436,7 +436,10 @@ async function sendManagerCc(techContact: CommsContact, input: SendMessageInput)
   }
   if (await isOptedOut(mgrDigits)) return;
 
-  const ccBody = `[CC re: ${techContact.name || techContact.ldap}] ${input.body}`;
+  // Tyler 2026-08-20: "[CC re: NAME]" did not actually say what the copy is.
+  // The lead has to be able to tell at a glance that the text went to their
+  // technician and not to them, without reading the whole body first.
+  const ccBody = `[Team lead copy, sent to your tech ${techContact.name || techContact.ldap}] ${input.body}`;
   const thread = await getOrCreateTechThread(techContact.ldap, techContact);
   // A supervisor with no contact row has no primary_state either. The tech's
   // state is a better quiet-hours proxy than falling through to the
