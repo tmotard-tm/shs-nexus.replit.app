@@ -245,6 +245,18 @@ export async function initFormsSchema(): Promise<void> {
     ALTER TABLE vrm_rental_request
       ADD COLUMN IF NOT EXISTS is_over_21 boolean;
   `);
+
+  // Fleet sets the RETURN date at approval, and that is what sets the number of
+  // days on the reservation. Until now every booking was a flat 7 days: the
+  // technician's shop-estimate question was removed on 2026-08-14 and nothing
+  // took its place, so the end date was a constant nobody chose.
+  //
+  // Nullable, and the booking queue falls back to start + 7 days when it is
+  // null, so an approval that skips it behaves exactly as before.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS return_at timestamptz;
+  `);
   await db.execute(sql`
     DELETE FROM vrm_rental_request a
     USING vrm_rental_request b

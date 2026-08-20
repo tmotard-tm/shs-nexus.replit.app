@@ -292,6 +292,10 @@ export default function RentalRequests() {
   const [note, setNote] = useState("");
   const [pickupDate, setPickupDate] = useState("");
   const [pickupTime, setPickupTime] = useState("08:00");
+  const [returnDate, setReturnDate] = useState("");
+  const [returnTime, setReturnTime] = useState("08:00");
+  // Mirrors the server's cap. Longer stays are extensions, not longer bookings.
+  const MAX_RENTAL_DAYS = 7;
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [classDraft, setClassDraft] = useState("sedan");
@@ -334,10 +338,10 @@ export default function RentalRequests() {
   const MAINT_SCRIPT = reasonData?.maintenanceDenyScript ?? "";
 
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.message || "decision failed");
@@ -917,13 +921,55 @@ export default function RentalRequests() {
                 <input type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}
                        style={{ ...ctrl, width: 110 }} />
               </div>
+              {/* The return date IS the number of days. Leave it blank and the
+                  booking falls back to 7 days, which is what every reservation
+                  silently got before this existed. */}
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Return date
+                </span>
+                <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)}
+                       max={(() => {
+                         // Stop the out-of-range date being pickable at all, rather
+                         // than only rejecting it after the approve round-trips.
+                         const start = pickupDate
+                           ? Date.parse(`${pickupDate}T00:00`)
+                           : (detail.pickup_at ? Date.parse(detail.pickup_at)
+                              : detail.appointment_at ? Date.parse(detail.appointment_at) : NaN);
+                         if (!Number.isFinite(start)) return undefined;
+                         return new Date(start + MAX_RENTAL_DAYS * 86400000)
+                           .toISOString().slice(0, 10);
+                       })()}
+                       style={{ ...ctrl, flex: 1 }} />
+                <input type="time" value={returnTime} onChange={(e) => setReturnTime(e.target.value)}
+                       style={{ ...ctrl, width: 110 }} />
+              </div>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, marginBottom: 8 }}>
+                {(() => {
+                  if (!returnDate) return "No return date set, so this books for 7 days.";
+                  const start = pickupDate
+                    ? Date.parse(`${pickupDate}T${pickupTime || "08:00"}`)
+                    : (detail.pickup_at ? Date.parse(detail.pickup_at)
+                       : detail.appointment_at ? Date.parse(detail.appointment_at) : NaN);
+                  const end = Date.parse(`${returnDate}T${returnTime || "08:00"}`);
+                  if (!Number.isFinite(start)) return "Set a pickup date so the length can be counted.";
+                  const days = Math.round((end - start) / 86400000);
+                  if (days <= 0) return "Return date must be after the pickup.";
+                  if (days > MAX_RENTAL_DAYS) {
+                    return `${days} days exceeds the ${MAX_RENTAL_DAYS}-day cap. `
+                         + "Book up to a week, then extend.";
+                  }
+                  return `${days} day${days === 1 ? "" : "s"} on rent.`;
+                })()}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
                   return (
                     <button key={d} type="button" disabled={decide.isPending}
                             onClick={() => decide.mutate({ requestNo: detail.request_no, decision: d, note,
-                              pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null })}
+                              pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
+                              returnAt: d === "APPROVE" && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null })}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
                       {d}
                     </button>

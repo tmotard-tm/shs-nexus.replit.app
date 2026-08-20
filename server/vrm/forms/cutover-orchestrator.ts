@@ -846,11 +846,26 @@ export async function fetchEligibilityFacts(params: {
   let otherNonterminalIntentId: number | null = null;
   if (ldap) {
     const { rows } = await db.execute(sql`
-      SELECT id FROM vrm_rental_workflow_intents
-      WHERE upper(ldap) = ${ldap}
-        AND execution_mode = 'live'
-        AND status NOT IN ('completed','cancelled','abandoned')
-        AND (${params.excludeIntentId ?? null}::integer IS NULL OR id <> ${params.excludeIntentId ?? null}::integer)
+      SELECT i.id FROM vrm_rental_workflow_intents i
+      WHERE upper(i.ldap) = ${ldap}
+        AND i.execution_mode = 'live'
+        AND i.status NOT IN ('completed','cancelled','abandoned')
+        AND (${params.excludeIntentId ?? null}::integer IS NULL OR i.id <> ${params.excludeIntentId ?? null}::integer)
+        -- Skip an intent that is orphaned: its source request is gone, so it can
+        -- never become a reservation and must not hold the live lock.
+        --
+        -- The lock exists so two live intents cannot become two cars. An intent
+        -- pointing at a deleted request cannot become any car, and there is no
+        -- way to clear it by hand either: Cancel lives in a drawer reached FROM
+        -- the request, and the request no longer exists. Intent #37 blocked
+        -- AROTTER's request #39 for a day exactly this way, with no reservation
+        -- and zero booking attempts behind it.
+        --
+        -- Deliberately scoped to rental_request. A cutover intent keys on the
+        -- survey and is not the same shape, so leave that lock strict.
+        AND (i.workflow_type <> 'rental_request'
+             OR EXISTS (SELECT 1 FROM vrm_rental_request r
+                         WHERE r.request_no::text = i.source_id::text))
       LIMIT 1
     `);
     otherNonterminalIntentId = (rows as any[])[0]?.id ?? null;

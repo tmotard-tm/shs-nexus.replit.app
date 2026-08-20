@@ -600,6 +600,15 @@ interface SubmitContext {
  * eligibility verdict and one audit trail. The only thing `source` changes is
  * how it is reported.
  */
+/**
+ * The longest rental Fleet will book in one go.
+ *
+ * Not a vendor limit: ETD quotes 90 days without complaint. This is the weekly
+ * extension cadence the technician acknowledges on the form, and it is the only
+ * point at which anyone re-checks whether the van is still in the shop.
+ */
+const MAX_RENTAL_DAYS = 7;
+
 async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json: any }> {
   const { ldap, body: b, tokenRow } = ctx;
   const s = (v: any, max = 300) => String(v ?? "").trim().slice(0, max) || null;
@@ -1208,7 +1217,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "accident_ok",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "return_at", "accident_ok",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
@@ -1514,8 +1523,15 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                -- gone from the form (Tyler 2026-08-14) and 7 matches the weekly
                -- extension cadence the technician signs. Old rows with an
                -- estimate keep estimate + 1.
-               to_char(COALESCE(r.pickup_at, r.appointment_at)
-                         + (COALESCE(r.shop_estimated_days + 1, 7) * interval '1 day'),
+               -- Fleet's return date decides the length. It is the only value here
+               -- a person actually chose. The old fallbacks stay underneath it for
+               -- rows approved before the field existed: an old shop estimate, then
+               -- 7 days, which matches the weekly extension cadence the technician
+               -- signs.
+               to_char(COALESCE(
+                         r.return_at,
+                         COALESCE(r.pickup_at, r.appointment_at)
+                           + (COALESCE(r.shop_estimated_days + 1, 7) * interval '1 day')),
                        'YYYY-MM-DD"T"HH24:MI:SS')                    AS end_dt,
                r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference,
                -- Class is decided from the roster, never asked. Tyler's cutover
@@ -1888,6 +1904,13 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       if (pickupAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(pickupAt)) {
         return res.status(400).json({ message: "pickupAt must be YYYY-MM-DDTHH:MM" });
       }
+      // Fleet's return date. Same override shape as the pickup, and it is what
+      // decides the number of days Enterprise bills for.
+      const returnAt = decision === "APPROVE"
+        ? String(req.body?.returnAt || "").trim().slice(0, 40) || null : null;
+      if (returnAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(returnAt)) {
+        return res.status(400).json({ message: "returnAt must be YYYY-MM-DDTHH:MM" });
+      }
 
       // RETURN is "you have not given us enough to book this", which is a
       // different fact from "no". It must name what is missing, because a
@@ -1909,10 +1932,46 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
                -- holds. Compared in SQL so both sides normalize through timestamptz;
                -- string-comparing "2026-08-18T16:00" against a serialized DB value
                -- would report a change on every approve.
-               (${pickupAt}::timestamptz IS DISTINCT FROM pickup_at) AS pickup_changes
+               (${pickupAt}::timestamptz IS DISTINCT FROM pickup_at) AS pickup_changes,
+               -- The start this approval will actually book from, resolved the same
+               -- way the booking queue resolves it, so the day count validated here
+               -- is the day count Enterprise gets.
+               to_char(COALESCE(${pickupAt}::timestamptz, pickup_at, appointment_at),
+                       'YYYY-MM-DD"T"HH24:MI:SS') AS effective_pickup
         FROM vrm_rental_request WHERE request_no = ${Number(req.params.requestNo)}
       `);
       const cur = (rows as any[])[0];
+
+      // A return date before the pickup silently produces a negative rental that
+      // ETD answers with an empty class list and no explanation.
+      if (returnAt) {
+        const startIso = String(cur?.effective_pickup || "");
+        if (!startIso) {
+          return res.status(400).json({
+            message: "Set a pickup date before a return date. There is no start to count from.",
+          });
+        }
+        if (returnAt <= startIso) {
+          return res.status(400).json({
+            message: `Return date must be after the pickup (${startIso.replace("T", " ")}).`,
+          });
+        }
+        const days = Math.round(
+          (Date.parse(returnAt) - Date.parse(startIso)) / 86400000);
+        // Fleet policy, not a vendor limit. ETD quotes 90 days perfectly happily
+        // (measured 2026-08-20: 27 classes at every duration from 1 to 90 at the
+        // same branch), so nothing stops a long booking except us. Tyler,
+        // 2026-08-20: "we're not gonna be setting it up for more than seven days."
+        // Longer stays happen by EXTENDING weekly, which is the cadence the
+        // technician signs in the acknowledgements and the thing Fleet can stop.
+        // A long booking is a car nobody is reviewing.
+        if (days > MAX_RENTAL_DAYS) {
+          return res.status(400).json({
+            message: `That is a ${days}-day rental and the cap is ${MAX_RENTAL_DAYS}. `
+                   + "Book up to a week, then extend if the shop still has the van.",
+          });
+        }
+      }
       if (!cur) return res.status(404).json({ message: "request not found" });
       if (cur.auto_decision && cur.auto_decision !== decision && !note) {
         return res.status(400).json({
@@ -1932,6 +1991,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         UPDATE vrm_rental_request
         SET status = ${nextStatus},
             pickup_at = COALESCE(${pickupAt}::timestamptz, pickup_at),
+            return_at = COALESCE(${returnAt}::timestamptz, return_at),
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
               // string_to_array, not a bound JS array. Interpolating an array into
