@@ -1,0 +1,25 @@
+---
+name: Enterprise direct-billing rental import
+description: Manual xlsx upload source 'enterprise_direct' — durable rules: ExcelJS vendor-file quirk, sweep-safety, truck authority, source coexistence, override expiry.
+---
+
+# Enterprise direct-billing rental import (`enterprise_direct`)
+
+Manual upload for Enterprise's "Rental Agreement Detail Open Ticket Report" (direct-billing rentals that NEVER appear in the Snowflake ECARS feed). Temporary until a real feed exists.
+
+## ExcelJS silently fails on this vendor xlsx
+ExcelJS opens the file and returns **zero worksheets — no error**. Any "0 rows imported" symptom on a vendor xlsx should suspect the library before the file. The importer parses raw OOXML instead (jszip, cells aligned by cell ref because they're sparse).
+
+## Full-state upload + source-scoped sweep = layout-drift hazard
+Each upload is full open-ticket state and sweeps its source's absent cases. **Why:** a vendor column rename/drop that still parses would import structurally hollow rows and sweep every real case. **How to apply:** any future full-state import must refuse the whole file on missing load-bearing headers / bulk-blank key fields, never import-and-sweep degraded data.
+
+## Truck authority (Tyler's locked rule)
+Displayed truck = the resolved tech's **live TPMS assignment only**. Never a report value, never the booking intent's truck (booking-time snapshot), never the last-known truck→tech edge (may *confirm identity*, never supply the truck). No live truck → truckless case under a `db:<RA#>` key; blank enrichment is by design.
+
+## Source coexistence & overrides
+- **Why:** case_key is the truck, and the same physical rental can sit in both the ECARS feed and the direct report during changeover — two sources would ping-pong one key.
+- While a live `enterprise_direct` case holds a case_key, feed rows for that key are dropped in persist; feeds reclaim automatically when the direct case leaves the report.
+- **Override-expiry trap:** the PO-based identity-override expiry would wipe every human override the moment a case flips to the PO-less direct source — and in changeover the renter is the same person. Direct source is excluded; a PO-less case is no evidence the rental turned over.
+
+## Destructive imports need role gates
+Full-state report imports are admin/developer-gated (`requireImportOperator`, before multer) — the `/api/vrm` session check only proves login (same lesson as fs-router-auth-gap).

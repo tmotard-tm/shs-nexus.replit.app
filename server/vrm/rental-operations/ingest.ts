@@ -92,7 +92,7 @@ export interface RentalCase {
   case_key: string;
   vehicle_number: string;
   vehicle_number_padded: string;
-  source: "enterprise" | "holman_non_enterprise";
+  source: "enterprise" | "holman_non_enterprise" | "enterprise_direct";
   rental_vendor: string | null;
   renter_name_raw: string;
   ticket_number: string | null;
@@ -323,6 +323,14 @@ export interface PersistOptions {
   fingerprint?: string;
   roster?: RosterRow[];
   onboarding?: OnboardingRow[];
+  /**
+   * case_key -> a resolution the caller already established from STRONGER
+   * evidence than a renter name (the direct-billing import links rows via
+   * reservation confirmations / prior-ticket identity before persisting).
+   * When present for a case it replaces the name-based resolveIdentity call;
+   * human override columns are untouched either way.
+   */
+  presetResolutions?: Map<string, IdentityResolution>;
 }
 export interface PersistResult {
   runId: string;
@@ -349,7 +357,7 @@ export interface PersistResult {
  * DISTINCT ON orders active-first — a plain join silently returns whichever the
  * planner reached last.
  */
-async function loadTruckTechMap(): Promise<Map<string, TruckTech>> {
+export async function loadTruckTechMap(): Promise<Map<string, TruckTech>> {
   const norm = (v: unknown) => {
     const d = String(v ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
     return d.length ? d : null;
@@ -443,8 +451,35 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
   `);
   const runId = (runRes.rows[0] as any).id as string;
 
+  // ── direct-billing takeover ────────────────────────────────────────────────
+  // While a truck's case slot is OWNED by a live 'enterprise_direct' case
+  // (manual direct-billing upload), the Snowflake feeds still carry the OLD
+  // open Enterprise ticket for that same truck until the branch closes it
+  // (the direct report itself instructs "CLOSE ENTERPRISE TICKET …"). Letting
+  // those rows through would flip the case's source/renter back on every sync,
+  // and the next direct sweep would then drop the case entirely (ping-pong).
+  // The direct report is the fresher truth (Tyler 2026-08-21), so feed rows
+  // aimed at a live direct case are excluded from this run; once the direct
+  // case drops (rental returned / absent from the next upload) the feeds
+  // reclaim the slot naturally because the ownership check is present-only.
+  let incoming = o.cases;
+  if (incoming.some((c) => c.source !== "enterprise_direct")) {
+    const live = await db.execute(sql`
+      SELECT case_key FROM vrm_rental_operations_cases
+      WHERE source = 'enterprise_direct' AND present_in_latest = true
+    `);
+    const owned = new Set((live.rows as any[]).map((r) => String(r.case_key)));
+    if (owned.size) {
+      const before = incoming.length;
+      incoming = incoming.filter((c) => c.source === "enterprise_direct" || !owned.has(c.case_key));
+      if (incoming.length !== before) {
+        console.log(`[VRM/RentalOps] ${before - incoming.length} feed case(s) excluded — truck owned by a live direct-billing case`);
+      }
+    }
+  }
+
   // guard: never sweep on an empty set (a bad parse must not wipe cases)
-  if (!o.cases.length) {
+  if (!incoming.length) {
     await db.execute(sql`
       UPDATE vrm_rental_operations_import_runs
       SET status='failed', error='no cases — refused to sweep', finished_at=NOW() WHERE id=${runId}
@@ -453,7 +488,7 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
     return { runId, resolved: 0, review: 0, exception: 0, dropped: 0, totalCases: 0, enterpriseCount: 0, holmanCount: 0, pendedCount: 0 };
   }
 
-  const cases = o.cases;
+  const cases = incoming;
   const roster = o.roster ?? await loadRoster();
   const onboarding = o.onboarding ?? await loadOnboarding();
   const rosterIndex = buildRosterIndex(roster);
@@ -463,7 +498,9 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
   let resolved = 0, review = 0, exception = 0;
   for (const c of cases) {
     const truckKey = String(c.vehicle_number ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
-    const r = resolveIdentity({
+    // A caller-supplied resolution (stronger-than-name evidence) wins over the
+    // name-based resolver; everything downstream treats both identically.
+    const r = o.presetResolutions?.get(c.case_key) ?? resolveIdentity({
       renter: c.renter_name_raw, rentalStart: c.rental_start_date, rosterIndex, onboarding,
       truckTech: truckKey ? (truckTechs.get(truckKey) ?? null) : null,
       pickupState: c.renting_state,
@@ -561,6 +598,13 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
         AND i.override_employee_id IS NOT NULL
         AND i.override_po_number IS NOT NULL
         AND i.override_po_number IS DISTINCT FROM c.po_number
+        -- Direct-billing cases carry NO po_number by design (no Holman rental
+        -- PO exists), so the PO comparison above would expire EVERY override on
+        -- a truck the moment its case flips to the direct report — and in the
+        -- changeover scenario the renter is the SAME person continuing the same
+        -- physical rental, so the human call is still valid. A PO-less case
+        -- provides no evidence the rental turned over; keep the override.
+        AND c.source <> 'enterprise_direct'
     `);
   });
 

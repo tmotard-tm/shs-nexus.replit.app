@@ -470,6 +470,7 @@ export default function RentalOperations() {
   const qc = useQueryClient();
   const { toast } = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  const fileDirectRef = useRef<HTMLInputElement>(null);
 
   const { data, isLoading, error, isFetching } = useQuery<MasterModel>({
     queryKey: ["/api/vrm/rental-operations/master"],
@@ -673,6 +674,26 @@ export default function RentalOperations() {
     },
     onError: (e: any) => toast({ title: "Import failed", description: String(e?.message || e), variant: "destructive" }),
   });
+  // Enterprise DIRECT-BILLING open-ticket report (SHS direct account). These
+  // rentals never reach the Snowflake feed, so this upload is their only path
+  // in until a real data feed exists. The toast surfaces the tech-match split
+  // because the report has no truck numbers — rows the ladder couldn't match
+  // land in the identity-review lane and deserve immediate operator eyes.
+  const importDirectMut = useMutation({
+    mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return apiRequest("POST", "/api/vrm/rental-operations/imports/direct-billing", fd); },
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k })));
+      const s = j?.result?.stats;
+      toast({
+        title: "Direct-billing report imported",
+        description: s
+          ? `${j?.result?.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review`
+          : `${j?.result?.totalCases ?? "?"} cases`,
+      });
+    },
+    onError: (e: any) => toast({ title: "Direct-billing import failed", description: String(e?.message || e), variant: "destructive" }),
+  });
   const scrapeMissingMut = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/scrape-missing"),
     onSuccess: async (res: any) => {
@@ -831,6 +852,10 @@ export default function RentalOperations() {
             <Upload size={13} /> {importMut.isPending ? "Importing…" : "Import report"}
           </button>
           <input ref={fileRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importMut.mutate(f); e.target.value = ""; }} />
+          <button type="button" onClick={() => fileDirectRef.current?.click()} disabled={importDirectMut.isPending} title="Enterprise 'Rental Agreement Detail Open Ticket Report' for the SHS direct-billing account" style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Upload size={13} /> {importDirectMut.isPending ? "Importing…" : "Import direct billing"}
+          </button>
+          <input ref={fileDirectRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDirectMut.mutate(f); e.target.value = ""; }} />
           {sweep && (
             <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={sweepBusy} title={sweep.title}
               style={{ ...selStyle, cursor: sweepBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, opacity: sweepBusy ? 0.7 : 1,

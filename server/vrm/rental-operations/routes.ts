@@ -97,6 +97,20 @@ export function requestRentalOpsAutoSync(reason: string): "started" | "in-flight
  * sign somebody else's name to an action. The body fields stay as the fallback
  * for the no-session server-to-server callers.
  */
+/**
+ * Full-state report imports (enterprise + direct-billing) REPLACE the open
+ * rental picture for their source and sweep every case the file omits — a
+ * destructive bulk write, so a session alone is not enough (/api/vrm only
+ * proves login). Same admin/developer bar the sibling operational modules
+ * use (cutover-intents, fleet-comms, truck-maintenance). Runs BEFORE multer
+ * so an unauthorized caller never gets a file parsed. Exported for tests.
+ */
+export function requireImportOperator(req: any, res: any, next: any): void {
+  const role = String(req.user?.role ?? "").toLowerCase();
+  if (role === "admin" || role === "developer") return next();
+  res.status(403).json({ error: "admin or developer role required to import rental reports", code: "import_operator_only" });
+}
+
 function actorOf(req: any): string {
   const u = req.user ?? {};
   const b = req.body ?? {};
@@ -1436,7 +1450,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
   // POST manual Enterprise-report import — upload the fresh "Open Ticket Detail
   // Report Fleet - MasterARI" xlsx to OVERRIDE the (lagging) Snowflake sync.
   // Accepts multipart file "file" OR a JSON body { entRows: [...] }.
-  router.post("/rental-operations/imports/enterprise", upload.single("file"), async (req: any, res) => {
+  router.post("/rental-operations/imports/enterprise", requireImportOperator, upload.single("file"), async (req: any, res) => {
     if (syncInFlight) return res.status(409).json({ error: "a sync/import is already running" });
     syncInFlight = true;
     try {
@@ -1470,6 +1484,37 @@ export function registerRentalOperationsRoutes(router: Router): void {
       return res.status(400).json({ error: "upload an xlsx as 'file' or POST { entRows: [...] }" });
     } catch (e: any) {
       console.error("[VRM/RentalOps] enterprise import failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "import failed" });
+    } finally {
+      syncInFlight = false;
+    }
+  });
+
+  // POST manual DIRECT-BILLING report import — Enterprise's "Rental Agreement
+  // Detail Open Ticket Report" for the SHS direct account. These rentals never
+  // reach the Snowflake ECARS feed (different contract), so this upload is
+  // their only ingest path until a data feed exists. NOT parsed with ExcelJS:
+  // it returns zero worksheets for this vendor file (silently), so the module
+  // reads the raw OOXML by cell reference. Identity is tech-first and the
+  // truck shown is the tech's live TPMS assignment — see direct-billing-import.
+  router.post("/rental-operations/imports/direct-billing", requireImportOperator, upload.single("file"), async (req: any, res) => {
+    if (syncInFlight) return res.status(409).json({ error: "a sync/import is already running" });
+    syncInFlight = true;
+    try {
+      if (!req.file?.buffer) return res.status(400).json({ error: "upload the direct-billing xlsx as 'file'" });
+      const origName = (req.file.originalname || "").toLowerCase();
+      if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
+        return res.status(400).json({ error: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
+      }
+      const { importDirectBillingReport } = await import("./direct-billing-import");
+      const fileDate: string | null = (req.body?.fileDate && /^\d{4}-\d{2}-\d{2}$/.test(req.body.fileDate)) ? req.body.fileDate : null;
+      const result = await importDirectBillingReport({
+        buffer: req.file.buffer, fileDate,
+        sourceLabel: req.file.originalname || "manual_direct_billing_xlsx",
+      });
+      return res.json({ ok: true, result });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] direct-billing import failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "import failed" });
     } finally {
       syncInFlight = false;
