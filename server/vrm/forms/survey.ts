@@ -1728,7 +1728,22 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                CASE
                  WHEN c.route_block_status <> 'filed'
                    OR c.route_block_live IS NOT TRUE           THEN 'no route block'
-                 WHEN COALESCE(hb.book_state, '') = 'open'     THEN 'not collected'
+                 -- 2026-08-20 second pass: the first version painted EVERY booked
+                 -- technician still on the Holman book as "not collected", which
+                 -- was 140 rows, 73 of them with a pickup date that has not
+                 -- arrived yet. Booking somebody today for tomorrow is not a
+                 -- failure and must not read as one. Only call it not-collected
+                 -- once the pickup day has actually passed.
+                 --
+                 -- The date test is written [0-9] and not the backslash-d
+                 -- shorthand on purpose: inside a drizzle tagged template JS
+                 -- cooks \d down to a bare d before drizzle ever sees it.
+                 WHEN COALESCE(hb.book_state, '') = 'open'
+                  AND left(c.reservation_start, 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                  AND left(c.reservation_start, 10)::date
+                      < (now() AT TIME ZONE 'America/New_York')::date
+                                                               THEN 'not collected'
+                 WHEN COALESCE(hb.book_state, '') = 'open'      THEN 'scheduled'
                  ELSE 'complete'
                END AS stage,
                COALESCE(hb.book_state, '') AS holman_book_state,

@@ -80,6 +80,8 @@ function stageTone(stage: string): { fg: string; bg: string } {
   // Added 2026-08-20 with the derived stage. Amber = the reservation exists but
   // the technician is still billing on Holman, so nothing has actually moved.
   if (stage === "not collected") return { fg: colors.amber, bg: colors.amberLight };
+  // Booked, on a route, pickup day has not arrived. Nothing is wrong with these.
+  if (stage === "scheduled") return { fg: colors.blue, bg: colors.blueLight };
   if (stage === "no route block") return { fg: colors.red, bg: colors.redLight };
   if (stage.startsWith("reserved")) return { fg: colors.blue, bg: colors.blueLight };
   if (stage.startsWith("reservation failed")) return { fg: colors.red, bg: colors.redLight };
