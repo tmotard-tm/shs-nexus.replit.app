@@ -44,6 +44,9 @@ import {
   bookingRequestHash,
   extractJourneyRows,
   identifyJourneyRows,
+  possibleUnlinkedRows,
+  mergePossibleUnlinked,
+  POSSIBLE_UNLINKED_CAP,
   parseConfirmation,
   intentAddress,
   classForIntent,
@@ -350,6 +353,57 @@ describe("journey readback parsing", () => {
     assert.equal(identifyJourneyRows(mine, { intentRef: "SHSNX-42" }).length, 0);
     // And with no witness at all there is nothing to identify against.
     assert.equal(identifyJourneyRows(mine, {}).length, 0);
+  });
+
+  test("possibleUnlinked is ADVISORY: unidentified confirmation-bearing rows, never matches", () => {
+    // A reservation booked BY HAND in the ETD portal carries no SHSNX
+    // reference — its row cannot identify, but it does carry a confirmation.
+    // That sighting must reach the server as advisory data (the cancel lane
+    // refuses to settle terminal on it) without EVER entering matches.
+    const rows = [
+      { confirmation: "AAA111", reference: "SHS ZZEXEC1 SHSNX-42", branchCode: "9911", date: "2026-09-08", sipp: "ICAR" },
+      { confirmation: "HAND99", reference: "walk-in for John Q Technician", branchCode: "9912", date: "2026-09-09", sipp: "FCAR" },
+      { confirmation: "", reference: "SHS QUOTE ONLY", branchCode: "9913", date: "2026-09-10", sipp: "ECAR" },
+    ];
+    const matches = identifyJourneyRows(rows, { intentRef: "SHSNX-42" });
+    assert.deepEqual(matches.map((r) => r.confirmation), ["AAA111"]);
+    const advisory = possibleUnlinkedRows(rows, matches);
+    // Identified rows and confirmation-less quote rows are both excluded.
+    assert.deepEqual(advisory, [
+      { confirmation: "HAND99", branchCode: "9912", date: "2026-09-09", sipp: "FCAR" },
+    ]);
+    // The reference field is DROPPED from the advisory shape — for a hand
+    // booking it is branch-typed free text that can carry a person's name.
+    assert.ok(!("reference" in (advisory[0] as any)));
+  });
+
+  test("possibleUnlinked dedupes on the confirmation and stays capped", () => {
+    const rows = Array.from({ length: 30 }, (_, i) => ({
+      confirmation: `C${i % 15}`, reference: "", branchCode: "", date: "", sipp: "",
+    }));
+    const advisory = possibleUnlinkedRows(rows, []);
+    assert.equal(advisory.length, POSSIBLE_UNLINKED_CAP, "a hint, not a roster");
+    assert.equal(new Set(advisory.map((r) => r.confirmation)).size, advisory.length);
+    // Case-insensitive dedupe, like every confirmation comparison in this file.
+    assert.equal(
+      possibleUnlinkedRows(
+        [
+          { confirmation: "abc123", reference: "", branchCode: "", date: "", sipp: "" },
+          { confirmation: "ABC123", reference: "", branchCode: "", date: "", sipp: "" },
+        ],
+        [],
+      ).length,
+      1,
+    );
+    // Merging successive searches keeps first sighting and the cap.
+    const merged = mergePossibleUnlinked(
+      [{ confirmation: "X1", branchCode: "A", date: "", sipp: "" }],
+      [
+        { confirmation: "x1", branchCode: "B", date: "", sipp: "" },
+        { confirmation: "X2", branchCode: "C", date: "", sipp: "" },
+      ],
+    );
+    assert.deepEqual(merged.map((r) => `${r.confirmation}:${r.branchCode}`), ["X1:A", "X2:C"]);
   });
 });
 

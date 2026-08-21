@@ -541,6 +541,24 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                 {busy === "evidence" ? <Loader2 size={13} className="animate-spin" /> : "Record ETD cancellation evidence"}
               </button>
             )}
+            {/* A reservation booked BY HAND in the ETD portal carries no SHSNX
+                reference, so no readback can identify it until its confirmation
+                number is on file. Attaching it makes the normal readback lanes
+                find and settle it (cancel or verify). */}
+            {["booking", "booking_unknown", "awaiting_verification", "manual_review", "cancel_pending_readback"].includes(status) && (
+              <button type="button" disabled={!!busy}
+                      title="Use when a reservation was booked by hand in the ETD portal: attach its confirmation number so the readback can identify (and cancel/verify) it."
+                      onClick={() => {
+                        const conf = (window.prompt("Confirmation number of the Enterprise reservation (from the ETD portal or branch):") ?? "").trim();
+                        if (!conf) return;
+                        const note = (window.prompt("Where did this confirmation come from? (optional note)") ?? "").trim();
+                        run("attach", () => post(`${BASE}/intents/${intent.id}/attach-confirmation`,
+                          { confirmation: conf, note: note || undefined }));
+                      }}
+                      style={btn}>
+                {busy === "attach" ? <Loader2 size={13} className="animate-spin" /> : "Attach confirmation #"}
+              </button>
+            )}
             {!isRequest && ENGINE_RUNNABLE.has(status) && (
               <button type="button" disabled={!!busy}
                       title="Claims this intent's queued work and drives Enterprise to completion. Safe to press again — a claim already in flight is skipped, and nothing is booked twice."

@@ -54,7 +54,7 @@ from etd.client import (redacted_shape, rejection_reasons,  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vehicle_class import (choose as choose_class, choose_same_vehicle,  # noqa: E402
-                           describe as describe_vehicle, _rank)
+                           describe as describe_vehicle)
 
 
 _ZIP_STATE = [
@@ -90,27 +90,6 @@ def zip_state(zip5: str) -> str:
         if lo <= p <= hi:
             return st
     return ""
-
-
-def _miles(place: dict, branch: dict) -> float:
-    """Great-circle miles between the resolved address and a branch.
-
-    Only used to bound the cheapest-class search. closest_branches() already
-    returns nearest-first, so this is a ceiling, not a sort.
-    """
-    import math
-    try:
-        lat1 = math.radians(float(place["latitude"]))
-        lon1 = math.radians(float(place["longitude"]))
-        lat2 = math.radians(float(branch.get("latitude")))
-        lon2 = math.radians(float(branch.get("longitude")))
-    except (TypeError, ValueError, KeyError):
-        return 1e9
-    dlat, dlon = lat2 - lat1, lon2 - lon1
-    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
-    return 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
-
-
 def vehicle_label(r: dict) -> str:
     """What they are driving, as both systems see it."""
     feed = describe_vehicle(r.get("veh_make"), r.get("veh_model"), r.get("veh_year"))
@@ -1021,108 +1000,8 @@ def main() -> None:
             sel = choose_same_vehicle(r["veh_make"], r["veh_model"], classes,
                                       r.get("tech_says_vehicle"))
             if not sel["pick"]:
-                # Tyler, 2026-08-20: do not refuse when the contract branch cannot
-                # match their vehicle. Start from the CHEAPEST class on offer, and
-                # look at up to two more branches within 10 miles before settling.
-                # etd.car_classes() already returns base_rate ascending, so the
-                # cheapest at any one branch is classes[0]; this compares across
-                # branches too and takes the global minimum.
-                same_note = sel["note"]
-                cands = [(q, "contract branch")]
-                try:
-                    near = etd.closest_branches(q["place"]["latitude"],
-                                                q["place"]["longitude"], r_start)
-                except Exception:
-                    near = []
-                here = str(q["branch"].get("branchCode", "")).strip()
-                tried = 0
-                for b in near:
-                    if tried >= 2:
-                        break
-                    bc = str(b.get("branchCode", "")).strip()
-                    if not bc or bc == here:
-                        continue
-                    if _miles(q["place"], b) > 10.0:
-                        continue
-                    try:
-                        q2 = etd.quote(address=address, start=r_start, end=r_end,
-                                       prefer_branch_code=bc)
-                    except Exception:
-                        continue
-                    # Must actually land on the branch we asked for, and must not
-                    # cross a state line: the geocoder guard above applies here too.
-                    if str(q2["branch"].get("branchCode", "")).strip() != bc:
-                        continue
-                    if want_state and len(want_state) == 2 \
-                       and branch_state(q2) not in ("", want_state):
-                        continue
-                    cands.append((q2, f"branch {bc}"))
-                    tried += 1
-                # Tyler's ladder, 2026-08-20, in his words: "if there's a sedan
-                # available then you should do a sedan. If I get blocked because
-                # there's no sedan available then you need to put them in the next
-                # tier up. If all they have is a smaller, go there first, but if
-                # they have no cars, then they have no cars, and you have to put
-                # them in a small SUV or a minivan."
-                #
-                # So: CARS first and cheapest within them (SEDAN_LADDER already
-                # runs ECAR -> FCAR, so "a smaller" is the bottom of that ladder,
-                # not a separate case). Only when no car is offered anywhere do we
-                # step out to an SUV, smallest first, then a van. Booking them is
-                # the objective; refusing is the last resort.
-                pool = []
-                for qq, why in cands:
-                    for c in (qq.get("classes") or []):
-                        code_c = str(c.get("code") or "").upper()
-                        if len(code_c) < 2:
-                            continue
-                        rate = c.get("base_rate")
-                        try:
-                            rate_f = float(rate)
-                        except (TypeError, ValueError):
-                            rate_f = float("inf")
-                        body = code_c[1]          # SIPP: C car, F SUV, V van, P pickup
-                        size = _rank(code_c)[1]   # size index within the body style
-                        pool.append((body, size, rate_f, c, qq, why))
-
-                def _cheapest(rows):
-                    return min(rows, key=lambda t: (t[2], t[1])) if rows else None
-
-                def _smallest(rows):
-                    return min(rows, key=lambda t: (t[1], t[2])) if rows else None
-
-                cars = [p for p in pool if p[0] == "C"]
-                suvs = [p for p in pool if p[0] == "F"]
-                vans = [p for p in pool if p[0] == "V"]
-                chosen = _cheapest(cars) or _smallest(suvs) or _smallest(vans) \
-                    or _cheapest(pool)
-                best = None
-                if chosen:
-                    _, _, rate_f, c, qq, why = chosen
-                    tier = ("car" if chosen[0] == "C" else "SUV" if chosen[0] == "F"
-                            else "van" if chosen[0] == "V" else "other")
-                    why = f"{why}, cheapest {tier} on offer"
-                    best = (rate_f, c, qq, why)
-                if best is None:
-                    raise RuntimeError(
-                        f"cannot match their vehicle ({vehicle_label(r)}): {same_note};"
-                        f" and no priced class at any of {len(cands)} branch(es)"
-                        " within 10 miles")
-                rate_f, pick_c, q, why = best
-                classes = q.get("classes") or []
-                _code = str(pick_c.get("code") or "").upper()
-                sel = {
-                    "pick": pick_c, "code": _code, "match": "cheapest_available",
-                    # TRUE on purpose. The branch note and the technician's text
-                    # both promise "NO VEHICLE CHANGE" when this is False, and
-                    # that would be a lie here: they are changing vehicle.
-                    "changes_vehicle": True,
-                    "note": (f"no same-vehicle match ({same_note}); took the cheapest"
-                             f" class offered at the {why}: {_code}"
-                             f" at {rate_f} {pick_c.get('currency') or ''}"
-                             f"/{pick_c.get('unit') or 'week'}"),
-                }
-                print(f"  CHEAPEST {ldap:<9} {_code} @ {rate_f} ({why})")
+                raise RuntimeError(
+                    f"cannot match their vehicle ({vehicle_label(r)}): {sel['note']}")
             pick = sel["pick"]
 
             model = copy.deepcopy(template)
@@ -1161,11 +1040,9 @@ def main() -> None:
             # different car onto the lot.
             have = describe_vehicle(r["veh_make"], r["veh_model"], r["veh_year"])
             if sel["changes_vehicle"]:
-                # Was hardcoded "right-sized to a sedan", which is wrong whenever
-                # the replacement is not a sedan. Name the class we actually booked.
                 same = (f"VEHICLE CHANGE REQUIRED: the technician is currently in a "
-                        f"{have or 'different vehicle'} and is being moved to class "
-                        f"{sel['code']}. Please have the replacement ready.")
+                        f"{have or 'larger vehicle'} and is being right-sized to a sedan "
+                        f"({sel['code']}). Please have the replacement ready.")
             else:
                 same = (f"NO VEHICLE CHANGE: the technician keeps the {have} they are "
                         f"already driving. Reserved {sel['code']} to match."
@@ -1580,6 +1457,60 @@ def _identify_journey_rows(rows: list, confirmation: str = "",
             if (conf and r["confirmation"].strip().upper() == conf)
             or (ref and ref in _reference_tokens(r["reference"]))]
 
+# Advisory rows are a hint, not a dump — enough to check ETD, never a roster.
+POSSIBLE_UNLINKED_CAP = 8
+
+def _possible_unlinked_rows(rows: list, matches: list) -> list:
+    """ADVISORY sightings, never identification.
+
+    MUST stay byte-for-byte equivalent to possibleUnlinkedRows() in
+    server/vrm/etd/executor.ts: unidentified rows carrying a confirmation
+    number, deduped on the confirmation, capped. An LDAP-keyed journey hit can
+    never identify (one technician owns many journeys), but it is exactly the
+    trace a reservation booked BY HAND in the ETD portal leaves behind (no
+    SHSNX reference, no confirmation on file) — so these ride the search
+    evidence as `possibleUnlinked` and the server's cancel lane refuses to
+    settle terminal while one is in view. They never enter `matches`.
+
+    The `reference` field is deliberately DROPPED: for a hand booking it is
+    free text typed at the branch and can carry a technician's name; the four
+    kept fields are codes.
+    """
+    identified = {m["confirmation"].strip().upper() for m in matches
+                  if m["confirmation"].strip()}
+    seen, out = set(), []
+    for r in rows:
+        conf = r["confirmation"].strip()
+        if not conf:
+            continue
+        key = conf.upper()
+        if key in identified or key in seen:
+            continue
+        seen.add(key)
+        out.append({"confirmation": conf, "branchCode": r["branchCode"],
+                    "date": r["date"], "sipp": r["sipp"]})
+        if len(out) >= POSSIBLE_UNLINKED_CAP:
+            break
+    return out
+
+
+def _merge_possible_unlinked(*lists: list) -> list:
+    """Merge advisory lists from successive searches: first sighting wins, capped.
+
+    Mirrors mergePossibleUnlinked() in server/vrm/etd/executor.ts.
+    """
+    seen, out = set(), []
+    for lst in lists:
+        for r in lst:
+            key = r["confirmation"].strip().upper()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(r)
+            if len(out) >= POSSIBLE_UNLINKED_CAP:
+                return out
+    return out
+
 
 def _reference_tokens(reference) -> list:
     """The reference field split into identity tokens.
@@ -1600,11 +1531,14 @@ def _search_evidence(search: dict) -> dict:
     rowsReturned vs identified is what makes a later misfire diagnosable from
     the ledger ("0 identified of 65 rows" = noisy search, none of it ours;
     "0 of 0" = ETD answered empty). A bare match count says neither.
+    `possibleUnlinked` is advisory, never identification (see
+    _possible_unlinked_rows).
     """
     return {"status": "error" if search["error"] else "ok",
             "criteria": search["criteria"],
             "rowsReturned": search["rowsReturned"],
             "identified": len(search["matches"]),
+            "possibleUnlinked": search["possibleUnlinked"],
             "error": search["error"]}
 
 
@@ -1625,8 +1559,8 @@ def _journey_matches(etd: EtdClient, criteria: str, confirmation: str = "",
         res = etd.search_journeys(criteria=criteria or "", period="Last30Days")
     except Exception as exc:
         print(f"       journey search failed: {str(exc)[:120]}")
-        return {"matches": [], "rowsReturned": 0, "criteria": [criteria],
-                "error": str(exc)[:300]}
+        return {"matches": [], "possibleUnlinked": [], "rowsReturned": 0,
+                "criteria": [criteria], "error": str(exc)[:300]}
     rows: list = []
 
     def walk(node):
@@ -1663,7 +1597,9 @@ def _journey_matches(etd: EtdClient, criteria: str, confirmation: str = "",
             continue
         seen.add(key)
         out.append(r)
-    return {"matches": _identify_journey_rows(out, confirmation, intent_ref),
+    matches = _identify_journey_rows(out, confirmation, intent_ref)
+    return {"matches": matches,
+            "possibleUnlinked": _possible_unlinked_rows(out, matches),
             "rowsReturned": len(out),
             "criteria": [criteria],
             "error": None}
@@ -1735,21 +1671,29 @@ def _do_book(etd: EtdClient, item: dict, template: dict, mapping: dict,
     # what the found (or not-found) journey means; the search meta tells it
     # whether a "none" is authoritative (repair spec §3/§4).
     if item.get("requiresReconcile") or item.get("kind") == "cancel":
+        # A confirmation on file (parsed from a commit OR attached by staff
+        # for a reservation booked by hand in the ETD portal) is a positive
+        # identifier; the claim serves it, so an attach is picked up on the
+        # very next pass.
         known_conf = str(((item.get("reservationEvidence") or {}).get("confirmation")) or "")
         criteria = [known_conf or intent_ref]
         search = _journey_matches(etd, criteria[0], confirmation=known_conf,
                                   intent_ref=intent_ref)
         rows_returned = search["rowsReturned"]
+        possible_unlinked = search["possibleUnlinked"]
         if not search["matches"] and not search["error"]:
             criteria.append(ldap)
             search = _journey_matches(etd, ldap, confirmation=known_conf,
                                       intent_ref=intent_ref)
             rows_returned += search["rowsReturned"]
+            possible_unlinked = _merge_possible_unlinked(possible_unlinked,
+                                                         search["possibleUnlinked"])
         st, body = post("readback", {
             "matches": search["matches"],
             "expected": {"confirmation": known_conf} if known_conf else {},
             "search": _search_evidence({**search, "criteria": criteria,
-                                        "rowsReturned": rows_returned}),
+                                        "rowsReturned": rows_returned,
+                                        "possibleUnlinked": possible_unlinked}),
         })
         print(f"  RECON {label} {'cancel-' if item.get('kind') == 'cancel' else ''}readback "
               f"({len(search['matches'])} identified of {rows_returned} row(s)) "

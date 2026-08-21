@@ -49,6 +49,7 @@ import {
   morningSweep,
   isContractBlockLive,
   recordCancellationEvidence,
+  attachReservationConfirmation,
   getQuietStateFallback,
   setQuietStateFallback,
   QUIET_FALLBACK_SETTING_KEY,
@@ -453,6 +454,28 @@ export function registerCutoverIntentRoutes(router: Router): void {
       res.json(
         await recordCancellationEvidence(intentId, actor(req), {
           etdCancellationRef: req.body?.etdCancellationRef,
+          note: req.body?.note,
+        }),
+      );
+    } catch (e: any) {
+      sendOrchestratorError(res, e);
+    }
+  });
+
+  /**
+   * Staff attaches the confirmation number of a reservation booked BY HAND in
+   * the ETD portal (it carries no SHSNX reference, so readbacks cannot
+   * identify it until its confirmation is on file). After the attach the
+   * normal readback lanes find and settle it. Same live RBAC as the other
+   * mutations; conflicts (a different confirmation already on file) 409.
+   */
+  router.post(`${base}/intents/:intentId/attach-confirmation`, async (req, res) => {
+    try {
+      const intentId = intentIdParam(req);
+      if (await blockNonAdminLiveIntent(req, res, intentId)) return;
+      res.json(
+        await attachReservationConfirmation(intentId, actor(req), {
+          confirmation: req.body?.confirmation,
           note: req.body?.note,
         }),
       );

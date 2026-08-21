@@ -68,6 +68,54 @@ print(br._search_evidence.__module__)
     assert.deepEqual(out.trim().split("\n"), ["book_cutover", "book_cutover"]);
   });
 
+  test("an unmatched confirmation-bearing row is ADVISORY, never a NameError or a match", () => {
+    // Regression: after a bad merge the advisory helpers' shared cap constant
+    // vanished, so the FIRST noisy journey result (an unidentified row that
+    // carries a confirmation — the trace every hand booking leaves) raised
+    // NameError inside the pre-commit guard and blocked legitimate first
+    // bookings. Run the real functions through the real module: the row must
+    // land in possibleUnlinked (reference dropped), matches must stay empty.
+    const out = py(`${PRELUDE}
+rows = [
+  {"confirmation": "HAND99", "reference": "walk-in for a named person", "branchCode": "9912", "date": "2026-09-09", "sipp": "FCAR"},
+  {"confirmation": "", "reference": "SHS QUOTE ONLY", "branchCode": "9913", "date": "2026-09-10", "sipp": "ECAR"},
+]
+import book_cutover as bc
+matches = bc._identify_journey_rows(rows, "", "SHSNX-42")
+adv = bc._possible_unlinked_rows(rows, matches)
+merged = bc._merge_possible_unlinked(adv, adv)
+print(json.dumps({"matches": matches, "adv": adv, "merged": merged}))
+`);
+    const got = JSON.parse(out.trim().split("\n").pop()!);
+    assert.deepEqual(got.matches, []);
+    assert.deepEqual(got.adv, [
+      { confirmation: "HAND99", branchCode: "9912", date: "2026-09-09", sipp: "FCAR" },
+    ]);
+    assert.deepEqual(got.merged, got.adv, "merge is idempotent on one sighting");
+  });
+
+  test("direct-script execution defines every helper before main() can run", () => {
+    // Regression: _merge_possible_unlinked was once stranded AFTER the
+    // \`if __name__ == "__main__": main()\` guard, so importing the module
+    // worked (imports execute the whole file) while running the script
+    // directly raised NameError the first time the LDAP fallback merged
+    // advisory lists. Parse the module top-level: nothing may be defined
+    // below the entry-point guard.
+    const out = py(`
+import ast
+tree = ast.parse(open("scripts/book_cutover.py").read())
+guard = None
+late = []
+for node in tree.body:
+    if isinstance(node, ast.If) and getattr(getattr(node.test, "left", None), "id", "") == "__name__":
+        guard = node.lineno
+    elif guard is not None and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Assign)):
+        late.append(node.lineno)
+print(guard is not None and not late)
+`);
+    assert.equal(out.trim(), "True");
+  });
+
   test("the guard and the lock are actually wired into the booking path", () => {
     // Components that pass their own tests protect nothing if book_one stops
     // calling them. A tripwire on the call sites: the pre-commit guard runs

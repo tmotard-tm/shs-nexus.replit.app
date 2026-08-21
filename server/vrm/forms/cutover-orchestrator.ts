@@ -1620,6 +1620,16 @@ export type QueueItem = {
   executionMode: string;
   ldap: string;
   requiresReconcile: boolean;
+  /**
+   * The confirmation already on file for this intent, if any — parsed from a
+   * commit OR staff-attached for a reservation booked by hand in the ETD
+   * portal (attachReservationConfirmation). Both runners' readback searches
+   * use it as a positive identifier, so it MUST ride every claim: without it
+   * an attached confirmation would never reach the search and a hand-booked
+   * reservation would stay invisible forever. Only the confirmation is
+   * served — the rest of reservation_evidence is server-side ledger.
+   */
+  reservationEvidence: { confirmation: string | null };
   facts: Record<string, unknown>;
   preview: any | null;
 };
@@ -1735,6 +1745,9 @@ export async function claimBookingWork(params: {
             ((openAttempts as any[]).length > 0 ||
               lane === "verify" ||
               ["unknown", "booked_unverified"].includes(String(r.reservation_state ?? "")))),
+        reservationEvidence: {
+          confirmation: strOrNull((r.reservation_evidence as any)?.confirmation),
+        },
         facts: publicFacts(facts),
         preview: r.preview ?? null,
       });
@@ -2625,11 +2638,31 @@ export async function recordBookingPostback(params: {
   // of unrelated quote journeys, and that distinction is exactly what a phantom
   // duplicate looks like in the ledger.
   const rowsReturnedRaw = Number(searchMeta?.rowsReturned);
+  // ADVISORY sightings, never identification (decision, task 2026-08-21): a
+  // journey row that carried a confirmation number but did NOT identify as
+  // this intent's. An LDAP-keyed hit can never identify — one technician owns
+  // many journeys — but it is exactly the trace a reservation booked BY HAND
+  // in the ETD portal leaves (no SHSNX reference, no confirmation on file).
+  // These rows therefore inform the human path (the cancel lane refuses to
+  // settle terminal while one is in view) without ever entering `matches`.
+  const possibleUnlinked: Array<{ confirmation: string; branchCode: string | null; date: string | null; sipp: string | null }> =
+    Array.isArray(searchMeta?.possibleUnlinked)
+      ? (searchMeta.possibleUnlinked as any[])
+          .filter((r) => r && String(r.confirmation ?? "").trim() !== "")
+          .slice(0, 8)
+          .map((r) => ({
+            confirmation: String(r.confirmation).trim(),
+            branchCode: strOrNull(r.branchCode),
+            date: strOrNull(r.date),
+            sipp: strOrNull(r.sipp),
+          }))
+      : [];
   const searchSummary = {
     status: searchOk ? "ok" : String(searchMeta?.status ?? "missing"),
     criteria: criteriaList,
     rowsReturned: Number.isFinite(rowsReturnedRaw) ? rowsReturnedRaw : null,
     identified: matches.length,
+    possibleUnlinked,
     authoritative: criteriaAuthoritative,
     error: strOrNull(searchMeta?.error),
   };
@@ -2682,15 +2715,55 @@ export async function recordBookingPostback(params: {
   }
 
   // Cancel lane (repair spec §4): a cancel_pending_readback intent is waiting
-  // for PROOF before its terminal write. Authoritative-none → cancelled.
-  // Anything found → manual_review: a human cancels in ETD, then records
+  // for PROOF before its terminal write. Authoritative-none → cancelled — but
+  // never SILENTLY: identification requires the intent's SHSNX reference or a
+  // confirmation on file, and a reservation booked by hand in the ETD portal
+  // carries neither, so a bare "none" cannot rule one out. The terminal write
+  // therefore records exactly what was searched and what was seen, and names
+  // the manual-check path. And when the search DID see unidentified journeys
+  // carrying confirmation numbers (possibleUnlinked — the trace a hand
+  // booking leaves), the cancel refuses to settle at all and parks
+  // manual_review: staff either cancel the reservation in ETD and record
+  // cancellation evidence, or attach its confirmation to this intent
+  // (attachReservationConfirmation) and cancel again to re-run the readback.
+  // Anything IDENTIFIED → manual_review: a human cancels in ETD, then records
   // cancellation evidence via recordCancellationEvidence.
   if (intent.status === "cancel_pending_readback") {
     if (verdict.verdict === "none") {
+      if (possibleUnlinked.length > 0) {
+        const confs = possibleUnlinked.slice(0, 3).map((r) => r.confirmation).join(", ");
+        await touchIntent(intent.id, {
+          status: "manual_review",
+          last_error: clipText(
+            `cancel NOT settled: nothing identified as this intent's reservation, but ` +
+              `${possibleUnlinked.length} unidentified journey(s) for ${intent.ldap} carry confirmation number(s)` +
+              ` (${confs}${possibleUnlinked.length > 3 ? ", …" : ""}) — a reservation booked by hand in Enterprise has` +
+              ` no SHSNX reference, so this search cannot identify it. Check ETD for ${intent.ldap}: if one is a live` +
+              ` reservation, cancel it there and record cancellation evidence; or attach its confirmation number to` +
+              ` this intent and cancel again to re-run the readback (${searchNote})`,
+            700,
+          ),
+          claimed_by: null,
+          lease_expires_at: null,
+        }, { statusIn: ["cancel_pending_readback"] });
+        await mirrorCutoverSummary(intent.id);
+        return { accepted: true, status: (await loadIntent(intent.id)).status, readback: verdict };
+      }
+      const settleNote = clipText(
+        `cancel confirmed: authoritative readback identified no reservation for this intent and saw no unlinked` +
+          ` confirmations (${searchNote}). Caveat: a reservation booked by hand in Enterprise carries no SHSNX` +
+          ` reference and would not be identified here — if staff know of one for ${intent.ldap}, it must be` +
+          ` cancelled in the ETD portal directly`,
+        700,
+      );
+      const cancelReadback = JSON.stringify({
+        cancelReadback: { search: searchSummary, readback: verdict, at: new Date().toISOString() },
+      });
       const { rows: c } = await db.execute(sql`
         UPDATE vrm_rental_workflow_intents
         SET status = 'cancelled',
-            last_error = 'cancel confirmed: authoritative readback found no active reservation',
+            last_error = ${settleNote},
+            reservation_evidence = coalesce(reservation_evidence, '{}'::jsonb) || ${cancelReadback}::jsonb,
             claimed_by = NULL, lease_expires_at = NULL, updated_at = now()
         WHERE id = ${intent.id} AND status = 'cancel_pending_readback'
         RETURNING id
@@ -4179,6 +4252,95 @@ export async function recordCancellationEvidence(
   `);
   if (!(rows as any[]).length) {
     throw new OrchestratorError("conflict", "intent moved while recording evidence; reload and retry", 409);
+  }
+  await mirrorCutoverSummary(intentId);
+  return loadIntent(intentId);
+}
+
+/**
+ * Statuses from which a staff-known confirmation may be attached: everywhere
+ * an unidentifiable external reservation is the live problem. Pre-booking
+ * statuses are excluded (nothing external to link yet), and terminal /
+ * verified statuses are excluded (the ledger is settled — a different
+ * confirmation there means a double booking to resolve in ETD, not a field
+ * to overwrite).
+ */
+const CONFIRMATION_ATTACHABLE_STATUSES = [
+  "booking",
+  "booking_unknown",
+  "awaiting_verification",
+  "manual_review",
+  "cancel_pending_readback",
+];
+
+/**
+ * Attach a confirmation number obtained OUTSIDE the workflow — the closure
+ * for the manual-booking residual gap: a reservation booked by hand in the
+ * ETD portal carries no SHSNX reference and no confirmation we have on file,
+ * so no readback can identify it and a cancel would otherwise be told "none".
+ * Once the confirmation is on file it IS a positive identifier: claims serve
+ * it (QueueItem.reservationEvidence), both runners search on it, and
+ * identifyJourneyRows matches it exactly — so the very next readback
+ * (re-cancel from cancel_pending_readback/manual_review, or staff /retry on
+ * the reconcile lane) finds and settles the reservation normally.
+ *
+ * A DIFFERENT confirmation already on file is a hard conflict, never an
+ * overwrite: two confirmations for one intent means a possible double
+ * booking, and silently replacing the first would erase the evidence.
+ */
+export async function attachReservationConfirmation(
+  intentId: number,
+  attachedBy: string,
+  input: { confirmation?: string | null; note?: string | null },
+): Promise<any> {
+  const intent = await loadIntent(intentId);
+  if (!CONFIRMATION_ATTACHABLE_STATUSES.includes(intent.status)) {
+    throw new OrchestratorError(
+      "bad_state",
+      `a confirmation attaches only from ${CONFIRMATION_ATTACHABLE_STATUSES.join(", ")} (status ${intent.status})`,
+      409,
+    );
+  }
+  const confirmation = String(input.confirmation ?? "").trim().toUpperCase();
+  if (!/^[A-Z0-9][A-Z0-9-]{2,31}$/.test(confirmation)) {
+    throw new OrchestratorError(
+      "bad_payload",
+      "confirmation must be 3-32 letters, digits or dashes (as shown in the ETD portal)",
+      400,
+    );
+  }
+  const existing = String(intent.reservation_evidence?.confirmation ?? "").trim();
+  if (existing && existing.toUpperCase() !== confirmation) {
+    throw new OrchestratorError(
+      "conflict",
+      `intent already holds confirmation ${existing}; refusing to overwrite with ${confirmation} — two different` +
+        ` confirmations means a possible double booking. Resolve which reservation is real in ETD first`,
+      409,
+    );
+  }
+  const confirmationAttachment = {
+    confirmation,
+    attachedBy,
+    note: strOrNull(input.note),
+    at: new Date().toISOString(),
+  };
+  const nextStep =
+    intent.status === "cancel_pending_readback"
+      ? "the cancel readback will identify it on the next runner pass"
+      : intent.status === "manual_review"
+        ? "press Cancel to re-run the cancel readback, or Retry to reconcile"
+        : "the next readback will identify it";
+  const { rows } = await db.execute(sql`
+    UPDATE vrm_rental_workflow_intents
+    SET reservation_evidence = coalesce(reservation_evidence, '{}'::jsonb)
+          || ${JSON.stringify({ confirmation, confirmationAttachment })}::jsonb,
+        last_error = ${clipText(`confirmation ${confirmation} attached by ${attachedBy} — ${nextStep}`, 400)},
+        updated_at = now()
+    WHERE id = ${intentId} AND status = ${intent.status}
+    RETURNING id
+  `);
+  if (!(rows as any[]).length) {
+    throw new OrchestratorError("conflict", "intent moved while attaching; reload and retry", 409);
   }
   await mirrorCutoverSummary(intentId);
   return loadIntent(intentId);

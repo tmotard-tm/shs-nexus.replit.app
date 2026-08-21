@@ -843,6 +843,31 @@ export function identifyJourneyRows(rows: JourneyRow[], identity: JourneyIdentit
 }
 
 /**
+ * An ADVISORY sighting, never an identifier: a journey row that carries a
+ * confirmation number but did NOT positively identify as this intent's.
+ *
+ * Decision (task 2026-08-21, closing the manual-booking residual gap): an
+ * LDAP-keyed journey hit IS worth surfacing — it is exactly the shape a
+ * reservation booked by hand in the ETD portal leaves behind (no SHSNX
+ * reference, no confirmation on file) — but it must NEVER become an
+ * identifier again: one technician owns many journeys, and treating "the
+ * search returned rows" as identification is precisely what parked 65
+ * unrelated quote journeys as phantom duplicates. So these rows ride the
+ * search evidence as `possibleUnlinked`, the server treats them as "a human
+ * must look" (cancel lane), and identifyJourneyRows stays untouched.
+ *
+ * The `reference` field is deliberately DROPPED from the advisory shape: for
+ * a hand booking it is free text typed at the branch and can carry a
+ * technician's name; the four kept fields are codes.
+ */
+export type PossibleUnlinkedRow = {
+  confirmation: string;
+  branchCode: string;
+  date: string;
+  sipp: string;
+};
+
+/**
  * The reference field split into identity tokens. Anything that is not part of
  * an SHS reference (whitespace, punctuation) separates; the dash stays inside a
  * token because it is part of the reference itself (SHSNX-42, SHSRQ-7).
@@ -856,6 +881,8 @@ function referenceTokens(reference: string): string[] {
 export type JourneySearch = {
   /** Rows that positively identify as this intent's reservation. */
   matches: JourneyRow[];
+  /** Advisory only: unidentified rows carrying a confirmation number. */
+  possibleUnlinked: PossibleUnlinkedRow[];
   /** Every distinct journey row the search produced, identified or not. */
   rowsReturned: number;
   /** The criteria handed to ETD, in the order they were tried. */
@@ -872,11 +899,13 @@ async function journeyMatches(
   try {
     res = await etd.searchJourneys({ criteria: criteria || "", period: "Last30Days" });
   } catch (err) {
-    return { matches: [], rowsReturned: 0, criteria: [criteria], error: clip(errText(err)) };
+    return { matches: [], possibleUnlinked: [], rowsReturned: 0, criteria: [criteria], error: clip(errText(err)) };
   }
   const rows = extractJourneyRows(res);
+  const matches = identifyJourneyRows(rows, identity);
   return {
-    matches: identifyJourneyRows(rows, identity),
+    matches,
+    possibleUnlinked: possibleUnlinkedRows(rows, matches),
     rowsReturned: rows.length,
     criteria: [criteria],
     error: null,
@@ -894,6 +923,7 @@ function searchEvidence(s: {
   criteria: string[];
   rowsReturned: number;
   matches: JourneyRow[];
+  possibleUnlinked: PossibleUnlinkedRow[];
   error: string | null;
 }): Record<string, unknown> {
   return {
@@ -901,6 +931,9 @@ function searchEvidence(s: {
     criteria: s.criteria,
     rowsReturned: s.rowsReturned,
     identified: s.matches.length,
+    // Advisory, never identification (see PossibleUnlinkedRow): the server's
+    // cancel lane refuses to settle terminal while one of these is in view.
+    possibleUnlinked: s.possibleUnlinked,
     error: s.error,
   };
 }
@@ -1019,20 +1052,26 @@ async function runBook(
   // decides what a found (or not-found) journey means; the search meta tells it whether
   // a "none" is authoritative.
   if (item.requiresReconcile || item.kind === "cancel") {
-    const knownConf = String((item as any).reservationEvidence?.confirmation ?? "");
+    // A confirmation on file (parsed from a commit OR attached by staff for a
+    // reservation booked by hand in the ETD portal) is a positive identifier;
+    // claimBookingWork now serves it on every claim so an attach is picked up
+    // on the very next pass.
+    const knownConf = String(item.reservationEvidence?.confirmation ?? "");
     const identity: JourneyIdentity = { confirmation: knownConf, intentRef };
     const criteria = [knownConf || intentRef];
     let search = await journeyMatches(etd, criteria[0], identity);
     let rowsReturned = search.rowsReturned;
+    let possibleUnlinked = search.possibleUnlinked;
     if (!search.matches.length && !search.error) {
       criteria.push(ldap);
       search = await journeyMatches(etd, ldap, identity);
       rowsReturned += search.rowsReturned;
+      possibleUnlinked = mergePossibleUnlinked(possibleUnlinked, search.possibleUnlinked);
     }
     const body = await post("readback", {
       matches: search.matches,
       expected: knownConf ? { confirmation: knownConf } : {},
-      search: searchEvidence({ ...search, criteria, rowsReturned }),
+      search: searchEvidence({ ...search, criteria, rowsReturned, possibleUnlinked }),
     });
     return result(
       "RECON",
@@ -1502,4 +1541,52 @@ export function runBookingExecutor(
   // Keep the chain alive regardless of outcome; the caller owns the rejection.
   chain = next.catch(() => undefined);
   return next;
+}
+
+/** Advisory rows are a hint, not a dump — enough to check ETD, never a roster. */
+export const POSSIBLE_UNLINKED_CAP = 8;
+
+/**
+ * Unidentified rows carrying a confirmation number, deduped on the
+ * confirmation, capped. MUST stay byte-for-byte equivalent to
+ * _possible_unlinked_rows() in etd-runner/scripts/book_cutover.py — both
+ * runners post into the same readback handler.
+ */
+export function possibleUnlinkedRows(
+  rows: JourneyRow[],
+  matches: JourneyRow[],
+): PossibleUnlinkedRow[] {
+  const identified = new Set(
+    matches.map((m) => m.confirmation.trim().toUpperCase()).filter(Boolean),
+  );
+  const seen = new Set<string>();
+  const out: PossibleUnlinkedRow[] = [];
+  for (const r of rows) {
+    const conf = r.confirmation.trim();
+    if (!conf) continue;
+    const key = conf.toUpperCase();
+    if (identified.has(key) || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ confirmation: conf, branchCode: r.branchCode, date: r.date, sipp: r.sipp });
+    if (out.length >= POSSIBLE_UNLINKED_CAP) break;
+  }
+  return out;
+}
+
+/** Merge advisory lists from successive searches: first sighting wins, capped. */
+export function mergePossibleUnlinked(
+  ...lists: PossibleUnlinkedRow[][]
+): PossibleUnlinkedRow[] {
+  const seen = new Set<string>();
+  const out: PossibleUnlinkedRow[] = [];
+  for (const list of lists) {
+    for (const r of list) {
+      const key = r.confirmation.trim().toUpperCase();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(r);
+      if (out.length >= POSSIBLE_UNLINKED_CAP) return out;
+    }
+  }
+  return out;
 }

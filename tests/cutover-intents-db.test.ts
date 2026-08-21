@@ -50,6 +50,7 @@ import {
   requestBookingInFlight,
   recordBookingPostback,
   recordCancellationEvidence,
+  attachReservationConfirmation,
   reconcileOpenBlockAttempt,
   reconcileOpenBlockAttempts,
   releaseMsg2IfDue,
@@ -1248,6 +1249,16 @@ describe("cancel is TRUE (repair spec §4)", () => {
         payload: { matches: [], search: { status: "ok", criteria: [`SHSNX-${idNone}`] } },
       });
       assert.equal(rbNone.status, "cancelled", "authoritative none = proof ETD holds nothing → terminal cancel");
+      // The settle must be LOUD, never a bare "found nothing": it records what
+      // was searched, and names the residual a hand-booked reservation leaves
+      // (no SHSNX reference → invisible to this search) plus the manual path.
+      const settled = ((await db.execute(sql`
+        SELECT last_error, reservation_evidence FROM vrm_rental_workflow_intents WHERE id = ${idNone}
+      `)).rows as any[])[0];
+      assert.match(String(settled.last_error), /SHSNX-/, "the settle names the criteria searched");
+      assert.match(String(settled.last_error), /booked by hand/i, "the hand-booking caveat is explicit");
+      assert.match(String(settled.last_error), /cancelled in the ETD portal directly/i, "the manual path is named, not implied");
+      assert.ok(settled.reservation_evidence?.cancelReadback?.search, "the search summary is ledgered on the intent");
 
       const rbFound = await recordBookingPostback({
         intentId: idFound, runnerId: "cancel-runner", fencingToken: mineFound!.fencingToken,
@@ -1272,6 +1283,106 @@ describe("cancel is TRUE (repair spec §4)", () => {
       if (prev === undefined) delete process.env[FLAG];
       else process.env[FLAG] = prev;
     }
+  });
+
+  test("a hand-booked reservation: advisory sighting parks the cancel, attaching its confirmation makes it findable", async () => {
+    // The residual gap this pins: a reservation booked BY HAND in the ETD
+    // portal carries no SHSNX reference and no confirmation on file, so the
+    // readback CANNOT identify it (matches stays []). The runner still SAW it
+    // as an unidentified confirmation-bearing journey (possibleUnlinked) —
+    // and on that sighting the cancel must refuse to settle terminal.
+    const prev = process.env[FLAG];
+    try {
+      const ldap = `${LDAP_PREFIX}CXH`;
+      const id = await insertIntent({ execution_mode: "live", ldap, status: "awaiting_verification" });
+      await db.execute(sql`UPDATE vrm_rental_workflow_intents SET reservation_state = 'booked_unverified' WHERE id = ${id}`);
+      await cancelIntent(id, "db-test", "tech declined");
+
+      process.env[FLAG] = "true";
+      let items = await claimBookingWork({ runnerId: "cancel-runner", intentId: id });
+      let mine = items.find((i) => i.intentId === id)!;
+      assert.ok(mine, "cancel lane serves the intent");
+      assert.equal(mine.reservationEvidence.confirmation, null, "nothing on file yet");
+
+      const rb = await recordBookingPostback({
+        intentId: id, runnerId: "cancel-runner", fencingToken: mine.fencingToken,
+        phase: "readback",
+        payload: {
+          matches: [], // NOT identified — advisory rows are never matches
+          search: {
+            status: "ok", criteria: [`SHSNX-${id}`, ldap], rowsReturned: 3, identified: 0,
+            possibleUnlinked: [{ confirmation: "HAND77", branchCode: "9912", date: "2026-08-24", sipp: "ICAR" }],
+          },
+        },
+      });
+      assert.equal(rb.status, "manual_review", "an unlinked confirmation in view must block the terminal settle");
+      const parked = ((await db.execute(sql`
+        SELECT last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+      `)).rows as any[])[0];
+      assert.match(String(parked.last_error), /cancel NOT settled/i);
+      assert.match(String(parked.last_error), /HAND77/, "the sighted confirmation is named for the human");
+      assert.match(String(parked.last_error), /attach its confirmation/i, "the attach path is named, not implied");
+
+      // Staff checks ETD, finds the hand booking, attaches its confirmation.
+      const attached = await attachReservationConfirmation(id, "db-test", { confirmation: "hand77", note: "found in ETD portal" });
+      assert.equal(attached.reservation_evidence?.confirmation, "HAND77", "normalized upper-case");
+      assert.equal(attached.reservation_evidence?.confirmationAttachment?.attachedBy, "db-test");
+      // A DIFFERENT confirmation is a conflict, never an overwrite.
+      await assert.rejects(
+        () => attachReservationConfirmation(id, "db-test", { confirmation: "OTHER99" }),
+        (e: any) => String(e?.code ?? "") === "conflict" && e?.httpStatus === 409,
+        "two confirmations = possible double booking; must 409",
+      );
+
+      // Re-cancel: reservation_state is still booked_unverified → readback lane again.
+      const again = await cancelIntent(id, "db-test", "cancel the hand booking");
+      assert.equal(again.status, "cancel_pending_readback");
+      items = await claimBookingWork({ runnerId: "cancel-runner", intentId: id });
+      mine = items.find((i) => i.intentId === id)!;
+      assert.equal(mine.reservationEvidence.confirmation, "HAND77",
+        "the claim serves the attached confirmation — without this the runner could never search on it");
+
+      // The runner searches on HAND77 and now POSITIVELY identifies the row.
+      const rb2 = await recordBookingPostback({
+        intentId: id, runnerId: "cancel-runner", fencingToken: mine.fencingToken,
+        phase: "readback",
+        payload: {
+          matches: [{ confirmation: "HAND77", reference: "walk-in", branchCode: "9912", date: "2026-08-24", sipp: "ICAR" }],
+          expected: { confirmation: "HAND77" },
+          search: { status: "ok", criteria: ["HAND77"], rowsReturned: 1, identified: 1, possibleUnlinked: [] },
+        },
+      });
+      assert.equal(rb2.status, "manual_review", "found = a human cancels it in ETD, then records evidence");
+      const done = await recordCancellationEvidence(id, "db-test", { etdCancellationRef: "ETD-CXL-880" });
+      assert.equal(done.status, "cancelled");
+    } finally {
+      if (prev === undefined) delete process.env[FLAG];
+      else process.env[FLAG] = prev;
+    }
+  });
+
+  test("attach-confirmation is state- and format-guarded", async () => {
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}CXI`, status: "created" });
+    await assert.rejects(
+      () => attachReservationConfirmation(id, "db-test", { confirmation: "ABC123" }),
+      (e: any) => String(e?.code ?? "") === "bad_state" && e?.httpStatus === 409,
+      "nothing external exists before booking — attach must 409",
+    );
+    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET status = 'manual_review' WHERE id = ${id}`);
+    await assert.rejects(
+      () => attachReservationConfirmation(id, "db-test", { confirmation: "x" }),
+      (e: any) => String(e?.code ?? "") === "bad_payload",
+      "a one-character 'confirmation' is a typo, not evidence",
+    );
+    await assert.rejects(
+      () => attachReservationConfirmation(id, "db-test", { confirmation: "has spaces!" }),
+      (e: any) => String(e?.code ?? "") === "bad_payload",
+    );
+    const ok = await attachReservationConfirmation(id, "db-test", { confirmation: "ABC123" });
+    assert.equal(ok.reservation_evidence?.confirmation, "ABC123");
+    // Idempotent re-attach of the SAME confirmation is fine (case-insensitive).
+    const re = await attachReservationConfirmation(id, "db-test", { confirmation: "abc123" });
+    assert.equal(re.reservation_evidence?.confirmation, "ABC123");
   });
 
   test("cancellation evidence is state- and payload-guarded", async () => {
