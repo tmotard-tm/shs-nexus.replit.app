@@ -179,6 +179,25 @@ ALTER TABLE "fs_truck_maintenance_cycles"
 ALTER TABLE "fs_truck_maintenance_cycles"
   ADD COLUMN IF NOT EXISTS "follow_up_claimed_at" timestamp;
 
+-- The blocked-since clock (Task #674). Set when a cycle FIRST becomes
+-- excluded for a reason, preserved while the same reason recurs sweep after
+-- sweep, reset when the reason changes, cleared when the exclusion clears.
+-- eligibility_checked_at cannot serve this purpose: it is touched on every
+-- sweep, so it always reads "just now" no matter how long the truck has been
+-- stuck in the shop.
+ALTER TABLE "fs_truck_maintenance_cycles"
+  ADD COLUMN IF NOT EXISTS "exclusion_since" timestamp;
+
+-- One-time backfill for cycles already sitting excluded when the column
+-- arrives: anchor on opened_at. For the population this task exists for
+-- (blocked at open, re-excluded every sweep since) that IS the true
+-- blocked-since; for the rare cycle that was eligible first and excluded
+-- later it can only OVERSTATE the age, which errs on the side of flagging.
+-- Guarded on IS NULL so it runs exactly once per row.
+UPDATE "fs_truck_maintenance_cycles"
+   SET "exclusion_since" = "opened_at"
+ WHERE "status" = 'excluded' AND "closed_at" IS NULL AND "exclusion_since" IS NULL;
+
 CREATE TABLE IF NOT EXISTS "fs_truck_maintenance_settings" (
   "key" text PRIMARY KEY,
   "value" text,

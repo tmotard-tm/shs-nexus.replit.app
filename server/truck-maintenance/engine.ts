@@ -62,6 +62,8 @@ import {
   getMaintenanceActivityType,
   getMaintenanceApproachingMiles,
   getMaintenanceBookingLeadDays,
+  getMaintenanceDigestRecipients,
+  getMaintenanceStaleExclusionDays,
   isMaintenanceBookingLive,
   isMaintenanceSmsLive,
 } from "./constants";
@@ -194,6 +196,19 @@ export function isWindowStale(
   return String(windowEnd).slice(0, 10) < today;
 }
 
+/**
+ * Whole days a cycle has been blocked for its current reason. null when the
+ * clock is unset (never excluded, or a pre-migration row not yet backfilled).
+ */
+export function computeBlockedDays(
+  since: Date | string | null | undefined,
+  now: Date = new Date(),
+): number | null {
+  if (!since) return null;
+  const d = new Date(since as any);
+  if (Number.isNaN(d.getTime())) return null;
+  return Math.max(0, Math.floor((now.getTime() - d.getTime()) / 86_400_000));
+}
 /* ------------------------------------------------------------------------ *
  * Settings (kill switch + daily watermark)
  * ------------------------------------------------------------------------ */
@@ -201,6 +216,7 @@ export function isWindowStale(
 export const SETTING_PAUSED = "cycle_open_paused";
 export const SETTING_LAST_SWEEP_DATE = "last_sweep_date_et";
 
+export const SETTING_LAST_DIGEST_DATE = "last_stale_digest_date_et";
 export async function getSetting(key: string): Promise<string | null> {
   const r: any = await db.execute(sql`
     SELECT value FROM fs_truck_maintenance_settings WHERE key = ${key} LIMIT 1
@@ -565,6 +581,14 @@ export interface CycleRow {
   odometer_date: string | null;
   exclusion_reason: string | null;
   exclusion_detail: string | null;
+  /**
+   * The blocked-since clock (Task #674): when this cycle FIRST became
+   * excluded for the CURRENT reason. Preserved while the same reason recurs
+   * sweep after sweep; reset on a reason change; cleared when the exclusion
+   * clears. Distinct from eligibility_checked_at, which is touched on every
+   * sweep and therefore always reads "just now".
+   */
+  exclusion_since: Date | string | null;
   text_status: string | null;
   text_body: string | null;
   text_message_id: string | null;
@@ -646,19 +670,28 @@ export async function openCycle(args: {
   return row?.id ?? null;
 }
 
-async function markExcluded(cycle: CycleRow, code: string, detail: string | null): Promise<void> {
+/** Exported for the DB test suite — the sweep and retry paths are the callers. */
+export async function markExcluded(cycle: CycleRow, code: string, detail: string | null): Promise<void> {
   await db.execute(sql`
     UPDATE fs_truck_maintenance_cycles
        SET status = 'excluded',
            exclusion_reason = ${code},
            exclusion_detail = ${detail},
+           -- The blocked-since clock: keeps its original value while the SAME
+           -- reason recurs on every sweep, restarts when the reason changes.
+           exclusion_since = CASE
+             WHEN status = 'excluded' AND exclusion_reason = ${code} AND exclusion_since IS NOT NULL
+             THEN exclusion_since
+             ELSE now()
+           END,
            eligibility_checked_at = now(),
            updated_at = now()
      WHERE id = ${cycle.id} AND closed_at IS NULL
   `);
 }
 
-async function clearExclusion(cycle: CycleRow, assignment: {
+/** Exported for the DB test suite — the sweep and retry paths are the callers. */
+export async function clearExclusion(cycle: CycleRow, assignment: {
   ldap: string | null; name: string | null; district: string | null;
 }): Promise<void> {
   // enterprise_id = ldap: the TPMS ldapId IS the Enterprise ID.
@@ -667,6 +700,12 @@ async function clearExclusion(cycle: CycleRow, assignment: {
        SET status = CASE WHEN status = 'excluded' THEN 'open' ELSE status END,
            exclusion_reason = NULL,
            exclusion_detail = NULL,
+           -- The comms-gate clock survives eligibility clearing: eligibility
+           -- passing says the TRUCK is unblocked, but the text gate that set
+           -- the clock has not been re-tested yet. The text step clears it on
+           -- a real send (or restores/preserves it on another refusal); any
+           -- other exclusion reason resets on the next markExcluded anyway.
+           exclusion_since = CASE WHEN exclusion_reason = 'comms_gate' THEN exclusion_since ELSE NULL END,
            ldap = ${assignment.ldap},
            enterprise_id = ${assignment.ldap},
            tech_name = ${assignment.name},
@@ -705,7 +744,8 @@ export interface TextOutcome {
   detail: string | null;
 }
 
-async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): Promise<TextOutcome> {
+/** Exported for the DB test suite — the sweep (processCycle) is the caller. */
+export async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): Promise<TextOutcome> {
   const body = buildMaintenanceMessage(ldap, truckNumber);
   const live = isMaintenanceSmsLive();
 
@@ -745,7 +785,7 @@ async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): 
        SET text_status = 'pending', text_body = ${body},
            text_claimed_at = now(), updated_at = now()
      WHERE id = ${cycle.id} AND closed_at IS NULL AND texted_at IS NULL
-       AND (text_status IS NULL OR text_status IN ('dry_run', 'failed'))
+       AND (text_status IS NULL OR text_status IN ('dry_run', 'failed', 'skipped'))
      RETURNING id
   `);
   if ((claim.rows ?? claim ?? []).length === 0) {
@@ -818,6 +858,9 @@ async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): 
              text_message_id = ${result.messageId ?? result.queueId ?? null},
              text_detail = ${result.reason ?? null},
              text_claimed_at = NULL,
+             -- The text really went out: the comms-gate blocked-since clock
+             -- (preserved through clearExclusion) is genuinely over.
+             exclusion_since = NULL,
              texted_at = now(),
              trigger_date = ${triggerDate}::date,
              booking_window_start = ${triggerDate}::date,
@@ -841,6 +884,11 @@ async function runTextStep(cycle: CycleRow, ldap: string, truckNumber: string): 
            text_claimed_at = NULL,
            exclusion_reason = 'comms_gate',
            exclusion_detail = ${detail},
+           -- clearExclusion deliberately preserved a prior comms-gate clock on
+           -- this row (see clearExclusion), so "blocked since" survives the
+           -- clear→re-block cycle of consecutive sweeps. Only a first-time
+           -- refusal starts a new clock.
+           exclusion_since = COALESCE(exclusion_since, now()),
            updated_at = now()
      WHERE id = ${cycle.id} AND closed_at IS NULL
   `);
@@ -1541,6 +1589,31 @@ export async function retryCycle(
 }
 
 /* ------------------------------------------------------------------------ *
+ * Long-blocked cycle digest (Task #674)
+ *
+ * The overdue section on the monitoring screen only helps someone who opens
+ * the page. The digest is the push half: once a day (riding the daily sweep),
+ * every cycle blocked past the threshold is emailed to the configured
+ * recipients — with how far past its interval the truck has now drifted.
+ * ------------------------------------------------------------------------ */
+
+export interface StaleBlockedCycle {
+  id: number;
+  truck_number: string;
+  ldap: string | null;
+  enterprise_id: string | null;
+  tech_name: string | null;
+  exclusion_reason: string;
+  exclusion_detail: string | null;
+  exclusion_since: Date | string;
+  blocked_days: number;
+  odometer_at_trigger: number;
+  /** Current reconciled reading, when the vehicle cache still has one. */
+  current_odometer: number | null;
+  /** current_odometer - odometer_at_trigger; null when no current reading. */
+  miles_past_trigger: number | null;
+}
+/* ------------------------------------------------------------------------ *
  * Scheduling
  * ------------------------------------------------------------------------ */
 
@@ -1579,6 +1652,18 @@ export async function runDailySweep(opts: {
       + `${summary.opened} opened, ${summary.texted} texted, ${summary.booked} booked, `
       + `${summary.excluded} excluded, ${summary.failed} failed`,
     );
+    // The long-blocked digest rides the daily sweep. A digest failure must
+    // never fail the sweep — the pipeline work above is the important thing.
+    try {
+      const digest = await sendStaleBlockedDigestIfDue({ todayET, trigger: opts.trigger });
+      console.log(
+        digest.sent
+          ? `[TruckMaint] stale-cycle digest sent (${digest.count} cycles): ${digest.reason}`
+          : `[TruckMaint] stale-cycle digest not sent: ${digest.reason}`,
+      );
+    } catch (err: any) {
+      console.error(`[TruckMaint] stale-cycle digest failed: ${err?.message || err}`);
+    }
     return { ran: true, reason: decision.reason, summary };
   } finally {
     sweepInFlight = false;
@@ -1922,6 +2007,7 @@ async function adoptTextEvidence(cycleId: number, hit: TextEvidence, detail: str
            text_message_id = COALESCE(text_message_id, ${hit.id}),
            text_detail = ${detail},
            text_claimed_at = NULL,
+           exclusion_since = NULL,
            texted_at = ${hit.created_at},
            trigger_date = COALESCE(trigger_date, ${triggerDate}::date),
            booking_window_start = COALESCE(booking_window_start, ${triggerDate}::date),
@@ -2565,4 +2651,134 @@ async function findTextEvidence(ldap: string, body: string): Promise<TextEvidenc
      LIMIT 1
   `);
   return ((evidence as any).rows ?? [])[0] ?? null;
+}
+
+/**
+ * Send the digest at most once per ET day, and only when there is something
+ * to say. Recipients come from TRUCK_MAINTENANCE_DIGEST_EMAILS; unset =
+ * disabled, stated in the returned reason rather than silently skipped.
+ * The day is claimed only AFTER a successful send: a failed send retries on
+ * the next forced sweep rather than losing the day.
+ */
+export async function sendStaleBlockedDigestIfDue(opts: {
+  todayET: string;
+  trigger: string;
+}): Promise<{ sent: boolean; reason: string; count: number }> {
+  const recipients = getMaintenanceDigestRecipients();
+  if (recipients.length === 0) {
+    return { sent: false, reason: "TRUCK_MAINTENANCE_DIGEST_EMAILS not configured — digest disabled", count: 0 };
+  }
+  const last = await getSetting(SETTING_LAST_DIGEST_DATE);
+  if (last === opts.todayET) {
+    return { sent: false, reason: `digest already sent today (${opts.todayET} ET)`, count: 0 };
+  }
+  const thresholdDays = getMaintenanceStaleExclusionDays();
+  const rows = await listStaleBlockedCycles(thresholdDays);
+  const digest = buildStaleBlockedDigest(rows, thresholdDays);
+  if (!digest) {
+    return { sent: false, reason: `no cycles blocked more than ${thresholdDays} days`, count: 0 };
+  }
+  const { sendEmail } = await import("../email-service");
+  const result = await sendEmail({
+    to: recipients[0],
+    ...(recipients.length > 1 ? { cc: recipients.slice(1) } : {}),
+    from: "",
+    subject: digest.subject,
+    text: digest.text,
+  });
+  if (!result.success) {
+    return { sent: false, reason: `digest email failed: ${result.error ?? "unknown error"}`, count: rows.length };
+  }
+  await setSetting(SETTING_LAST_DIGEST_DATE, opts.todayET, opts.trigger);
+  return { sent: true, reason: `digest sent to ${recipients.length} recipient(s)`, count: rows.length };
+}
+
+/** Pure formatter, so the digest content is unit-testable without a mailbox. */
+export function buildStaleBlockedDigest(
+  rows: StaleBlockedCycle[],
+  thresholdDays: number,
+): { subject: string; text: string } | null {
+  if (rows.length === 0) return null;
+  const subject =
+    `Truck Maintenance: ${rows.length} cycle${rows.length === 1 ? "" : "s"} `
+    + `blocked more than ${thresholdDays} days`;
+  const lines = rows.map((r) => {
+    const who = r.tech_name || r.ldap || "no technician";
+    const drift = r.miles_past_trigger != null && r.miles_past_trigger > 0
+      ? `now ${r.current_odometer?.toLocaleString()} mi — ${r.miles_past_trigger.toLocaleString()} mi past the trigger reading`
+      : r.current_odometer != null
+        ? `current reading ${r.current_odometer.toLocaleString()} mi`
+        : "no current odometer reading";
+    return (
+      `- Truck ${r.truck_number} (${who}): blocked ${r.blocked_days} days — `
+      + `${r.exclusion_reason}${r.exclusion_detail ? ` (${r.exclusion_detail})` : ""}; `
+      + `triggered at ${r.odometer_at_trigger.toLocaleString()} mi, ${drift}`
+    );
+  });
+  const text =
+    `These maintenance cycles have been blocked by the same reason for more than `
+    + `${thresholdDays} days. They will not proceed until the block clears — each one `
+    + `needs a human to chase the shop, the assignment, or the data:\n\n`
+    + lines.join("\n")
+    + `\n\nSee the Truck Maintenance monitoring screen for the full detail.`;
+  return { subject, text };
+}
+
+/**
+ * Every open cycle blocked by the same reason for >= thresholdDays, oldest
+ * first, enriched with the truck's CURRENT reconciled odometer so a human can
+ * see how far past its interval the truck has drifted while stuck.
+ *
+ * The lateral join canonicalizes the Holman number in SQL the same way
+ * toCanonical does (strip leading zeros) — cycles store canonical numbers,
+ * the vehicle cache stores display numbers, and legacy rows exist in both
+ * formats, so the highest plausible reading wins.
+ */
+export async function listStaleBlockedCycles(
+  thresholdDays: number = getMaintenanceStaleExclusionDays(),
+): Promise<StaleBlockedCycle[]> {
+  const r: any = await db.execute(sql`
+    SELECT c.id, c.truck_number, c.ldap, c.enterprise_id, c.tech_name,
+           c.exclusion_reason, c.exclusion_detail, c.exclusion_since,
+           FLOOR(EXTRACT(EPOCH FROM (now() - c.exclusion_since)) / 86400)::int AS blocked_days,
+           c.odometer_at_trigger,
+           cur.odometer AS current_odometer,
+           (cur.odometer - c.odometer_at_trigger) AS miles_past_trigger
+      FROM fs_truck_maintenance_cycles c
+      LEFT JOIN LATERAL (
+        SELECT h.odometer
+          FROM holman_vehicles_cache h
+         WHERE COALESCE(NULLIF(regexp_replace(TRIM(h.holman_vehicle_number), '^0+', ''), ''), '0') = c.truck_number
+           AND h.odometer IS NOT NULL
+           AND h.odometer BETWEEN ${ODOMETER_MIN} AND ${ODOMETER_MAX}
+           AND COALESCE(h.is_active, true) = true
+         ORDER BY h.odometer DESC
+         LIMIT 1
+      ) cur ON true
+     WHERE c.closed_at IS NULL
+       AND c.status = 'excluded'
+       AND c.exclusion_since IS NOT NULL
+       AND c.exclusion_since <= now() - (${thresholdDays}::text || ' days')::interval
+     ORDER BY c.exclusion_since ASC
+  `);
+  return ((r.rows ?? r ?? []) as any[]).map((row) => ({
+    ...row,
+    odometer_at_trigger: Number(row.odometer_at_trigger),
+    current_odometer: row.current_odometer == null ? null : Number(row.current_odometer),
+    miles_past_trigger: row.miles_past_trigger == null ? null : Number(row.miles_past_trigger),
+    blocked_days: Number(row.blocked_days),
+  }));
+}
+
+/**
+ * True when a cycle has been blocked by the same reason for at least the
+ * configured threshold — the "overdue / needs a human" flag (Task #674).
+ */
+export function isExclusionStale(
+  since: Date | string | null | undefined,
+  thresholdDays: number = getMaintenanceStaleExclusionDays(),
+  now: Date = new Date(),
+): boolean {
+  const days = computeBlockedDays(since, now);
+  return days !== null && days >= thresholdDays;
 }

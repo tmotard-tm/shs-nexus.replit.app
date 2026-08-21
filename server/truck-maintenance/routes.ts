@@ -22,9 +22,12 @@ import {
   MAINTENANCE_BLOCK_DURATION_MIN,
   MAINTENANCE_TRIGGER_MILES,
   MAINTENANCE_WINDOW_DAYS,
+  ODOMETER_MAX,
+  ODOMETER_MIN,
   getMaintenanceActivityType,
   getMaintenanceApproachingMiles,
   getMaintenanceBookingLeadDays,
+  getMaintenanceStaleExclusionDays,
   isMaintenanceActivityTypeConfirmed,
   isMaintenanceBookingLive,
   isMaintenanceSmsLive,
@@ -37,6 +40,7 @@ import {
   getFleetRoster,
   getMissingOdometerReport,
   isCycleOpeningPaused,
+  listStaleBlockedCycles,
   type MissingOdometerCounts,
   recordConfirmedSlot,
   retryCycle,
@@ -105,9 +109,19 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
       ]);
       const byStatus: Record<string, number> = {};
       for (const row of ((counts as any).rows ?? [])) byStatus[row.status] = row.n;
-      const bookedTotal: any = await db.execute(sql`
-        SELECT COUNT(*)::int AS n FROM fs_truck_maintenance_cycles WHERE status = 'booked'
-      `);
+      const staleDays = getMaintenanceStaleExclusionDays();
+      const [bookedTotal, staleBlocked]: any[] = await Promise.all([
+        db.execute(sql`
+          SELECT COUNT(*)::int AS n FROM fs_truck_maintenance_cycles WHERE status = 'booked'
+        `),
+        db.execute(sql`
+          SELECT COUNT(*)::int AS n
+            FROM fs_truck_maintenance_cycles
+           WHERE closed_at IS NULL AND status = 'excluded'
+             AND exclusion_since IS NOT NULL
+             AND exclusion_since <= now() - (${staleDays}::text || ' days')::interval
+        `),
+      ]);
 
       // Trucks the sweep cannot see (no usable odometer). Isolated so a
       // failure here degrades ONE number on the card — visibly, with the
@@ -135,6 +149,8 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
         openByStatus: byStatus,
         openTotal: Object.values(byStatus).reduce((a, b) => a + b, 0),
         bookedTotal: ((bookedTotal as any).rows ?? [])[0]?.n ?? 0,
+        staleExclusionDays: staleDays,
+        staleBlockedCount: ((staleBlocked as any).rows ?? [])[0]?.n ?? 0,
         exclusionLabels: EXCLUSION_LABELS,
         missingOdometer,
         missingOdometerError,
@@ -152,33 +168,82 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
       const limit = Math.min(Math.max(Number.parseInt(String(req.query.limit ?? "200"), 10) || 200, 1), 1000);
       const openOnly = String(req.query.openOnly ?? "") === "true";
 
+      const staleDays = getMaintenanceStaleExclusionDays();
+      // The lateral join enriches each cycle with the truck's CURRENT
+      // reconciled odometer (Task #674): a long-blocked truck keeps driving,
+      // and staff need to see how far past its interval it has drifted — not
+      // just the reading frozen at trigger time. Numbers are canonicalized in
+      // SQL the same way toCanonical does (strip leading zeros) because
+      // cycles store canonical numbers while the vehicle cache stores display
+      // numbers, in more than one legacy format.
       const rows: any = await db.execute(sql`
-        SELECT id, truck_number, vin, ldap, enterprise_id, tech_name, district, status,
-               odometer_at_trigger, watermark_at_trigger, miles_since_watermark,
-               odometer_source, odometer_date, exclusion_reason, exclusion_detail,
-               eligibility_checked_at, text_status, text_body, text_detail,
-               text_claimed_at, texted_at,
-               to_char(trigger_date, 'YYYY-MM-DD') AS trigger_date,
-               to_char(booking_window_start, 'YYYY-MM-DD') AS booking_window_start,
-               to_char(booking_window_end, 'YYYY-MM-DD') AS booking_window_end,
-               booking_due_at, booking_date, booking_status, booking_project_name,
-               booking_project_id, booking_detail, booking_claimed_at, booking_attempted_at,
-               booking_test_status, booking_test_detail, booking_test_project_name, booking_test_at,
-               booked_at, confirmation_status,
-               to_char(confirmed_slot_date::date, 'YYYY-MM-DD') AS confirmed_slot_date,
-               confirmed_slot_time,
-               follow_up_claimed_at, follow_up_sent_at, follow_up_message_id, follow_up_detail,
-               attempts, last_error,
-               opened_at, closed_at, updated_at
-          FROM fs_truck_maintenance_cycles
-         WHERE (${status} = '' OR status = ${status})
-           AND (${openOnly} = false OR closed_at IS NULL)
-         ORDER BY (closed_at IS NULL) DESC, opened_at DESC
+        SELECT c.id, c.truck_number, c.vin, c.ldap, c.enterprise_id, c.tech_name, c.district, c.status,
+               c.odometer_at_trigger, c.watermark_at_trigger, c.miles_since_watermark,
+               c.odometer_source, c.odometer_date, c.exclusion_reason, c.exclusion_detail,
+               c.eligibility_checked_at, c.exclusion_since,
+               CASE WHEN c.exclusion_since IS NOT NULL AND c.status = 'excluded' AND c.closed_at IS NULL
+                    THEN FLOOR(EXTRACT(EPOCH FROM (now() - c.exclusion_since)) / 86400)::int
+                    ELSE NULL END AS blocked_days,
+               cur.odometer AS current_odometer,
+               (cur.odometer - c.odometer_at_trigger) AS miles_past_trigger,
+               c.text_status, c.text_body, c.text_detail,
+               c.text_claimed_at, c.texted_at,
+               to_char(c.trigger_date, 'YYYY-MM-DD') AS trigger_date,
+               to_char(c.booking_window_start, 'YYYY-MM-DD') AS booking_window_start,
+               to_char(c.booking_window_end, 'YYYY-MM-DD') AS booking_window_end,
+               c.booking_due_at, c.booking_date, c.booking_status, c.booking_project_name,
+               c.booking_project_id, c.booking_detail, c.booking_claimed_at, c.booking_attempted_at,
+               c.booking_test_status, c.booking_test_detail, c.booking_test_project_name, c.booking_test_at,
+               c.booked_at, c.confirmation_status,
+               to_char(c.confirmed_slot_date::date, 'YYYY-MM-DD') AS confirmed_slot_date,
+               c.confirmed_slot_time,
+               c.follow_up_claimed_at, c.follow_up_sent_at, c.follow_up_message_id, c.follow_up_detail,
+               c.attempts, c.last_error,
+               c.opened_at, c.closed_at, c.updated_at
+          FROM fs_truck_maintenance_cycles c
+          LEFT JOIN LATERAL (
+            SELECT h.odometer
+              FROM holman_vehicles_cache h
+             WHERE COALESCE(NULLIF(regexp_replace(TRIM(h.holman_vehicle_number), '^0+', ''), ''), '0') = c.truck_number
+               AND h.odometer IS NOT NULL
+               AND h.odometer BETWEEN ${ODOMETER_MIN} AND ${ODOMETER_MAX}
+               AND COALESCE(h.is_active, true) = true
+             ORDER BY h.odometer DESC
+             LIMIT 1
+          ) cur ON true
+         WHERE (${status} = '' OR c.status = ${status})
+           AND (${openOnly} = false OR c.closed_at IS NULL)
+         ORDER BY (c.closed_at IS NULL) DESC, c.opened_at DESC
          LIMIT ${limit}
       `);
-      res.json({ cycles: (rows.rows ?? []) });
+      const cycles = ((rows.rows ?? []) as any[]).map((row) => ({
+        ...row,
+        current_odometer: row.current_odometer == null ? null : Number(row.current_odometer),
+        miles_past_trigger: row.miles_past_trigger == null ? null : Number(row.miles_past_trigger),
+        blocked_days: row.blocked_days == null ? null : Number(row.blocked_days),
+        stale_blocked: row.blocked_days != null && Number(row.blocked_days) >= staleDays,
+      }));
+      res.json({ cycles, staleExclusionDays: staleDays });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "cycle list failed" });
+    }
+  });
+
+  /**
+   * The COMPLETE overdue set — independent of the capped/ordered cycle list.
+   * The general /cycles list is limited (default 200, newest first), so the
+   * oldest long-blocked cycles — the exact population this surface exists for
+   * (Task #674) — would silently fall out of a client-side derivation once the
+   * table grows. This endpoint has no cap and orders oldest block first.
+   */
+  app.get("/truck-maintenance/stale-blocked", requireStaff, async (_req, res) => {
+    try {
+      await initTruckMaintenanceSchema();
+      const staleDays = getMaintenanceStaleExclusionDays();
+      const cycles = await listStaleBlockedCycles(staleDays);
+      res.json({ cycles, staleExclusionDays: staleDays });
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "stale-blocked list failed" });
     }
   });
 

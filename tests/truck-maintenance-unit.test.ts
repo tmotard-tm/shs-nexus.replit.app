@@ -20,6 +20,8 @@ import {
   getMaintenanceActivityType,
   getMaintenanceApproachingMiles,
   getMaintenanceBookingLeadDays,
+  getMaintenanceDigestRecipients,
+  getMaintenanceStaleExclusionDays,
   isMaintenanceActivityTypeConfirmed,
   isMaintenanceBookingLive,
   isMaintenanceSmsLive,
@@ -32,12 +34,15 @@ import {
 } from "../server/truck-maintenance/eligibility";
 import {
   TEXT_CLAIM_STALE_MS,
+  buildStaleBlockedDigest,
   classifyBookingResult,
   classifyMissingOdometer,
   classifyTextClaim,
+  computeBlockedDays,
   computeBookingDueAt,
   computeWatermarkAdvance,
   computeWindowEnd,
+  isExclusionStale,
   isPlausibleOdometer,
   isWindowStale,
   partitionMissingOdometerRows,
@@ -802,4 +807,100 @@ test("partitionMissingOdometerRows: a 5-digit BYOV truck is BYOV even though pad
   );
   assert.equal(counts.byov, 1);
   assert.equal(trucks.length, 0);
+});
+
+/* ------------------------------------------------- stale exclusions (#674) */
+
+test("getMaintenanceStaleExclusionDays defaults to 14 and clamps garbage", () => {
+  const saved = process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS;
+  try {
+    delete process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS;
+    assert.equal(getMaintenanceStaleExclusionDays(), 14);
+    process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS = "21";
+    assert.equal(getMaintenanceStaleExclusionDays(), 21);
+    // Out of range or unparsable → the default, never a surprise threshold.
+    process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS = "0";
+    assert.equal(getMaintenanceStaleExclusionDays(), 14);
+    process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS = "9999";
+    assert.equal(getMaintenanceStaleExclusionDays(), 14);
+    process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS = "soon";
+    assert.equal(getMaintenanceStaleExclusionDays(), 14);
+  } finally {
+    if (saved === undefined) delete process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS;
+    else process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS = saved;
+  }
+});
+
+test("digest recipients: unset means DISABLED, never a guessed default", () => {
+  const saved = process.env.TRUCK_MAINTENANCE_DIGEST_EMAILS;
+  try {
+    delete process.env.TRUCK_MAINTENANCE_DIGEST_EMAILS;
+    assert.deepEqual(getMaintenanceDigestRecipients(), []);
+    process.env.TRUCK_MAINTENANCE_DIGEST_EMAILS = " a@x.com, b@y.com ,not-an-email,, ";
+    assert.deepEqual(getMaintenanceDigestRecipients(), ["a@x.com", "b@y.com"]);
+  } finally {
+    if (saved === undefined) delete process.env.TRUCK_MAINTENANCE_DIGEST_EMAILS;
+    else process.env.TRUCK_MAINTENANCE_DIGEST_EMAILS = saved;
+  }
+});
+
+test("computeBlockedDays: whole days, never negative, null-safe", () => {
+  const now = new Date("2026-08-21T12:00:00Z");
+  assert.equal(computeBlockedDays(null, now), null);
+  assert.equal(computeBlockedDays(undefined, now), null);
+  assert.equal(computeBlockedDays("not a date", now), null);
+  assert.equal(computeBlockedDays("2026-08-21T11:00:00Z", now), 0);
+  assert.equal(computeBlockedDays("2026-08-07T12:00:00Z", now), 14);
+  assert.equal(computeBlockedDays("2026-03-10T00:00:00Z", now), 164, "the March truck reads five months");
+  // A clock-skewed future timestamp reads 0, not negative.
+  assert.equal(computeBlockedDays("2026-08-22T12:00:00Z", now), 0);
+});
+
+test("isExclusionStale fires AT the threshold, not before", () => {
+  const now = new Date("2026-08-21T12:00:00Z");
+  assert.equal(isExclusionStale("2026-08-08T12:00:00Z", 14, now), false, "13 days is not stale");
+  assert.equal(isExclusionStale("2026-08-07T12:00:00Z", 14, now), true, "exactly 14 days is stale");
+  assert.equal(isExclusionStale(null, 14, now), false, "no clock = not stale, never a false alarm");
+});
+
+test("the digest is null when nothing is blocked — no empty emails", () => {
+  assert.equal(buildStaleBlockedDigest([], 14), null);
+});
+
+test("the digest names the truck, the reason, the age, and the odometer drift", () => {
+  const digest = buildStaleBlockedDigest([
+    {
+      id: 1,
+      truck_number: "61385",
+      ldap: "jdoe",
+      tech_name: "Jane Doe",
+      exclusion_reason: "ams_blocked",
+      exclusion_detail: "Waiting Estimate From Shop",
+      exclusion_since: "2026-03-10T00:00:00Z",
+      blocked_days: 164,
+      odometer_at_trigger: 105_500,
+      current_odometer: 112_300,
+      miles_past_trigger: 6_800,
+    },
+    {
+      id: 2,
+      truck_number: "88144",
+      ldap: null,
+      tech_name: null,
+      exclusion_reason: "unassigned",
+      exclusion_detail: null,
+      exclusion_since: "2026-08-01T00:00:00Z",
+      blocked_days: 20,
+      odometer_at_trigger: 55_500,
+      current_odometer: null,
+      miles_past_trigger: null,
+    },
+  ], 14)!;
+  assert.ok(digest, "two blocked cycles produce a digest");
+  assert.match(digest.subject, /2 cycles blocked more than 14 days/);
+  assert.match(digest.text, /Truck 61385 \(Jane Doe\): blocked 164 days/);
+  assert.match(digest.text, /Waiting Estimate From Shop/);
+  assert.match(digest.text, /6,800 mi past the trigger reading/, "the drift since trigger is spelled out");
+  assert.match(digest.text, /Truck 88144 \(no technician\)/);
+  assert.match(digest.text, /no current odometer reading/, "a missing reading is stated, not hidden");
 });

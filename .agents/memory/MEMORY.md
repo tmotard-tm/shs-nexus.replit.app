@@ -129,5 +129,6 @@
 - [Odometer cycle & dry-run semantics](odometer-cycle-dry-run-semantics.md) — seed-never-fire on first sight, forward-only watermark, and NEVER stamp sent_at on a dry run or arming the gate goes silently dead.
 - [Holman harvest 401 intermittent](holman-harvest-401-intermittent.md) — prod TabId-401 with valid creds/binary = portal-side transient; triage via holman_po_sync_meta + cron-refresh curl, not (often-empty) deploy logs.
 - [Approved pickup time → ETD booking](request-pickup-time-flow.md) — quote-feeding request-row edits must invalidateRequestPreviews (commit books the stored preview); clear etd_error on accepted retry; preview_failed is a code, not a status.
+- [Blocked-since clocks](blocked-since-clocks.md) — re-evaluated-every-sweep states need their own since column preserved through clear→re-mark round trips; "complete set" surfaces need an uncapped read, never the capped list.
 - [jsdom component-test recipe](jsdom-component-test-recipe.md) — render real client pages under node:test via tsx --tsconfig tsconfig.dom-tests.json (jsx react-jsx), generic window-constructor copy, fetch route table, toast probe.
 - [Radix Select async-prefill wipe](radix-select-async-prefill-wipe.md) — bubble-input coerces a controlled value through a native select; setting a value before its async options load fires change("") and erases it (real browsers too).

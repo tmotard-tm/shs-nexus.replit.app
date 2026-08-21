@@ -66,6 +66,32 @@ export function getMaintenanceApproachingMiles(): number {
   return 500;
 }
 
+/**
+ * How long a cycle may sit excluded for the SAME reason before it is flagged
+ * as "overdue — needs a human" (Task #674). The re-evaluate-every-sweep loop
+ * is correct behavior, but it has no clock: live sampling found trucks
+ * "Waiting Estimate From Shop" for five months while quietly running further
+ * past their service interval. Default 14 days; range clamped 1–365.
+ */
+export function getMaintenanceStaleExclusionDays(): number {
+  const raw = Number.parseInt((process.env.TRUCK_MAINTENANCE_STALE_EXCLUSION_DAYS ?? "").trim(), 10);
+  if (Number.isFinite(raw) && raw >= 1 && raw <= 365) return raw;
+  return 14;
+}
+
+/**
+ * Recipients for the daily long-blocked-cycles digest email. Comma-separated
+ * addresses; empty/unset = digest disabled (the sweep logs that it is off).
+ * Deliberately an explicit opt-in: an unconfigured deploy must never guess at
+ * who should be emailed.
+ */
+export function getMaintenanceDigestRecipients(): string[] {
+  return (process.env.TRUCK_MAINTENANCE_DIGEST_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.includes("@"));
+}
+
 /** Project-name prefix, and therefore the upstream 409 duplicate key. */
 export const MAINTENANCE_PROJECT_LABEL = "Truck Maintenance";
 

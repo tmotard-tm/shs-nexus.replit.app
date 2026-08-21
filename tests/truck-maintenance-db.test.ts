@@ -32,14 +32,18 @@ import {
   advanceWatermark,
   claimBooking,
   classifyBookingResult,
+  clearExclusion,
   isCycleOpeningPaused,
+  listStaleBlockedCycles,
   loadWatermarks,
+  markExcluded,
   openCycle,
   reconcileStaleBookingClaim,
   markBookingUnknown,
   reconcileStalePendingText,
   recordTestFiling,
   runMaintenanceSweepTick,
+  runTextStep,
   retryCycle,
   seedWatermark,
   seedWatermarks,
@@ -623,6 +627,163 @@ describe("truck maintenance — database guarantees", () => {
   });
 
   /* ----------------------------------------------------------------------- *
+   * The blocked-since clock (Task #674)
+   *
+   * Cycles blocked while a truck sits in the shop are re-evaluated every
+   * sweep — correct, but eligibility_checked_at reads "just now" forever.
+   * exclusion_since is the durable clock: it survives same-reason re-marks,
+   * resets on a reason change, and clears with the exclusion.
+   * ----------------------------------------------------------------------- */
+
+  test("re-marking the SAME exclusion reason preserves the blocked-since clock", async () => {
+    const cycleId = await openCycle({ candidate: candidate(TRUCK_C, 46_000), watermark: 40_000 });
+    assert.ok(cycleId, "fixture cycle opened");
+    const cycle = await fetchRow(cycleId!);
+
+    await markExcluded(cycle, "ams_blocked", "Waiting Estimate From Shop");
+    const first = await fetchRow(cycleId!);
+    assert.ok(first.exclusion_since, "the first exclusion starts the clock");
+
+    // Age the clock so a preserved value is distinguishable from a re-stamp.
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles
+         SET exclusion_since = now() - interval '30 days'
+       WHERE id = ${cycleId}
+    `);
+    const aged = await fetchRow(cycleId!);
+
+    // The next sweep re-marks the same reason — the clock must NOT reset.
+    await markExcluded(aged, "ams_blocked", "Waiting Estimate From Shop (still)");
+    const after = await fetchRow(cycleId!);
+    assert.equal(
+      new Date(after.exclusion_since as any).getTime(),
+      new Date(aged.exclusion_since as any).getTime(),
+      "same reason on a later sweep keeps the original blocked-since",
+    );
+    assert.equal(after.exclusion_detail, "Waiting Estimate From Shop (still)", "the detail still refreshes");
+
+    // A DIFFERENT reason is a different block — the clock restarts.
+    await markExcluded(after, "unassigned", null);
+    const changed = await fetchRow(cycleId!);
+    assert.ok(
+      new Date(changed.exclusion_since as any).getTime()
+        > new Date(aged.exclusion_since as any).getTime(),
+      "a changed reason restarts the clock",
+    );
+
+    // And clearing the exclusion clears the clock entirely.
+    await clearExclusion(changed, {
+      ldap: TEST_LDAP,
+      name: "Maintenance Fixture",
+      district: "3132",
+    });
+    const cleared = await fetchRow(cycleId!);
+    assert.equal(cleared.exclusion_since, null, "an eligible truck carries no blocked-since");
+    assert.equal(cleared.status, "open");
+
+    // Close the fixture so it doesn't collide with later TRUCK_C tests.
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles SET closed_at = now(), status = 'excluded' WHERE id = ${cycleId}
+    `);
+  });
+
+  test("listStaleBlockedCycles returns only cycles past the threshold, oldest first", async () => {
+    // A fresh truck number: TRUCK_A/B carry open cycles from earlier suites,
+    // and the partial unique index would (correctly) refuse a second one.
+    const cycleId = await openCycle({ candidate: candidate(`${PREFIX}04`, 118_000), watermark: 111_500 });
+    assert.ok(cycleId, "fixture cycle opened");
+    const cycle = await fetchRow(cycleId!);
+    await markExcluded(cycle, "ams_blocked", "Waiting Estimate From Shop");
+
+    // Fresh block: under any sane threshold → not in the stale list.
+    const freshList = await listStaleBlockedCycles(14);
+    assert.ok(!freshList.some((r) => r.id === cycleId), "a fresh block is not stale");
+
+    // Age it past the threshold.
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles
+         SET exclusion_since = now() - interval '20 days'
+       WHERE id = ${cycleId}
+    `);
+    const staleList = await listStaleBlockedCycles(14);
+    const hit = staleList.find((r) => r.id === cycleId);
+    assert.ok(hit, "an aged block appears in the stale list");
+    assert.equal(hit!.blocked_days, 20);
+    assert.equal(hit!.odometer_at_trigger, 118_000);
+    // ZZMAINT trucks have no vehicle-cache row: the absence is explicit.
+    assert.equal(hit!.current_odometer, null);
+    assert.equal(hit!.miles_past_trigger, null);
+
+    // Close it so later suites see a clean slate for TRUCK_A.
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles SET closed_at = now() WHERE id = ${cycleId}
+    `);
+  });
+
+  test("consecutive comms-gate sweeps preserve the blocked-since clock", async () => {
+    // The sweep order for a comms-gate-excluded cycle is: eligibility passes →
+    // clearExclusion → runTextStep refuses again. The clock must survive that
+    // clear→re-block round trip, or comms-gate cycles never age.
+    const cycleId = await openCycle({ candidate: candidate(`${PREFIX}05`, 92_000), watermark: 86_000 });
+    assert.ok(cycleId, "fixture cycle opened");
+
+    // A synthetic LDAP with no fs_comms_contacts row: sendMessage refuses with
+    // "no valid phone on file" (a real gate, zero side effects) even when the
+    // SMS flag is live.
+    const ghostLdap = "zzmaint674ghost";
+    const savedLive = process.env.TRUCK_MAINTENANCE_SMS_LIVE;
+    process.env.TRUCK_MAINTENANCE_SMS_LIVE = "true";
+    try {
+      // Sweep 1: the gate blocks and starts the clock.
+      const out1 = await runTextStep(await fetchRow(cycleId!), ghostLdap, `${PREFIX}05`);
+      assert.equal(out1.action, "skipped");
+      const first = await fetchRow(cycleId!);
+      assert.equal(first.status, "excluded");
+      assert.equal(first.exclusion_reason, "comms_gate");
+      assert.ok(first.exclusion_since, "the first gate refusal starts the clock");
+
+      // Age the clock so a preserved value is distinguishable from a re-stamp.
+      await db.execute(sql`
+        UPDATE fs_truck_maintenance_cycles
+           SET exclusion_since = now() - interval '30 days'
+         WHERE id = ${cycleId}
+      `);
+      const aged = await fetchRow(cycleId!);
+
+      // Sweep 2, step 1: eligibility passes again → clearExclusion. The
+      // comms-gate clock must survive the clear (the gate is not re-tested yet).
+      await clearExclusion(aged, { ldap: ghostLdap, name: "Ghost Fixture", district: "3132" });
+      const between = await fetchRow(cycleId!);
+      assert.equal(between.status, "open");
+      assert.equal(between.exclusion_reason, null);
+      assert.ok(between.exclusion_since, "clearExclusion keeps a comms-gate clock");
+
+      // Sweep 2, step 2: the gate blocks again — the ORIGINAL clock returns.
+      const out2 = await runTextStep(between, ghostLdap, `${PREFIX}05`);
+      assert.equal(out2.action, "skipped");
+      const second = await fetchRow(cycleId!);
+      assert.equal(second.status, "excluded");
+      assert.equal(second.exclusion_reason, "comms_gate");
+      assert.equal(
+        new Date(second.exclusion_since as any).getTime(),
+        new Date(aged.exclusion_since as any).getTime(),
+        "a repeat gate refusal keeps the original blocked-since",
+      );
+
+      // An aged comms-gate block reaches the stale list like any other reason.
+      const staleList = await listStaleBlockedCycles(14);
+      assert.ok(staleList.some((r) => r.id === cycleId), "an aged comms-gate block is stale");
+    } finally {
+      if (savedLive === undefined) delete process.env.TRUCK_MAINTENANCE_SMS_LIVE;
+      else process.env.TRUCK_MAINTENANCE_SMS_LIVE = savedLive;
+    }
+
+    await db.execute(sql`
+      UPDATE fs_truck_maintenance_cycles SET closed_at = now() WHERE id = ${cycleId}
+    `);
+  });
+
+  /* ----------------------------------------------------------------------- *
    * Route authorization
    * ----------------------------------------------------------------------- */
 
@@ -699,6 +860,51 @@ describe("truck maintenance — database guarantees", () => {
       const testFiling = await call("/cycles/1/retry", "admin", { testFiling: true });
       assert.equal(testFiling.status, 403);
       assert.match((await testFiling.json()).message, /developers/);
+    });
+
+    test("the overdue endpoint is complete even when the cycle list caps out", async () => {
+      // The general /cycles list is capped (default 200) and newest-first, so
+      // the OLDEST long-blocked cycle — the exact row the overdue surface
+      // exists for — falls out of it once the table grows. The dedicated
+      // stale-blocked endpoint must still return it.
+      const oldTruck = `${PREFIX}CAPOLD`;
+      try {
+        await db.execute(sql`
+          INSERT INTO fs_truck_maintenance_cycles
+            (truck_number, odometer_at_trigger, watermark_at_trigger, miles_since_watermark,
+             status, exclusion_reason, exclusion_detail, exclusion_since, opened_at)
+          VALUES (${oldTruck}, 100000, 94000, 6000,
+                  'excluded', 'ams_blocked', 'Waiting Estimate From Shop',
+                  now() - interval '150 days', now() - interval '160 days')
+        `);
+        await db.execute(sql`
+          INSERT INTO fs_truck_maintenance_cycles
+            (truck_number, odometer_at_trigger, watermark_at_trigger, miles_since_watermark,
+             status, opened_at)
+          SELECT ${PREFIX} || 'CAP' || lpad(g::text, 3, '0'), 100000, 94000, 6000,
+                 'open', now() - (g || ' minutes')::interval
+            FROM generate_series(1, 201) g
+        `);
+
+        const list = await (await call("/cycles", "admin")).json();
+        assert.ok(
+          !list.cycles.some((c: any) => c.truck_number === oldTruck),
+          "precondition: the capped newest-first list has dropped the oldest blocked cycle",
+        );
+
+        const stale = await (await call("/stale-blocked", "admin")).json();
+        const hit = stale.cycles.find((c: any) => c.truck_number === oldTruck);
+        assert.ok(hit, "the dedicated overdue endpoint still returns it");
+        assert.equal(hit.exclusion_reason, "ams_blocked");
+        assert.ok(hit.blocked_days >= 149, "with its true age");
+        assert.equal(typeof stale.staleExclusionDays, "number");
+        // And it is gated like every other staff read.
+        assert.equal((await call("/stale-blocked", "agent")).status, 403);
+      } finally {
+        await db.execute(sql`
+          DELETE FROM fs_truck_maintenance_cycles WHERE truck_number LIKE ${PREFIX + "CAP%"}
+        `);
+      }
     });
   });
 

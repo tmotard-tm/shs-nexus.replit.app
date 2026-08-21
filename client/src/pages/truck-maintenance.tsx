@@ -64,6 +64,10 @@ interface WorkflowStatus {
   openByStatus: Record<string, number>;
   openTotal: number;
   bookedTotal: number;
+  /** Days a cycle may sit blocked by the same reason before it is flagged. */
+  staleExclusionDays: number;
+  /** Open excluded cycles blocked past that threshold. */
+  staleBlockedCount: number;
   exclusionLabels: Record<string, string>;
   missingOdometer: { assigned: number; byov: number; unassigned: number; total: number } | null;
   missingOdometerError: string | null;
@@ -105,6 +109,16 @@ interface Cycle {
   odometer_date: string | null;
   exclusion_reason: string | null;
   exclusion_detail: string | null;
+  /** When the cycle FIRST became blocked by its current reason (Task #674). */
+  exclusion_since: string | null;
+  /** Whole days blocked by the same reason; null when not excluded. */
+  blocked_days: number | null;
+  /** Server-computed: blocked_days >= the configured threshold. */
+  stale_blocked: boolean;
+  /** Current reconciled odometer from the vehicle cache, when available. */
+  current_odometer: number | null;
+  /** current_odometer - odometer_at_trigger. */
+  miles_past_trigger: number | null;
   text_status: string | null;
   text_body: string | null;
   text_detail: string | null;
@@ -132,6 +146,22 @@ interface Cycle {
   last_error: string | null;
   opened_at: string;
   closed_at: string | null;
+}
+
+/** Row from the uncapped overdue endpoint (Task #674). */
+interface OverdueCycle {
+  id: number;
+  truck_number: string;
+  ldap: string | null;
+  enterprise_id: string | null;
+  tech_name: string | null;
+  exclusion_reason: string;
+  exclusion_detail: string | null;
+  exclusion_since: string;
+  blocked_days: number;
+  odometer_at_trigger: number;
+  current_odometer: number | null;
+  miles_past_trigger: number | null;
 }
 
 interface ApproachingTruck {
@@ -236,7 +266,14 @@ export default function TruckMaintenance() {
     refetchInterval: 5 * 60_000,
   });
 
-  const cyclesQuery = useQuery<{ cycles: Cycle[] }>({
+  // The complete overdue set — its own uncapped endpoint, NOT derived from
+  // the (limited, newest-first) cycle list below.
+  const staleQuery = useQuery<{ cycles: OverdueCycle[]; staleExclusionDays: number }>({
+    queryKey: ["/api/fs/truck-maintenance/stale-blocked"],
+    refetchInterval: 5 * 60_000,
+  });
+
+  const cyclesQuery = useQuery<{ cycles: Cycle[]; staleExclusionDays: number }>({
     queryKey: ["/api/fs/truck-maintenance/cycles", showClosed ? "all" : "open"],
     queryFn: async () => {
       const res = await apiRequest(
@@ -253,6 +290,7 @@ export default function TruckMaintenance() {
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/cycles"] });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/approaching"] });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/missing-odometer"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/stale-blocked"] });
   }
 
   const pauseMutation = useMutation({
@@ -334,6 +372,15 @@ export default function TruckMaintenance() {
 
   const status = statusQuery.data;
   const cycles = cyclesQuery.data?.cycles ?? [];
+  const staleDays = staleQuery.data?.staleExclusionDays
+    ?? cyclesQuery.data?.staleExclusionDays
+    ?? status?.staleExclusionDays
+    ?? 14;
+  // "Overdue — needs a human" (Task #674): the COMPLETE set from its own
+  // uncapped endpoint — the general cycle list is limited and newest-first,
+  // so deriving this client-side would drop exactly the oldest blocked
+  // cycles once the table outgrows the cap. Server order: oldest block first.
+  const overdue = staleQuery.data?.cycles ?? [];
 
   return (
     <div className="p-6 space-y-6">
@@ -432,6 +479,14 @@ export default function TruckMaintenance() {
                   <span className="text-muted-foreground">Booked (all time)</span>
                   <span>{status.bookedTotal}</span>
                 </div>
+                {status.staleBlockedCount > 0 ? (
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Blocked &gt; {status.staleExclusionDays}d</span>
+                    <span className="text-red-700 font-medium" data-testid="text-stale-blocked-count">
+                      {status.staleBlockedCount}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Trucks watermarked</span>
                   <span>{status.watermarks}</span>
@@ -477,6 +532,74 @@ export default function TruckMaintenance() {
           </CardContent>
         </Card>
       )}
+
+      {overdue.length > 0 ? (
+        <Card className="border-red-300" data-testid="card-overdue-blocked">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2 text-red-800">
+              <AlertTriangle className="h-4 w-4" />
+              Overdue — blocked more than {staleDays} days ({overdue.length})
+            </CardTitle>
+            <CardDescription>
+              These cycles have been stuck on the same reason past the threshold. The sweep keeps re-checking
+              them, but they will not move until a human chases the shop, the assignment, or the data — and the
+              trucks keep driving past their service interval in the meantime.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Truck</TableHead>
+                    <TableHead>Technician</TableHead>
+                    <TableHead>Blocked</TableHead>
+                    <TableHead>Reason</TableHead>
+                    <TableHead className="text-right">At trigger</TableHead>
+                    <TableHead className="text-right">Now</TableHead>
+                    <TableHead className="text-right">Past trigger</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {overdue.map((c) => (
+                    <TableRow key={`overdue-${c.id}`} data-testid={`row-overdue-${c.id}`}>
+                      <TableCell className="font-medium">{c.truck_number}</TableCell>
+                      <TableCell className="text-xs">
+                        {c.tech_name ?? c.enterprise_id ?? c.ldap ?? "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="bg-red-100 text-red-800 border-red-200">
+                          {c.blocked_days} days
+                        </Badge>
+                        {c.exclusion_since ? (
+                          <div className="text-xs text-muted-foreground mt-0.5">
+                            since {new Date(c.exclusion_since).toLocaleDateString()}
+                          </div>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="text-xs max-w-xs">
+                        {status?.exclusionLabels?.[c.exclusion_reason ?? ""] ?? c.exclusion_reason ?? "—"}
+                        {c.exclusion_detail
+                          ? <span className="block text-muted-foreground">{c.exclusion_detail}</span>
+                          : null}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMiles(c.odometer_at_trigger)}</TableCell>
+                      <TableCell className="text-right tabular-nums">{fmtMiles(c.current_odometer)}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {c.miles_past_trigger != null && c.miles_past_trigger > 0 ? (
+                          <span className="text-red-700 font-medium">+{fmtMiles(c.miles_past_trigger)} mi</span>
+                        ) : c.current_odometer == null ? (
+                          <span className="text-muted-foreground">no reading</span>
+                        ) : "—"}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -537,6 +660,18 @@ export default function TruckMaintenance() {
                         {fmtMiles(c.odometer_at_trigger)}
                         {c.odometer_source
                           ? <div className="text-xs text-muted-foreground">{c.odometer_source}</div>
+                          : null}
+                        {/* Current reading vs the frozen trigger reading, so a
+                            blocked truck's drift is visible (Task #674). */}
+                        {!c.closed_at && c.current_odometer != null && c.current_odometer !== c.odometer_at_trigger
+                          ? (
+                            <div className="text-xs text-muted-foreground">
+                              now {fmtMiles(c.current_odometer)}
+                              {c.miles_past_trigger != null && c.miles_past_trigger > 0
+                                ? <span className="text-red-700"> (+{fmtMiles(c.miles_past_trigger)})</span>
+                                : null}
+                            </div>
+                          )
                           : null}
                       </TableCell>
                       <TableCell className="text-right tabular-nums">{fmtMiles(c.miles_since_watermark)}</TableCell>
@@ -606,12 +741,23 @@ export default function TruckMaintenance() {
                       <TableCell className="text-xs max-w-xs">
                         {c.exclusion_reason ? (
                           <span className="flex items-start gap-1">
-                            <ShieldAlert className="h-3 w-3 mt-0.5 shrink-0 text-slate-500" />
+                            <ShieldAlert className={`h-3 w-3 mt-0.5 shrink-0 ${c.stale_blocked ? "text-red-600" : "text-slate-500"}`} />
                             <span>
                               {status?.exclusionLabels?.[c.exclusion_reason] ?? c.exclusion_reason}
                               {c.exclusion_detail
                                 ? <span className="block text-muted-foreground">{c.exclusion_detail}</span>
                                 : null}
+                              {c.blocked_days != null && !c.closed_at ? (
+                                <Badge
+                                  variant="outline"
+                                  className={`mt-1 ${c.stale_blocked
+                                    ? "bg-red-100 text-red-800 border-red-200"
+                                    : "bg-slate-100 text-slate-700 border-slate-200"}`}
+                                  data-testid={`badge-blocked-days-${c.id}`}
+                                >
+                                  blocked {c.blocked_days} {c.blocked_days === 1 ? "day" : "days"}
+                                </Badge>
+                              ) : null}
                             </span>
                           </span>
                         ) : c.last_error ? (
