@@ -101,6 +101,7 @@
 - [Publish bundle vs broken symlinks](publish-bundle-broken-symlinks.md) — dangling links (killed-chromium Singleton* under .config/chromium) abort the bundle phase; find via `find . -xtype l`, delete, republish.
 - [Publish liveness verification](publish-liveness-verification.md) — deploys/history.json entry ≠ promoted; /api route answering SPA HTML = route absent; boot-DDL tables missing in prod = module never booted there.
 - [Rental request/ETD pre-mortem debts](rental-request-etd-premortem.md) — open gaps: no booking claim/lease or state predicates, non-atomic token consume (dup bookings), over-broad cron bearer, prod-dead syncs, survey↛request seam.
+- [Drizzle wraps pg errors](drizzle-query-error-wrapping.md) — `Failed query:` wrapper hides the constraint name on e.cause; `e.message.includes("<index>")` race handlers are dead code → 500s. Walk the cause chain.
 - [Drizzle sql-tag regex escaping](drizzle-sql-tag-regex-escaping.md) — `\D` inside a drizzle sql`` template cooks to literal `D`; write `\\D` or bind params; audit by running both variants against prod counts.
 - [Pooled advisory locks don't single-flight](pooled-advisory-lock-not-single-flight.md) — pool-issued pg_try_advisory_lock is re-entrant across requests sharing a connection + unlock leaks; use one dedicated client or row-level CAS.
 - [LUCA shop-contact intake loop](luca-shop-contact-intake.md) — the one inbound LUCA write; vendor-match 409, humans win under a FOR UPDATE re-check, accepted contacts ALWAYS locked (unlocked luca phones are feed-invisible).
