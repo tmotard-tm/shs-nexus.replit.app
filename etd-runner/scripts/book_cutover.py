@@ -1563,6 +1563,14 @@ def _identify_journey_rows(rows: list, confirmation: str = "",
     The LDAP is deliberately NOT an identifier: one technician can own many
     journeys, so an LDAP-carrying reference says "this tech", never "this
     intent". When nothing identifies, the answer is an EMPTY list.
+
+    The reference match is TOKEN-exact, never substring: SHSNX-42 as a
+    substring also lives inside SHSNX-420 and SHSNX-421, so a plain `in` would
+    report a NEIGHBOURING intent's reservation as this one's — refusing a
+    legitimate first booking (pre-commit) or settling the wrong state
+    (readback). The reference field is a space-joined string
+    ("LDAP = JSMITH1 SHSNX-42"), so the unit of identity is the whole token
+    between separators.
     """
     conf = str(confirmation or "").strip().upper()
     ref = str(intent_ref or "").strip().upper()
@@ -1570,7 +1578,19 @@ def _identify_journey_rows(rows: list, confirmation: str = "",
         return []
     return [r for r in rows
             if (conf and r["confirmation"].strip().upper() == conf)
-            or (ref and ref in r["reference"].upper())]
+            or (ref and ref in _reference_tokens(r["reference"]))]
+
+
+def _reference_tokens(reference) -> list:
+    """The reference field split into identity tokens.
+
+    Anything that is not part of an SHS reference (whitespace, punctuation)
+    separates; the dash stays inside a token because it is part of the
+    reference itself (SHSNX-42, SHSRQ-7). MUST stay byte-for-byte equivalent to
+    referenceTokens() in server/vrm/etd/executor.ts — a drift silently breaks
+    cross-runner dedupe.
+    """
+    return [t for t in re.split(r"[^A-Z0-9-]+", str(reference or "").upper()) if t]
 
 
 def _search_evidence(search: dict) -> dict:

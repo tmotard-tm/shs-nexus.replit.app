@@ -313,6 +313,28 @@ describe("journey readback parsing", () => {
     );
   });
 
+  test("reference identity is TOKEN-exact: SHSNX-42 never matches SHSNX-420", () => {
+    // SHSNX-42 as a SUBSTRING also lives inside SHSNX-420/421, so a plain
+    // includes() reported a neighbouring intent's reservation as this one's —
+    // refusing a legitimate first booking pre-commit, or settling the wrong
+    // state on readback. The unit of identity is the whole token.
+    const neighbours = [
+      { confirmation: "AAA111", reference: "SHS ZZEXEC1 SHSNX-420", branchCode: "", date: "", sipp: "" },
+      { confirmation: "BBB222", reference: "SHS ZZEXEC1 SHSNX-421", branchCode: "", date: "", sipp: "" },
+    ];
+    assert.equal(identifyJourneyRows(neighbours, { intentRef: "SHSNX-42" }).length, 0);
+    // The exact reference still identifies, even wrapped in punctuation —
+    // only alphanumerics and the in-reference dash bind tokens together.
+    const mine = [
+      { confirmation: "CCC333", reference: "SHS ZZEXEC1 (SHSNX-42)", branchCode: "", date: "", sipp: "" },
+      ...neighbours,
+    ];
+    assert.deepEqual(
+      identifyJourneyRows(mine, { intentRef: "SHSNX-42" }).map((r) => r.confirmation),
+      ["CCC333"],
+    );
+  });
+
   test("returns NOTHING rather than everything when no row identifies", () => {
     // ETD's Last30Days list is every QUOTE the engine ever took, so a criteria
     // search routinely answers with dozens of unrelated journeys. Handing them

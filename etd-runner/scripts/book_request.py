@@ -68,6 +68,16 @@ from book_cutover import (                                       # noqa: E402
     # VALENCIA, SPAIN on 2026-08-18 and simply returned no branch, with no reason
     # text. Deduping the address fixed that case; this catches the next one.
     _guarded_quote,
+    # The pre-commit duplicate search the intent lane runs before every commit.
+    # IMPORTED, never copied: _journey_matches identifies rows via
+    # _identify_journey_rows, which MUST stay byte-for-byte equivalent to
+    # identifyJourneyRows() in server/vrm/etd/executor.ts. Copying it here would
+    # create a third place for that rule to drift, and a drift silently breaks
+    # dedupe on a real technician's reservation. This lane had NO duplicate
+    # search at all: run twice on the same approved row (or after a crash
+    # between commit and writeback) it created a second real Enterprise
+    # reservation for the same technician.
+    _journey_matches, _search_evidence,
 )
 
 REF = HERE / "reference"
@@ -82,6 +92,97 @@ RUNNER = os.environ.get("RUNNER_NAME", "book_request")
 # branch that returned 23 for 7 days, same start date. So never believe an empty
 # class list until the request itself has been varied.
 FALLBACK_DAYS = [7, 3]
+
+
+class DuplicateReservation(RuntimeError):
+    """A journey POSITIVELY identified as this request's reservation already exists.
+
+    Raised by the pre-commit duplicate search so drain() can report it as DUPE
+    rather than FAIL: nothing is broken, a car already exists, and the one wrong
+    response is to book another. The row keeps its error writeback (so the panel
+    says why it is not booking) and every later pass refuses the same way.
+    """
+
+
+def request_reference(request_no) -> str:
+    """The request's unique SHS reference, carried in ETD's ONE searchable field.
+
+    Mirrors the intent lane's SHSNX-{id} (repair spec §3): ETD surfaces a single
+    reference value on the journey search — the FIRST bookingReferences entry —
+    so the reference must ride in that entry or no later search can ever find
+    THIS request's reservation. The prefix differs from SHSNX so a request
+    number can never collide with an intent id.
+    """
+    return f"SHSRQ-{request_no}"
+
+
+def precommit_duplicate_guard(etd, request_no) -> None:
+    """Refuse when a journey POSITIVELY identifies as this request's reservation.
+
+    The same pre-commit duplicate search the intent lane runs (repair spec §3):
+    before anything that could create a reservation, ask ETD whether THIS
+    request already has one (a crash between commit and writeback, a second
+    copy of this script, a row booked elsewhere and never stamped). Only a row
+    that POSITIVELY identifies as this request's counts — the search returns
+    every journey ETD will hand over for the criteria, most of them unrelated
+    quotes — and identification is decided by book_cutover's
+    _identify_journey_rows, never here. A search FAILURE is a blind spot, and
+    nothing books on a blind spot.
+    """
+    req_ref = request_reference(request_no)
+    dup = _journey_matches(etd, req_ref, intent_ref=req_ref)
+    if dup["error"]:
+        raise RuntimeError(
+            f"pre-commit duplicate search failed: {dup['error'][:160]} — "
+            "not booking on a blind spot; fix the search and re-run")
+    if dup["matches"]:
+        m = dup["matches"][0]
+        raise DuplicateReservation(
+            f"pre-commit search identified {len(dup['matches'])} existing "
+            f"reservation(s) for this request (of {dup['rowsReturned']} row(s)): "
+            f"confirmation {m['confirmation'] or 'n/a'}, branch {m['branchCode'] or '?'}, "
+            f"pickup {m['date'] or '?'}. Record it on the request (or cancel it at "
+            "Enterprise) before re-running; refusing to create a second reservation. "
+            f"search={json.dumps(_search_evidence(dup))}")
+
+
+def acquire_runner_lock():
+    """ONE legacy booker per machine, enforced by an OS file lock.
+
+    The pre-commit duplicate search closes the RE-RUN hole, but not a live race:
+    two processes can both search (finding nothing) before either commits. The
+    server's queue lease does not close it either — a runner may always re-take
+    its OWN lease (required for the dry-run -> --confirm workflow), and both
+    processes default to RUNNER_NAME="book_request", so both are handed the
+    SAME rows. That exact pair booked DWHITE0 two real cars 26 seconds apart.
+
+    An OS lock dies with the process, so a crashed runner never wedges the next
+    one. Returns the open handle; the caller keeps it alive for the run.
+    Mutual exclusion across DIFFERENT machines rides on the queue lease — set a
+    distinct RUNNER_NAME per machine if this ever runs on more than one.
+    """
+    REF.mkdir(exist_ok=True)
+    path = REF / "book_request.lock"
+    fh = open(path, "a+")
+    try:
+        if os.name == "nt":
+            import msvcrt
+            if os.fstat(fh.fileno()).st_size == 0:
+                fh.write("L")
+                fh.flush()
+            fh.seek(0)
+            msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        raise SystemExit(
+            f"another book_request.py is already running on this machine (lock {path}). "
+            "Two copies share one RUNNER_NAME, get handed the SAME queue rows, and both "
+            "book them - that is how DWHITE0 got two reservations 26 seconds apart. "
+            "Stop the other process, or let it finish, before running this one.")
+    return fh
 
 
 def nexus(method: str, path: str, body=None):
@@ -498,7 +599,21 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     # any mandatory field is still empty, BY NAME, rather than eating ETD's generic
     # refusal again.
     strip_truck_number_reference(model)
+    # ETD surfaces ONE reference value on the Open RA report and the journey
+    # search — the FIRST entry (LDAP owns it, 2026-08-14). The request's unique
+    # reference must ride IN that same field, exactly as the intent lane rides
+    # SHSNX-{id} in its refs[0], or the duplicate search below can never find
+    # THIS request's reservation on the next pass. Appended AFTER the truck
+    # strip so it lands on the entry that survives.
+    req_ref = request_reference(no)
+    refs = model.get("bookingReferences") or []
+    if refs and req_ref not in " ".join(refs[:1]):
+        refs[0] = f"{refs[0]} {req_ref}".strip()
     assert_additional_info_complete(model, ldap)
+
+    # The pre-commit duplicate search, same rule and wording as the intent
+    # lane. Runs on dry runs too, so a DUPE is visible BEFORE --confirm.
+    precommit_duplicate_guard(etd, no)
 
     for gate in ("/api/dailyrental/validateLocAddInfo", "/api/dailyrental/validate"):
         gr = etd.post(gate, model, mutating=False)
@@ -680,6 +795,18 @@ def drain(etd: EtdClient, template: dict, mapping: dict, old_j, old_r,
         label = f"#{r['request_no']} {r['ldap']}"
         try:
             res = book_one(etd, r, template, mapping, old_j, old_r, confirm)
+        except DuplicateReservation as exc:
+            msg = str(exc)[:300]
+            # A car for this request already exists at Enterprise. Refusing is
+            # the whole point: the row stays 'approved' and every later pass
+            # refuses the same way, so re-running cannot mint a second
+            # reservation. The writeback records WHY it is not booking (with
+            # the found confirmation) so an operator can adopt it onto the row
+            # — the /book route's adopt path, or by hand — instead of guessing.
+            print(f"  DUPE {label:<18} {msg}")
+            nexus("POST", f"/api/vrm/forms/rental-request/{r['request_no']}/booked",
+                  {"error": msg})
+            continue
         except Exception as exc:
             msg = str(exc)[:300]
             print(f"  FAIL {label:<18} {msg}")
@@ -724,6 +851,12 @@ def main() -> None:
         run_intents(workflow_type="rental_request", watch=args.watch,
                     poll=max(args.interval, 10), confirm=args.confirm, runner=RUNNER)
         return
+
+    # The intents lane above is protected by the shared claim/fencing-token
+    # ledger; this legacy lane has only the queue lease, which deliberately
+    # lets a runner re-take its own name. Hold the machine lock for the whole
+    # run so a second copy cannot drain the same rows concurrently.
+    _lock = acquire_runner_lock()  # noqa: F841 — held until the process exits
 
     if not TEMPLATE_PATH.exists():
         raise SystemExit(f"Missing {TEMPLATE_PATH}. It is the captured reservation model and "

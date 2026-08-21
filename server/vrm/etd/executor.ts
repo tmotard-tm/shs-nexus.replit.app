@@ -823,6 +823,13 @@ export type JourneyIdentity = {
  * journeys, so an LDAP-carrying reference says "this tech", never "this intent".
  * When nothing identifies, the answer is an EMPTY list — "no reservation of ours
  * is visible" — never "here is everything the search returned".
+ *
+ * The reference match is TOKEN-exact, never substring: SHSNX-42 as a substring
+ * also lives inside SHSNX-420 and SHSNX-421, so a plain `includes` would report
+ * a NEIGHBOURING intent's reservation as this one's — refusing a legitimate
+ * first booking (pre-commit) or settling the wrong state (readback). The
+ * reference field is a space-joined string ("LDAP = JSMITH1 SHSNX-42"), so the
+ * unit of identity is the whole token between separators.
  */
 export function identifyJourneyRows(rows: JourneyRow[], identity: JourneyIdentity): JourneyRow[] {
   const conf = String(identity.confirmation ?? "").trim().toUpperCase();
@@ -831,8 +838,19 @@ export function identifyJourneyRows(rows: JourneyRow[], identity: JourneyIdentit
   return rows.filter(
     (r) =>
       (!!conf && r.confirmation.trim().toUpperCase() === conf) ||
-      (!!ref && r.reference.toUpperCase().includes(ref)),
+      (!!ref && referenceTokens(r.reference).includes(ref)),
   );
+}
+
+/**
+ * The reference field split into identity tokens. Anything that is not part of
+ * an SHS reference (whitespace, punctuation) separates; the dash stays inside a
+ * token because it is part of the reference itself (SHSNX-42, SHSRQ-7).
+ * MUST stay byte-for-byte equivalent to _reference_tokens in
+ * etd-runner/scripts/book_cutover.py — a drift silently breaks cross-runner dedupe.
+ */
+function referenceTokens(reference: string): string[] {
+  return String(reference ?? "").toUpperCase().split(/[^A-Z0-9-]+/).filter(Boolean);
 }
 
 export type JourneySearch = {
