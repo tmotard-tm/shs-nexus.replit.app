@@ -1479,6 +1479,23 @@ export async function createIntent(params: {
 
   const facts = await fetchEligibilityFacts({ workflowType: params.workflowType, sourceId: params.sourceId });
   if (!facts.sourceRow) throw new OrchestratorError("source_missing", "source record not found", 404);
+
+  // EXTENSION requests never spawn a booking intent, from ANY caller. The
+  // technician already holds the car; the only thing an intent could do here
+  // is reserve a second one. Fleet extends the existing rental with
+  // Enterprise manually after approval. Belt-and-braces with the decide
+  // route's own skip — this is the layer a future caller cannot forget.
+  if (
+    params.workflowType === WORKFLOW_REQUEST &&
+    String((facts.sourceRow as any)?.request_type ?? "new") === "extension"
+  ) {
+    throw new OrchestratorError(
+      "extension_not_bookable",
+      "extension requests are handled manually by Fleet and never book through ETD",
+      409,
+    );
+  }
+
   const gate = evaluateEligibility(facts);
   if (!gate.ok) {
     throw new OrchestratorError("eligibility_failed", "eligibility gate failed", 422, { failures: gate.failures });

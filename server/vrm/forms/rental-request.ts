@@ -125,6 +125,41 @@ export const MISSING_REASONS: Record<string, string> = {
   other: "more information",
 };
 
+/**
+ * The CANONICAL acknowledgement wording, keyed by the stored column name.
+ *
+ * These are the server's copy of the bullets the form renders, and they exist
+ * so the acknowledgement snapshot written onto every request is built HERE,
+ * from text the client cannot alter. A request's ack_snapshot must prove what
+ * a technician agreed to at the moment of signing; a snapshot assembled from
+ * whatever the browser posted would prove nothing. The wording has already
+ * been revised once (see POLICY_VERSION history above) — when it changes
+ * again, change it here AND in the client in the same commit, and bump
+ * POLICY_VERSION so the stored version says which wording was live.
+ *
+ * ack_has_appointment is LEGACY: removed from the set in 2026-08-14.c but
+ * kept here so pre-snapshot rows can be rendered from their stored booleans.
+ */
+export const ACK_TEXTS: Record<string, string> = {
+  ack_not_maintenance:
+    "This is not scheduled maintenance. I understand rentals are not provided for oil changes, tires, preventive maintenance or inspections.",
+  ack_cannot_drive_safely:
+    "My vehicle cannot be driven safely to complete my route.",
+  ack_return_one_day:
+    "I will return the rental within 1 working day of my vehicle being ready, and I understand failing to do so is a cost to the business.",
+  ack_accurate:
+    "The information above is accurate and may be verified against shop records.",
+  ack_working_hours_only:
+    "I understand the rental is only for use while working. Off the clock use is not allowed, and I will not drive it outside of my working hours.",
+  ack_return_before_time_off:
+    "I understand I must turn the rental in before any time off of more than 3 days, including vacation or a leave of absence.",
+  ack_extension_weekly:
+    "I understand I must request a rental extension from Fleet every 7 days for as long as I keep the rental.",
+  ack_discipline:
+    "I understand any violation of these terms can result in disciplinary action, up to and including termination.",
+  ack_has_appointment:
+    "I have a confirmed shop appointment for the date entered above.",
+};
 export type Decision = "APPROVE" | "DENY" | "DEFER" | "REVIEW";
 
 export interface Eligibility {
@@ -319,6 +354,41 @@ function phoneFor(f: any): string | null {
   return null;
 }
 
+/**
+ * The technician's open rental cases, in detail.
+ *
+ * factsFor() already COUNTS them (open_rentals); this returns the rows, so the
+ * extension path can show the technician which rental the system believes they
+ * hold and pin that snapshot onto the request for the reviewer. Same join as
+ * the count on purpose — two different definitions of "open rental" would let
+ * the default and the display disagree.
+ */
+async function openRentalsFor(ldap: string): Promise<any[]> {
+  const { rows } = await db.execute(sql`
+    SELECT c.case_key,
+           c.vehicle_number,
+           c.veh_desc,
+           c.rental_class,
+           c.rental_vendor,
+           c.po_number,
+           to_char(c.rental_start_date, 'YYYY-MM-DD') AS rental_start_date,
+           c.days_open,
+           c.days_authorized,
+           c.number_of_extensions,
+           c.renting_city,
+           c.renting_state
+    FROM vrm_rental_operations_cases c
+    JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
+    JOIN all_techs a
+      ON COALESCE(ir.override_employee_id, ir.resolved_employee_id) = a.employee_id
+    WHERE upper(a.tech_racfid) = upper(${ldap})
+      AND c.present_in_latest
+      AND upper(c.ticket_status) = 'OPEN'
+    ORDER BY c.rental_start_date DESC NULLS LAST
+    LIMIT 3
+  `);
+  return rows as any[];
+}
 /**
  * Who owns this request regionally. Derived, never asked, never sent by the
  * client — the previous version read `regionOwner` off the request body, which
@@ -703,10 +773,46 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   const s = (v: any, max = 300) => String(v ?? "").trim().slice(0, max) || null;
   const bool = (v: any) => (v === true || v === "yes" ? true : v === false || v === "no" ? false : null);
   const num = (v: any) => (v === "" || v == null || Number.isNaN(Number(v)) ? null : Number(v));
+  const dateStr = (v: any) => {
+    const d = String(v ?? "").trim();
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+  };
 
-  const category = s(b.problemCategory, 40) ?? "";
-  if (!PROBLEM_CATEGORIES.has(category)) {
+  // NEW vs EXTENSION. An extension is more time on the rental the technician
+  // already holds — not a different vehicle — so the intake questions differ:
+  // no problem category, no shop intake, no age gate (they are already renting;
+  // Enterprise vetted their age when the car went out). What it DOES demand is
+  // a van status update — proof they are keeping up with the repair — and a
+  // fresh signature on the FULL acknowledgement set, every single time.
+  const requestType = String(b.requestType ?? "new") === "extension" ? "extension" : "new";
+  const isExtension = requestType === "extension";
+
+  const category = isExtension ? null : (s(b.problemCategory, 40) ?? "");
+  if (!isExtension && !PROBLEM_CATEGORIES.has(category as string)) {
     return { code: 400, json: { success: false, message: "Please choose what is wrong with the vehicle." } };
+  }
+
+  // The van status update. Required in full: the extension path doubles as the
+  // repair check-in, and an extension request that cannot say what the shop
+  // said is exactly the silence Fleet needs surfaced, not stored as blanks.
+  const extRepairStatus = s(b.extRepairStatus, 1000);
+  const extLastShopContact = dateStr(b.extLastShopContact);
+  const extShopSaid = s(b.extShopSaid, 1000);
+  const extExpectedCompletion = dateStr(b.extExpectedCompletion); // optional — shops do not always commit
+  const extTimeNeeded = s(b.extTimeNeeded, 200);
+  if (isExtension) {
+    if (!extRepairStatus) {
+      return { code: 400, json: { success: false, message: "Please describe the current status of your van's repair." } };
+    }
+    if (!extLastShopContact) {
+      return { code: 400, json: { success: false, message: "Please tell us when you last spoke with the shop." } };
+    }
+    if (!extShopSaid) {
+      return { code: 400, json: { success: false, message: "Please tell us what the shop said when you last spoke." } };
+    }
+    if (!extTimeNeeded) {
+      return { code: 400, json: { success: false, message: "Please tell us roughly how much longer you need the rental." } };
+    }
   }
 
   // AGE GATE. Enterprise does not rent to a driver under 21, so an under-21
@@ -717,8 +823,11 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   //
   // Enforced here as well as on the form because this endpoint is public: the
   // form's stop screen is a courtesy, this is the rule.
-  const over21 = bool(b.isOver21);
-  if (over21 === null) {
+  //
+  // Not asked on an extension: the driver is already in the rental, so the
+  // vendor has already rented to them.
+  const over21 = isExtension ? null : bool(b.isOver21);
+  if (!isExtension && over21 === null) {
     return {
       code: 400,
       json: { success: false, message: "Please tell us whether you are 21 or older." },
@@ -733,10 +842,45 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   const facts = await factsFor(ldap);
   const isByov = Number(facts?.byov_count ?? 0) > 0;
 
-  const verdict = evaluate({
-    problemCategory: category,
-    hvacCarveOut: b.hvacCarveOut === true,
-  });
+  // The engine screens NEW requests only. An extension has no problem category
+  // to judge and no maintenance gate to fail — it is always a manual Fleet
+  // review, recorded as REVIEW with no rule number.
+  const verdict: Eligibility = isExtension
+    ? { decision: "REVIEW", rule: null as any, reason: "extension of current rental — manual Fleet review" }
+    : evaluate({
+        problemCategory: category as string,
+        hvacCarveOut: b.hvacCarveOut === true,
+      });
+
+  // What the system believes vs what the technician chose. The rental-ops feed
+  // can lag, so a contradiction is a FLAG for the reviewer, never a wall: the
+  // technician saw the warning, wrote a line about why, and proceeded.
+  const detectedOpenRentals = Number(facts?.open_rentals ?? 0);
+  const typeMismatch = isExtension ? detectedOpenRentals === 0 : detectedOpenRentals > 0;
+  const typeMismatchExplanation = typeMismatch ? s(b.typeMismatchExplanation, 500) : null;
+  // The form makes this same demand, but this endpoint is public: a direct
+  // request must not slip a contradictory choice through without the line the
+  // reviewer is promised.
+  if (typeMismatch && !typeMismatchExplanation) {
+    return {
+      code: 400,
+      json: {
+        success: false,
+        message: isExtension
+          ? "Our records show no current rental for you. Add a short explanation so Fleet understands why you are asking for an extension."
+          : "Our records show you currently have a rental. Add a short explanation so Fleet understands why you are asking for a new one.",
+      },
+    };
+  }
+  let currentRental: any = null;
+  if (isExtension || detectedOpenRentals > 0) {
+    try {
+      const cases = await openRentalsFor(ldap);
+      currentRental = cases[0] ?? null;
+    } catch (e: any) {
+      console.error("[rental-request] open-rental detail lookup failed:", e?.message || e);
+    }
+  }
 
   // Acknowledgements are required, but never as false attestations: the shop
   // appointment acknowledgement is skipped on a path that never asked for a
@@ -747,8 +891,8 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // the standard response instead of the form silently eating it.
   const acksRequired = true;
   const appointmentAsked = bool(b.hasAppointment) === true;
-  const noVehicle = category === "new_hire_awaiting_vehicle" || b.noVehicle === true;
-  const isMaintenance = MAINTENANCE.has(category);
+  const noVehicle = !isExtension && (category === "new_hire_awaiting_vehicle" || b.noVehicle === true);
+  const isMaintenance = !isExtension && MAINTENANCE.has(category as string);
   const acks = {
     ack_not_maintenance: b.ackNotMaintenance === true,
     ack_cannot_drive_safely: b.ackCannotDriveSafely === true,
@@ -760,15 +904,32 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     ack_extension_weekly: b.ackExtensionWeekly === true,
     ack_discipline: b.ackDiscipline === true,
   };
+  // An EXTENSION re-signs the FULL set every time — the consolidated core
+  // agreement and all four individual terms. No skips: the van is in the shop
+  // (not maintenance, not drivable) and the weekly-extension cadence is the
+  // entire reason this request exists.
+  const required = Object.entries(acks)
+    .filter(([k]) => isExtension
+      ? k !== "ack_has_appointment"
+      : true)
+    .filter(([k]) => isExtension || appointmentAsked || k !== "ack_has_appointment")
+    .filter(([k]) => !noVehicle || k !== "ack_cannot_drive_safely")
+    .filter(([k]) => !isMaintenance || (k !== "ack_not_maintenance" && k !== "ack_cannot_drive_safely"));
   if (acksRequired) {
-    const required = Object.entries(acks)
-      .filter(([k]) => appointmentAsked || k !== "ack_has_appointment")
-      .filter(([k]) => !noVehicle || k !== "ack_cannot_drive_safely")
-      .filter(([k]) => !isMaintenance || (k !== "ack_not_maintenance" && k !== "ack_cannot_drive_safely"));
     if (!required.every(([, v]) => v)) {
       return { code: 400, json: { success: false, message: "Please tick every acknowledgement before submitting." } };
     }
   }
+
+  // The durable signature record, for BOTH request types: exact bullet texts
+  // as worded right now, signer, timestamp. Built from the REQUIRED set so the
+  // snapshot never claims assent to a bullet the form did not show.
+  const ackSnapshot = buildAckSnapshot({
+    signerName: ctx.identity.techName,
+    signerLdap: ldap,
+    requestType,
+    ackKeys: required.map(([k]) => k),
+  });
 
   // ONE PATH: every request lands pending and waits for a person.
   //
@@ -819,9 +980,12 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       DELETE FROM vrm_rental_request WHERE token_id = ${tokenRow.id} AND status = 'deferred'
     `);
   } else {
+    // Same-type only: an extension submission must not eat a returned NEW
+    // request the technician was told to come back and finish (or vice versa).
     await db.execute(sql`
       DELETE FROM vrm_rental_request
       WHERE ldap = ${ldap} AND token_id IS NULL AND status IN ('deferred','returned')
+        AND COALESCE(request_type, 'new') = ${requestType}
     `);
   }
 
@@ -840,6 +1004,10 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ack_working_hours_only, ack_return_before_time_off, ack_extension_weekly, ack_discipline,
       approved_vehicle_class, reason_code, region_owner,
       is_over_21,
+      request_type, ext_repair_status, ext_last_shop_contact_at, ext_shop_said,
+      ext_expected_completion, ext_time_needed,
+      detected_open_rentals, type_mismatch, type_mismatch_explanation,
+      current_rental, ack_snapshot,
       status, auto_decision, auto_reason, auto_rule, source
     ) VALUES (
       ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
@@ -860,6 +1028,11 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_extension_weekly}, ${acks.ack_discipline},
       ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
       ${over21},
+      ${requestType}, ${extRepairStatus}, ${extLastShopContact}::date, ${extShopSaid},
+      ${extExpectedCompletion}::date, ${extTimeNeeded},
+      ${detectedOpenRentals}, ${typeMismatch}, ${typeMismatchExplanation},
+      ${currentRental ? JSON.stringify(currentRental) : null}::jsonb,
+      ${JSON.stringify(ackSnapshot)}::jsonb,
       ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
     )
     RETURNING request_no
@@ -876,7 +1049,8 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // Fire and forget. A comms outage must never fail a submission.
   void alertFleet({
     requestNo, ldap, techName: ctx.identity.techName, truck: ctx.identity.truckNumber,
-    decision: verdict.decision, rule: verdict.rule, reason: verdict.reason, category,
+    decision: verdict.decision, rule: verdict.rule, reason: verdict.reason,
+    category: isExtension ? "rental_extension" : (category as string),
     homeState, shopName: s(b.shopName, 200), appointmentAt: s(b.appointmentAt, 40),
     regionOwner,
   });
@@ -909,8 +1083,12 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       success: true,
       requestNo,
       decision: "PENDING",
-      message: "Fleet has your request and will review it. "
-             + "You will get a text as soon as it is decided.",
+      message: isExtension
+        ? "Fleet has your extension request and will review it. "
+        + "You will get a text as soon as it is decided. "
+        + "Keep the rental until you hear from us."
+        : "Fleet has your request and will review it. "
+        + "You will get a text as soon as it is decided.",
     },
   };
 }
@@ -953,19 +1131,16 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         });
       }
 
-      // A technician who already has one in flight must not open a second.
-      const { rows: live } = await db.execute(sql`
-        SELECT request_no, status FROM vrm_rental_request
-        WHERE ldap = ${ldap} AND status IN ('pending','approved','booked')
-          AND created_at > now() - interval '30 days'
-        ORDER BY created_at DESC LIMIT 1
-      `);
-      const open = (live as any[])[0];
-      if (open) {
+      // Type-aware in-flight guard. A hard 409 only when NEITHER door is open:
+      // a technician whose new request is BOOKED is exactly the person who
+      // files an extension, so the booked row must not turn them away here.
+      const guard = await liveRequestGuard(ldap);
+      if (guard.blockNew && guard.blockExtension) {
+        const open = guard.blockNew;
         logEvent("verify_fail", { ldap, outcome: "open_request", ip });
         return res.status(409).json({
           verified: false,
-          message: `You already have rental request #${open.request_no} with us (${open.status}). `
+          message: `You already have rental request #${open.requestNo} with us (${open.status}). `
                  + "Fleet is working it. Contact Fleet rather than starting a second one.",
         });
       }
@@ -1002,9 +1177,31 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       `);
       const p = (prior as any[])[0] || null;
 
+      // What the system believes about their current rental, so the form can
+      // default the New-vs-Extension choice and show the detected unit. A
+      // lookup failure degrades to "no detection", never to a blocked door.
+      let openRentalCases: any[] = [];
+      const detectedOpenRentals = Number(f.open_rentals ?? 0);
+      if (detectedOpenRentals > 0) {
+        openRentalCases = await openRentalsFor(ldap).catch(() => []);
+      }
+
       res.json({
         verified: true,
         policyVersion: POLICY_VERSION,
+        openRentals: detectedOpenRentals,
+        currentRental: openRentalCases[0] ?? null,
+        // Which request types this technician may file RIGHT NOW, and what is
+        // in the way when one is closed. The form disables the blocked option
+        // and explains, instead of letting a submit bounce off a 409.
+        allowed: {
+          new: !guard.blockNew,
+          extension: !guard.blockExtension,
+        },
+        blocking: {
+          new: guard.blockNew,
+          extension: guard.blockExtension,
+        },
         resume: p && {
           requestNo: p.request_no,
           status: p.status,
@@ -1065,20 +1262,21 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       // Re-check the in-flight guard at submit time, not just at verify time.
       // Two tabs, or a double-tap on a slow phone, would otherwise each pass
       // the earlier check and produce two records and two ETD reservations.
-      // The partial unique index on (ldap) WHERE token_id IS NULL is the
+      // The partial unique indexes on (ldap) WHERE token_id IS NULL are the
       // backstop underneath this; this is here to give a readable answer.
-      const { rows: live } = await db.execute(sql`
-        SELECT request_no, status FROM vrm_rental_request
-        WHERE ldap = ${ldap} AND status IN ('pending','approved','booked')
-          AND created_at > now() - interval '30 days'
-        ORDER BY created_at DESC LIMIT 1
-      `);
-      const open = (live as any[])[0];
-      if (open) {
+      // Enforced PER TYPE: a booked new request blocks another new request,
+      // not the extension asking for more time on it.
+      const submitType = String(req.body?.requestType ?? "new") === "extension" ? "extension" : "new";
+      const guard = await liveRequestGuard(ldap);
+      const blocked = submitType === "extension" ? guard.blockExtension : guard.blockNew;
+      if (blocked) {
         return res.status(409).json({
           success: false,
-          requestNo: open.request_no,
-          message: `You already have rental request #${open.request_no} with us (${open.status}).`,
+          requestNo: blocked.requestNo,
+          message: submitType === "extension"
+            ? `You already have rental request #${blocked.requestNo} with us (${blocked.status}). `
+            + "Fleet is working it. Contact Fleet rather than filing another one."
+            : `You already have rental request #${blocked.requestNo} with us (${blocked.status}).`,
         });
       }
 
@@ -1116,12 +1314,15 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         ip,
       });
       if (out.code === 200) {
-        logEvent("submit", { ldap, ip });
+        logEvent("submit", { ldap, ip, outcome: submitType });
       }
       res.status(out.code).json(out.json);
     } catch (e: any) {
-      // The unique index firing here means a genuine race, not a bug.
-      if (String(e?.message || "").includes("vrm_rental_request_open_live_uniq")) {
+      // Either unique index firing here means a genuine race, not a bug.
+      const msg = String(e?.message || "");
+      if (msg.includes("vrm_rental_request_open_live_uniq")
+       || msg.includes("vrm_rental_request_open_live_xtype_uniq")
+       || msg.includes("vrm_rental_request_ext_pending_uniq")) {
         return res.status(409).json({
           success: false,
           message: "You already have a rental request with us. Fleet is working it.",
@@ -1176,9 +1377,29 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 
       // Section A is CONFIRMED, not typed. Send back what we already hold.
       const f = await factsFor(ldap);
+
+      // Same detection the open door returns, so the tokenized form can
+      // default New vs Extension and show the current rental too.
+      const detectedOpenRentals = Number(f?.open_rentals ?? 0);
+      const openRentalCases = detectedOpenRentals > 0
+        ? await openRentalsFor(ldap).catch(() => [])
+        : [];
+
+      // The token door deliberately skips the live guard for NEW requests —
+      // Fleet issued this link on purpose, and overriding the dedupe is part
+      // of why the token path exists. Extensions get no such override: there
+      // is never a reason for a second pending extension, whoever sent the
+      // link, and a live new in pending/approved still means there is nothing
+      // to extend yet.
+      const guard = await liveRequestGuard(ldap);
+
       res.json({
         verified: true,
         policyVersion: POLICY_VERSION,
+        openRentals: detectedOpenRentals,
+        currentRental: openRentalCases[0] ?? null,
+        allowed: { new: true, extension: !guard.blockExtension },
+        blocking: { new: null, extension: guard.blockExtension },
         identity: {
           ldap,
           techName: row.tech_name || "",
@@ -1206,6 +1427,23 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       if (!ldap || (row.ldap && ldap !== String(row.ldap).trim().toUpperCase())) {
         return res.status(403).json({ success: false, message: "That LDAP does not match this link." });
       }
+      // Type-aware guard on the token door too, for extensions only. A Fleet
+      // link may deliberately duplicate a NEW request, but a second pending
+      // extension is never legitimate, and an extension makes no sense while
+      // a new request is still pending/approved (nothing to extend yet). The
+      // vrm_rental_request_ext_pending_uniq index backstops the race below.
+      if (String(req.body?.requestType ?? "new") === "extension") {
+        const guard = await liveRequestGuard(ldap);
+        if (guard.blockExtension) {
+          return res.status(409).json({
+            success: false,
+            requestNo: guard.blockExtension.requestNo,
+            message: `You already have rental request #${guard.blockExtension.requestNo} with us `
+                   + `(${guard.blockExtension.status}). Fleet is working it. Contact Fleet rather than filing another one.`,
+          });
+        }
+      }
+
       const facts0 = await factsFor(ldap);
       const ip0 = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
       const out = await screenAndRecord({
@@ -1224,6 +1462,14 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       });
       return res.status(out.code).json(out.json);
     } catch (e: any) {
+      // The extension dedupe index firing here is a genuine race (two tabs,
+      // two links), not a bug — answer it like the guard above would have.
+      if (String(e?.message || "").includes("vrm_rental_request_ext_pending_uniq")) {
+        return res.status(409).json({
+          success: false,
+          message: "You already have an extension request with us. Fleet is working it.",
+        });
+      }
       console.error("[rental-request] submit failed:", e?.message || e);
       res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
     }
@@ -1252,10 +1498,19 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const no = Number(req.params.requestNo);
       if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
       const { rows } = await db.execute(sql`
-        SELECT status, etd_booked_at FROM vrm_rental_request WHERE request_no = ${no}
+        SELECT status, etd_booked_at, COALESCE(request_type, 'new') AS request_type
+        FROM vrm_rental_request WHERE request_no = ${no}
       `);
       const row = (rows as any[])[0];
       if (!row) return res.status(404).json({ message: "request not found" });
+      // An extension NEVER books: the technician already has the car. Firing
+      // the ETD chain here would reserve a second one on top of it.
+      if (String(row.request_type) === "extension") {
+        return res.status(409).json({
+          message: "This is an extension request. Fleet extends the existing rental with "
+                 + "Enterprise manually — nothing books through ETD.",
+        });
+      }
       if (row.etd_booked_at != null) {
         return res.status(409).json({ message: "This request is already booked." });
       }
@@ -1268,6 +1523,67 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       res.json({ ok: true, started: true, requestNo: no });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "book failed" });
+    }
+  });
+
+  /**
+   * The retrievable acknowledgement record: who signed, when, and the exact
+   * bullet texts they attested to. Requests since the snapshot landed carry it
+   * verbatim (ack_snapshot, written server-side at submit); older rows are
+   * rendered from their stored booleans against TODAY's wording, flagged as
+   * such — the wording has been revised before, so pretending a legacy render
+   * is the signed text would be inventing evidence.
+   */
+  router.get("/forms/rental-request/:requestNo/acknowledgements", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
+      const { rows } = await db.execute(sql`
+        SELECT request_no, ldap, tech_name,
+               COALESCE(request_type, 'new') AS request_type,
+               policy_version, policy_acknowledged_at, created_at,
+               ack_snapshot,
+               ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
+               ack_return_one_day, ack_accurate,
+               ack_working_hours_only, ack_return_before_time_off,
+               ack_extension_weekly, ack_discipline
+        FROM vrm_rental_request WHERE request_no = ${no}
+      `);
+      const r = (rows as any[])[0];
+      if (!r) return res.status(404).json({ message: "request not found" });
+
+      if (r.ack_snapshot) {
+        return res.json({
+          requestNo: r.request_no,
+          requestType: r.request_type,
+          source: "snapshot",
+          snapshot: r.ack_snapshot,
+        });
+      }
+
+      // Legacy render: booleans only, today's wording, honest caveat.
+      const bullets = Object.keys(ACK_TEXTS)
+        .filter((k) => r[k] === true)
+        .map((k) => ({ key: k, text: ACK_TEXTS[k] }));
+      return res.json({
+        requestNo: r.request_no,
+        requestType: r.request_type,
+        source: "legacy_render",
+        caveat: "This request predates stored acknowledgement snapshots. Bullets are the "
+              + "statements marked as attested on the record, rendered with the CURRENT "
+              + `wording — the signed wording was policy version ${r.policy_version || "unknown"}.`,
+        snapshot: {
+          policyVersion: r.policy_version || null,
+          signerName: r.tech_name || null,
+          signerLdap: r.ldap,
+          requestType: r.request_type,
+          signedAt: r.policy_acknowledged_at || r.created_at,
+          bullets,
+        },
+      });
+    } catch (e: any) {
+      console.error("[rental-request] acknowledgements failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "failed to load acknowledgements" });
     }
   });
 
@@ -1308,7 +1624,13 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          // missing is worse than no health check; that lesson cost a publish.
          "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "return_at", "approved_branch", "accident_ok", "approval_sms_body",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
-         "policy_complete"]],
+         "policy_complete",
+         // Extension option + acknowledgement snapshot. Same lesson as above:
+         // a health check that omits what it guards is worse than none.
+         "request_type", "ext_repair_status", "ext_last_shop_contact_at",
+         "ext_shop_said", "ext_expected_completion", "ext_time_needed",
+         "detected_open_rentals", "type_mismatch", "type_mismatch_explanation",
+         "current_rental", "ack_snapshot"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
       // Cutover tracking. Without this the survey pool, the ETD reservation and
@@ -1337,7 +1659,12 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
 
       // Indexes are part of correctness here, not tuning: without the unique
       // index a concurrent double-submit becomes two ETD bookings.
-      const requiredIndexes = ["vrm_rental_request_token_uniq", "vrm_rental_request_open_live_uniq"];
+      const requiredIndexes = [
+        "vrm_rental_request_token_uniq",
+        "vrm_rental_request_open_live_uniq",
+        "vrm_rental_request_ext_pending_uniq",
+        "vrm_rental_request_open_live_xtype_uniq",
+      ];
       for (const idx of requiredIndexes) {
         const { rows } = await db.execute(sql`
           SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = ${idx}
@@ -1675,6 +2002,10 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
           UPDATE vrm_rental_request
           SET claimed_at = now(), claimed_by = ${runner}
           WHERE status = 'approved' AND etd_booked_at IS NULL
+            -- Extensions NEVER enter the booking pipeline: the technician
+            -- already holds the car and Fleet extends it with Enterprise
+            -- manually. Leasing one here would book them a second vehicle.
+            AND COALESCE(request_type, 'new') <> 'extension'
             AND COALESCE(pickup_at, appointment_at) IS NOT NULL
             AND (claimed_at IS NULL
                  OR claimed_at < now() - interval '30 minutes'
@@ -1740,6 +2071,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                to_char(claimed_at + interval '30 minutes', 'HH24:MI:SS') AS lease_expires_utc
           FROM vrm_rental_request
          WHERE status = 'approved' AND etd_booked_at IS NULL
+           AND COALESCE(request_type, 'new') <> 'extension'
            AND COALESCE(pickup_at, appointment_at) IS NOT NULL
            AND claimed_at IS NOT NULL AND claimed_at >= now() - interval '30 minutes'
            AND claimed_by IS DISTINCT FROM ${runner}
@@ -1787,6 +2119,21 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
     try {
       const no = Number(req.params.requestNo);
       if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
+
+      // An extension must NEVER transition to booked — the technician already
+      // holds the car and Fleet extends it with Enterprise manually. The queue
+      // and /book both refuse extensions, but this writeback is its own door,
+      // and a runner replaying an old batch must bounce off it too.
+      const { rows: typeRow } = await db.execute(sql`
+        SELECT COALESCE(request_type, 'new') AS request_type
+        FROM vrm_rental_request WHERE request_no = ${no}
+      `);
+      if (String((typeRow as any[])[0]?.request_type) === "extension") {
+        return res.status(409).json({
+          message: `request #${no} is an EXTENSION — it never books; Fleet handles it manually with Enterprise.`,
+        });
+      }
+
       const ref = String(req.body?.etdReference || "").trim();
       const resId = String(req.body?.etdReservationId || "").trim();
       const error = String(req.body?.error || "").trim();
@@ -1828,6 +2175,9 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
             status = 'booked', claimed_at = NULL, claimed_by = NULL,
             updated_at = now()
         WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
+          -- Defence in depth behind the explicit 409 above: even a racing
+          -- writeback can never flip an extension to booked.
+          AND COALESCE(request_type, 'new') <> 'extension'
         RETURNING request_no, status, COALESCE(pickup_at, appointment_at) AS appointment_at, shop_name
       `);
       // Same reconcile on the happy path, so a runner booking leaves ONE truth behind
@@ -2152,6 +2502,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
 
       const { rows } = await db.execute(sql`
         SELECT auto_decision,
+               COALESCE(request_type, 'new') AS request_type,
                -- Whether this approval carries a DIFFERENT pickup time than the row
                -- holds. Compared in SQL so both sides normalize through timestamptz;
                -- string-comparing "2026-08-18T16:00" against a serialized DB value
@@ -2173,9 +2524,14 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       `);
       const cur = (rows as any[])[0];
 
+      // Approving an EXTENSION books nothing: Fleet extends the existing
+      // rental with Enterprise manually. Pickup/return/branch are new-booking
+      // concepts, so they are ignored rather than validated here.
+      const isExtensionRow = String(cur?.request_type ?? "new") === "extension";
+
       // A return date before the pickup silently produces a negative rental that
       // ETD answers with an empty class list and no explanation.
-      if (returnAt) {
+      if (returnAt && !isExtensionRow) {
         const startIso = String(cur?.effective_pickup || "");
         if (!startIso) {
           return res.status(400).json({
@@ -2223,26 +2579,35 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // (Settings-aware, Monday/Uber copy when the booked start is the rolled
       // Monday) otherwise. One resolver, so a blank body can never route
       // around the Friday→Monday policy through a side-door literal.
-      const approveText = decision === "APPROVE"
-        ? resolveApprovalDecideSms({
-            override: approvalSms,
-            todayISO: etTodayISO(),
-            requestedPickupISO: String(cur.requested_day_et ?? ""),
-            effectivePickupISO: String(cur.effective_pickup_day_et ?? ""),
-            techName: cur.tech_name ?? null,
-            techLdap: String(cur.ldap ?? ""),
-            // Blankness here must match the resolver's own test (trim), or a
-            // whitespace-only body would skip loading the Settings templates
-            // while the resolver still falls back to the default copy.
-            templates: approvalSms.trim() ? { standard: "", monday: "" } : await loadRequestApprovalTemplates(),
-          }).body
-        : "";
+      // An EXTENSION approval books nothing, so the Friday→Monday resolver
+      // (a new-booking concept) never runs for it; the fixed extension copy
+      // is what gets sent and audited.
+      const approveText = decision !== "APPROVE"
+        ? ""
+        : isExtensionRow
+          ? "Sears Fleet: your rental extension is approved. We are arranging the extra "
+            + "time with Enterprise — keep the rental, no action needed unless we text you."
+          : resolveApprovalDecideSms({
+              override: approvalSms,
+              todayISO: etTodayISO(),
+              requestedPickupISO: String(cur.requested_day_et ?? ""),
+              effectivePickupISO: String(cur.effective_pickup_day_et ?? ""),
+              techName: cur.tech_name ?? null,
+              techLdap: String(cur.ldap ?? ""),
+              // Blankness here must match the resolver's own test (trim), or a
+              // whitespace-only body would skip loading the Settings templates
+              // while the resolver still falls back to the default copy.
+              templates: approvalSms.trim() ? { standard: "", monday: "" } : await loadRequestApprovalTemplates(),
+            }).body;
       const { rows: upd } = await db.execute(sql`
         UPDATE vrm_rental_request
         SET status = ${nextStatus},
-            pickup_at = COALESCE(${pickupAt}::timestamptz, pickup_at),
-            return_at = COALESCE(${returnAt}::timestamptz, return_at),
-            approved_branch = COALESCE(${approvedBranch}, approved_branch),
+            -- An extension carries NO booking coordinates. Cleared outright,
+            -- not COALESCEd: a stale pickup/branch left on the row from any
+            -- earlier write would read like a booking to everything downstream.
+            pickup_at = ${isExtensionRow ? sql`NULL` : sql`COALESCE(${pickupAt}::timestamptz, pickup_at)`},
+            return_at = ${isExtensionRow ? sql`NULL` : sql`COALESCE(${returnAt}::timestamptz, return_at)`},
+            approved_branch = ${isExtensionRow ? sql`NULL` : sql`COALESCE(${approvedBranch}, approved_branch)`},
             approval_sms_body = ${decision === "APPROVE" ? sql`${approveText}` : sql`approval_sms_body`},
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
@@ -2277,9 +2642,11 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
             + `${missingText}.${note ? ` ${note}` : ""}\nFinish it here: ${PUBLIC_REQUEST_URL}`
             + `\nYour earlier answers are saved, you only need to add what is missing.`
         : decision === "APPROVE"
+          // Resolved above: the approver's reviewed words for a new request,
+          // the fixed Enterprise-handled copy for an extension.
           ? approveText
           : decision === "DENY"
-          ? `Sears Fleet: your rental request was not approved.${note ? ` ${note}` : ""}`
+          ? `Sears Fleet: your rental ${isExtensionRow ? "extension " : ""}request was not approved.${note ? ` ${note}` : ""}`
             + " Reply to this message if your situation has changed."
           : `Sears Fleet: we are holding your rental request until you have a confirmed shop `
             + `appointment.${note ? ` ${note}` : ""} Start a new request once the shop gives you a date: `
@@ -2293,14 +2660,18 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // preview_pending/preview_ready are knocked back; an intent already at
       // confirmed/booking is past the point where a retime can be honored, and
       // yanking it there risks orphaning a real ETD reservation.
-      if (decision === "APPROVE" && pickupAt && cur.pickup_changes) {
+      if (decision === "APPROVE" && pickupAt && cur.pickup_changes && !isExtensionRow) {
         await invalidateRequestPreviews(
           String(no), `pickup time set to ${pickupAt} by ${actor}`);
       }
 
       // APPROVE books it. The acknowledgement above promises a confirmation number
       // and a branch; this is what actually produces them.
-      if (decision === "APPROVE") void autoBookApprovedRequest(no);
+      //
+      // NEVER for an extension: the technician already holds the car, and this
+      // chain would reserve a second one. Fleet extends with Enterprise
+      // manually after approval — the row is settled the moment it flips.
+      if (decision === "APPROVE" && !isExtensionRow) void autoBookApprovedRequest(no);
 
       res.json({ ok: true, decision });
     } catch (e: any) {
@@ -2499,3 +2870,73 @@ async function readIntentRow(intentId: number): Promise<any | null> {
   return (rows as any[])[0] ?? null;
 }
 
+
+/**
+ * The durable acknowledgement record written onto EVERY request, new or
+ * extension: who signed (name + LDAP), when, and the exact bullet texts as
+ * worded at that moment. Built server-side from ACK_TEXTS — the client never
+ * supplies wording — and only from the bullets that were actually shown and
+ * attested, so the record never claims assent to a statement nobody saw.
+ */
+function buildAckSnapshot(opts: {
+  signerName: string | null;
+  signerLdap: string;
+  requestType: string;
+  ackKeys: string[];
+}): any {
+  return {
+    policyVersion: POLICY_VERSION,
+    signerName: opts.signerName,
+    signerLdap: opts.signerLdap,
+    requestType: opts.requestType,
+    signedAt: new Date().toISOString(),
+    bullets: opts.ackKeys
+      .filter((k) => ACK_TEXTS[k])
+      .map((k) => ({ key: k, text: ACK_TEXTS[k] })),
+  };
+}
+
+/**
+ * The type-aware in-flight guard, shared by verify and submit on the open door.
+ *
+ * The old rule — any live row blocks any new request — broke the moment
+ * extensions existed: the BOOKED new request IS the rental the technician now
+ * wants more time on, so it must never block the extension asking for it.
+ *
+ * Semantics (Fleet's rule, 2026-08):
+ *   - NEW is blocked by any live row: a live new (pending/approved/booked) or
+ *     a pending extension. You cannot ask for a second vehicle.
+ *   - EXTENSION is blocked by a pending extension (no duplicates) and by a
+ *     live new still in pending/approved — there is nothing to extend yet.
+ *     A booked new does NOT block it.
+ *   - An APPROVED extension is settled: Fleet extends with Enterprise
+ *     manually and the row never books, so it must not block next week's
+ *     extension request. Extensions only count as live while 'pending'.
+ */
+async function liveRequestGuard(ldap: string): Promise<{
+  liveNew: any | null;
+  liveExt: any | null;
+  blockNew: { requestNo: number; status: string } | null;
+  blockExtension: { requestNo: number; status: string } | null;
+}> {
+  const { rows } = await db.execute(sql`
+    SELECT request_no, status, COALESCE(request_type, 'new') AS request_type
+    FROM vrm_rental_request
+    WHERE ldap = ${ldap} AND status IN ('pending','approved','booked')
+      AND created_at > now() - interval '30 days'
+    ORDER BY created_at DESC
+  `);
+  const all = rows as any[];
+  const liveNew = all.find((r) => r.request_type !== "extension") ?? null;
+  const liveExt = all.find((r) => r.request_type === "extension" && r.status === "pending") ?? null;
+  const asRef = (r: any) => (r ? { requestNo: r.request_no, status: r.status } : null);
+  const newInProgress = all.find(
+    (r) => r.request_type !== "extension" && (r.status === "pending" || r.status === "approved"),
+  ) ?? null;
+  return {
+    liveNew,
+    liveExt,
+    blockNew: asRef(liveNew ?? liveExt),
+    blockExtension: asRef(liveExt ?? newInProgress),
+  };
+}

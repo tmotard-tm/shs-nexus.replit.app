@@ -282,6 +282,39 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL;
   `);
 
+  // Request TYPE: 'new' (a vehicle they do not have) vs 'extension' (more time
+  // on the rental they already hold). An extension is NOT a different-vehicle
+  // request — it is the weekly re-up the acknowledgements promise, and it
+  // doubles as a repair status check-in. Every historical row predates the
+  // question and was by definition a new-vehicle request, hence the default.
+  //
+  // The ext_* columns are the van status update the extension path collects.
+  // detected_open_rentals / type_mismatch record what the SYSTEM believed at
+  // submit time against what the technician chose: the rental-ops feed can
+  // lag, so a contradiction warns and flags rather than hard-blocking.
+  //
+  // ack_snapshot is the durable acknowledgement record for EVERY request: the
+  // signer's name + LDAP, the signed-at timestamp, and the exact bullet texts
+  // as worded at the moment of signing. The wording has been revised once
+  // already; rendering today's client copy against yesterday's signature
+  // would forge what was agreed to, so the texts are frozen per request.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS request_type              text NOT NULL DEFAULT 'new',
+      ADD COLUMN IF NOT EXISTS ext_repair_status         text,
+      ADD COLUMN IF NOT EXISTS ext_last_shop_contact_at  date,
+      ADD COLUMN IF NOT EXISTS ext_shop_said             text,
+      ADD COLUMN IF NOT EXISTS ext_expected_completion   date,
+      ADD COLUMN IF NOT EXISTS ext_time_needed           text,
+      ADD COLUMN IF NOT EXISTS detected_open_rentals     integer,
+      ADD COLUMN IF NOT EXISTS type_mismatch             boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS type_mismatch_explanation text,
+      ADD COLUMN IF NOT EXISTS current_rental            jsonb,
+      ADD COLUMN IF NOT EXISTS ack_snapshot              jsonb;
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_type_idx
+      ON vrm_rental_request (request_type);
+  `);
+
   // One live request per technician on the OPEN front door.
   //
   // The index above is partial on `token_id IS NOT NULL`, so it does not cover
@@ -293,12 +326,17 @@ export async function initFormsSchema(): Promise<void> {
   // Older duplicates are DEMOTED, never deleted: a live row can already carry
   // a reservation, and this migration runs unattended behind a non-fatal
   // catch. Losing a booked request here would be undiscoverable.
+  //
+  // Type-aware since the extension option landed: a technician's BOOKED new
+  // request (the rental they now hold) must legally coexist with the pending
+  // extension asking for more time on it, so the dedupe never crosses types.
   await db.execute(sql`
     UPDATE vrm_rental_request a
     SET status = 'superseded', updated_at = now()
     FROM vrm_rental_request b
     WHERE a.token_id IS NULL AND b.token_id IS NULL
       AND a.ldap = b.ldap
+      AND COALESCE(a.request_type,'new') = COALESCE(b.request_type,'new')
       AND a.status IN ('pending','approved','booked')
       AND b.status IN ('pending','approved','booked')
       AND a.created_at < b.created_at
@@ -322,6 +360,7 @@ export async function initFormsSchema(): Promise<void> {
          AND d LIKE '%UNIQUE%'
          AND d LIKE '%(ldap)%'
          AND d LIKE '%token_id IS NULL%'
+         AND d LIKE '%request_type%'
          AND d LIKE '%pending%' AND d LIKE '%approved%' AND d LIKE '%booked%' THEN
         RETURN;
       END IF;
@@ -330,10 +369,63 @@ export async function initFormsSchema(): Promise<void> {
         DROP INDEX vrm_rental_request_open_live_uniq;
       END IF;
 
+      -- Covers NEW requests only. An extension row must be able to sit pending
+      -- while the technician's booked new request (the rental being extended)
+      -- is still live on the same LDAP.
       CREATE UNIQUE INDEX vrm_rental_request_open_live_uniq
         ON vrm_rental_request (ldap)
-        WHERE token_id IS NULL AND status IN ('pending','approved','booked');
+        WHERE token_id IS NULL AND request_type = 'new'
+          AND status IN ('pending','approved','booked');
     END $$;
+  `);
+
+  // At most ONE pending extension per technician — on EVERY door. The token
+  // door deliberately lets Fleet issue duplicate NEW links, but there is no
+  // legitimate reason for two pending extensions, so this one is unconditional
+  // on token_id. Only `pending` — an approved extension is settled (Fleet
+  // extends with Enterprise manually, nothing books), so it must never block
+  // next week's extension request.
+  await db.execute(sql`
+    UPDATE vrm_rental_request a
+    SET status = 'superseded', updated_at = now()
+    FROM vrm_rental_request b
+    WHERE a.ldap = b.ldap
+      AND a.request_type = 'extension' AND b.request_type = 'extension'
+      AND a.status = 'pending' AND b.status = 'pending'
+      AND a.created_at < b.created_at;
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_ext_pending_uniq
+      ON vrm_rental_request (ldap)
+      WHERE request_type = 'extension' AND status = 'pending';
+  `);
+  // Subsumed by the unconditional index above.
+  await db.execute(sql`DROP INDEX IF EXISTS vrm_rental_request_open_live_ext_uniq;`);
+
+  // The CROSS-TYPE invariant, enforced by the database rather than by the
+  // check-then-insert in the route (which two concurrent submissions can both
+  // pass). One row per LDAP may satisfy this predicate on the open door:
+  //   - a pending extension conflicts with a pending/approved new, and
+  //   - a pending new conflicts with a pending extension,
+  // while the one legal pairing — a BOOKED new (the rental being extended)
+  // beside a pending extension — stays out of the predicate entirely.
+  // An extension caught by a live new is the invalid half, so the pre-clean
+  // demotes the pending extension, never Fleet's approved new.
+  await db.execute(sql`
+    UPDATE vrm_rental_request a
+    SET status = 'superseded', updated_at = now()
+    FROM vrm_rental_request b
+    WHERE a.token_id IS NULL AND b.token_id IS NULL
+      AND a.ldap = b.ldap
+      AND a.request_type = 'extension' AND a.status = 'pending'
+      AND COALESCE(b.request_type,'new') = 'new' AND b.status IN ('pending','approved');
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_open_live_xtype_uniq
+      ON vrm_rental_request (ldap)
+      WHERE token_id IS NULL
+        AND ((request_type = 'extension' AND status = 'pending')
+          OR (request_type = 'new' AND status IN ('pending','approved')));
   `);
 
   // Where a request came from. A survey-originated request has no token and no

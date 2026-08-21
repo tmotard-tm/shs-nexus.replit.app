@@ -68,8 +68,22 @@ interface Req {
   booked_facts?: BookedFacts | null;
   msg1_state?: string | null;
   intent_error?: string | null;
+  // Extension of the technician's CURRENT rental: more time on the same unit,
+  // never a new booking. Approve settles it — Fleet extends with Enterprise
+  // manually.
+  request_type?: string | null;
+  ext_repair_status?: string | null;
+  ext_last_shop_contact_at?: string | null;
+  ext_shop_said?: string | null;
+  ext_expected_completion?: string | null;
+  ext_time_needed?: string | null;
+  detected_open_rentals?: number | null;
+  type_mismatch?: boolean | null;
+  type_mismatch_explanation?: string | null;
+  current_rental?: Record<string, any> | null;
 }
 
+const isExt = (r: Req | null | undefined) => String(r?.request_type ?? "new") === "extension";
 /** The reservation as Enterprise recorded it, mirrored onto the intent at booking. */
 interface BookedFacts {
   branchName?: string | null; branchCode?: string | null; branchAddress?: string | null;
@@ -333,9 +347,11 @@ export default function RentalRequests() {
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [classDraft, setClassDraft] = useState("sedan");
+  const [showAcks, setShowAcks] = useState(false);
   // The approval SMS the technician will receive. Server-rendered default,
   // editable in place; `smsEdited` pins the approver's words against the
-  // refresh that follows a pickup-date change.
+  // refresh that follows a pickup-date change. New requests only — an
+  // extension approval sends fixed Enterprise-handled copy from the server.
   const [smsBody, setSmsBody] = useState("");
   const [smsEdited, setSmsEdited] = useState(false);
   // A hand-picked date is never overwritten by the late-arriving context.
@@ -359,6 +375,9 @@ export default function RentalRequests() {
       // forever. Ten minutes is far longer than the 20-30s an ETD round trip takes.
       const settling = reqs.some((r) =>
         r.status === "approved" && !r.etd_booked_at && !r.etd_error
+        // An approved extension never books, so it is settled the moment it
+        // flips — polling it fast would pin the page at 5s forever.
+        && !isExt(r)
         && r.decided_at != null && Date.now() - Date.parse(r.decided_at) < 10 * 60_000);
       return settling ? 5_000 : 30_000;
     },
@@ -420,7 +439,9 @@ export default function RentalRequests() {
   // the preview and the sent text are the same code path. Re-fetched when the
   // approver changes the pickup date so the default copy tracks the date; an
   // edited body is never overwritten (see the effect below).
-  const canDecide = !!detail && detail.status !== "booked";
+  // Extensions are excluded outright: approving one books nothing, so the
+  // Friday policy, the schedule lookup, and the SMS preview never apply.
+  const canDecide = !!detail && detail.status !== "booked" && !isExt(detail);
   const apCtxUrl = detail
     ? `/api/vrm/forms/rental-request/${detail.request_no}/approval-context`
     : "";
@@ -436,7 +457,7 @@ export default function RentalRequests() {
     },
   });
   useEffect(() => {
-    if (!apCtx || !detail) return;
+    if (!apCtx || !detail || isExt(detail)) return;
     // Reconcile the server's answer into the drawer. The approver always
     // wins: a hand-edited date or body is never overwritten. The date is
     // reconciled ONCE per opened request (the click handler already seeded
@@ -469,7 +490,7 @@ export default function RentalRequests() {
   // from resolveApprovalDecideSms on the same inputs. An edited body is
   // never touched.
   useEffect(() => {
-    if (!detail || smsEdited || !pickupDate) return;
+    if (!detail || isExt(detail) || smsEdited || !pickupDate) return;
     setSmsBody(resolveApprovalDecideSms({
       override: "",
       todayISO: etTodayISO(),
@@ -481,6 +502,26 @@ export default function RentalRequests() {
     }).body);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tplForOpen, detail?.request_no, pickupDate, smsEdited]);
+
+  // The retrievable acknowledgement record: signer, timestamp, and the exact
+  // bullet texts as signed. Rows since the snapshot landed carry it verbatim;
+  // legacy rows render from their stored booleans with a wording caveat.
+  const { data: ackRecord, isLoading: ackLoading, error: ackError } = useQuery<{
+    source: string; caveat?: string;
+    snapshot: {
+      policyVersion?: string | null; signerName?: string | null; signerLdap: string;
+      signedAt?: string | null; bullets: Array<{ key: string; text: string }>;
+    };
+  }>({
+    queryKey: ["/api/vrm/forms/rental-request", detail?.request_no, "acknowledgements"],
+    enabled: showAcks && detail != null,
+    queryFn: async () => {
+      const res = await fetch(`/api/vrm/forms/rental-request/${detail!.request_no}/acknowledgements`);
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.message || "failed to load acknowledgements");
+      return j;
+    },
+  });
 
   const decide = useMutation({
     mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null; approvalSms?: string | null }) => {
@@ -748,48 +789,60 @@ export default function RentalRequests() {
                 return (
                   <tr key={r.request_no} onClick={() => {
                         setDetail(r);
-                        // The drawer must hold a SAFE, complete default the
-                        // instant it opens — the server's Saturday-schedule
-                        // answer can take a minute on a cold boot, and an
-                        // approver who clicks APPROVE before it lands must
-                        // still send the Friday→Monday policy, never a blank
-                        // that decays to generic copy. Unknown schedule =
-                        // Monday branch; the context reconciles back to
-                        // Friday only on a fresh "works Saturday".
-                        const init = initialApprovalDrawerDefaults({
-                          todayISO: etTodayISO(),
-                          requestedPickupISO: etDateISO(r.pickup_at),
-                          techName: r.tech_name,
-                          techLdap: r.ldap,
-                          templates: smsTemplates,
-                        });
-                        setPickupDate(init.pickupDateISO);
-                        // Rolled/future dates start at 08:00; a same-day
-                        // pickup keeps "come get it within the hour".
-                        setPickupTime(init.useMorningTime ? "08:00" : nextHourET().time);
-                        setPendingReason(init.pendingReason);
-                        setSmsBody(init.smsBody);
+                        if (!isExt(r)) {
+                          // The drawer must hold a SAFE, complete default the
+                          // instant it opens — the server's Saturday-schedule
+                          // answer can take a minute on a cold boot, and an
+                          // approver who clicks APPROVE before it lands must
+                          // still send the Friday→Monday policy, never a blank
+                          // that decays to generic copy. Unknown schedule =
+                          // Monday branch; the context reconciles back to
+                          // Friday only on a fresh "works Saturday".
+                          const init = initialApprovalDrawerDefaults({
+                            todayISO: etTodayISO(),
+                            requestedPickupISO: etDateISO(r.pickup_at),
+                            techName: r.tech_name,
+                            techLdap: r.ldap,
+                            templates: smsTemplates,
+                          });
+                          setPickupDate(init.pickupDateISO);
+                          // Rolled/future dates start at 08:00; a same-day
+                          // pickup keeps "come get it within the hour".
+                          setPickupTime(init.useMorningTime ? "08:00" : nextHourET().time);
+                          setPendingReason(init.pendingReason);
+                          setSmsBody(init.smsBody);
+                          // Start THIS open's own template request — a fresh
+                          // cache-busted HTTP call, never a dedupe onto some
+                          // earlier in-flight fetch — so the untouched default
+                          // becomes sendable only once bytes requested BY this
+                          // open have arrived.
+                          const seq = ++tplSeqRef.current;
+                          setTplState((s) => tplFreshnessOnOpen(s, seq));
+                          fetchTemplatesForOpen(seq);
+                        } else {
+                          // An extension books nothing and its approval copy
+                          // is fixed on the server — no pickup default, no
+                          // SMS preview, no schedule lookup.
+                          const def = nextHourET();
+                          setPickupDate(def.date);
+                          setPickupTime(def.time);
+                          setPendingReason("");
+                          setSmsBody("");
+                        }
                         setSmsEdited(false);
                         setDateEdited(false);
+                        // Unconditional: every OPEN is a fresh reconciliation
+                        // window, including a close→reopen of the same
+                        // request — the schedule answer must be able to move
+                        // the seeded Monday back to Friday each time.
+                        suggestedFor.current = null;
                         // Maintenance arrives pre-denied: the standard response
                         // is already in the note box, so DENY is one click and
                         // the technician receives the exact script.
                         setNote(MAINT_CATS.has(r.problem_category ?? "") && r.status === "pending" ? MAINT_SCRIPT : "");
                         setClassDraft(normCls(r.approved_vehicle_class) || "sedan");
                         setActionErr("");
-                        // Unconditional: every OPEN is a fresh reconciliation
-                        // window, including a close→reopen of the same
-                        // request — the schedule answer must be able to move
-                        // the seeded Monday back to Friday each time.
-                        suggestedFor.current = null;
-                        // Start THIS open's own template request — a fresh
-                        // cache-busted HTTP call, never a dedupe onto some
-                        // earlier in-flight fetch — so the untouched default
-                        // becomes sendable only once bytes requested BY this
-                        // open have arrived.
-                        const seq = ++tplSeqRef.current;
-                        setTplState((s) => tplFreshnessOnOpen(s, seq));
-                        fetchTemplatesForOpen(seq);
+                        setShowAcks(false);
                       }}
                       style={{ cursor: "pointer" }}>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.request_no}</td>
@@ -804,9 +857,14 @@ export default function RentalRequests() {
                           <Pill text="from survey" fg={colors.inkMuted} bg={colors.background} />
                         </span>
                       )}
+                      {isExt(r) && (
+                        <span style={{ marginLeft: 6 }}>
+                          <Pill text="EXTENSION" fg={colors.accent} bg={colors.accentLight} />
+                        </span>
+                      )}
                     </td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.truck_number || "—"}</td>
-                    <td style={tdBase}>{CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "—"}</td>
+                    <td style={tdBase}>{isExt(r) ? "Extension" : (CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "—")}</td>
                     <td style={tdBase}>{r.auto_decision ? <Pill text={r.auto_decision} fg={fg} bg={bg} /> : "—"}</td>
                     {/* The number the decision now turns on, visible without
                         opening the drawer. */}
@@ -850,6 +908,40 @@ export default function RentalRequests() {
                 <X size={18} />
               </button>
             </div>
+
+            {/* An extension is a different transaction: more time on the car
+                the technician already has. Say so before anything below reads
+                like a booking. */}
+            {isExt(detail) && (
+              <div style={{ background: colors.accentLight, border: `1px solid ${colors.accent}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.accent }}>
+                  RENTAL EXTENSION
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                  More time on the rental this technician already holds. Approving books
+                  NOTHING — Fleet arranges the extra time with Enterprise manually.
+                </div>
+              </div>
+            )}
+
+            {/* The technician's choice contradicted what the rental feed shows.
+                Soft by design (the feed can lag) — but Fleet decides with the
+                contradiction and the technician's explanation in view. */}
+            {detail.type_mismatch && (
+              <div style={{ background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.amber }}>
+                  CHOICE CONTRADICTS OUR RECORDS
+                </div>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                  {isExt(detail)
+                    ? "Filed as an EXTENSION, but the rental feed shows no open rental for this technician."
+                    : `Filed as a NEW rental, but the rental feed shows ${detail.detected_open_rentals ?? "an"} open rental(s) for this technician.`}
+                  {detail.type_mismatch_explanation
+                    ? <> Their explanation: <i>“{detail.type_mismatch_explanation}”</i></>
+                    : " No explanation was captured."}
+                </div>
+              </div>
+            )}
 
             {/* Maintenance is the one answer that is already decided. Say it
                 before anything else in the drawer gets a chance to look like
@@ -939,11 +1031,59 @@ export default function RentalRequests() {
                 </div>
               ))}
 
+            {/* Extension context: what the extension is FOR, and the van
+                status update — the repair check-in Fleet reviews before
+                granting the extra time. */}
+            {isExt(detail) && (
+              <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                  Current rental (from rental-ops cases)
+                </div>
+                {detail.current_rental ? (
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, display: "grid", gap: 3, marginBottom: 10 }}>
+                    <div><b>{detail.current_rental.veh_desc || detail.current_rental.rental_class || "vehicle unknown"}</b>
+                      {detail.current_rental.rental_vendor ? ` · ${detail.current_rental.rental_vendor}` : ""}
+                      {detail.current_rental.po_number ? ` · PO ${detail.current_rental.po_number}` : ""}</div>
+                    <div>
+                      {detail.current_rental.rental_start_date ? `Started ${detail.current_rental.rental_start_date}` : ""}
+                      {detail.current_rental.days_open != null ? ` · ${detail.current_rental.days_open} days on rent` : ""}
+                      {detail.current_rental.number_of_extensions != null ? ` · ${detail.current_rental.number_of_extensions} extension(s) so far` : ""}
+                    </div>
+                    {(detail.current_rental.renting_city || detail.current_rental.renting_state) && (
+                      <div>{[detail.current_rental.renting_city, detail.current_rental.renting_state].filter(Boolean).join(", ")}</div>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, marginBottom: 10 }}>
+                    No open rental detected at submit time — see the contradiction flag above.
+                  </div>
+                )}
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6, borderTop: `1px solid ${colors.rule}`, paddingTop: 10 }}>
+                  Van status update
+                </div>
+                {([["Repair status", detail.ext_repair_status],
+                   ["Last spoke with shop", d10(detail.ext_last_shop_contact_at ?? null)],
+                   ["Shop said", detail.ext_shop_said],
+                   ["Expected completion", d10(detail.ext_expected_completion ?? null)],
+                   ["Time still needed", detail.ext_time_needed]] as Array<[string, unknown]>)
+                  .filter(([, v]) => String(v ?? "").trim() !== "")
+                  .map(([k, v]) => (
+                    <div key={k} style={{ display: "flex", gap: 10, padding: "6px 0", borderBottom: `1px solid ${colors.rule}` }}>
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", minWidth: 140 }}>{k}</div>
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, flex: 1, wordBreak: "break-word" }}>{String(v)}</div>
+                    </div>
+                  ))}
+              </div>
+            )}
+
             {/* The class the booking will reserve. The engine wrote sedan
                 (cargo van for the HVAC carve-out) at submit; this is Fleet's
                 when-necessary override. The bookers match this text against
                 ETD's offered classes; the server locks it once a booking is
-                past Confirm and knocks waiting previews back to re-quote. */}
+                past Confirm and knocks waiting previews back to re-quote.
+                Hidden for extensions: an extension is more time on the SAME
+                unit, never a class decision. */}
+            {!isExt(detail) && (
             <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
                 Vehicle class for the booking
@@ -988,12 +1128,27 @@ export default function RentalRequests() {
                 </div>
               )}
             </div>
+            )}
 
             {/* The booking outcome, as the REQUEST ROW knows it. This is the
                 one place a failure that happened before any workflow intent
                 existed (eligibility gate, intent conflict) becomes visible —
-                the intent panel below can only show what an intent recorded. */}
-            {detail.etd_booked_at ? (
+                the intent panel below can only show what an intent recorded.
+                An EXTENSION has no booking outcome by design: approved means
+                settled, and Fleet handles Enterprise manually. */}
+            {isExt(detail) ? (
+              detail.status === "approved" ? (
+                <div style={{ marginTop: 16, background: colors.greenLight, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.green }}>
+                    EXTENSION APPROVED — HANDLE WITH ENTERPRISE
+                  </div>
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                    Nothing books automatically. Extend the existing reservation with
+                    Enterprise manually; the technician was texted to keep the rental.
+                  </div>
+                </div>
+              ) : null
+            ) : detail.etd_booked_at ? (
               <div style={{ marginTop: 16, background: colors.greenLight, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "10px 12px" }}>
                 <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.green }}>
                   BOOKED{detail.etd_reference ? ` — CONFIRMATION ${detail.etd_reference}` : ""}
@@ -1068,8 +1223,9 @@ export default function RentalRequests() {
 
             {/* Booking workflow: only offered once the request is APPROVED
                 (the server's eligibility gate requires it anyway), or shown
-                read-only if an intent already exists. */}
-            {(intentFor(detail.request_no) || detail.status === "approved") && (
+                read-only if an intent already exists. Never for extensions —
+                the orchestrator refuses extension intents outright. */}
+            {!isExt(detail) && (intentFor(detail.request_no) || detail.status === "approved") && (
               <CutoverIntentPanel
                 workflow="request"
                 sourceId={String(detail.request_no)}
@@ -1085,6 +1241,10 @@ export default function RentalRequests() {
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
                         placeholder="Note (required if you overrule the engine)"
                         style={{ ...ctrl, width: "100%", resize: "vertical", marginBottom: 8 }} />
+              {/* Pickup/return/branch are new-booking concepts. An extension
+                  books nothing, so none of them apply — approving it is the
+                  whole action. */}
+              {!isExt(detail) && (<>
               {/* Fleet controls when the rental actually starts. Prefilled to
                   today (ET) at the next full hour when the request is opened;
                   clearing the date falls back to the technician's own date. */}
@@ -1174,7 +1334,9 @@ export default function RentalRequests() {
               {/* The exact SMS an APPROVE sends, shown BEFORE the click so
                   the approver can tailor the words (e.g. the Monday/Uber
                   line). Server-rendered from the same template the decide
-                  path uses; editing here is editing the real message. */}
+                  path uses; editing here is editing the real message.
+                  New requests only — an extension approval sends fixed
+                  Enterprise-handled copy. */}
               <div style={{ marginBottom: 8 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
                   <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
@@ -1222,6 +1384,7 @@ export default function RentalRequests() {
                   </div>
                 )}
               </div>
+              </>)}
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
@@ -1235,8 +1398,10 @@ export default function RentalRequests() {
                               // UNTOUCHED default until the Settings templates
                               // that rendered it have actually arrived — an
                               // edit is always sendable (those bytes were
-                              // human-reviewed by definition).
-                              if (d === "APPROVE") {
+                              // human-reviewed by definition). Extensions skip
+                              // the gate: their approval copy is fixed on the
+                              // server and no preview exists to review.
+                              if (d === "APPROVE" && !isExt(detail)) {
                                 const gate = approvalSendGate({
                                   smsBody, smsEdited,
                                   templatesReady: tplTemplatesReady(tplState),
@@ -1244,13 +1409,13 @@ export default function RentalRequests() {
                                 if (!gate.ok) { setActionErr(gate.message); return; }
                               }
                               decide.mutate({ requestNo: detail.request_no, decision: d, note,
-                                pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
-                                returnAt: d === "APPROVE" && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
-                                approvedBranch: d === "APPROVE" && approvedBranch.trim() ? approvedBranch.trim() : null,
-                                approvalSms: d === "APPROVE" ? smsBody : null });
+                                pickupAt: d === "APPROVE" && !isExt(detail) && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
+                                returnAt: d === "APPROVE" && !isExt(detail) && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
+                                approvedBranch: d === "APPROVE" && !isExt(detail) && approvedBranch.trim() ? approvedBranch.trim() : null,
+                                approvalSms: d === "APPROVE" && !isExt(detail) ? smsBody : null });
                             }}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
-                      {d}
+                      {d === "APPROVE" && isExt(detail) ? "APPROVE EXTENSION" : d}
                     </button>
                   );
                 })}
@@ -1290,6 +1455,46 @@ export default function RentalRequests() {
                 </p>
               </div>
               {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, marginTop: 8 }}>{actionErr}</p>}
+            </div>
+
+            {/* The acknowledgement record — retrievable at any time, for both
+                new requests and extensions: who signed, when, and the exact
+                bullet texts they attested to. */}
+            <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
+              <button type="button" onClick={() => setShowAcks((v) => !v)}
+                      style={{ ...ctrl, cursor: "pointer", fontWeight: 600, width: "100%" }}>
+                {showAcks ? "Hide acknowledgements" : "View acknowledgements"}
+              </button>
+              {showAcks && (
+                ackLoading ? (
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted, marginTop: 10 }}>Loading…</div>
+                ) : ackError ? (
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.red, marginTop: 10 }}>
+                    {String((ackError as any)?.message || ackError)}
+                  </div>
+                ) : ackRecord ? (
+                  <div style={{ marginTop: 10 }}>
+                    {ackRecord.caveat && (
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 8, padding: "6px 8px", marginBottom: 8 }}>
+                        {ackRecord.caveat}
+                      </div>
+                    )}
+                    <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 5 }}>
+                      {(ackRecord.snapshot?.bullets ?? []).map((b) => (
+                        <li key={b.key} style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>{b.text}</li>
+                      ))}
+                    </ul>
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${colors.rule}` }}>
+                      Digitally signed by <b>{ackRecord.snapshot?.signerName || "(name not recorded)"}</b>
+                      {" "}({ackRecord.snapshot?.signerLdap})
+                      {ackRecord.snapshot?.signedAt
+                        ? <> on {new Date(ackRecord.snapshot.signedAt).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</>
+                        : null}
+                      {ackRecord.snapshot?.policyVersion ? <> · policy {ackRecord.snapshot.policyVersion}</> : null}
+                    </div>
+                  </div>
+                ) : null
+              )}
             </div>
           </div>
         </div>

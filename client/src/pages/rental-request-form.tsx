@@ -163,6 +163,26 @@ export default function RentalRequestForm() {
   const [correctedPhone, setCorrectedPhone] = useState("");
   const [identityCorrection, setIdentityCorrection] = useState("");
 
+  // New rental vs extension of the current one. Defaulted from what the
+  // system detects (an open rental-ops case => extension), but the technician
+  // decides: the feed can lag, so a contradiction warns and asks for a line
+  // of explanation rather than blocking.
+  const [requestType, setRequestType] = useState<"" | "new" | "extension">("");
+  const [detection, setDetection] = useState<{
+    openRentals: number;
+    currentRental: any | null;
+    allowed: { new: boolean; extension: boolean };
+    blocking: { new: any | null; extension: any | null };
+  } | null>(null);
+  const [typeMismatchExplanation, setTypeMismatchExplanation] = useState("");
+
+  // The extension path's van status update.
+  const [extRepairStatus, setExtRepairStatus] = useState("");
+  const [extLastShopContact, setExtLastShopContact] = useState("");
+  const [extShopSaid, setExtShopSaid] = useState("");
+  const [extExpectedCompletion, setExtExpectedCompletion] = useState("");
+  const [extTimeNeeded, setExtTimeNeeded] = useState("");
+
   const [problemCategory, setProblemCategory] = useState("");
   const [symptom, setSymptom] = useState("");
   const [isTowed, setIsTowed] = useState("");
@@ -197,6 +217,14 @@ export default function RentalRequestForm() {
   const clearErr = (k: string) =>
     setFieldErrors((p) => { if (!(k in p)) return p; const n = { ...p }; delete n[k]; return n; });
 
+  // A choice that contradicts detection. Soft: the rental-ops feed can lag,
+  // so the technician proceeds with an explanation and Fleet sees the flag.
+  const typeMismatch = !!detection && requestType !== "" &&
+    (requestType === "extension" ? detection.openRentals === 0 : detection.openRentals > 0);
+  // The extension re-signs the FULL set: all four core statements and all
+  // four terms, every time — no category-based trimming.
+  const extCoreAll = CORE_ACKS.every(([k]) => !!acks[k]);
+
   const { data: linkInfo, isLoading } = useQuery<{ valid: boolean; completed?: boolean; message?: string }>({
     queryKey: [api, "start"],
     queryFn: async () => (await fetch(openMode ? `${api}/start` : api)).json(),
@@ -208,6 +236,20 @@ export default function RentalRequestForm() {
     onSuccess: (d: any) => {
       setVerifyError("");
       setIdentity(d.identity);
+      // Detection drives the DEFAULT choice only. A tech with an open rental
+      // case defaults to Extension; without one, to New. A resumed send-back
+      // is a new-rental continuation, so it defaults to New regardless.
+      const det = {
+        openRentals: Number(d.openRentals ?? 0),
+        currentRental: d.currentRental ?? null,
+        allowed: { new: d.allowed?.new !== false, extension: d.allowed?.extension !== false },
+        blocking: { new: d.blocking?.new ?? null, extension: d.blocking?.extension ?? null },
+      };
+      setDetection(det);
+      let def: "new" | "extension" = d.resume ? "new" : det.openRentals > 0 ? "extension" : "new";
+      if (def === "new" && !det.allowed.new && det.allowed.extension) def = "extension";
+      if (def === "extension" && !det.allowed.extension && det.allowed.new) def = "new";
+      setRequestType(def);
       // A send-back that makes someone retype everything is a send-back they
       // abandon, and an abandoned request becomes a phone call to Fleet, which
       // is the cost this whole process exists to remove. Give them back what
@@ -245,6 +287,9 @@ export default function RentalRequestForm() {
   const validate = () => {
     const e: Record<string, string> = {};
     if (!identityOk) e.identityOk = "Please confirm your details.";
+    if (typeMismatch && !typeMismatchExplanation.trim()) {
+      e.typeMismatchExplanation = "Tell us briefly why our records look wrong.";
+    }
     if (!isOver21) {
       e.isOver21 = "Please answer.";
     } else if (isOver21 === "no") {
@@ -295,6 +340,8 @@ export default function RentalRequestForm() {
     if (!validate()) return;
     submitMutation.mutate({
       ldap,
+      requestType: "new",
+      typeMismatchExplanation: typeMismatch ? typeMismatchExplanation.trim() : null,
       district: identity?.district, homeState: identity?.homeState,
       identityCorrected: identityOk === "no",
       identityCorrection,
@@ -309,6 +356,49 @@ export default function RentalRequestForm() {
       // statement the technician never made.
       ...Object.fromEntries(Object.entries(acks).filter(([k]) =>
         coreAcks.some(([c]) => c === k) || INDIVIDUAL_ACKS.some(([c]) => c === k))),
+    });
+  };
+
+  const validateExtension = () => {
+    const e: Record<string, string> = {};
+    if (!identityOk) e.identityOk = "Please confirm your details.";
+    if (identityOk === "no") {
+      const digits = correctedPhone.replace(/[^0-9]/g, "").replace(/^1(?=\d{10}$)/, "");
+      if (correctedPhone.trim() && digits.length !== 10) e.correctedPhone = "Enter a 10-digit mobile number.";
+      const tChanged = correctedTruck.trim() !== String(identity?.truckNumber || "").trim();
+      const pChanged = digits !== String(identity?.mobilePhone || "").replace(/[^0-9]/g, "");
+      if (!tChanged && !pChanged && !identityCorrection.trim()) {
+        e.identityCorrection = "Update your truck or mobile number, or tell us what else is wrong.";
+      }
+    }
+    if (typeMismatch && !typeMismatchExplanation.trim()) {
+      e.typeMismatchExplanation = "Tell us briefly why our records look wrong.";
+    }
+    if (!extRepairStatus.trim()) e.extRepairStatus = "Tell us where the repair stands.";
+    if (!extLastShopContact) e.extLastShopContact = "When did you last speak with the shop?";
+    if (!extShopSaid.trim()) e.extShopSaid = "What did the shop tell you?";
+    if (!extTimeNeeded.trim()) e.extTimeNeeded = "Roughly how much longer do you need the rental?";
+    if (!extCoreAll || INDIVIDUAL_ACKS.some(([k]) => !acks[k])) e.acks = "Please tick every box.";
+    setFieldErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const onSubmitExtension = () => {
+    setSubmitError("");
+    if (!validateExtension()) return;
+    submitMutation.mutate({
+      ldap,
+      requestType: "extension",
+      typeMismatchExplanation: typeMismatch ? typeMismatchExplanation.trim() : null,
+      district: identity?.district, homeState: identity?.homeState,
+      identityCorrected: identityOk === "no",
+      identityCorrection,
+      correctedTruck, correctedPhone,
+      extRepairStatus, extLastShopContact, extShopSaid,
+      extExpectedCompletion: extExpectedCompletion || null,
+      extTimeNeeded,
+      // Every extension re-signs the FULL set, every time.
+      ...Object.fromEntries([...CORE_ACKS, ...INDIVIDUAL_ACKS].map(([k]) => [k, !!acks[k]])),
     });
   };
 
@@ -481,6 +571,71 @@ export default function RentalRequestForm() {
               </CardContent>
             </Card>
 
+            {/* Section — what do you need? New rental vs more time on the one
+                they already hold. Defaulted from detection, but the technician
+                decides: the rental-ops feed can lag, so a contradiction warns
+                and asks for one line instead of blocking. */}
+            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
+              <CardHeader>
+                <CardTitle className="text-base">What do you need?</CardTitle>
+                <CardDescription>
+                  {detection && detection.openRentals > 0
+                    ? "Our records show you currently have a rental."
+                    : "Our records do not show a current rental for you."}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid gap-3">
+                  <Button type="button" variant={requestType === "new" ? "default" : "outline"}
+                          className={"h-auto justify-start whitespace-normal py-3 text-left "
+                            + (requestType === "new" ? "bg-[#00529B] hover:bg-[#003A70]" : "")}
+                          disabled={detection ? !detection.allowed.new : false}
+                          onClick={() => { setRequestType("new"); clearErr("typeMismatchExplanation"); }}>
+                    <span><span className="font-semibold">New rental</span> — I need a vehicle and do not
+                      currently have a rental.</span>
+                  </Button>
+                  <Button type="button" variant={requestType === "extension" ? "default" : "outline"}
+                          className={"h-auto justify-start whitespace-normal py-3 text-left "
+                            + (requestType === "extension" ? "bg-[#00529B] hover:bg-[#003A70]" : "")}
+                          disabled={detection ? !detection.allowed.extension : false}
+                          onClick={() => { setRequestType("extension"); clearErr("typeMismatchExplanation"); }}>
+                    <span><span className="font-semibold">Extension of my current rental</span> — I already
+                      have a rental and need more time on it.</span>
+                  </Button>
+                </div>
+                {detection && !detection.allowed.new && (
+                  <p className="text-sm text-slate-500">
+                    New rental is unavailable: you already have request
+                    #{detection.blocking.new?.requestNo} ({detection.blocking.new?.status}) with Fleet.
+                  </p>
+                )}
+                {detection && !detection.allowed.extension && (
+                  <p className="text-sm text-slate-500">
+                    Extension is unavailable: you already have request
+                    #{detection.blocking.extension?.requestNo} ({detection.blocking.extension?.status}) with Fleet.
+                  </p>
+                )}
+                {typeMismatch && (
+                  <div className="space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3">
+                    <p className="text-sm font-medium text-amber-900">
+                      {requestType === "extension"
+                        ? "Our records do not show a current rental for you. You can still continue — "
+                          + "our rental feed can run behind — but tell us briefly what rental you have."
+                        : "Our records show you currently have a rental. You can still request a NEW "
+                          + "rental — our feed can run behind — but tell us briefly why."}
+                    </p>
+                    <Textarea rows={2} value={typeMismatchExplanation}
+                              placeholder="One or two lines is fine"
+                              onChange={(e) => { setTypeMismatchExplanation(e.target.value); clearErr("typeMismatchExplanation"); }} />
+                    {fieldErrors.typeMismatchExplanation && (
+                      <p className="text-sm text-red-600">{fieldErrors.typeMismatchExplanation}</p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {requestType === "new" && (<>
             {/* Enterprise will not rent to a driver under 21, so this is asked
                 before the problem questions. An under-21 technician is stopped
                 here and sent to Holman rather than filling in a whole form that
@@ -749,6 +904,130 @@ export default function RentalRequestForm() {
 
             <Button className="h-11 w-full bg-[#00529B] text-base hover:bg-[#003A70]" onClick={onSubmit} disabled={submitMutation.isPending}>
               {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit request"}
+            </Button>
+            </>)}
+            </>)}
+
+            {requestType === "extension" && (<>
+            {/* The detected current rental, so the technician can see what the
+                extension is FOR. Absent when detection found nothing — the
+                mismatch box above already asked what they are driving. */}
+            {detection?.currentRental && (
+              <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
+                <CardHeader>
+                  <CardTitle className="text-base">Your current rental</CardTitle>
+                  <CardDescription>From Fleet&apos;s rental records.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <dl className="text-sm">
+                    {([["Vehicle", detection.currentRental.veh_desc || detection.currentRental.rental_class],
+                       ["Vendor", detection.currentRental.rental_vendor],
+                       ["Started", detection.currentRental.rental_start_date],
+                       ["Days so far", detection.currentRental.days_open],
+                       ["Extensions so far", detection.currentRental.number_of_extensions],
+                       ["Location", [detection.currentRental.renting_city, detection.currentRental.renting_state]
+                         .filter(Boolean).join(", ")]] as Array<[string, unknown]>)
+                      .filter(([, v]) => v !== null && v !== undefined && String(v).trim() !== "")
+                      .map(([k, v]) => (
+                        <div key={k} className="flex justify-between border-b border-slate-100 py-1.5">
+                          <dt className="text-slate-500">{k}</dt>
+                          <dd className="font-medium text-slate-800">{String(v)}</dd>
+                        </div>
+                      ))}
+                  </dl>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Section — the van status update. The extension doubles as a
+                repair check-in: it validates the technician is keeping up with
+                the shop, which is what Fleet reviews before granting time. */}
+            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">2</span>How is your van&apos;s repair going?</CardTitle>
+                <CardDescription>
+                  An extension is more time on the rental you already have. Fleet reviews
+                  these answers before approving the extra time.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="extstatus">What is the current status of your van&apos;s repair?</Label>
+                  <Textarea id="extstatus" rows={3} value={extRepairStatus}
+                            onChange={(e) => { setExtRepairStatus(e.target.value); clearErr("extRepairStatus"); }} />
+                  {fieldErrors.extRepairStatus && <p className="text-sm text-red-600">{fieldErrors.extRepairStatus}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="extcontact">When did you last speak with the shop?</Label>
+                  <Input id="extcontact" type="date" value={extLastShopContact}
+                         onChange={(e) => { setExtLastShopContact(e.target.value); clearErr("extLastShopContact"); }} />
+                  {fieldErrors.extLastShopContact && <p className="text-sm text-red-600">{fieldErrors.extLastShopContact}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="extsaid">What did the shop say?</Label>
+                  <Textarea id="extsaid" rows={2} value={extShopSaid}
+                            placeholder="e.g. waiting on a transmission part, due Thursday"
+                            onChange={(e) => { setExtShopSaid(e.target.value); clearErr("extShopSaid"); }} />
+                  {fieldErrors.extShopSaid && <p className="text-sm text-red-600">{fieldErrors.extShopSaid}</p>}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="extdone">When does the shop expect the van to be done? (optional)</Label>
+                  <Input id="extdone" type="date" value={extExpectedCompletion}
+                         onChange={(e) => setExtExpectedCompletion(e.target.value)} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="exttime">Roughly how much longer do you need the rental?</Label>
+                  <Input id="exttime" value={extTimeNeeded} placeholder="e.g. one more week"
+                         onChange={(e) => { setExtTimeNeeded(e.target.value); clearErr("extTimeNeeded"); }} />
+                  {fieldErrors.extTimeNeeded && <p className="text-sm text-red-600">{fieldErrors.extTimeNeeded}</p>}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Section — acknowledgements. Every extension re-signs the FULL
+                set: all four core statements and all four terms, every time. */}
+            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
+              <CardHeader>
+                <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">3</span>Before you submit</CardTitle>
+                <CardDescription>
+                  These apply to every week of the rental, so each extension signs them
+                  again. All are recorded with your request.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <label className="flex items-start gap-3 text-sm font-medium text-slate-800">
+                  <Checkbox checked={extCoreAll}
+                            onCheckedChange={(v) => {
+                              const on = v === true;
+                              setAcks((p) => {
+                                const nx = { ...p };
+                                for (const [k] of CORE_ACKS) nx[k] = on;
+                                return nx;
+                              });
+                              clearErr("acks");
+                            }} />
+                  <span>I acknowledge and agree to all of the following:</span>
+                </label>
+                <ul className="ml-10 list-disc space-y-1.5 text-sm text-slate-600">
+                  {CORE_ACKS.map(([k, text]) => <li key={k}>{text}</li>)}
+                </ul>
+                <div className="space-y-3 border-t border-slate-200 pt-4">
+                  {INDIVIDUAL_ACKS.map(([k, text]) => (
+                    <label key={k} className="flex items-start gap-3 text-sm text-slate-700">
+                      <Checkbox checked={!!acks[k]}
+                                onCheckedChange={(v) => { setAcks((p) => ({ ...p, [k]: v === true })); clearErr("acks"); }} />
+                      <span>{text}</span>
+                    </label>
+                  ))}
+                </div>
+                {fieldErrors.acks && <p className="text-sm text-red-600">{fieldErrors.acks}</p>}
+              </CardContent>
+            </Card>
+
+            {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+
+            <Button className="h-11 w-full bg-[#00529B] text-base hover:bg-[#003A70]" onClick={onSubmitExtension} disabled={submitMutation.isPending}>
+              {submitMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit extension request"}
             </Button>
             </>)}
           </>
