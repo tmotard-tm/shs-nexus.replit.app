@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
-import * as XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { getTPMSService } from '../server/tpms-service';
 
 const INPUT = process.argv[2] || 'attached_assets/TPMSBulkPhoneNumberUpdates_Round1_20260509_1778370055804.xlsx';
@@ -21,7 +21,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface Row { ldap: string; phone: string; email: string; }
 
-function loadRows(input: string): Row[] {
+async function loadRows(input: string): Promise<Row[]> {
   const ext = input.toLowerCase().split('.').pop();
   if (ext === 'csv') {
     const text = readFileSync(input, 'utf8');
@@ -47,22 +47,33 @@ function loadRows(input: string): Row[] {
     return [...map.values()];
   } else {
     const buf = readFileSync(input);
-    const wb = XLSX.read(buf, { type: 'buffer' });
-    const raw = XLSX.utils.sheet_to_json<Record<string, any>>(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(buf);
+    const ws = workbook.worksheets[0];
+    const headers: string[] = [];
     const map = new Map<string, Row>();
-    for (const r of raw) {
-      const ldap  = String(r['Enterprise ID'] ?? r['Employee ID'] ?? '').trim().toUpperCase();
-      const phone = String(r['Mobile Phone'] ?? r['Phone'] ?? '').trim();
-      const email = String(r['Email2'] ?? r['Email'] ?? '').trim();
-      if (!ldap) continue;
-      map.set(ldap, { ldap, phone, email });
-    }
+    let firstRow = true;
+    ws.eachRow({ includeEmpty: false }, (row) => {
+      const vals = (row.values as any[]).slice(1); // ExcelJS rows are 1-indexed
+      if (firstRow) {
+        vals.forEach((v: any) => headers.push(String(v ?? '')));
+        firstRow = false;
+      } else {
+        const r: Record<string, any> = {};
+        headers.forEach((h, i) => { r[h] = vals[i] ?? ''; });
+        const ldap  = String(r['Enterprise ID'] ?? r['Employee ID'] ?? '').trim().toUpperCase();
+        const phone = String(r['Mobile Phone'] ?? r['Phone'] ?? '').trim();
+        const email = String(r['Email2'] ?? r['Email'] ?? '').trim();
+        if (!ldap) return;
+        map.set(ldap, { ldap, phone, email });
+      }
+    });
     return [...map.values()];
   }
 }
 
 async function main() {
-  const allRows = loadRows(INPUT);
+  const allRows = await loadRows(INPUT);
   const endIdx = END_IDX > 0 ? Math.min(END_IDX, allRows.length) : allRows.length;
   const rows = allRows.slice(START_IDX, endIdx);
   console.log(`[Bulk] Loaded ${allRows.length} unique rows; processing slice [${START_IDX}..${endIdx}) -> ${rows.length} rows`);

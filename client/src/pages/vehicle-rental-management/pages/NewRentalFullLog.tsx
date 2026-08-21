@@ -1,7 +1,6 @@
 import { useState, useRef, useCallback, CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Upload, X, Pencil, Trash2, ChevronDown, ChevronUp, Download } from "lucide-react";
-import * as XLSX from "xlsx";
 import { fonts, colors } from "../lib/constants";
 import { DiscrepancyFlag, useDiscrepancies } from "../components/discrepancy";
 import { apiRequest } from "@/lib/queryClient";
@@ -394,26 +393,25 @@ function mapCSVRowToForm(raw: Record<string, string>): ImportRow {
   return entry;
 }
 
-function parseXLSX(
-  buf: ArrayBuffer,
+async function parseXLSXViaServer(
+  file: File,
   onFallback?: (usedSheet: string) => void,
-): Record<string, string>[] {
-  const wb = XLSX.read(buf, { type: "array", cellDates: true });
-  const targetName = wb.SheetNames.find((n) => n.trim() === "Rental Approvals");
-  let sheetName: string;
-  if (targetName) {
-    sheetName = targetName;
-  } else {
-    sheetName = wb.SheetNames[0];
-    onFallback?.(sheetName.trim());
-  }
-  const ws = wb.Sheets[sheetName];
-  const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, {
-    raw: false,
-    defval: "",
-    dateNF: "YYYY-MM-DD",
+): Promise<Record<string, string>[]> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch("/api/vrm/new-rental-log/parse-xlsx", {
+    method: "POST",
+    body: formData,
   });
-  return rows.filter((row) => Object.values(row).some((v) => String(v).trim() !== ""));
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: "Unknown error" }));
+    throw new Error(err.error || `Server error ${res.status}`);
+  }
+  const { rows, sheetName, usedFirstSheet } = await res.json();
+  if (usedFirstSheet && onFallback) {
+    onFallback(sheetName);
+  }
+  return rows as Record<string, string>[];
 }
 
 // ─── Sort state ───────────────────────────────────────────────────────────────
@@ -897,27 +895,32 @@ export default function NewRentalFullLog() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const isXlsx = file.name.toLowerCase().endsWith(".xlsx");
+      const nameLower = file.name.toLowerCase();
+      const isXlsx = nameLower.endsWith(".xlsx");
+      const isXls = nameLower.endsWith(".xls") && !isXlsx;
+      if (isXls) {
+        toast({
+          title: "Unsupported file format",
+          description: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload.",
+          variant: "destructive",
+        });
+        e.target.value = "";
+        return;
+      }
       if (isXlsx) {
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const buf = ev.target?.result as ArrayBuffer;
-          let rawRows: Record<string, string>[];
-          try {
-            rawRows = parseXLSX(buf, (usedSheet) => {
-              toast({
-                title: "Sheet not found",
-                description: `"Rental Approvals" sheet not found. Using first sheet: "${usedSheet}".`,
-              });
-            });
-          } catch (err: any) {
+        parseXLSXViaServer(file, (usedSheet) => {
+          toast({
+            title: "Sheet not found",
+            description: `"Rental Approvals" sheet not found. Using first sheet: "${usedSheet}".`,
+          });
+        })
+          .then((rawRows) => {
+            const mapped = rawRows.map(mapCSVRowToForm);
+            importMutation.mutate(mapped);
+          })
+          .catch((err: any) => {
             toast({ title: "XLSX parse error", description: err.message, variant: "destructive" });
-            return;
-          }
-          const mapped = rawRows.map(mapCSVRowToForm);
-          importMutation.mutate(mapped);
-        };
-        reader.readAsArrayBuffer(file);
+          });
       } else {
         const reader = new FileReader();
         reader.onload = (ev) => {

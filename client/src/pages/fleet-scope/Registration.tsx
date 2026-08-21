@@ -1135,7 +1135,7 @@ export default function Registration() {
           <input
             type="file"
             ref={renewalsFileRef}
-            accept=".xlsx,.xls"
+            accept=".xlsx"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

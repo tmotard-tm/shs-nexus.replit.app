@@ -867,7 +867,7 @@ export default function Decommissioning() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".xlsx,.xls,.csv"
+                    accept=".xlsx,.csv"
                     onChange={handleFileUpload}
                     className="hidden"
                     data-testid="input-file-upload"
@@ -1497,7 +1497,7 @@ export default function Decommissioning() {
               <input
                 ref={termFileInputRef}
                 type="file"
-                accept=".xlsx,.xls"
+                accept=".xlsx"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];

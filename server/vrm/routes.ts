@@ -1,4 +1,6 @@
 import { Router } from "express";
+import multer from "multer";
+import ExcelJS from "exceljs";
 import { db } from "../db";
 import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
 import { registerRentalOperationsRoutes } from "./rental-operations/routes";
@@ -96,6 +98,8 @@ import {
   insertVrmNewRentalLogSchema,
   insertVrmRepairTrackerSchema,
 } from "../../shared/vrm-schema";
+
+const vrmUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 export function registerVrmRoutes(): Router {
   const router = Router();
@@ -1334,6 +1338,59 @@ export function registerVrmRoutes(): Router {
       res.json(row);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Parse an uploaded xlsx file and return rows as header-keyed objects.
+  // The client maps these with its CSV_HEADER_MAP before calling /new-rental-log/import.
+  router.post("/new-rental-log/parse-xlsx", vrmUpload.single("file"), async (req: any, res) => {
+    try {
+      if (!req.file?.buffer) {
+        return res.status(400).json({ error: "No file uploaded" });
+      }
+      const origName = (req.file.originalname || "").toLowerCase();
+      if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
+        return res.status(400).json({ error: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
+      }
+      const workbook = new ExcelJS.Workbook();
+      await workbook.xlsx.load(req.file.buffer);
+      const targetWs =
+        workbook.worksheets.find((ws) => ws.name.trim() === "Rental Approvals") ||
+        workbook.worksheets[0];
+      if (!targetWs) {
+        return res.status(400).json({ error: "Excel file has no worksheets" });
+      }
+      const usedFirstSheet =
+        !workbook.worksheets.find((ws) => ws.name.trim() === "Rental Approvals");
+      const headers: string[] = [];
+      const rows: Record<string, string>[] = [];
+      let firstRow = true;
+      targetWs.eachRow({ includeEmpty: false }, (row) => {
+        const vals = (row.values as any[]).slice(1); // ExcelJS rows are 1-indexed
+        if (firstRow) {
+          vals.forEach((v: any) => headers.push(String(v ?? "").trim()));
+          firstRow = false;
+        } else {
+          const obj: Record<string, string> = {};
+          headers.forEach((h, i) => {
+            const v = vals[i];
+            if (v == null) { obj[h] = ""; return; }
+            if (v instanceof Date) { obj[h] = v.toISOString().slice(0, 10); return; }
+            if (typeof v === "object" && v?.text != null) { obj[h] = String(v.text); return; }
+            obj[h] = String(v);
+          });
+          if (Object.values(obj).some((v) => v.trim() !== "")) {
+            rows.push(obj);
+          }
+        }
+      });
+      res.json({
+        rows,
+        sheetName: targetWs.name,
+        usedFirstSheet,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message || "Failed to parse xlsx" });
     }
   });
 

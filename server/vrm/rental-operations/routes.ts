@@ -7,7 +7,7 @@
  */
 import type { Router } from "express";
 import multer from "multer";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory, loadQueuePoContext, attachReconciledShops, loadFsShopPhoneFallbacks, type QueuePoContext } from "./read-repository";
@@ -1443,9 +1443,23 @@ export function registerRentalOperationsRoutes(router: Router): void {
       const { importEnterpriseReport } = await import("./manual-import");
       const fileDate: string | null = (req.body?.fileDate && /^\d{4}-\d{2}-\d{2}$/.test(req.body.fileDate)) ? req.body.fileDate : null;
       if (req.file?.buffer) {
-        const wb = XLSX.read(req.file.buffer, { type: "buffer", cellDates: false });
-        const ws = wb.Sheets[wb.SheetNames[0]];
-        const aoa = XLSX.utils.sheet_to_json<any[]>(ws, { header: 1, raw: false, defval: "" });
+        const origName = (req.file.originalname || "").toLowerCase();
+        if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
+          return res.status(400).json({ error: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
+        }
+        const excelWb = new ExcelJS.Workbook();
+        await excelWb.xlsx.load(req.file.buffer);
+        const excelWs = excelWb.worksheets[0];
+        const aoa: any[][] = [];
+        excelWs.eachRow({ includeEmpty: true }, (row) => {
+          const vals = (row.values as any[]).slice(1);
+          aoa.push(vals.map((v: any) => {
+            if (v === null || v === undefined) return "";
+            if (v instanceof Date) return v.toISOString().slice(0, 10);
+            if (typeof v === "object" && v?.text != null) return String(v.text);
+            return String(v);
+          }));
+        });
         const result = await importEnterpriseReport({ aoa, fileDate, sourceLabel: req.file.originalname || "manual_enterprise_xlsx" });
         return res.json({ ok: true, result });
       }

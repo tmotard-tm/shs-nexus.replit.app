@@ -235,10 +235,10 @@ export default function FleetCost() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+    if (!file.name.endsWith('.xlsx')) {
       toast({
         title: "Invalid file type",
-        description: "Please upload an Excel file (.xlsx or .xls)",
+        description: "Please upload an .xlsx file",
         variant: "destructive",
       });
       return;
@@ -308,10 +308,10 @@ export default function FleetCost() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    if (!file.name.endsWith('.xlsx') && !file.name.endsWith('.xls')) {
+    if (!file.name.endsWith('.xlsx')) {
       toast({
         title: "Invalid file type",
-        description: "Please upload an Excel file (.xlsx or .xls)",
+        description: "Please upload an .xlsx file",
         variant: "destructive",
       });
       return;
@@ -401,7 +401,7 @@ export default function FleetCost() {
                     type="file"
                     ref={fileInputRef}
                     onChange={handleFileChange}
-                    accept=".xlsx,.xls"
+                    accept=".xlsx"
                     className="hidden"
                     data-testid="input-file-upload"
                   />
@@ -450,7 +450,7 @@ export default function FleetCost() {
                     type="file"
                     ref={approvedFileInputRef}
                     onChange={handleApprovedFileChange}
-                    accept=".xlsx,.xls"
+                    accept=".xlsx"
                     className="hidden"
                     data-testid="input-approved-file-upload"
                   />

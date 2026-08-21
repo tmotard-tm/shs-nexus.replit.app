@@ -42,7 +42,7 @@ import sgMail from "@sendgrid/mail";
 import twilio from "twilio";
 import multer from "multer";
 import cron from "node-cron";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import { randomUUID } from "node:crypto";
 import { pool as fsCachePool } from "./db";
 
@@ -552,18 +552,25 @@ async function parseShopListBuffer(buffer: Buffer, mimeOrExt?: string): Promise<
     return { rows, dateFilteredCount };
   }
 
-  // .xlsx or .xls: use SheetJS (xlsx package) which supports both formats
-  let wb: XLSX.WorkBook;
+  // Only .xlsx is supported; .xls (legacy binary format) is not supported
+  if (extHint === "xls" || extHint === "application/vnd.ms-excel") {
+    throw new Error("Legacy .xls files are not supported. Please save the file as .xlsx and re-upload.");
+  }
+  let xlsWorkbook: ExcelJS.Workbook;
   try {
-    wb = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    xlsWorkbook = new ExcelJS.Workbook();
+    await xlsWorkbook.xlsx.load(buffer);
   } catch (e: any) {
     throw new Error(`Failed to parse Excel file (${extHint || "unknown format"}): ${e.message}`);
   }
-  const sheetName = wb.SheetNames[0];
-  if (!sheetName) throw new Error("Excel file has no worksheets");
-  const ws = wb.Sheets[sheetName];
-  // Convert to array of arrays (raw values)
-  const rawData: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: "" });
+  const xlsWs = xlsWorkbook.worksheets[0];
+  if (!xlsWs) throw new Error("Excel file has no worksheets");
+  // Convert to array of arrays (raw values, 0-indexed)
+  const rawData: any[][] = [];
+  xlsWs.eachRow({ includeEmpty: true }, (row) => {
+    const vals = (row.values as any[]).slice(1); // ExcelJS rows are 1-indexed
+    rawData.push(vals.map((v: any) => (v === null || v === undefined ? "" : v)));
+  });
   const rows: ShopListRow[] = [];
   let dateFilteredCount = 0;
   for (let i = 1; i < rawData.length; i++) {
@@ -11100,6 +11107,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ message: "No file uploaded" });
       }
 
+      // Reject legacy .xls before the background job even starts (ExcelJS is xlsx-only).
+      const uploadName = (req.file.originalname || "").toLowerCase();
+      if (uploadName.endsWith(".xls") && !uploadName.endsWith(".xlsx")) {
+        return res.status(400).json({ message: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
+      }
+
       const importedBy = req.body.importedBy || "Unknown";
       const { generateJobId, createJob, saveUploadedFile, processJobInBackground } = await import('./fleet-scope-fleet-cost-jobs');
       
@@ -12481,15 +12494,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ message: "No file uploaded" });
       }
 
+      const origName = (req.file.originalname || "").toLowerCase();
+      if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
+        return res.status(400).json({ message: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
+      }
+
       console.log(`[Registration Import Renewals] Processing file: ${req.file.originalname} (${(req.file.size / 1024).toFixed(1)} KB)`);
 
-      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const detailsSheet = workbook.Sheets["Details"] || workbook.Sheets["details"];
-      if (!detailsSheet && workbook.SheetNames.length > 1) {
-        return res.status(400).json({ message: `Could not find 'Details' sheet. Available sheets: ${workbook.SheetNames.join(", ")}` });
+      const excelWorkbook = new ExcelJS.Workbook();
+      await excelWorkbook.xlsx.load(req.file.buffer);
+      const sheetNames = excelWorkbook.worksheets.map(ws => ws.name);
+      const detailsWs = excelWorkbook.getWorksheet("Details") || excelWorkbook.getWorksheet("details");
+      if (!detailsWs && sheetNames.length > 1) {
+        return res.status(400).json({ message: `Could not find 'Details' sheet. Available sheets: ${sheetNames.join(", ")}` });
       }
-      const sheet = detailsSheet || workbook.Sheets[workbook.SheetNames[0]];
-      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+      const xlSheet = detailsWs || excelWorkbook.worksheets[0];
+      const rows: any[][] = [];
+      xlSheet.eachRow({ includeEmpty: true }, (row) => {
+        const vals = (row.values as any[]).slice(1);
+        rows.push(vals.map((v: any) => (v === null || v === undefined ? null : typeof v === "object" && "text" in v ? String(v.text) : v)));
+      });
 
       let headerRowIdx = -1;
       for (let i = 0; i < Math.min(rows.length, 5); i++) {
@@ -12534,9 +12558,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         if (etaColIdx >= 0 && row[etaColIdx] != null && row[etaColIdx] !== "") {
           const rawEta = row[etaColIdx];
           if (typeof rawEta === "number") {
+            // ExcelJS may return numeric serial for unformatted date cells.
             const excelEpoch = new Date(1899, 11, 30);
             const d = new Date(excelEpoch.getTime() + rawEta * 86400000);
             eta = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+          } else if (rawEta instanceof Date) {
+            // ExcelJS returns JS Date objects for date-formatted cells.
+            eta = `${String(rawEta.getMonth() + 1).padStart(2, "0")}/${String(rawEta.getDate()).padStart(2, "0")}/${rawEta.getFullYear()}`;
           } else {
             eta = String(rawEta).trim();
           }
@@ -13088,8 +13116,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       const ext = (file.originalname || "").toLowerCase();
-      if (!ext.endsWith(".xlsx") && !ext.endsWith(".xls")) {
-        return res.status(400).json({ message: "Only .xlsx or .xls files are accepted" });
+      if (!ext.endsWith(".xlsx")) {
+        return res.status(400).json({ message: "Only .xlsx files are accepted. Please save the file as .xlsx and re-upload." });
       }
 
       const vehicle = await fleetScopeStorage.getDecommissioningVehicleById(parseInt(id));
@@ -15385,6 +15413,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     try {
       if (!req.file) {
         return res.status(400).json({ message: "No file uploaded" });
+      }
+      // Reject legacy .xls before reaching the ExcelJS parser (ExcelJS is xlsx-only).
+      const origName = (req.file.originalname || "").toLowerCase();
+      if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
+        return res.status(400).json({ message: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
       }
       const ext = (req.file.originalname || "").split(".").pop()?.toLowerCase() || req.file.mimetype || "";
       const { rows, dateFilteredCount } = await parseShopListBuffer(req.file.buffer, ext);

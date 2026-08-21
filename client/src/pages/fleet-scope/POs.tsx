@@ -818,7 +818,7 @@ export default function POs() {
 
     setIsUploading(true);
     const filename = file.name;
-    const isExcel = filename.endsWith('.xlsx') || filename.endsWith('.xls');
+    const isExcel = filename.endsWith('.xlsx');
 
     if (isExcel) {
       const reader = new FileReader();
@@ -1305,7 +1305,7 @@ export default function POs() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".csv,.xlsx,.xls"
+                accept=".csv,.xlsx"
                 onChange={handleFileUpload}
                 className="hidden"
                 data-testid="input-file-upload"

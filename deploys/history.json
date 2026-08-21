@@ -1,59 +1,5 @@
 [
   {
-    "deployedAt": "2026-07-13T17:29:50.286Z",
-    "bundleHash": "BNujRdnr",
-    "gitSha": "c0526b12",
-    "snapshotKey": "guardrails/snapshots/snapshot-2026-07-13T17-29-19-170Z.json",
-    "migrationsApplied": [
-      "0000_chemical_dormammu.sql",
-      "0001_add_is_tlt_to_queue_items.sql",
-      "0002_add_last_observed_tech_to_holman_submissions.sql",
-      "0003_add_bulk_fix_runs.sql",
-      "0004_add_vin_license_plate_to_trucks.sql",
-      "0005_add_automation_detail_to_queue_items.sql",
-      "0006_add_offboarding_return_tokens.sql",
-      "0007_add_byov_intent_to_onboarding_hires.sql",
-      "0008_add_logical_entities.sql"
-    ],
-    "fingerprint": "f144cd154e0c"
-  },
-  {
-    "deployedAt": "2026-08-05T07:08:55.008Z",
-    "bundleHash": "opoa8FfQ",
-    "gitSha": "96713edc",
-    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-05T07-08-17-744Z.json",
-    "migrationsApplied": [
-      "0000_chemical_dormammu.sql",
-      "0001_add_is_tlt_to_queue_items.sql",
-      "0002_add_last_observed_tech_to_holman_submissions.sql",
-      "0003_add_bulk_fix_runs.sql",
-      "0004_add_vin_license_plate_to_trucks.sql",
-      "0005_add_automation_detail_to_queue_items.sql",
-      "0006_add_offboarding_return_tokens.sql",
-      "0007_add_byov_intent_to_onboarding_hires.sql",
-      "0008_add_logical_entities.sql"
-    ],
-    "fingerprint": "39689b785230"
-  },
-  {
-    "deployedAt": "2026-08-06T20:46:12.955Z",
-    "bundleHash": "CV-NiCzn",
-    "gitSha": "94ef57a2",
-    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-06T20-45-42-140Z.json",
-    "migrationsApplied": [
-      "0000_chemical_dormammu.sql",
-      "0001_add_is_tlt_to_queue_items.sql",
-      "0002_add_last_observed_tech_to_holman_submissions.sql",
-      "0003_add_bulk_fix_runs.sql",
-      "0004_add_vin_license_plate_to_trucks.sql",
-      "0005_add_automation_detail_to_queue_items.sql",
-      "0006_add_offboarding_return_tokens.sql",
-      "0007_add_byov_intent_to_onboarding_hires.sql",
-      "0008_add_logical_entities.sql"
-    ],
-    "fingerprint": "51664026c6e5"
-  },
-  {
     "deployedAt": "2026-08-11T13:15:08.630Z",
     "bundleHash": "DkASjGCy",
     "gitSha": "b619a3c8",
@@ -898,5 +844,59 @@
       "0008_add_logical_entities.sql"
     ],
     "fingerprint": "e118c403179f"
+  },
+  {
+    "deployedAt": "2026-08-21T03:32:21.444Z",
+    "bundleHash": "CCmo-DpH",
+    "gitSha": "6b1a6b71",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-21T03-31-58-901Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "036169b49069"
+  },
+  {
+    "deployedAt": "2026-08-21T03:38:40.484Z",
+    "bundleHash": "g2uMkbhf",
+    "gitSha": "02d8f087",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-21T03-38-13-095Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "06dd24f39db2"
+  },
+  {
+    "deployedAt": "2026-08-21T03:51:43.002Z",
+    "bundleHash": "D8OQ1jEZ",
+    "gitSha": "9139a827",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-21T03-51-17-300Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "a6bea42a0cb3"
   }
 ]

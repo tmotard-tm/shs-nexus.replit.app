@@ -2129,7 +2129,7 @@ export default function Dashboard() {
               <DialogHeader>
                 <DialogTitle>Shop List Import</DialogTitle>
                 <DialogDescription>
-                  Upload a Rental Extension Review file (.xlsx, .xls, or .csv) to update Repair Location and Enterprise ID. Only rows within the last 7 days are processed.
+                  Upload a Rental Extension Review file (.xlsx or .csv) to update Repair Location and Enterprise ID. Only rows within the last 7 days are processed.
                 </DialogDescription>
               </DialogHeader>
 
@@ -2163,7 +2163,7 @@ export default function Dashboard() {
                     <input
                       ref={shopListFileRef}
                       type="file"
-                      accept=".xlsx,.xls,.csv"
+                      accept=".xlsx,.csv"
                       onChange={handleShopListFileSelect}
                       className="hidden"
                       id="shop-list-upload"
@@ -2172,9 +2172,9 @@ export default function Dashboard() {
                     <label htmlFor="shop-list-upload" className="cursor-pointer">
                       <FileSpreadsheet className="w-12 h-12 mx-auto mb-2 text-muted-foreground" />
                       <p className="text-sm font-medium mb-1">
-                        {shopListFile ? shopListFile.name : "Click to upload XLSX, XLS, or CSV"}
+                        {shopListFile ? shopListFile.name : "Click to upload XLSX or CSV"}
                       </p>
-                      <p className="text-xs text-muted-foreground">.xlsx, .xls, or .csv</p>
+                      <p className="text-xs text-muted-foreground">.xlsx or .csv</p>
                     </label>
                   </div>
                   <Tooltip>
