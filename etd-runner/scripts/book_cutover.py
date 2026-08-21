@@ -54,7 +54,7 @@ from etd.client import (redacted_shape, rejection_reasons,  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from vehicle_class import (choose as choose_class, choose_same_vehicle,  # noqa: E402
-                           describe as describe_vehicle)
+                           describe as describe_vehicle, _rank)
 
 
 _ZIP_STATE = [
@@ -90,6 +90,25 @@ def zip_state(zip5: str) -> str:
         if lo <= p <= hi:
             return st
     return ""
+
+
+def _miles(place: dict, branch: dict) -> float:
+    """Great-circle miles between the resolved address and a branch.
+
+    Only used to bound the cheapest-class search. closest_branches() already
+    returns nearest-first, so this is a ceiling, not a sort.
+    """
+    import math
+    try:
+        lat1 = math.radians(float(place["latitude"]))
+        lon1 = math.radians(float(place["longitude"]))
+        lat2 = math.radians(float(branch.get("latitude")))
+        lon2 = math.radians(float(branch.get("longitude")))
+    except (TypeError, ValueError, KeyError):
+        return 1e9
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 3958.8 * 2 * math.asin(min(1.0, math.sqrt(h)))
 
 
 def vehicle_label(r: dict) -> str:
@@ -1002,8 +1021,108 @@ def main() -> None:
             sel = choose_same_vehicle(r["veh_make"], r["veh_model"], classes,
                                       r.get("tech_says_vehicle"))
             if not sel["pick"]:
-                raise RuntimeError(
-                    f"cannot match their vehicle ({vehicle_label(r)}): {sel['note']}")
+                # Tyler, 2026-08-20: do not refuse when the contract branch cannot
+                # match their vehicle. Start from the CHEAPEST class on offer, and
+                # look at up to two more branches within 10 miles before settling.
+                # etd.car_classes() already returns base_rate ascending, so the
+                # cheapest at any one branch is classes[0]; this compares across
+                # branches too and takes the global minimum.
+                same_note = sel["note"]
+                cands = [(q, "contract branch")]
+                try:
+                    near = etd.closest_branches(q["place"]["latitude"],
+                                                q["place"]["longitude"], r_start)
+                except Exception:
+                    near = []
+                here = str(q["branch"].get("branchCode", "")).strip()
+                tried = 0
+                for b in near:
+                    if tried >= 2:
+                        break
+                    bc = str(b.get("branchCode", "")).strip()
+                    if not bc or bc == here:
+                        continue
+                    if _miles(q["place"], b) > 10.0:
+                        continue
+                    try:
+                        q2 = etd.quote(address=address, start=r_start, end=r_end,
+                                       prefer_branch_code=bc)
+                    except Exception:
+                        continue
+                    # Must actually land on the branch we asked for, and must not
+                    # cross a state line: the geocoder guard above applies here too.
+                    if str(q2["branch"].get("branchCode", "")).strip() != bc:
+                        continue
+                    if want_state and len(want_state) == 2 \
+                       and branch_state(q2) not in ("", want_state):
+                        continue
+                    cands.append((q2, f"branch {bc}"))
+                    tried += 1
+                # Tyler's ladder, 2026-08-20, in his words: "if there's a sedan
+                # available then you should do a sedan. If I get blocked because
+                # there's no sedan available then you need to put them in the next
+                # tier up. If all they have is a smaller, go there first, but if
+                # they have no cars, then they have no cars, and you have to put
+                # them in a small SUV or a minivan."
+                #
+                # So: CARS first and cheapest within them (SEDAN_LADDER already
+                # runs ECAR -> FCAR, so "a smaller" is the bottom of that ladder,
+                # not a separate case). Only when no car is offered anywhere do we
+                # step out to an SUV, smallest first, then a van. Booking them is
+                # the objective; refusing is the last resort.
+                pool = []
+                for qq, why in cands:
+                    for c in (qq.get("classes") or []):
+                        code_c = str(c.get("code") or "").upper()
+                        if len(code_c) < 2:
+                            continue
+                        rate = c.get("base_rate")
+                        try:
+                            rate_f = float(rate)
+                        except (TypeError, ValueError):
+                            rate_f = float("inf")
+                        body = code_c[1]          # SIPP: C car, F SUV, V van, P pickup
+                        size = _rank(code_c)[1]   # size index within the body style
+                        pool.append((body, size, rate_f, c, qq, why))
+
+                def _cheapest(rows):
+                    return min(rows, key=lambda t: (t[2], t[1])) if rows else None
+
+                def _smallest(rows):
+                    return min(rows, key=lambda t: (t[1], t[2])) if rows else None
+
+                cars = [p for p in pool if p[0] == "C"]
+                suvs = [p for p in pool if p[0] == "F"]
+                vans = [p for p in pool if p[0] == "V"]
+                chosen = _cheapest(cars) or _smallest(suvs) or _smallest(vans) \
+                    or _cheapest(pool)
+                best = None
+                if chosen:
+                    _, _, rate_f, c, qq, why = chosen
+                    tier = ("car" if chosen[0] == "C" else "SUV" if chosen[0] == "F"
+                            else "van" if chosen[0] == "V" else "other")
+                    why = f"{why}, cheapest {tier} on offer"
+                    best = (rate_f, c, qq, why)
+                if best is None:
+                    raise RuntimeError(
+                        f"cannot match their vehicle ({vehicle_label(r)}): {same_note};"
+                        f" and no priced class at any of {len(cands)} branch(es)"
+                        " within 10 miles")
+                rate_f, pick_c, q, why = best
+                classes = q.get("classes") or []
+                _code = str(pick_c.get("code") or "").upper()
+                sel = {
+                    "pick": pick_c, "code": _code, "match": "cheapest_available",
+                    # TRUE on purpose. The branch note and the technician's text
+                    # both promise "NO VEHICLE CHANGE" when this is False, and
+                    # that would be a lie here: they are changing vehicle.
+                    "changes_vehicle": True,
+                    "note": (f"no same-vehicle match ({same_note}); took the cheapest"
+                             f" class offered at the {why}: {_code}"
+                             f" at {rate_f} {pick_c.get('currency') or ''}"
+                             f"/{pick_c.get('unit') or 'week'}"),
+                }
+                print(f"  CHEAPEST {ldap:<9} {_code} @ {rate_f} ({why})")
             pick = sel["pick"]
 
             model = copy.deepcopy(template)
@@ -1042,9 +1161,11 @@ def main() -> None:
             # different car onto the lot.
             have = describe_vehicle(r["veh_make"], r["veh_model"], r["veh_year"])
             if sel["changes_vehicle"]:
+                # Was hardcoded "right-sized to a sedan", which is wrong whenever
+                # the replacement is not a sedan. Name the class we actually booked.
                 same = (f"VEHICLE CHANGE REQUIRED: the technician is currently in a "
-                        f"{have or 'larger vehicle'} and is being right-sized to a sedan "
-                        f"({sel['code']}). Please have the replacement ready.")
+                        f"{have or 'different vehicle'} and is being moved to class "
+                        f"{sel['code']}. Please have the replacement ready.")
             else:
                 same = (f"NO VEHICLE CHANGE: the technician keeps the {have} they are "
                         f"already driving. Reserved {sel['code']} to match."
