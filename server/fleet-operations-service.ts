@@ -22,6 +22,7 @@ const FREEZE_TPMS_CACHE_WRITES: boolean = true;
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
 import { sendEmail } from "./email-service";
 import { holmanApiService } from "./holman-api-service";
+import { isOutOfServiceRecord } from "./holman-oos-policy";
 
 interface RepairData {
   repairStatus?: number;
@@ -1320,12 +1321,15 @@ export async function districtGuardForAssign(
  *    a live-lookup ERROR fails open with a warning — an outage must not block
  *    legit assigns, and the format check above still blocks garbage);
  *  - vehicles whose Holman assigned-status code is L/B/W/T (FM's UI rule);
+ *  - vehicles that are out of service (cache statusCode 2 OR a past
+ *    outOfServiceDate — the code lags the date after an OOS submit, so the
+ *    date is the durable signal; Task #662);
  *  - vehicles currently operation-locked (active lock < 2 min old).
  * Purely read-only; distinct human-readable reasons per block.
  */
 export async function validateAssignTarget(
   truckNumber: string,
-): Promise<{ blocked: boolean; reason?: "invalid_format" | "not_found" | "blocked_status" | "locked"; message?: string }> {
+): Promise<{ blocked: boolean; reason?: "invalid_format" | "not_found" | "blocked_status" | "out_of_service" | "locked"; message?: string }> {
   const raw = String(truckNumber ?? "").trim();
   if (!/^\d{1,6}$/.test(raw)) {
     return {
@@ -1342,13 +1346,15 @@ export async function validateAssignTarget(
   ));
 
   let statusCd = "";
-  let cacheRow: { holmanAssignedStatusCd: string | null; operationLockAt: Date | null; operationLockedBy: string | null } | null = null;
+  let cacheRow: { holmanAssignedStatusCd: string | null; operationLockAt: Date | null; operationLockedBy: string | null; statusCode: number | null; outOfServiceDate: string | null } | null = null;
   try {
     const rows = await db
       .select({
         holmanAssignedStatusCd: holmanVehiclesCache.holmanAssignedStatusCd,
         operationLockAt: holmanVehiclesCache.operationLockAt,
         operationLockedBy: holmanVehiclesCache.operationLockedBy,
+        statusCode: holmanVehiclesCache.statusCode,
+        outOfServiceDate: holmanVehiclesCache.outOfServiceDate,
       })
       .from(holmanVehiclesCache)
       .where(inArray(holmanVehiclesCache.holmanVehicleNumber, candidates))
@@ -1360,6 +1366,17 @@ export async function validateAssignTarget(
 
   if (cacheRow) {
     statusCd = String(cacheRow.holmanAssignedStatusCd ?? "").trim().toUpperCase();
+    // Task #662: never assign a tech to an out-of-service vehicle. The cache
+    // statusCode can lag at 1 after an OOS submit while outOfServiceDate
+    // already carries a past date, so the check uses the durable signal
+    // (statusCode 2 OR past outOfServiceDate), not statusCode alone.
+    if (isOutOfServiceRecord(cacheRow)) {
+      return {
+        blocked: true,
+        reason: "out_of_service",
+        message: `Truck ${raw} is out of service in Holman (statusCode=${cacheRow.statusCode ?? "—"}${cacheRow.outOfServiceDate ? `, outOfServiceDate=${String(cacheRow.outOfServiceDate).slice(0, 10)}` : ""}) — it cannot be assigned. No systems were changed.`,
+      };
+    }
   } else {
     // Cache miss — verify LIVE against Holman before rejecting.
     try {
@@ -1369,6 +1386,14 @@ export async function validateAssignTarget(
           blocked: true,
           reason: "not_found",
           message: `Truck ${raw} was not found in Holman — it is not a fleet vehicle, so it cannot be assigned. No systems were changed.`,
+        };
+      }
+      // Task #662: same out-of-service block on the live record.
+      if (isOutOfServiceRecord(live.rawVehicle ?? {})) {
+        return {
+          blocked: true,
+          reason: "out_of_service",
+          message: `Truck ${raw} is out of service in Holman — it cannot be assigned. No systems were changed.`,
         };
       }
       statusCd = String(live.assignedStatusCode ?? "").trim().toUpperCase();

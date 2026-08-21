@@ -39,6 +39,8 @@ import { pgQueryWithRetry } from "./fleet-scope-all-vehicles-mirror";
 import { AmsApiService, batchFetchAmsCurrentLocation } from "./ams-api-service";
 import { getAmsTruckStatusMap, getAmsTruckStatusMapCachedOnly } from "./ams-truck-status-cache";
 import { isAmsDisposalStatus, lookupVinStatus } from "./ams-truck-status-labels";
+import { filterInServiceRows, isInOosExclusion, type OosExclusionSets } from "./holman-oos-policy";
+import { fetchHolmanOosExclusion } from "./holman-oos-exclusion";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 
 // Matches the row shape previously returned by UNASSIGNED_VEHICLES so the
@@ -146,10 +148,12 @@ type ActiveCacheRow = {
   district: string | null;
   odometer: number | null;
   tpmsAssignedTechId: string | null;
+  statusCode: number | null;
+  outOfServiceDate: string | null;
 };
 
 async function fetchActiveCacheRows(): Promise<ActiveCacheRow[]> {
-  return db
+  const rows = await db
     .select({
       holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
       vin: holmanVehiclesCache.vin,
@@ -158,6 +162,8 @@ async function fetchActiveCacheRows(): Promise<ActiveCacheRow[]> {
       district: holmanVehiclesCache.district,
       odometer: holmanVehiclesCache.odometer,
       tpmsAssignedTechId: holmanVehiclesCache.tpmsAssignedTechId,
+      statusCode: holmanVehiclesCache.statusCode,
+      outOfServiceDate: holmanVehiclesCache.outOfServiceDate,
     })
     .from(holmanVehiclesCache)
     .where(
@@ -168,6 +174,12 @@ async function fetchActiveCacheRows(): Promise<ActiveCacheRow[]> {
         inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS),
       ),
     );
+  // Task #662: statusCode=1 alone is NOT "in service". After an out-of-service
+  // submit, the cache row can carry a past outOfServiceDate while statusCode
+  // still says 1 until a later sync flips it (observed on all 10 BYOV OOS
+  // trucks). filterInServiceRows uses the durable signal — statusCode 2 OR a
+  // past outOfServiceDate — so such rows never enter any spare/available pool.
+  return filterInServiceRows(rows);
 }
 
 // IMPORTANT: holman_vehicles_cache.interior is NOT usable for rack matching —
@@ -235,18 +247,41 @@ async function fetchSnowflakeFallbackPool(): Promise<{
     /* Non-fatal */
   }
 
+  // Task #662: the Snowflake table knows nothing about Holman lifecycle, so
+  // cross-check against the local cache's out-of-service set (statusCode 2 OR
+  // past outOfServiceDate). Best-effort: if the cache read fails (which is
+  // often exactly why we fell back), serve unfiltered rather than go dark.
+  let oosSets: OosExclusionSets = { canonNumbers: new Set(), vins: new Set() };
+  try {
+    oosSets = await fetchHolmanOosExclusion();
+  } catch (err: any) {
+    console.warn(
+      `[SparesPool] OOS exclusion set unavailable for fallback pool (serving unfiltered): ${err?.message || err}`,
+    );
+  }
+
   // Disposal validation: the Snowflake row carries the AMS status as text
   // ("Declined repair" / "Sent to auction" casings); the cached bulk map,
   // when warm, additionally covers rows whose Snowflake text is stale.
   const cachedMap = getAmsTruckStatusMapCachedOnly() ?? {};
   const excluded: string[] = [];
+  const oosExcluded: string[] = [];
   const kept = rows.filter((r) => {
+    if (isInOosExclusion(oosSets, r.VEHICLE_NUMBER, r.VIN)) {
+      oosExcluded.push(String(r.VEHICLE_NUMBER ?? "").trim());
+      return false;
+    }
     const disposal =
       isAmsDisposalStatus(r.TRUCK_STATUS) ||
       isAmsDisposalStatus(lookupVinStatus(cachedMap, r.VIN || null));
     if (disposal) excluded.push(String(r.VEHICLE_NUMBER ?? "").trim());
     return !disposal;
   });
+  if (oosExcluded.length > 0) {
+    console.log(
+      `[SparesPool] Fallback pool excluded ${oosExcluded.length} out-of-service van(s): ${oosExcluded.join(", ")}`,
+    );
+  }
   if (excluded.length > 0) {
     console.log(
       `[SparesPool] Fallback pool excluded ${excluded.length} disposal-status van(s): ${excluded.join(", ")}`,

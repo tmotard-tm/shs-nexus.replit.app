@@ -11,6 +11,7 @@ import { getTPMSService } from "./tpms-service";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
 import { loadActiveFenceSet } from "./fleet-reconciliation/fences";
 import { decodeModelYearFromVin } from "@shared/vin-year";
+import { easternIsoDate } from "./holman-oos-policy";
 import { markFleetAssignmentDataUpdated } from "./fleet-mismatch-signal";
 
 // Resolve a model year, preferring the Holman-supplied value and falling back
@@ -543,7 +544,21 @@ class HolmanVehicleSyncService {
   ): Promise<SyncResult> {
     try {
       const offset = (page - 1) * pageSize;
-      
+
+      // Task #662: an "active" (statusCode=1) cached read must also exclude
+      // rows whose outOfServiceDate has already passed. After an OOS submit
+      // the cache row can keep statusCode=1 with a past date until a later
+      // sync flips the code — Holman itself would report such a truck as
+      // status 2, so the cached active list must not surface it. The date
+      // column is text (ISO 'YYYY-MM-DDTHH:mm:ssZ'), so guard the comparison
+      // behind an ISO-shape regex ([0-9], NOT \d — drizzle sql`` cooks \d to
+      // a literal 'd') and compare the date prefix lexicographically against
+      // today's Eastern date. Callers asking for other statuses (or all) get
+      // the rows unchanged.
+      const notPastOosDate = statusCode === 1
+        ? sql`NOT (COALESCE(${holmanVehiclesCache.outOfServiceDate}, '') <> '' AND LEFT(${holmanVehiclesCache.outOfServiceDate}, 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' AND LEFT(${holmanVehiclesCache.outOfServiceDate}, 10) <= ${easternIsoDate()})`
+        : sql`true`;
+
       // Filter to only divisions 01 and RF
       const cachedVehicles = await db
         .select()
@@ -551,6 +566,7 @@ class HolmanVehicleSyncService {
         .where(and(
           eq(holmanVehiclesCache.isActive, true),
           statusCode ? eq(holmanVehiclesCache.statusCode, statusCode) : sql`true`,
+          notPastOosDate,
           inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
         ))
         .orderBy(holmanVehiclesCache.holmanVehicleNumber)
@@ -563,6 +579,7 @@ class HolmanVehicleSyncService {
         .where(and(
           eq(holmanVehiclesCache.isActive, true),
           statusCode ? eq(holmanVehiclesCache.statusCode, statusCode) : sql`true`,
+          notPastOosDate,
           inArray(holmanVehiclesCache.division, ALLOWED_DIVISIONS)
         ));
 

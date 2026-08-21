@@ -15643,7 +15643,27 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Get available vehicles from PMF
   app.get("/api/pmf/vehicles/available", requireAuth, async (req: any, res) => {
     try {
-      const vehicles = await pmfApiService.getAvailableVehicles();
+      let vehicles = await pmfApiService.getAvailableVehicles();
+      // Task #662: PMF availability is PMF-status-only — cross-check against
+      // the Holman cache's out-of-service set (statusCode 2 OR past
+      // outOfServiceDate; the code lags the date after an OOS submit) so the
+      // Assign Truck picker never offers a truck Holman has taken out of
+      // service. VIN-keyed; best-effort — a cache read failure serves the
+      // list unfiltered rather than blanking the picker.
+      try {
+        const { fetchHolmanOosExclusion } = await import("./holman-oos-exclusion");
+        const { isInOosExclusion } = await import("./holman-oos-policy");
+        const oos = await fetchHolmanOosExclusion();
+        if (oos.vins.size > 0) {
+          const before = vehicles.length;
+          vehicles = vehicles.filter((v: any) => !isInOosExclusion(oos, null, v.vin || v.descriptor));
+          if (vehicles.length !== before) {
+            console.log(`[PMF] Excluded ${before - vehicles.length} out-of-service vehicle(s) from the available list (Holman OOS cross-check)`);
+          }
+        }
+      } catch (oosErr: any) {
+        console.warn(`[PMF] Holman OOS cross-check unavailable (serving unfiltered): ${oosErr?.message || oosErr}`);
+      }
       res.json({ success: true, vehicles });
     } catch (error: any) {
       console.error("Error fetching available PMF vehicles:", error);

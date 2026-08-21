@@ -125,6 +125,87 @@ export function isOutOfServiceRecord(rawVehicle: any, today?: string): boolean {
   return iso <= (today ?? easternIsoDate());
 }
 
+// ── Cache-row OOS exclusion (Task #662) ─────────────────────────────────────
+
+/**
+ * Row shape for classifying local holman_vehicles_cache rows as out of
+ * service. Matches the drizzle column names, so cache rows can be passed
+ * through unchanged.
+ */
+export interface OosExclusionRow {
+  holmanVehicleNumber: string | null;
+  vin?: string | null;
+  statusCode?: number | string | null;
+  outOfServiceDate?: string | null;
+}
+
+export interface OosExclusionSets {
+  /** Canonical (zero-stripped) truck numbers of out-of-service vehicles. */
+  canonNumbers: Set<string>;
+  /** Uppercased, trimmed VINs of out-of-service vehicles. */
+  vins: Set<string>;
+}
+
+/**
+ * Classify cache rows into exclusion sets for "available truck" surfaces.
+ *
+ * The trap this exists for: after an out-of-service submit is applied,
+ * `holman_vehicles_cache.statusCode` can sit at 1 while `outOfServiceDate`
+ * already carries a past date (the sync wrote the date before Holman's
+ * nightly batch flipped the status — observed on all 10 BYOV OOS trucks).
+ * A `statusCode = 1` filter alone therefore still treats the truck as an
+ * assignable spare. `isOutOfServiceRecord` uses the durable signal
+ * (statusCode 2 OR past outOfServiceDate), so both spellings of "out of
+ * service" are excluded.
+ */
+export function classifyOosExclusion(
+  rows: readonly OosExclusionRow[],
+  today?: string,
+): OosExclusionSets {
+  const canonNumbers = new Set<string>();
+  const vins = new Set<string>();
+  for (const r of rows) {
+    if (!isOutOfServiceRecord(r, today)) continue;
+    const canon = (toCanonical(String(r.holmanVehicleNumber ?? "").trim()) || "").trim();
+    if (canon) canonNumbers.add(canon);
+    const vin = String(r.vin ?? "").trim().toUpperCase();
+    if (vin) vins.add(vin);
+  }
+  return { canonNumbers, vins };
+}
+
+/**
+ * Keep only in-service rows. This is the spares-pool / "available truck"
+ * filter step, extracted pure so the surface behavior is directly testable:
+ * a query change that drops the statusCode/outOfServiceDate columns from the
+ * select would make the predicate a silent no-op — the tests pin the shape.
+ */
+export function filterInServiceRows<
+  T extends { statusCode?: number | string | null; outOfServiceDate?: string | null },
+>(rows: readonly T[], today?: string): T[] {
+  return rows.filter((r) => !isOutOfServiceRecord(r, today));
+}
+
+/**
+ * Membership test against OOS exclusion sets for candidate lists that carry a
+ * truck number and/or VIN but no lifecycle fields (Snowflake fallback pool,
+ * PMF Assign Truck candidates). Number matching goes through the SAME
+ * canonicalizer used to build the sets, so spelling variance ("088086" vs
+ * "88086") can never split the match; VINs match case-insensitively. Blank
+ * identifiers never match.
+ */
+export function isInOosExclusion(
+  sets: OosExclusionSets,
+  vehicleNumber?: string | null,
+  vin?: string | null,
+): boolean {
+  const canon = (toCanonical(String(vehicleNumber ?? "").trim()) || "").trim();
+  if (canon && sets.canonNumbers.has(canon)) return true;
+  const v = String(vin ?? "").trim().toUpperCase();
+  if (v && sets.vins.has(v)) return true;
+  return false;
+}
+
 // ── Lifecycle verification window ───────────────────────────────────────────
 
 /**
