@@ -152,7 +152,12 @@ type ActiveCacheRow = {
   outOfServiceDate: string | null;
 };
 
-async function fetchActiveCacheRows(): Promise<ActiveCacheRow[]> {
+// Exported for the Task #711 pool-level regression test: BOTH pool surfaces
+// (getNexusUnassignedVehicles and getSparePoolLite) must derive membership
+// from this one function so the OOS exclusion below cannot be bypassed by a
+// query rebuild. If you fork this query, the seeded-row test in
+// tests/spares-pool-oos.test.ts will catch any copy that loses the filter.
+export async function fetchActiveCacheRows(): Promise<ActiveCacheRow[]> {
   const rows = await db
     .select({
       holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
