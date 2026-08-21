@@ -257,6 +257,14 @@ export class HolmanSubmissionService {
   // (verifyFromFleetData, called from holman-vehicle-sync-service after every
   // cache update).  This method is kept as a thin wrapper that marks expired
   // submissions failed and returns 'pending' otherwise.
+  //
+  // PERSISTENCE CONTRACT (settle-persistence gap): this method only
+  // RETURNS a verdict — it never writes a terminal status itself. The only DB
+  // writes here are 'pending' + lastObservedTech bookkeeping. Every caller
+  // that receives newStatus='completed'/'failed' MUST persist it via
+  // updateSubmissionStatus (and check the write landed), or the row stays
+  // 'pending' forever: the 90s sweep re-verifies it every cycle and the
+  // --report mode keeps reporting it as in-flight.
   async verifyByVehicleLookup(submission: HolmanSubmission): Promise<{
     verified: boolean;
     newStatus: 'completed' | 'failed' | 'pending';
@@ -476,7 +484,10 @@ export class HolmanSubmissionService {
 
       if (success) {
         console.log(`[HolmanVerify] Fleet sync verified submission ${submission.id} (vehicle ${vehicleNumber}, ${action}): ${message}`);
-        await this.updateSubmissionStatus(submission.id, 'completed');
+        const persisted = await this.updateSubmissionStatus(submission.id, 'completed');
+        if (!persisted || persisted.status !== 'completed') {
+          console.error(`[HolmanVerify] SETTLE NOT PERSISTED: submission ${submission.id} (vehicle ${vehicleNumber}, ${action}) verified completed by fleet sync but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified by the next sweep`);
+        }
         await this.propagateStatusToFleetLog(submission, 'completed', message);
         // District changes are confirmed here (raw Holman prefix is the source of
         // truth). The fleet sync freezes cache.district on conflict, so this is the
@@ -494,8 +505,12 @@ export class HolmanSubmissionService {
           }
         }
       } else {
+        // INTENTIONALLY left 'pending': a not-yet-confirmed verdict is
+        // non-terminal — Holman applies queued records in nightly batch
+        // windows, so "not applied yet" must never settle the row. The only
+        // write here is lastObservedTech bookkeeping (assign only) so
+        // timeout/expiry messages can include actual vs expected.
         console.log(`[HolmanVerify] Fleet sync: submission ${submission.id} not yet confirmed: ${message}`);
-        // Persist the last observed tech so timeout/expiry messages can include actual vs expected
         if (action === 'assign' && techInHolman) {
           await this.updateSubmissionStatus(submission.id, 'pending', null, techInHolman);
         }
@@ -614,11 +629,17 @@ export class HolmanSubmissionService {
         // next fleet sync re-confirms it (verifyFromFleetData was the only
         // path that wrote status='completed'), so the 90s sweep would keep
         // re-verifying an already-confirmed submission.
-        await this.updateSubmissionStatus(submissionId, 'completed');
+        const persisted = await this.updateSubmissionStatus(submissionId, 'completed');
+        if (!persisted || persisted.status !== 'completed') {
+          console.error(`[HolmanVerify] SETTLE NOT PERSISTED: submission ${submissionId} verified completed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified by the next sweep`);
+        }
         const submission = await this.getSubmissionById(submissionId);
         if (submission) await this.propagateStatusToFleetLog(submission, 'completed', message);
       } else {
-        await this.updateSubmissionStatus(submissionId, 'failed', message);
+        const persisted = await this.updateSubmissionStatus(submissionId, 'failed', message);
+        if (!persisted || persisted.status !== 'failed') {
+          console.error(`[HolmanVerify] SETTLE NOT PERSISTED: submission ${submissionId} settled failed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified by the next sweep`);
+        }
         const submission = await this.getSubmissionById(submissionId);
         if (submission) await this.propagateStatusToFleetLog(submission, 'failed', message);
       }
@@ -742,6 +763,17 @@ export class HolmanSubmissionService {
     // For assign/unassign use vehicle lookup; for field_test keep legacy path
     if (submission.action === 'assign' || submission.action === 'unassign' || submission.action === 'district' || submission.action === 'out_of_service') {
       const r = await this.verifyByVehicleLookup(submission);
+      // Persist terminal verdicts HERE (settle-persistence gap): this entry
+      // point used to return the verdict without writing it, so a caller that
+      // didn't persist left the row 'pending' and every 90s sweep re-verified
+      // an already-confirmed submission. Idempotent with the sweep's persist.
+      if (r.newStatus === 'completed' || r.newStatus === 'failed') {
+        const persisted = await this.updateSubmissionStatus(submission.id, r.newStatus, r.newStatus === 'failed' ? r.message : undefined);
+        if (!persisted || persisted.status !== r.newStatus) {
+          console.error(`[HolmanVerify] SETTLE NOT PERSISTED: submission ${submission.id} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) verified ${r.newStatus} via checkSubmissionStatus but DB row reads '${persisted?.status ?? 'row missing'}'`);
+        }
+        await this.propagateStatusToFleetLog(submission, r.newStatus, r.message);
+      }
       return { checked: r.verified, newStatus: r.newStatus === 'pending' ? 'processing' : r.newStatus, message: r.message };
     }
     // Legacy status-API path for field_test
@@ -786,9 +818,24 @@ export class HolmanSubmissionService {
       if (newStatus === 'completed') {
         completed++;
         // Persist the settle (see settleSubmission) — otherwise the row stays
-        // 'pending' and every subsequent sweep re-verifies it.
-        await this.updateSubmissionStatus(submission.id, 'completed');
+        // 'pending' and every subsequent sweep re-verifies it. Read back the
+        // persist result so a silently-missing write is loud in the sweep log.
+        const persisted = await this.updateSubmissionStatus(submission.id, 'completed');
+        if (!persisted || persisted.status !== 'completed') {
+          console.error(`[HolmanSubmission] SETTLE NOT PERSISTED: submission ${submission.id} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) verified completed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified next sweep`);
+        }
         await this.propagateStatusToFleetLog(submission, 'completed', message);
+      } else if (newStatus === 'failed') {
+        // verifyByVehicleLookup currently never returns 'failed', but its
+        // return type allows it — settle defensively so a future verifier
+        // change can't reopen the silent-stall gap (an unpersisted 'failed'
+        // verdict would previously have been counted as stillPending).
+        failed++;
+        const persisted = await this.updateSubmissionStatus(submission.id, 'failed', message);
+        if (!persisted || persisted.status !== 'failed') {
+          console.error(`[HolmanSubmission] SETTLE NOT PERSISTED: submission ${submission.id} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) verified failed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified next sweep`);
+        }
+        await this.propagateStatusToFleetLog(submission, 'failed', message);
       } else if (oosVerificationExpired(ageMs, expiryMsForAction(submission.action), POST_EXPIRY_BUFFER_MS)) {
         let techDetail = '';
         if (submission.action === 'assign' && submission.enterpriseId) {
@@ -800,7 +847,10 @@ export class HolmanSubmissionService {
         }
         const failMsg = `Verification expired after ${Math.round(ageMs / 60000)} minutes.${techDetail} Last: ${message}`;
         console.error(`[HolmanVerify] Submission ${submission.id} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) expired without confirmation.${techDetail}`);
-        await this.updateSubmissionStatus(submission.id, 'failed', failMsg);
+        const persisted = await this.updateSubmissionStatus(submission.id, 'failed', failMsg);
+        if (!persisted || persisted.status !== 'failed') {
+          console.error(`[HolmanSubmission] SETTLE NOT PERSISTED: submission ${submission.id} (vehicle ${submission.holmanVehicleNumber}, ${submission.action}) expired-failed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified next sweep`);
+        }
         await this.propagateStatusToFleetLog(submission, 'failed', failMsg);
         failed++;
       } else {
@@ -909,6 +959,15 @@ export const holmanSubmissionService = new HolmanSubmissionService();
     console.log(`[HolmanBackfill] Result: ${verifyResult.newStatus} - ${verifyResult.message}`);
 
     if (verifyResult.newStatus === 'completed') {
+      // Persist the submission settle too (settle-persistence gap): this
+      // backfill previously updated only the fleet log, leaving the
+      // holman_submissions row 'pending' — so every 90s sweep re-verified it.
+      // Read back the persist result so a write that lands nowhere is loud
+      // BEFORE the fleet log is marked terminal (same check as the sweep).
+      const persisted = await holmanSubmissionService.updateSubmissionStatus(submission.id, 'completed');
+      if (!persisted || persisted.status !== 'completed') {
+        console.error(`[HolmanBackfill] SETTLE NOT PERSISTED: submission ${submission.id} verified completed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified by the next sweep`);
+      }
       await holmanSubmissionService.propagateStatusToFleetLog(submission, 'completed', verifyResult.message);
       const { storage } = await import("./storage");
       await storage.updateFleetOperationLog(STUCK_FLEET_LOG_ID, {
@@ -917,6 +976,12 @@ export const holmanSubmissionService = new HolmanSubmissionService();
       });
       console.log(`[HolmanBackfill] Fixed fleet_operation_log #${STUCK_FLEET_LOG_ID} → success`);
     } else if (verifyResult.newStatus === 'failed') {
+      // Same gap on the failed branch: settle the submission row itself and
+      // verify the write landed before touching the fleet log.
+      const persisted = await holmanSubmissionService.updateSubmissionStatus(submission.id, 'failed', `Backfill: ${verifyResult.message}`);
+      if (!persisted || persisted.status !== 'failed') {
+        console.error(`[HolmanBackfill] SETTLE NOT PERSISTED: submission ${submission.id} settled failed but DB row reads '${persisted?.status ?? 'row missing'}' — it will be re-verified by the next sweep`);
+      }
       await holmanSubmissionService.propagateStatusToFleetLog(submission, 'failed', verifyResult.message);
       const { storage } = await import("./storage");
       await storage.updateFleetOperationLog(STUCK_FLEET_LOG_ID, {
