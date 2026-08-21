@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Bot, CalendarDays, PhoneCall, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
+import { DispatchLucaCallButton } from "@/components/fleet-scope/DispatchLucaCallButton";
 
 interface ItemClassification {
   key: string;
@@ -723,13 +724,16 @@ function QueueRow({
         item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
       ]} />
 
-      <div className="flex items-center gap-1.5 pt-0.5">
+      <div className="flex items-center gap-1.5 pt-0.5 flex-wrap justify-end">
+        {item.step === 5 && item.caseKey && !dismissed && (
+          <DispatchLucaCallButton caseKey={item.caseKey} truckNumber={item.truckNumber} />
+        )}
         {showShopPhone && (
           <a
             href={`tel:${item.repairPhone}`}
             onClick={(e) => e.stopPropagation()}
             className="inline-flex items-center gap-1.5 h-7 px-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
-            title="Shop phone — call manually (LUCA calls are dispatched from VRM Rental Operations)"
+            title="Shop phone — call manually"
           >
             <Phone className="h-3.5 w-3.5" />
             {item.repairPhone}
@@ -796,6 +800,14 @@ function BucketRow({
             <ReadyEvidence item={item} />
             <SpareChip item={item} />
             {!dismissed && item.registration && <RegistrationBlock reg={item.registration} truckNumber={item.truckNumber} />}
+            {item.step === 5 && item.caseKey && !dismissed && (
+              <DispatchLucaCallButton
+                caseKey={item.caseKey}
+                truckNumber={item.truckNumber}
+                shopName={chips?.shopName}
+                className="mt-0.5"
+              />
+            )}
           </div>
         </div>
       </div>

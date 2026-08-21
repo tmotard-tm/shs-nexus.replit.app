@@ -68,6 +68,7 @@ import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scop
 import Papa from "papaparse";
 import { Badge } from "@/components/ui/badge";
 import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
+import { DispatchLucaCallButton } from "@/components/fleet-scope/DispatchLucaCallButton";
 
 type OwnerType = "Oscar S" | "Rob A" | "Bob B" | "Jenn D" | "Samantha W" | "Cheryl" | "Final Actioned";
 
@@ -3424,6 +3425,17 @@ export default function Dashboard() {
                                           </Button>
                                         </Link>
                                       </div>
+                                      {/* LUCA works the shop side of active repairs — this hands
+                                          the truck to the VRM dispatch path (never a direct dial). */}
+                                      {(truck.mainStatus === "Repairing" || truck.mainStatus === "Confirming Status") && (
+                                        <div className="flex items-center justify-center mt-0.5">
+                                          <DispatchLucaCallButton
+                                            caseKey={truck.truckNumber}
+                                            truckNumber={truck.truckNumber}
+                                            className="h-6 text-xs px-1.5"
+                                          />
+                                        </div>
+                                      )}
                                       {(shopStatus || techStatus) && (
                                         <div className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">
                                           {shopStatus && (
