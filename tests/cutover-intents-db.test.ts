@@ -96,8 +96,11 @@ async function insertIntent(over: Partial<Record<string, unknown>> = {}): Promis
   return (rows as any[])[0].id as number;
 }
 
-const isUniqueViolation = (e: any) =>
-  e?.code === "23505" || /duplicate key value/i.test(String(e?.message ?? e));
+// Drizzle wraps the pg error ("Failed query: <sql>", no .code) — the 23505
+// lives on e.cause, so the check must walk the cause chain. The old direct
+// e.code/e.message predicate silently matched NOTHING, failing every
+// assert.rejects that used it.
+import { isUniqueViolation } from "../server/vrm/forms/db-errors";
 
 before(async () => {
   await initFormsSchema(); // IF NOT EXISTS everywhere — also proves boot DDL runs clean
@@ -740,7 +743,7 @@ describe("atomic booking-attempt authorization (openBookingAttempt)", () => {
           INSERT INTO vrm_workflow_attempts (intent_id, phase, attempt_no, fencing_token, request_hash, request)
           VALUES (${id}, 'etd_booking', 2, ${mine!.fencingToken}, NULL, '{}'::jsonb)
         `),
-      (e: any) => String((e as any)?.code ?? "") === "23505" || /duplicate key/i.test(String(e?.message ?? "")),
+      isUniqueViolation,
       "two OPEN attempts for one (intent, phase) must be impossible at the DB level",
     );
 

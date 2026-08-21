@@ -28,6 +28,7 @@ import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 import { getNexusUnassignedVehicles, getOccupiedTruckSet, checkTruckAssignedNexus } from "./spares-pool";
 import { getTodaysQueueCached } from "./todays-queue";
 import { maybeAutoHealReadyConflicts } from "./vrm/rental-operations/ready-conflict-heal";
+import { isUniqueViolation } from "./vrm/forms/db-errors";
 import { registerCommsRoutes } from "./fleet-comms/routes";
 import { registerTruckMaintenanceRoutes } from "./truck-maintenance/routes";
 import { fetchRentalRoster } from "./vrm/snowflake-queries";
@@ -4520,8 +4521,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           errors: error.errors 
         });
       }
-      // Check for database unique constraint violation
-      if (error.code === '23505' || error.message?.includes('duplicate') || error.message?.includes('unique')) {
+      // Check for database unique constraint violation. Drizzle wraps the pg
+      // error ("Failed query: <sql>", no .code) — the 23505 lives on
+      // error.cause, so the check must walk the cause chain.
+      if (isUniqueViolation(error)) {
         return res.status(409).json({ 
           message: `Truck number already exists. Please use a different truck number.`
         });
@@ -4753,7 +4756,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           if (error instanceof z.ZodError) {
             const errorMsg = error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(", ");
             results.errors.push(`Row ${i + 1} (${trucks[i].truckNumber || 'unknown'}): ${errorMsg}`);
-          } else if (error.code === "23505") {
+          } else if (isUniqueViolation(error)) {
+            // Drizzle-wrapped: the 23505 lives on error.cause, never error.code.
             results.errors.push(`Row ${i + 1}: Truck ${trucks[i].truckNumber} already exists`);
           } else {
             results.errors.push(`Row ${i + 1}: ${error.message || 'Unknown error'}`);

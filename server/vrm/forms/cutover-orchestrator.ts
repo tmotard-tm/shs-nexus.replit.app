@@ -38,7 +38,7 @@ import {
   type StandardActivityArgs,
 } from "../dca-task-client";
 import { sendMessage } from "../../fleet-comms/outbound";
-import { isUniqueViolationOn } from "./db-errors";
+import { isUniqueViolation, isUniqueViolationOn } from "./db-errors";
 import { getNextAllowedSendTime, localHourToUtc, stateTimeZone } from "../../fleet-scope-reg-messaging";
 import {
   initializeSnowflakeService,
@@ -1819,6 +1819,11 @@ export async function openBookingAttempt(
   runnerId: string,
   fencingToken: number,
   payload?: { requestHash?: unknown; request?: unknown },
+  deps?: {
+    /** Test seam: runs between the open-attempt pre-check and the gated
+     *  INSERT — the snapshot-race window the one-open index closes. */
+    beforeAttemptInsert?: () => Promise<void>;
+  },
 ): Promise<{ attemptNo: number }> {
   const { rows: open } = await db.execute(sql`
     SELECT attempt_no FROM vrm_workflow_attempts
@@ -1850,6 +1855,7 @@ export async function openBookingAttempt(
       );
     }
   }
+  if (deps?.beforeAttemptInsert) await deps.beforeAttemptInsert();
   let inserted: any[];
   try {
     const { rows } = await db.execute(sql`
@@ -1875,7 +1881,9 @@ export async function openBookingAttempt(
     `);
     inserted = rows as any[];
   } catch (e: any) {
-    if (e?.code === "23505" || /duplicate key value/i.test(String(e?.message ?? ""))) {
+    // Drizzle wraps the pg error ("Failed query: <sql>", no .code) — the
+    // 23505 lives on e.cause, so the check MUST walk the cause chain.
+    if (isUniqueViolation(e)) {
       // A concurrent op_open won — either the attempt_no key (rival) or the
       // one-open partial index (same holder double-fire). Same discipline as
       // an unfinished attempt: reconcile via readback before booking again.
@@ -2906,6 +2914,9 @@ export async function recordBookingPostback(params: {
 export type BlockReconcileDeps = {
   /** Injectable readback source (tests); defaults to the live ART snapshot. */
   fetchRows?: typeof fetchBlockReadbackRows;
+  /** Test seam: runs between the filing-claim CAS and the attempt-ledger
+   *  INSERT — the window where a concurrent open trips the one-open index. */
+  beforeAttemptInsert?: () => Promise<void>;
 };
 
 export type BlockReconcileOutcome = "none" | "recovered" | "cleared" | "ambiguous" | "manual";
@@ -3254,6 +3265,7 @@ export async function fileContractBlock(intentId: number, deps?: BlockReconcileD
   if ((filingClaim as any[]).length === 0) return;
 
   // Persist intent-to-file BEFORE the call (attempt ledger).
+  if (deps?.beforeAttemptInsert) await deps.beforeAttemptInsert();
   let attemptNo: number;
   try {
     const { rows: att } = await db.execute(sql`
@@ -3265,7 +3277,9 @@ export async function fileContractBlock(intentId: number, deps?: BlockReconcileD
     `);
     attemptNo = (att as any[])[0]?.attempt_no;
   } catch (e: any) {
-    if (e?.code === "23505" || /duplicate key value/i.test(String(e?.message ?? ""))) {
+    // Drizzle wraps the pg error ("Failed query: <sql>", no .code) — the
+    // 23505 lives on e.cause, so the check MUST walk the cause chain.
+    if (isUniqueViolation(e)) {
       // one-open index refused a duplicate open. Should be unreachable behind
       // the CAS — surrender the claim so the sweep lanes drive recovery
       // rather than stranding 'filing'.

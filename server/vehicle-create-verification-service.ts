@@ -149,10 +149,11 @@ export interface VerifyAttemptOutcome {
   reclaimConflict: string | null;
 }
 
-/** Postgres unique-violation — another active reservation already holds the number or VIN. */
-function isUniqueViolation(err: any): boolean {
-  return err?.code === "23505" || /duplicate key value violates unique constraint/i.test(String(err?.message ?? ""));
-}
+// Postgres unique-violation (another active reservation already holds the
+// number or VIN): isUniqueViolation walks the error's cause chain, because
+// drizzle wraps the pg error ("Failed query: <sql>", no .code) and the 23505
+// only exists on err.cause — checking err.code directly matched nothing.
+import { isUniqueViolation } from "./vrm/forms/db-errors";
 
 type AuditRow = typeof byovCreationAudit.$inferSelect;
 
