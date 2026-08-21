@@ -286,7 +286,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npx tsx --test tests/cutover-orchestrator-unit.test.ts tests/cutover-route-block-payload.test.ts tests/rental-extension-booking-doors.test.ts tests/rental-extension-token-door.test.ts tests/rental-open-door-race.test.ts tests/cutover-live-lock-race.test.ts tests/cutover-attempt-ledger-race.test.ts"
+args = "npx tsx --test tests/cutover-orchestrator-unit.test.ts tests/cutover-route-block-payload.test.ts tests/rental-extension-booking-doors.test.ts tests/rental-extension-token-door.test.ts tests/rental-open-door-race.test.ts tests/cutover-live-lock-race.test.ts tests/cutover-attempt-ledger-race.test.ts tests/rental-open-door-refusals.test.ts"
 
 [[workflows.workflow]]
 name = "cutover-intents-db"
