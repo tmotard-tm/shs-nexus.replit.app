@@ -27,6 +27,7 @@ import {
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 import { getNexusUnassignedVehicles, getOccupiedTruckSet, checkTruckAssignedNexus } from "./spares-pool";
 import { getTodaysQueueCached } from "./todays-queue";
+import { maybeAutoHealReadyConflicts } from "./vrm/rental-operations/ready-conflict-heal";
 import { registerCommsRoutes } from "./fleet-comms/routes";
 import { registerTruckMaintenanceRoutes } from "./truck-maintenance/routes";
 import { fetchRentalRoster } from "./vrm/snowflake-queries";
@@ -4350,6 +4351,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Rental Operations queue (VRM is the authority; this is the FS mirror).
       // Same short-TTL cache as the VRM route, so mirror loads are ~free.
       res.json(await getTodaysQueueCached());
+      // Same level-triggered ready-conflict self-heal the VRM queue GET fires
+      // (throttled, fire-and-forget, after the response): the mirror page is
+      // read-only for HUMANS, but the status alignment is the system's own
+      // write — an FS-only viewer must not stare at a red STATUS CONFLICT row
+      // that would already be healed had someone opened the VRM board.
+      maybeAutoHealReadyConflicts("fs-queue-get");
     } catch (error: any) {
       console.error('[Queue] Error generating queue:', error);
       res.status(500).json({ success: false, message: 'Failed to generate queue' });

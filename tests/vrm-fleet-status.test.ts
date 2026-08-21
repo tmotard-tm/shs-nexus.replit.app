@@ -638,7 +638,7 @@ describe("ready-conflict heal core", () => {
         items: [
           item({}),
           item({ readyReason: "manual", caseKey: "60001", truckNumber: "60001", fleetScopeStatus: "Repairing" }),
-          item({ caseKey: null, truckNumber: "99999" }),
+          item({ caseKey: null, truckNumber: "byov" }),
           item({ caseKey: "60002", truckNumber: "60002" }),
         ],
       }),
@@ -651,7 +651,7 @@ describe("ready-conflict heal core", () => {
     });
     assert.equal(out.candidates, 4);
     assert.equal(out.healed, 1);
-    assert.equal(out.skipped, 2, "no-case row + guard refusal are skips");
+    assert.equal(out.skipped, 2, "unusable-number row + guard refusal are skips");
     assert.equal(out.errored, 1, "a THROWN append is an error, not a skip (throttle refund signal)");
     assert.equal(invalidated, 1);
     assert.equal(appends.length, 3);
@@ -662,6 +662,31 @@ describe("ready-conflict heal core", () => {
       sub: FS_SUB_TO_BE_SCHEDULED,
       actor: "system:ready-heal",
     });
+  });
+
+  test("caseKey null falls back to the truck-number-derived case key (edge-writer parity)", async () => {
+    // A case that left the latest rental report decorates the queue item with
+    // caseKey null even though its VRM case row still exists (the truck-36580
+    // stranding). The heal must derive the 5-digit display key like
+    // routeReadyStatusViaVrm and let the guarded append decide.
+    const appends: string[] = [];
+    const out = await runReadyConflictHeal({ apply: true, actor: "system:ready-heal" }, {
+      getQueue: async () => ({
+        items: [
+          item({ caseKey: null, truckNumber: "36580" }),
+          item({ caseKey: null, truckNumber: "099999" }),
+        ],
+      }),
+      appendGuarded: async (caseKey) => {
+        appends.push(caseKey);
+        return caseKey === "36580" ? outcome(true) : outcome(false, "unknown case 99999");
+      },
+      invalidateCache: () => {},
+    });
+    assert.deepEqual(appends, ["36580", "99999"], "display-form derivation, zeros trimmed to 5-digit form");
+    assert.equal(out.healed, 1);
+    assert.equal(out.skipped, 1, "guarded append still refuses genuinely unknown cases");
+    assert.equal(out.errored, 0);
   });
 
   test("apply with zero healed leaves the cache alone; overlapping run 409s", async () => {

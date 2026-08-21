@@ -32,6 +32,7 @@ import {
   FS_MAIN_SCHEDULING,
   FS_SUB_TO_BE_SCHEDULED,
   READY_REPLACEABLE_MAIN_STATUSES,
+  normalizeTruckNumber,
 } from "../../luca-writeback/mapper";
 
 /** Structural slice of a queue item this heal cares about. */
@@ -113,10 +114,17 @@ export async function runReadyConflictHeal(
     let skipped = 0;
     let errored = 0;
     for (const it of candidates) {
-      const caseKey = it.caseKey ?? null;
+      // Prefer the queue's rental-case join, but a case that has left the
+      // latest rental report decorates the item with caseKey null even though
+      // its vrm_rental_operations_cases row still exists — the exact rows the
+      // 2026-08-10 stale-rental reset stranded red. Fall back to the same
+      // truck-number derivation the edge writer (routeReadyStatusViaVrm)
+      // uses; the guarded append still refuses genuinely unknown cases.
+      const caseKey =
+        it.caseKey ?? normalizeTruckNumber(it.truckNumber ?? null)?.display ?? null;
       if (!caseKey) {
         skipped++;
-        results.push({ truckNumber: it.truckNumber, ok: false, skipped: "no rental case — cannot append VRM fleet-status" });
+        results.push({ truckNumber: it.truckNumber, ok: false, skipped: "no rental case and no usable truck number — cannot append VRM fleet-status" });
         continue;
       }
       if (!opts.apply) {
