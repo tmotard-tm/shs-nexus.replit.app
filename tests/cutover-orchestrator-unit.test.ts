@@ -346,13 +346,14 @@ describe("renderers (plan skeletons, verbatim)", () => {
     const f = { conf: "1568742936", branchName: "Dallas Main", branchAddress: "1 Main St, Dallas, TX 75001" };
     const m1 = renderMsg1(f);
     const m2 = renderMsg2(f);
-    // §7: "new Enterprise billing reservation", never "replacement rental" —
-    // the tech KEEPS their vehicle; the old copy read like a vehicle swap.
-    assert.match(m1, /^SHS Fleet: Your new Enterprise billing reservation is booked — confirmation 1568742936\./);
+    // Approved instruction template (2026-08-18) — supersedes the §7 draft copy.
+    // The invariants stand: never "replacement rental"; the tech KEEPS their
+    // vehicle; billing-only change; confirmation + block time up front.
+    assert.match(m1, /^This is Sears Fleet\. Tomorrow, we have blocked the first 30 minutes of your route, 8:00 AM/);
     assert.doesNotMatch(m1, /replacement/i);
-    assert.match(m1, /Tomorrow you have a 30-minute 8:00 AM route block/);
-    assert.match(m1, /billing changeover only/);
-    assert.match(m1, /You KEEP the vehicle you are driving/);
+    assert.match(m1, /Confirmation 1568742936\./);
+    assert.match(m1, /You keep the vehicle you are driving\. This is a billing change only\./);
+    assert.match(m1, /nothing for you to pay and nothing to hand back/);
     assert.match(m2, /^SHS Fleet reminder: today's 8:00 AM block/);
     assert.match(m2, /confirmation 1568742936/);
     for (const m of [m1, m2]) {
