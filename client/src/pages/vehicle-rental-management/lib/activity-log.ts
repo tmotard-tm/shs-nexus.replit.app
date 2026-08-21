@@ -81,6 +81,12 @@ export function describeAction(a: ActionRow): { label: string; detail: string | 
       const body = typeof p.body === "string" && p.body ? p.body : null;
       return { label: note || "Pickup text sent", detail: body };
     }
+    case "extension_reminder": {
+      // Weekly rental-extension reminder receipt (live sends only — the sweep
+      // writes the note as "Extension reminder sent/queued to NAME (day X of Y)").
+      const body = typeof p.body === "string" && p.body ? p.body : null;
+      return { label: note || "Extension reminder sent", detail: body };
+    }
     case "identity_override":
       return flag(p.cleared)
         ? { label: "Renter identity override cleared", detail: note }

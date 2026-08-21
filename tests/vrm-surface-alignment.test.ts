@@ -360,6 +360,14 @@ test("activity labels: every known writer renders a sentence, unknown types neve
   const text = at("pickup_text", { note: "Pickup text sent to SMITH,JOHN", payload: { body: "Your van is ready" } });
   assert.equal(text.label, "Pickup text sent to SMITH,JOHN");
   assert.equal(text.detail, "Your van is ready");
+  const rem = at("extension_reminder", {
+    note: "Extension reminder sent to SMITH,JOHN (day 8 of 7)",
+    payload: { body: "Your rental has reached its authorized days…" },
+  });
+  assert.equal(rem.label, "Extension reminder sent to SMITH,JOHN (day 8 of 7)");
+  assert.equal(rem.detail, "Your rental has reached its authorized days…");
+  // Older/degraded rows without a note still render a sentence, never blank.
+  assert.equal(at("extension_reminder").label, "Extension reminder sent");
   assert.equal(at("identity_override", { payload: { cleared: "true" } }).label, "Renter identity override cleared");
   assert.equal(
     at("identity_override", { note: "Renter identity pinned to SMITH,J (PO 123)" }).label,

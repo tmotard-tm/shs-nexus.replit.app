@@ -16,7 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight,
-  MessageSquare, Pencil, Lock, Bot,
+  MessageSquare, Pencil, Lock, Bot, BellRing,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours, phoneSearchMatches } from "../lib/format";
@@ -520,6 +520,9 @@ export default function RentalOperations() {
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
   const [panelKey, setPanelKey] = useState<string | null>(null);
   const [phoneEdit, setPhoneEdit] = useState<ShopPhoneEditTarget | null>(null);
+  // Weekly extension-reminder panel (arm switch + ledger). Collapsed by
+  // default — the header button opens it; data is only fetched while open.
+  const [showReminders, setShowReminders] = useState(false);
 
   // The as-of stamp has to age in place. React only re-renders this page on state
   // or query changes, so without a tick a board left open on the wall all afternoon
@@ -866,11 +869,14 @@ export default function RentalOperations() {
             </button>
           )}
           <AutoTextToggle />
+          <ReminderPanelButton open={showReminders} onToggle={() => setShowReminders((v) => !v)} />
           <button type="button" onClick={exportCsv} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Download size={13} /> CSV
           </button>
         </div>
       </div>
+
+      {showReminders && <ExtensionRemindersPanel />}
 
       {/* KPI cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
@@ -1285,5 +1291,233 @@ function AutoTextToggle() {
         color: on ? colors.green : colors.inkSoft, border: `1px solid ${on ? colors.green : colors.rule}`, fontWeight: on ? 700 : 400 }}>
       <MessageSquare size={13} /> Auto-text {data ? (on ? "ON" : "off") : "…"}
     </button>
+  );
+}
+
+// ─── weekly rental-extension reminders ───────────────────────────────────────
+/**
+ * The on-screen switch and log for the weekly extension-reminder sweep
+ * (server/vrm/rental-operations/extension-reminder.ts). The sweep itself runs
+ * on the cron dispatcher; until the durable `extension_reminders_enabled`
+ * toggle is armed every run is a dry run that records who WOULD be texted.
+ * This panel is where Fleet arms/disarms that toggle, previews a sweep, and
+ * reads the ledger back — no more curl.
+ *
+ * Same placement rule as AutoTextToggle: control-centre switches live on
+ * Rental Operations, not the regional boards.
+ */
+
+/** Header button: shows the arm state at a glance, opens/closes the panel. */
+function ReminderPanelButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
+  // Same key AutoTextToggle uses — React Query dedupes the fetch.
+  const { data } = useQuery<any>({ queryKey: ["/api/vrm/rental-operations/settings"] });
+  const armed = data?.extension_reminders_enabled?.enabled === true;
+  return (
+    <button type="button" onClick={onToggle} data-testid="button-reminder-panel"
+      title={armed
+        ? "Weekly rental-extension reminders are ARMED (live texts). Click to open the reminder log and switch."
+        : "Weekly rental-extension reminders are in dry-run (nothing is texted). Click to open the reminder log and switch."}
+      style={{ fontFamily: fonts.dmSans, fontSize: 12.5, padding: "7px 11px", borderRadius: 8, background: open ? colors.ink : colors.surface,
+        cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+        color: open ? "#fff" : armed ? colors.green : colors.inkSoft,
+        border: `1px solid ${open ? colors.ink : armed ? colors.green : colors.rule}`, fontWeight: armed ? 700 : 400 }}>
+      <BellRing size={13} /> Reminders {data ? (armed ? "ON" : "off") : "…"}
+    </button>
+  );
+}
+
+interface ReminderRow {
+  id: string; case_key: string; cycle_key: string | null; ldap: string | null;
+  tech_name: string | null; rental_vendor: string | null;
+  days_open: number | null; days_authorized: number | null;
+  status: string; reason: string | null; body: string | null;
+  dry_run: boolean; actor: string | null; created_at: string; sent_at: string | null;
+}
+interface ReminderRun {
+  id: string; live: boolean; trigger: string | null;
+  considered: number | null; sent: number | null; queued: number | null;
+  dry_run: number | null; skipped: number | null; failed: number | null;
+  error: string | null; started_at: string; finished_at: string | null;
+}
+interface RemindersModel { enabled: boolean; reminders: ReminderRow[]; runs: ReminderRun[] }
+
+const REMINDERS_KEY = ["/api/vrm/rental-operations/extension-reminders"];
+
+function ExtensionRemindersPanel() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data, isLoading, error } = useQuery<RemindersModel>({
+    queryKey: REMINDERS_KEY,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const armed = data?.enabled === true;
+
+  // Arm/disarm the durable toggle. Same confirm-before-arming contract as
+  // AutoTextToggle: turning live texting ON is deliberate, OFF is instant.
+  const armMut = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiRequest("POST", "/api/vrm/rental-operations/settings", { extension_reminders_enabled: enabled }),
+    onSuccess: async (_res: any, enabled: boolean) => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/settings"] }),
+        qc.invalidateQueries({ queryKey: REMINDERS_KEY }),
+      ]);
+      toast({
+        title: enabled ? "Weekly reminders ARMED" : "Weekly reminders disarmed",
+        description: enabled
+          ? "The daily sweep now texts technicians whose rental hit its authorized days (opt-out, quiet hours and the one-per-cycle guard still apply)."
+          : "Sweeps run dry from now on — they record who would be texted and send nothing.",
+      });
+    },
+    onError: (e: any) => toast({ title: "Setting not saved", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const flipArm = () => {
+    if (armMut.isPending || !data) return;
+    if (!armed) {
+      if (!window.confirm(
+        "ARM weekly rental-extension reminders?\n\nFrom the next sweep on, technicians whose rental has reached its authorized days (with no extension request in flight) are texted for real. Opt-out and quiet-hours still apply, and each case is texted at most once per authorization cycle.\n\nArm it?",
+      )) return;
+    }
+    armMut.mutate(!armed);
+  };
+
+  // Manual sweep. Always requests a dry run — the preview path. (A live run
+  // happens on the cron cadence once armed; this button exists so Fleet can
+  // see who WOULD be texted right now without waiting for noon.)
+  const runMut = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/vrm/rental-operations/extension-reminders/run", { dryRun: true });
+      return res.json();
+    },
+    onSuccess: async (out: any) => {
+      await qc.invalidateQueries({ queryKey: REMINDERS_KEY });
+      const s = out?.summary;
+      toast({
+        title: "Dry-run sweep finished",
+        description: s
+          ? `${s.considered ?? 0} considered · ${s.dryRun ?? 0} would be texted · ${s.skipped ?? 0} skipped${s.failed ? ` · ${s.failed} FAILED` : ""}`
+          : "Sweep ran — see the log below.",
+      });
+    },
+    onError: (e: any) => toast({ title: "Sweep failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+
+  const box: React.CSSProperties = { background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px", marginBottom: 16 };
+  const h: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 6 };
+  const th: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, fontWeight: 500, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", padding: "6px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" };
+  const td: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, padding: "6px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" };
+
+  if (isLoading) return <div style={{ ...box, color: colors.inkMuted, fontSize: 12.5 }}>Loading reminder log…</div>;
+  if (error || !data) return (
+    <div style={{ ...box, color: colors.red, fontSize: 12.5 }}>
+      Reminder log failed to load: {String((error as any)?.message || error || "no data")}
+      <span style={{ color: colors.inkMuted }}> — the extension-reminder endpoints may not be deployed yet.</span>
+    </div>
+  );
+
+  const statusChip = (r: ReminderRow) => {
+    const c = r.status === "sent" ? colors.green
+      : r.status === "queued" ? colors.blue
+      : r.status === "failed" ? colors.red
+      : r.status === "skipped" ? colors.amber
+      : colors.inkMuted; // dry_run / claimed / stale
+    return (
+      <span style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: c, border: `1px solid ${c}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+        {r.status.replace(/_/g, " ")}
+      </span>
+    );
+  };
+
+  return (
+    <div style={box} data-testid="panel-extension-reminders">
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+        <div>
+          <div style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink }}>Weekly rental-extension reminders</div>
+          <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 2 }}>
+            Texts a tech when their rental reaches its authorized days with no extension request in flight — one text per case per authorization cycle.
+            {armed
+              ? " Reminders are ARMED: the daily sweep sends live texts."
+              : " Reminders are in DRY-RUN: sweeps record who would be texted and send nothing."}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="button" onClick={() => runMut.mutate()} disabled={runMut.isPending} data-testid="button-reminder-dry-run"
+            title="Run the sweep now as a dry run — records who WOULD be texted (through the real opt-out/quiet-hours/dedupe gates) and sends nothing, regardless of the arm switch."
+            style={{ fontFamily: fonts.dmSans, fontSize: 12.5, padding: "7px 11px", borderRadius: 8, background: colors.surface, border: `1px solid ${colors.accent}`, color: colors.accent, cursor: runMut.isPending ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <RefreshCw size={13} style={{ animation: runMut.isPending ? "spin 1s linear infinite" : undefined }} />
+            {runMut.isPending ? "Previewing…" : "Preview now (dry run)"}
+          </button>
+          <button type="button" onClick={flipArm} disabled={armMut.isPending} data-testid="button-reminder-arm"
+            title={armed
+              ? "Live texting is ON. Click to disarm — sweeps go back to dry-run."
+              : "Live texting is OFF (every sweep is a dry run). Click to arm live reminder texts."}
+            style={{ fontFamily: fonts.dmSans, fontSize: 12.5, padding: "7px 11px", borderRadius: 8, background: armed ? colors.green : colors.surface, border: `1px solid ${armed ? colors.green : colors.rule}`, color: armed ? "#fff" : colors.inkSoft, fontWeight: armed ? 700 : 400, cursor: armMut.isPending ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <BellRing size={13} /> {armed ? "Live texting ON — disarm" : "Arm live texting"}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 2fr) minmax(280px, 1fr)", gap: 14, alignItems: "start" }}>
+        {/* Reminder ledger — who was reminded (or would have been) */}
+        <div>
+          <div style={h}>Recent reminders ({data.reminders.length})</div>
+          {data.reminders.length === 0 ? (
+            <div style={{ fontSize: 12, color: colors.inkMuted }}>No reminders recorded yet — run a dry-run preview to see who is due.</div>
+          ) : (
+            <div style={{ maxHeight: 260, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead><tr>
+                  <th style={th}>When</th><th style={th}>Truck</th><th style={th}>Tech</th>
+                  <th style={th}>Day</th><th style={th}>Status</th><th style={th}>Reason</th>
+                </tr></thead>
+                <tbody>
+                  {data.reminders.map((r) => (
+                    <tr key={r.id} title={r.body || undefined}>
+                      <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>{fmtDateTime(r.created_at)}</td>
+                      <td style={{ ...td, fontFamily: fonts.jetbrains }}>{r.case_key}</td>
+                      <td style={td}>{r.tech_name || r.ldap || "—"}</td>
+                      <td style={td}>{r.days_open ?? "—"} / {r.days_authorized ?? "—"}</td>
+                      <td style={td}>{statusChip(r)}</td>
+                      <td style={{ ...td, whiteSpace: "normal", maxWidth: 260, fontSize: 11.5, color: colors.inkSoft }}>{r.reason || ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
+        {/* Sweep runs — did the job go off, and what did it do */}
+        <div>
+          <div style={h}>Sweep runs ({data.runs.length})</div>
+          {data.runs.length === 0 ? (
+            <div style={{ fontSize: 12, color: colors.inkMuted }}>No sweeps have run yet.</div>
+          ) : (
+            <div style={{ maxHeight: 260, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead><tr>
+                  <th style={th}>Started</th><th style={th}>Mode</th><th style={th}>Trigger</th><th style={th}>Result</th>
+                </tr></thead>
+                <tbody>
+                  {data.runs.map((run) => (
+                    <tr key={run.id} title={run.error || undefined}>
+                      <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>{fmtDateTime(run.started_at)}</td>
+                      <td style={{ ...td, fontWeight: 600, color: run.live ? colors.green : colors.inkMuted }}>{run.live ? "LIVE" : "dry"}</td>
+                      <td style={td}>{run.trigger || "—"}</td>
+                      <td style={{ ...td, fontSize: 11.5, color: run.error ? colors.red : colors.inkSoft, whiteSpace: "normal" }}>
+                        {run.error
+                          ? `ERROR: ${run.error}`
+                          : `${run.considered ?? 0} considered · ${run.sent ?? 0} sent · ${run.queued ?? 0} queued · ${run.dry_run ?? 0} dry · ${run.skipped ?? 0} skipped${run.failed ? ` · ${run.failed} failed` : ""}${run.finished_at ? "" : " · still running"}`}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
