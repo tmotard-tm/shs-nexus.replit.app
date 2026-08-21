@@ -30,7 +30,26 @@ import {
   verifyRequestOnCommitEvidence,
   adoptRunnerBooking,
   WORKFLOW_REQUEST,
+  // The Saturday-schedule truth for the Friday→Monday pickup default. The
+  // underlying function, NOT the cron-bearer /schedule-check route: this is
+  // read from a session lane by the approval drawer.
+  fetchScheduleWindow,
+  etTodayISO,
+  scheduleDaySnapshotAgeHours,
+  WATERMARK_MAX_AGE_HOURS,
 } from "./cutover-orchestrator";
+import {
+  type SaturdayStatus,
+  isFridayISO,
+  addDaysISO,
+  fridayPickupSuggestion,
+  buildApprovalSmsDefault,
+  resolveApprovalDecideSms,
+  APPROVAL_SMS_MAX_LEN,
+  REQUEST_APPROVE_TEMPLATE_KEY,
+  REQUEST_APPROVE_MONDAY_TEMPLATE_KEY,
+} from "../../../shared/rental-approval-sms";
+import { getNotificationTemplates } from "../storage";
 import { runBookingExecutor } from "../etd/executor";
 // One list of bookable classes, shared by the picker route and the validator so
 // they cannot drift apart.
@@ -555,6 +574,73 @@ async function notifyTech(requestNo: number, body: string, why: string): Promise
   } catch (e: any) {
     console.error(`[rental-request] ${why} failed:`, e?.message || e);
   }
+}
+
+/**
+ * Is this technician actually working the given Saturday?
+ *
+ * Tri-state on purpose: the Friday→Monday default treats "we cannot tell"
+ * differently from "no" only in the sentence shown to the approver — both
+ * default to Monday, but the approver must know WHICH fact produced the
+ * default. Freshness gates mirror the cutover lane's recheckScheduleDay:
+ * table watermark fresh AND the per-tech per-day snapshot fresh, because a
+ * tech missing from last night's load would otherwise pass on the table's
+ * freshness alone.
+ */
+async function saturdayScheduleFor(
+  ldap: string,
+  saturdayISO: string,
+): Promise<{ status: SaturdayStatus; detail: string }> {
+  try {
+    const win = await fetchScheduleWindow(ldap, saturdayISO, 1);
+    if (!win.fresh) {
+      return {
+        status: "unknown",
+        detail: `schedule watermark ${win.watermarkUtc ?? "missing"} is `
+          + `${win.watermarkAgeHours?.toFixed(1) ?? "?"}h old (limit ${WATERMARK_MAX_AGE_HOURS}h)`,
+      };
+    }
+    const day = win.days.find((d) => d.date === saturdayISO);
+    // No row = ServicePower has no shift for that day. That is the normal
+    // shape of a scheduled day off, not a data gap — gaps show up as a stale
+    // watermark, which the branch above already caught.
+    if (!day) return { status: "not_working", detail: "no Saturday shift on the schedule" };
+    const age = scheduleDaySnapshotAgeHours(day);
+    if (age === null || age > WATERMARK_MAX_AGE_HOURS) {
+      return {
+        status: "unknown",
+        detail: `snapshot carrying Saturday is ${age === null ? "unparseable" : `${age.toFixed(1)}h old`}`,
+      };
+    }
+    if (day.working) return { status: "working", detail: "scheduled to work Saturday" };
+    return {
+      status: "not_working",
+      detail: day.absences.length
+        ? `Saturday absence: ${day.absences.join(", ")}`
+        : "no available hours Saturday",
+    };
+  } catch (e: any) {
+    return { status: "unknown", detail: `schedule lookup failed: ${e?.message || e}` };
+  }
+}
+
+/**
+ * The Settings overrides for the two request-approval SMS templates.
+ * "" means "no override, use the built-in default" — same contract as the
+ * notification dispatcher's templates. A lookup failure THROWS.
+ */
+async function loadRequestApprovalTemplates(): Promise<{ standard: string; monday: string }> {
+  // Deliberately loud: a settings-read failure must surface as an HTTP error
+  // on every caller, never decay to a silent built-in send. An admin who
+  // saved custom copy has to be able to trust that "success" meant THEIR
+  // words went out; "" here means only "no override saved", never "the read
+  // failed".
+  const rows = await getNotificationTemplates();
+  const get = (k: string) => rows.find((r) => r.key === k)?.body ?? "";
+  return {
+    standard: get(REQUEST_APPROVE_TEMPLATE_KEY),
+    monday: get(REQUEST_APPROVE_MONDAY_TEMPLATE_KEY),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1220,7 +1306,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "claimed_at", "claimed_by", "source", "origin_survey_id",
          // Send-back. A health check that passes while the thing it guards is
          // missing is worse than no health check; that lesson cost a publish.
-         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "return_at", "approved_branch", "accident_ok",
+         "missing_fields", "returned_at", "return_count", "tech_reported_branch", "is_towed", "pickup_at", "return_at", "approved_branch", "accident_ok", "approval_sms_body",
          "ack_working_hours_only", "ack_return_before_time_off", "ack_extension_weekly", "ack_discipline",
          "policy_complete"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
@@ -1335,6 +1421,102 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
    */
   router.get("/forms/rental-request/class-options", async (_req, res) => {
     res.json({ options: REQUEST_CLASS_OPTIONS });
+  });
+
+  /**
+   * The two Settings-tunable approval templates, served bare and FAST (one
+   * settings read, no Snowflake). The drawer fetches these the moment it
+   * opens so its INSTANT default — the one an approver can send before the
+   * slow schedule lookup answers — already carries the admin's saved copy,
+   * not just the built-ins. "" means "use the built-in", same contract as
+   * everywhere else.
+   */
+  router.get("/forms/rental-request/approval-sms-templates", async (_req, res) => {
+    try {
+      // no-store: every drawer open must see the admin's CURRENT saved copy;
+      // any intermediary caching would defeat the per-open freshness gate.
+      res.set("Cache-Control", "no-store");
+      res.json({ templates: await loadRequestApprovalTemplates() });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "templates unavailable" });
+    }
+  });
+
+  /**
+   * Everything the approval drawer needs BEFORE the approve click: the
+   * Friday→Monday pickup default (with the Saturday-schedule fact behind it)
+   * and the exact SMS the decide path will send, rendered with this request's
+   * real values so the approver edits the real thing, never a paraphrase.
+   *
+   * ?pickupDate=YYYY-MM-DD re-renders the copy for a date the approver has
+   * already changed in the drawer — the Monday wording (with the SHSAI
+   * Uber-home line) only survives while the field still holds the rolled
+   * Monday; any other date gets the standard copy for that date.
+   */
+  router.get("/forms/rental-request/:requestNo/approval-context", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      if (!Number.isInteger(no)) return res.status(400).json({ message: "bad request number" });
+      const { rows } = await db.execute(sql`
+        SELECT ldap, tech_name, status,
+               to_char(pickup_at AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS requested_date
+        FROM vrm_rental_request WHERE request_no = ${no}
+      `);
+      const row = (rows as any[])[0];
+      if (!row) return res.status(404).json({ message: "request not found" });
+
+      // The date this approval would start from if nobody touched anything:
+      // the technician's own FUTURE pickup, else today (the drawer's default).
+      // A requested date already in the past cannot be booked, so it does not
+      // get to decide which weekday the policy sees.
+      const today = etTodayISO();
+      const requested = String(row.requested_date ?? "");
+      const base = requested && requested > today ? requested : today;
+
+      const friday = isFridayISO(base);
+      let saturday: { status: SaturdayStatus; detail: string } = { status: "unknown", detail: "" };
+      let suggestion = { pickupDateISO: base, rolledToMonday: false, reason: "" };
+      if (friday) {
+        saturday = await saturdayScheduleFor(String(row.ldap ?? ""), addDaysISO(base, 1));
+        suggestion = fridayPickupSuggestion({ baseISO: base, saturday: saturday.status });
+      }
+
+      // Render the default SMS for the date the drawer currently shows —
+      // through the SAME resolver the decide route uses for a blank body, so
+      // the previewed default and the sent/audited fallback are byte-identical
+      // by construction, whichever arrives first. (This also makes the
+      // Monday/Uber copy a pure function of base + chosen date, not of the
+      // schedule: booking the rolled Monday reads the Monday copy even when
+      // the tech works Saturday, because the car still sits until Monday.)
+      const qd = String(req.query.pickupDate ?? "").trim();
+      const pickupISO = /^\d{4}-\d{2}-\d{2}$/.test(qd) ? qd : suggestion.pickupDateISO;
+      const resolved = resolveApprovalDecideSms({
+        override: "",
+        todayISO: today,
+        requestedPickupISO: requested,
+        effectivePickupISO: pickupISO,
+        techName: row.tech_name ?? null,
+        techLdap: String(row.ldap ?? ""),
+        templates: await loadRequestApprovalTemplates(),
+      });
+      const smsBody = resolved.body;
+      const mondayCopy = resolved.mondayCopy;
+
+      res.json({
+        friday,
+        saturday,
+        suggestedPickupDate: suggestion.pickupDateISO,
+        rolledToMonday: suggestion.rolledToMonday,
+        reason: suggestion.reason,
+        pickupDate: pickupISO,
+        smsBody,
+        smsIsMondayCopy: mondayCopy,
+        maxSmsLen: APPROVAL_SMS_MAX_LEN,
+      });
+    } catch (e: any) {
+      console.error("[rental-request] approval-context failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "approval context failed" });
+    }
   });
 
   router.get("/forms/rental-request/missing-reasons", async (_req, res) => {
@@ -1936,6 +2118,23 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       if (returnAt && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?$/.test(returnAt)) {
         return res.status(400).json({ message: "returnAt must be YYYY-MM-DDTHH:MM" });
       }
+      // The approver-reviewed (possibly edited) acknowledgement SMS. The drawer
+      // always sends the body it previewed — default or edited — so what the
+      // approver SAW is what the technician receives. Absent or blank (API
+      // callers that never previewed anything, or a cleared textarea) resolves
+      // to the SAME shared policy default the drawer previews — standard or
+      // Monday/Uber copy — never a separate generic literal that would bypass
+      // the Friday→Monday policy.
+      // APPROVE-only: deny/defer/return keep their fixed scripts.
+      // Kept RAW: the resolver trims only to decide blankness, so a human
+      // edit reaches the send and the audit byte-identical to the preview.
+      const approvalSms = decision === "APPROVE" && typeof req.body?.approvalSms === "string"
+        ? req.body.approvalSms : "";
+      if (approvalSms.length > APPROVAL_SMS_MAX_LEN) {
+        return res.status(400).json({
+          message: `approvalSms is ${approvalSms.length} characters; the cap is ${APPROVAL_SMS_MAX_LEN}.`,
+        });
+      }
 
       // RETURN is "you have not given us enough to book this", which is a
       // different fact from "no". It must name what is missing, because a
@@ -1962,7 +2161,14 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
                -- way the booking queue resolves it, so the day count validated here
                -- is the day count Enterprise gets.
                to_char(COALESCE(${pickupAt}::timestamptz, pickup_at, appointment_at),
-                       'YYYY-MM-DD"T"HH24:MI:SS') AS effective_pickup
+                       'YYYY-MM-DD"T"HH24:MI:SS') AS effective_pickup,
+               -- ET calendar days for the SMS fallback render: the tech's own
+               -- requested day (the Friday-policy base) and the day this
+               -- approval actually books from.
+               ldap, tech_name,
+               to_char(pickup_at AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS requested_day_et,
+               to_char(COALESCE(${pickupAt}::timestamptz, pickup_at, appointment_at)
+                       AT TIME ZONE 'America/New_York', 'YYYY-MM-DD') AS effective_pickup_day_et
         FROM vrm_rental_request WHERE request_no = ${Number(req.params.requestNo)}
       `);
       const cur = (rows as any[])[0];
@@ -2012,12 +2218,32 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         : decision === "DENY" ? "denied"
         : decision === "RETURN" ? "returned"
         : "deferred";
+      // Resolved BEFORE the UPDATE so the row records the exact words sent —
+      // the approver's edit when one arrived, the SHARED policy default
+      // (Settings-aware, Monday/Uber copy when the booked start is the rolled
+      // Monday) otherwise. One resolver, so a blank body can never route
+      // around the Friday→Monday policy through a side-door literal.
+      const approveText = decision === "APPROVE"
+        ? resolveApprovalDecideSms({
+            override: approvalSms,
+            todayISO: etTodayISO(),
+            requestedPickupISO: String(cur.requested_day_et ?? ""),
+            effectivePickupISO: String(cur.effective_pickup_day_et ?? ""),
+            techName: cur.tech_name ?? null,
+            techLdap: String(cur.ldap ?? ""),
+            // Blankness here must match the resolver's own test (trim), or a
+            // whitespace-only body would skip loading the Settings templates
+            // while the resolver still falls back to the default copy.
+            templates: approvalSms.trim() ? { standard: "", monday: "" } : await loadRequestApprovalTemplates(),
+          }).body
+        : "";
       const { rows: upd } = await db.execute(sql`
         UPDATE vrm_rental_request
         SET status = ${nextStatus},
             pickup_at = COALESCE(${pickupAt}::timestamptz, pickup_at),
             return_at = COALESCE(${returnAt}::timestamptz, return_at),
             approved_branch = COALESCE(${approvedBranch}, approved_branch),
+            approval_sms_body = ${decision === "APPROVE" ? sql`${approveText}` : sql`approval_sms_body`},
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
               // string_to_array, not a bound JS array. Interpolating an array into
@@ -2051,8 +2277,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
             + `${missingText}.${note ? ` ${note}` : ""}\nFinish it here: ${PUBLIC_REQUEST_URL}`
             + `\nYour earlier answers are saved, you only need to add what is missing.`
         : decision === "APPROVE"
-          ? "Sears Fleet: your rental request is approved. We are booking the reservation now "
-            + "and will text you the confirmation number and branch."
+          ? approveText
           : decision === "DENY"
           ? `Sears Fleet: your rental request was not approved.${note ? ` ${note}` : ""}`
             + " Reply to this message if your situation has changed."

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import multer from "multer";
+import { validateRequestApproveTemplate } from "../../shared/rental-approval-sms";
 import ExcelJS from "exceljs";
 import { db } from "../db";
 import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
@@ -2187,6 +2188,16 @@ export function registerVrmRoutes(): Router {
       "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
       "byov_link",
     ]),
+    // Rental-request approval acknowledgement (the /decide APPROVE text the
+    // drawer previews and lets the approver edit). Two variants: the everyday
+    // copy, and the Friday→Monday roll which adds the SHSAI Uber-home line.
+    // Empty body = the built-in default in shared/rental-approval-sms.ts.
+    sms_template_request_approve: new Set([
+      "tech_first_name", "tech_full_name", "tech_ldap", "pickup_date", "pickup_day",
+    ]),
+    sms_template_request_approve_monday: new Set([
+      "tech_first_name", "tech_full_name", "tech_ldap", "pickup_date", "pickup_day",
+    ]),
   };
   const ALLOWED_NOTIF_TEMPLATE_KEYS = new Set(Object.keys(NOTIF_TEMPLATE_TOKENS));
 
@@ -2241,7 +2252,19 @@ export function registerVrmRoutes(): Router {
       const body = typeof req.body?.body === "string" ? req.body.body : "";
       // Empty body is allowed — that's how the UI clears a template back to
       // the dispatcher's hard-coded fallback.
-      if (body.length > 4000) {
+      //
+      // The two request-approve SMS templates carry a TIGHTER contract than
+      // the general 4000: their RENDERED output must clear the decide route's
+      // APPROVAL_SMS_MAX_LEN, and a raw-length cap alone is not enough —
+      // repeated tokens expand (40 copies of {{tech_full_name}} fit in 800
+      // characters but render to 3,200). validateRequestApproveTemplate
+      // bounds the worst-case render, so a template an admin can save is a
+      // template every approval can send. Reject at save time, where the
+      // admin can fix it, not at approve time, where an approver pays for it.
+      if (key === "sms_template_request_approve" || key === "sms_template_request_approve_monday") {
+        const verdict = validateRequestApproveTemplate(body);
+        if (!verdict.ok) return res.status(400).json({ error: verdict.message });
+      } else if (body.length > 4000) {
         return res.status(400).json({ error: "body exceeds 4000 character limit" });
       }
       const unknown = findUnknownTokens(body, NOTIF_TEMPLATE_TOKENS[key]);

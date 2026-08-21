@@ -15,6 +15,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
 import CutoverIntentPanel, { IntentPill } from "../components/CutoverIntentPanel";
+import {
+  etTodayISO,
+  etDateISO,
+  initialApprovalDrawerDefaults,
+  reconcileApprovalContext,
+  resolveApprovalDecideSms,
+  approvalSendGate,
+  takeFirstContextApplication,
+  TPL_FRESHNESS_INIT,
+  tplFreshnessOnOpen,
+  tplFreshnessOnResult,
+  tplTemplatesReady,
+  tplTemplatesFailed,
+} from "@shared/rental-approval-sms";
 
 type SortDir = "asc" | "desc" | null;
 type SortState = { col: string | null; dir: SortDir };
@@ -285,6 +299,21 @@ const nextHourET = (): { date: string; time: string } => {
 const normCls = (s: string | null | undefined) =>
   String(s ?? "").trim().toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
 
+// What the approval-context endpoint answers: the Friday→Monday pickup
+// suggestion (with the Saturday-schedule fact behind it) and the exact SMS
+// the decide path will send for the drawer's current pickup date.
+type ApprovalCtx = {
+  friday: boolean;
+  saturday: { status: "working" | "not_working" | "unknown"; detail: string };
+  suggestedPickupDate: string;
+  rolledToMonday: boolean;
+  reason: string;
+  pickupDate: string;
+  smsBody: string;
+  smsIsMondayCopy: boolean;
+  maxSmsLen: number;
+};
+
 export default function RentalRequests() {
   const qc = useQueryClient();
   const [sort, setSort] = useState<SortState>({ col: null, dir: null });
@@ -304,6 +333,19 @@ export default function RentalRequests() {
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [classDraft, setClassDraft] = useState("sedan");
+  // The approval SMS the technician will receive. Server-rendered default,
+  // editable in place; `smsEdited` pins the approver's words against the
+  // refresh that follows a pickup-date change.
+  const [smsBody, setSmsBody] = useState("");
+  const [smsEdited, setSmsEdited] = useState(false);
+  // A hand-picked date is never overwritten by the late-arriving context.
+  const [dateEdited, setDateEdited] = useState(false);
+  // The client-side "checking the Saturday schedule…" note shown until the
+  // server's answer replaces it.
+  const [pendingReason, setPendingReason] = useState("");
+  // Which request the server's pickup suggestion was already applied to —
+  // apply once per opened drawer, then the field belongs to the approver.
+  const suggestedFor = useRef<number | null>(null);
 
   const { data, isLoading, error } = useQuery<{ requests: Req[] }>({
     queryKey: ["/api/vrm/forms/rental-request/list"],
@@ -342,11 +384,109 @@ export default function RentalRequests() {
   const REASONS = reasonData?.reasons ?? {};
   const MAINT_SCRIPT = reasonData?.maintenanceDenyScript ?? "";
 
+  // The Settings-tunable approval templates, fetched FAST (no schedule
+  // lookup) and cached, so the drawer's INSTANT default already carries the
+  // admin's saved copy — an approve clicked before the slow approval-context
+  // answers must not silently drop back to the built-ins.
+  // The Settings templates are fetched OPEN-SCOPED, deliberately outside
+  // React Query: the query cache dedupes refetches onto in-flight requests,
+  // so a "refetch" for drawer B could resolve with bytes requested before B
+  // existed (and before an admin's Settings edit). Instead every drawer open
+  // issues its OWN cache-busted HTTP request, and only that request's
+  // response can mark this open ready or update the copy it previews.
+  // Cross-open answers are dropped by sequence number in both places.
+  const [tplForOpen, setTplForOpen] = useState<{ standard: string; monday: string } | null>(null);
+  const smsTemplates = tplForOpen ?? { standard: "", monday: "" };
+  const [tplState, setTplState] = useState(TPL_FRESHNESS_INIT);
+  const tplSeqRef = useRef(0);
+  const fetchTemplatesForOpen = (seq: number) => {
+    fetch(`/api/vrm/forms/rental-request/approval-sms-templates?open=${seq}`, {
+      credentials: "include", cache: "no-store",
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`templates ${res.status}`);
+        const j = await res.json();
+        const tpl = {
+          standard: String(j?.templates?.standard ?? ""),
+          monday: String(j?.templates?.monday ?? ""),
+        };
+        if (tplSeqRef.current === seq) setTplForOpen(tpl);
+        setTplState((s) => tplFreshnessOnResult(s, seq, true));
+      })
+      .catch(() => setTplState((s) => tplFreshnessOnResult(s, seq, false)));
+  };
+
+  // Friday→Monday pickup default + the exact approval SMS, server-rendered so
+  // the preview and the sent text are the same code path. Re-fetched when the
+  // approver changes the pickup date so the default copy tracks the date; an
+  // edited body is never overwritten (see the effect below).
+  const canDecide = !!detail && detail.status !== "booked";
+  const apCtxUrl = detail
+    ? `/api/vrm/forms/rental-request/${detail.request_no}/approval-context`
+    : "";
+  const { data: apCtx } = useQuery<ApprovalCtx>({
+    queryKey: [apCtxUrl, pickupDate],
+    enabled: canDecide,
+    staleTime: 30_000,
+    queryFn: async () => {
+      const qs = pickupDate ? `?pickupDate=${encodeURIComponent(pickupDate)}` : "";
+      const res = await fetch(`${apCtxUrl}${qs}`, { credentials: "include" });
+      if (!res.ok) throw new Error("approval context failed");
+      return res.json();
+    },
+  });
+  useEffect(() => {
+    if (!apCtx || !detail) return;
+    // Reconcile the server's answer into the drawer. The approver always
+    // wins: a hand-edited date or body is never overwritten. The date is
+    // reconciled ONCE per opened request (the click handler already seeded
+    // the safe Monday default; the only move left is Monday→Friday when the
+    // schedule says the tech works Saturday); the body refreshes on every
+    // date change until the approver edits it.
+    const first = takeFirstContextApplication(suggestedFor, detail.request_no);
+    const apply = reconcileApprovalContext({
+      current: { pickupDateISO: pickupDate, dateEdited: dateEdited || !first, smsEdited },
+      ctx: apCtx,
+    });
+    setPendingReason("");
+    if (apply.pickupDateISO !== undefined) {
+      setPickupDate(apply.pickupDateISO);
+      setPickupTime(apCtx.rolledToMonday || apply.pickupDateISO > etTodayISO() ? "08:00" : nextHourET().time);
+    }
+    // The BODY is deliberately NOT taken from the context: the untouched
+    // preview has one source — the resolver effect below, fed this open's
+    // freshly fetched Settings templates — so a cached context render can
+    // never pin stale copy. The context contributes the date and the
+    // schedule reason only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apCtx, detail?.request_no]);
+
+  // The untouched preview is ALWAYS derived here — the same pure resolver
+  // the decide route uses for a default send, fed the latest fetched
+  // Settings templates and the drawer's current date. One body source, so a
+  // stale context render can never pin old copy after an admin retune, and
+  // byte parity holds by construction: preview, send, and audit all come
+  // from resolveApprovalDecideSms on the same inputs. An edited body is
+  // never touched.
+  useEffect(() => {
+    if (!detail || smsEdited || !pickupDate) return;
+    setSmsBody(resolveApprovalDecideSms({
+      override: "",
+      todayISO: etTodayISO(),
+      requestedPickupISO: etDateISO(detail.pickup_at),
+      effectivePickupISO: pickupDate,
+      techName: detail.tech_name,
+      techLdap: detail.ldap,
+      templates: smsTemplates,
+    }).body);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tplForOpen, detail?.request_no, pickupDate, smsEdited]);
+
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null; approvalSms?: string | null }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null, approvalSms: v.approvalSms ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.message || "decision failed");
@@ -354,6 +494,7 @@ export default function RentalRequests() {
     },
     onSuccess: (_j, v) => {
       setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00");
+      setSmsBody(""); setSmsEdited(false); setDateEdited(false); setPendingReason(""); suggestedFor.current = null;
       // APPROVE kicks off the booking — keep the drawer OPEN so the staffer
       // watches the confirmation (or the failure reason) land, instead of
       // closing on a request that still says nothing. Other verdicts are
@@ -607,18 +748,48 @@ export default function RentalRequests() {
                 return (
                   <tr key={r.request_no} onClick={() => {
                         setDetail(r);
-                        // Pickup defaults to today (ET) at the next full hour,
-                        // so an approval books "come get it within the hour"
-                        // without anyone touching the pickers.
-                        const def = nextHourET();
-                        setPickupDate(def.date);
-                        setPickupTime(def.time);
+                        // The drawer must hold a SAFE, complete default the
+                        // instant it opens — the server's Saturday-schedule
+                        // answer can take a minute on a cold boot, and an
+                        // approver who clicks APPROVE before it lands must
+                        // still send the Friday→Monday policy, never a blank
+                        // that decays to generic copy. Unknown schedule =
+                        // Monday branch; the context reconciles back to
+                        // Friday only on a fresh "works Saturday".
+                        const init = initialApprovalDrawerDefaults({
+                          todayISO: etTodayISO(),
+                          requestedPickupISO: etDateISO(r.pickup_at),
+                          techName: r.tech_name,
+                          techLdap: r.ldap,
+                          templates: smsTemplates,
+                        });
+                        setPickupDate(init.pickupDateISO);
+                        // Rolled/future dates start at 08:00; a same-day
+                        // pickup keeps "come get it within the hour".
+                        setPickupTime(init.useMorningTime ? "08:00" : nextHourET().time);
+                        setPendingReason(init.pendingReason);
+                        setSmsBody(init.smsBody);
+                        setSmsEdited(false);
+                        setDateEdited(false);
                         // Maintenance arrives pre-denied: the standard response
                         // is already in the note box, so DENY is one click and
                         // the technician receives the exact script.
                         setNote(MAINT_CATS.has(r.problem_category ?? "") && r.status === "pending" ? MAINT_SCRIPT : "");
                         setClassDraft(normCls(r.approved_vehicle_class) || "sedan");
                         setActionErr("");
+                        // Unconditional: every OPEN is a fresh reconciliation
+                        // window, including a close→reopen of the same
+                        // request — the schedule answer must be able to move
+                        // the seeded Monday back to Friday each time.
+                        suggestedFor.current = null;
+                        // Start THIS open's own template request — a fresh
+                        // cache-busted HTTP call, never a dedupe onto some
+                        // earlier in-flight fetch — so the untouched default
+                        // becomes sendable only once bytes requested BY this
+                        // open have arrived.
+                        const seq = ++tplSeqRef.current;
+                        setTplState((s) => tplFreshnessOnOpen(s, seq));
+                        fetchTemplatesForOpen(seq);
                       }}
                       style={{ cursor: "pointer" }}>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.request_no}</td>
@@ -666,7 +837,7 @@ export default function RentalRequests() {
       )}
 
       {detail && (
-        <div onClick={() => setDetail(null)}
+        <div onClick={() => { suggestedFor.current = null; setDetail(null); }}
              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 60, display: "flex", justifyContent: "flex-end" }}>
           <div onClick={(e) => e.stopPropagation()}
                style={{ width: 500, maxWidth: "94vw", height: "100%", overflowY: "auto", background: colors.background, borderLeft: `1px solid ${colors.rule}`, padding: 20 }}>
@@ -674,7 +845,7 @@ export default function RentalRequests() {
               <div style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink }}>
                 #{detail.request_no} · {detail.tech_name || detail.ldap}
               </div>
-              <button type="button" onClick={() => setDetail(null)}
+              <button type="button" onClick={() => { suggestedFor.current = null; setDetail(null); }}
                       style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted }}>
                 <X size={18} />
               </button>
@@ -933,11 +1104,32 @@ export default function RentalRequests() {
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Pickup date
                 </span>
-                <input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)}
+                <input type="date" value={pickupDate}
+                       onChange={(e) => { setPickupDate(e.target.value); setDateEdited(true); }}
                        style={{ ...ctrl, flex: 1 }} />
                 <input type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}
                        style={{ ...ctrl, width: 110 }} />
               </div>
+              {/* WHY the pickup defaulted where it did on a Friday request:
+                  rolled to Monday (tech off / schedule unverifiable / still
+                  checking) or kept (tech works Saturday). The field above
+                  stays fully editable either way — this is an explanation,
+                  never a lock. */}
+              {apCtx?.friday && apCtx.reason ? (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12, marginBottom: 8, padding: "6px 10px",
+                              borderRadius: 8,
+                              background: apCtx.rolledToMonday ? colors.accentLight : colors.greenLight,
+                              color: apCtx.rolledToMonday ? colors.accent : colors.green }}>
+                  Friday request: {apCtx.reason}
+                  {apCtx.saturday.status === "unknown" && apCtx.saturday.detail
+                    ? ` (${apCtx.saturday.detail})` : ""}
+                </div>
+              ) : pendingReason ? (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12, marginBottom: 8, padding: "6px 10px",
+                              borderRadius: 8, background: colors.accentLight, color: colors.accent }}>
+                  Friday request: {pendingReason}
+                </div>
+              ) : null}
               {/* The return date IS the number of days. Leave it blank and the
                   booking falls back to 7 days, which is what every reservation
                   silently got before this existed. */}
@@ -979,15 +1171,84 @@ export default function RentalRequests() {
                   return `${days} day${days === 1 ? "" : "s"} on rent.`;
                 })()}
               </div>
+              {/* The exact SMS an APPROVE sends, shown BEFORE the click so
+                  the approver can tailor the words (e.g. the Monday/Uber
+                  line). Server-rendered from the same template the decide
+                  path uses; editing here is editing the real message. */}
+              <div style={{ marginBottom: 8 }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Approval text to the technician
+                  </span>
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: smsEdited ? colors.amber : colors.inkMuted }}>
+                    {smsEdited ? "edited" : "default"}
+                  </span>
+                  {smsEdited && (
+                    <button type="button"
+                            onClick={() => {
+                              setSmsEdited(false);
+                              // Same single body source as the untouched
+                              // preview — reset must never leave the box
+                              // blank, and never resurrect a stale render.
+                              setSmsBody(resolveApprovalDecideSms({
+                                override: "",
+                                todayISO: etTodayISO(),
+                                requestedPickupISO: etDateISO(detail.pickup_at),
+                                effectivePickupISO: pickupDate,
+                                techName: detail.tech_name,
+                                techLdap: detail.ldap,
+                                templates: smsTemplates,
+                              }).body);
+                            }}
+                            style={{ background: "transparent", border: "none", cursor: "pointer",
+                                     fontFamily: fonts.dmSans, fontSize: 11, color: colors.accent, padding: 0 }}>
+                      reset to default
+                    </button>
+                  )}
+                </div>
+                <textarea value={smsBody}
+                          onChange={(e) => { setSmsBody(e.target.value); setSmsEdited(true); }}
+                          rows={4} maxLength={apCtx?.maxSmsLen ?? 1000}
+                          placeholder={apCtx ? "" : "Loading the default approval text…"}
+                          style={{ ...ctrl, width: "100%", resize: "vertical" }} />
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>
+                  Sent once on APPROVE only. {smsBody.length} chars ·{" "}
+                  {Math.max(1, Math.ceil(smsBody.length / 160))} SMS segment{smsBody.length > 160 ? "s" : ""}.
+                </div>
+                {tplTemplatesFailed(tplState) && (
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.red, marginTop: 4 }}>
+                    Couldn't load the saved SMS templates — the text above is the built-in default.
+                    Edit the message to send your own wording, or reopen this request to retry.
+                  </div>
+                )}
+              </div>
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
                   return (
                     <button key={d} type="button" disabled={decide.isPending}
-                            onClick={() => decide.mutate({ requestNo: detail.request_no, decision: d, note,
-                              pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
-                              returnAt: d === "APPROVE" && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
-                              approvedBranch: d === "APPROVE" && approvedBranch.trim() ? approvedBranch.trim() : null })}
+                            onClick={() => {
+                              // What-you-see-is-what-sends: the textarea's
+                              // exact bytes are submitted, so preview, sent
+                              // text, and audit can never diverge. The shared
+                              // gate blocks a blank box, and blocks an
+                              // UNTOUCHED default until the Settings templates
+                              // that rendered it have actually arrived — an
+                              // edit is always sendable (those bytes were
+                              // human-reviewed by definition).
+                              if (d === "APPROVE") {
+                                const gate = approvalSendGate({
+                                  smsBody, smsEdited,
+                                  templatesReady: tplTemplatesReady(tplState),
+                                });
+                                if (!gate.ok) { setActionErr(gate.message); return; }
+                              }
+                              decide.mutate({ requestNo: detail.request_no, decision: d, note,
+                                pickupAt: d === "APPROVE" && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
+                                returnAt: d === "APPROVE" && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
+                                approvedBranch: d === "APPROVE" && approvedBranch.trim() ? approvedBranch.trim() : null,
+                                approvalSms: d === "APPROVE" ? smsBody : null });
+                            }}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
                       {d}
                     </button>

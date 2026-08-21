@@ -414,6 +414,18 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS accident_ok boolean;
   `);
 
+  // The approval acknowledgement the technician was ACTUALLY texted.
+  //
+  // The decide route lets the approver edit the SMS before it goes out
+  // (task: Friday→Monday default + editable approval SMS). The comms lane
+  // logs the send too, but that log is keyed by phone number — this column
+  // is the request's own record of the exact words, edited or default.
+  // NULL = approved before this existed, or not approved at all.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS approval_sms_body text;
+  `);
+
   // Sent back as incomplete.
   //
   // A request missing the shop's estimate is not a denial and must not be
