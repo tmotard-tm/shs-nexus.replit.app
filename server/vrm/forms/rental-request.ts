@@ -2913,7 +2913,7 @@ function buildAckSnapshot(opts: {
  *     manually and the row never books, so it must not block next week's
  *     extension request. Extensions only count as live while 'pending'.
  */
-async function liveRequestGuard(ldap: string): Promise<{
+export async function liveRequestGuard(ldap: string): Promise<{
   liveNew: any | null;
   liveExt: any | null;
   blockNew: { requestNo: number; status: string } | null;

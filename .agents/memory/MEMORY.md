@@ -136,4 +136,5 @@
 - [jsdom component-test recipe](jsdom-component-test-recipe.md) — render real client pages under node:test via tsx --tsconfig tsconfig.dom-tests.json (jsx react-jsx), generic window-constructor copy, fetch route table, toast probe.
 - [--test-force-exit truncates suites](node-test-force-exit-truncation.md) — the flag can silently drop whole describe blocks (green run, lower test count); use it only for suites holding real handles.
 - [Schedule lookups from UI lanes](approval-drawer-schedule-latency.md) — fetchScheduleWindow cold-start can take ~60s from a drawer route; keep schedule facts advisory, never block a human action on them.
+- [Rental extension reminders](rental-extension-reminders.md) — cycle key = days_authorized rarely moves → one text per case in practice; arming fires the whole overdue backlog; dry runs never consume the cycle slot; standalone sweeps must ensure dependency schemas.
 - [Radix Select async-prefill wipe](radix-select-async-prefill-wipe.md) — bubble-input coerces a controlled value through a native select; setting a value before its async options load fires change("") and erases it (real browsers too).

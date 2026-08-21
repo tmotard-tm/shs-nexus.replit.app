@@ -37,6 +37,12 @@ let syncInFlight = false;
 // than a DB lock because the sweep is in-process and this is a single instance.
 let scrapeSweepInFlight = false;
 
+// One extension-reminder sweep at a time (module-level for the same reason as
+// scrapeSweepInFlight: single-instance, in-process trigger routes). The DB
+// cycle claim in extension-reminder.ts is the real double-send guard; this
+// flag just stops pointless overlapping runs.
+let extReminderInFlight = false;
+
 // ── background auto-sync (Executive Summary stale-data self-heal) ───────────
 // The exec summary computes from vrm_rental_operations_* tables, so it is only
 // as fresh as the last ingest. On autoscale nothing dependable pokes the cron
@@ -568,13 +574,21 @@ export function registerRentalOperationsRoutes(router: Router): void {
 
   router.get("/rental-operations/settings", async (_req, res) => {
     try {
-      const { getSetting, SETTING_AUTO_TEXT_ON_READY } = await import("./settings");
-      const s = await getSetting(SETTING_AUTO_TEXT_ON_READY);
+      const { getSetting, SETTING_AUTO_TEXT_ON_READY, SETTING_EXTENSION_REMINDERS } = await import("./settings");
+      const [s, er] = await Promise.all([
+        getSetting(SETTING_AUTO_TEXT_ON_READY),
+        getSetting(SETTING_EXTENSION_REMINDERS),
+      ]);
       res.json({
         auto_text_on_ready: {
           enabled: s?.value?.enabled === true,
           updated_by: s?.updated_by ?? null,
           updated_at: s?.updated_at ?? null,
+        },
+        extension_reminders_enabled: {
+          enabled: er?.value?.enabled === true,
+          updated_by: er?.updated_by ?? null,
+          updated_at: er?.updated_at ?? null,
         },
       });
     } catch (e: any) {
@@ -584,28 +598,150 @@ export function registerRentalOperationsRoutes(router: Router): void {
 
   router.post("/rental-operations/settings", async (req, res) => {
     try {
-      const enabled = req.body?.auto_text_on_ready;
-      if (typeof enabled !== "boolean") {
-        return res.status(400).json({ error: "auto_text_on_ready must be a boolean" });
+      // Two independent switches ride this route; each request may flip either
+      // or both, but every value present must be a real boolean.
+      const flips: Array<{ key: string; responseKey: string; enabled: boolean }> = [];
+      const { setSetting, SETTING_AUTO_TEXT_ON_READY, SETTING_EXTENSION_REMINDERS } = await import("./settings");
+      if (req.body?.auto_text_on_ready !== undefined) {
+        if (typeof req.body.auto_text_on_ready !== "boolean") {
+          return res.status(400).json({ error: "auto_text_on_ready must be a boolean" });
+        }
+        flips.push({ key: SETTING_AUTO_TEXT_ON_READY, responseKey: "auto_text_on_ready", enabled: req.body.auto_text_on_ready });
       }
-      const { setSetting, SETTING_AUTO_TEXT_ON_READY } = await import("./settings");
+      if (req.body?.extension_reminders_enabled !== undefined) {
+        if (typeof req.body.extension_reminders_enabled !== "boolean") {
+          return res.status(400).json({ error: "extension_reminders_enabled must be a boolean" });
+        }
+        flips.push({ key: SETTING_EXTENSION_REMINDERS, responseKey: "extension_reminders_enabled", enabled: req.body.extension_reminders_enabled });
+      }
+      if (!flips.length) {
+        return res.status(400).json({ error: "auto_text_on_ready or extension_reminders_enabled must be a boolean" });
+      }
       const actor = actorOf(req);
-      await setSetting(SETTING_AUTO_TEXT_ON_READY, { enabled }, actor);
-      console.log(`[VRM/RentalOps] auto_text_on_ready -> ${enabled} (by ${actor})`);
-      // Append-only audit of the flip itself (the settings table only keeps
-      // the latest state). '_global' = not tied to one case.
-      try {
-        await db.execute(sql`
-          INSERT INTO vrm_rental_operation_actions (case_key, action_type, note, payload, actor)
-          VALUES ('_global', 'setting', ${`auto_text_on_ready → ${enabled ? "ON" : "OFF"}`},
-                  ${JSON.stringify({ setting: "auto_text_on_ready", enabled: enabled ? "true" : "false" })}::jsonb, ${actor})
-        `);
-      } catch (logErr: any) {
-        console.warn("[VRM/RentalOps] settings audit insert failed (non-fatal):", logErr?.message || logErr);
+      const out: Record<string, any> = { ok: true };
+      for (const f of flips) {
+        await setSetting(f.key, { enabled: f.enabled }, actor);
+        console.log(`[VRM/RentalOps] ${f.key} -> ${f.enabled} (by ${actor})`);
+        // Append-only audit of the flip itself (the settings table only keeps
+        // the latest state). '_global' = not tied to one case.
+        try {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_operation_actions (case_key, action_type, note, payload, actor)
+            VALUES ('_global', 'setting', ${`${f.key} → ${f.enabled ? "ON" : "OFF"}`},
+                    ${JSON.stringify({ setting: f.key, enabled: f.enabled ? "true" : "false" })}::jsonb, ${actor})
+          `);
+        } catch (logErr: any) {
+          console.warn("[VRM/RentalOps] settings audit insert failed (non-fatal):", logErr?.message || logErr);
+        }
+        out[f.responseKey] = { enabled: f.enabled, updated_by: actor };
       }
-      res.json({ ok: true, auto_text_on_ready: { enabled, updated_by: actor } });
+      res.json(out);
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "settings write failed" });
+    }
+  });
+
+  // ── weekly rental-extension reminders ────────────────────────────────────
+  // The sweep that texts a tech when their rental hits its authorized days
+  // with no extension request in flight. Dry-run until the durable
+  // extension_reminders_enabled toggle is armed (see ./extension-reminder).
+
+  // GET the ledger: who was reminded (or would have been), plus sweep runs
+  // and the arm state. This is the "Fleet can see who was reminded" surface.
+  router.get("/rental-operations/extension-reminders", async (req, res) => {
+    try {
+      const { listExtensionReminders, listExtensionReminderRuns } = await import("./extension-reminder");
+      const { isExtensionRemindersEnabled } = await import("./settings");
+      const limit = Number(req.query.limit) || 200;
+      const [reminders, runs, enabled] = await Promise.all([
+        listExtensionReminders(limit),
+        listExtensionReminderRuns(),
+        isExtensionRemindersEnabled(),
+      ]);
+      res.json({ enabled, reminders, runs });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] extension-reminders read failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "extension-reminders read failed" });
+    }
+  });
+
+  // POST run the sweep now (session-gated manual trigger). Defaults to a
+  // dry-run preview; {dryRun:false} runs live ONLY if the toggle is armed —
+  // this route can never force a live send past the arm flag.
+  router.post("/rental-operations/extension-reminders/run", async (req, res) => {
+    try {
+      if (extReminderInFlight) {
+        return res.status(409).json({ error: "an extension-reminder sweep is already running" });
+      }
+      extReminderInFlight = true;
+      try {
+        const { runExtensionReminderSweep } = await import("./extension-reminder");
+        const summary = await runExtensionReminderSweep({
+          dryRun: req.body?.dryRun === false ? false : true,
+          actor: actorOf(req),
+          trigger: "manual",
+        });
+        res.json({ ok: true, summary });
+      } finally {
+        extReminderInFlight = false;
+      }
+    } catch (e: any) {
+      extReminderInFlight = false;
+      console.error("[VRM/RentalOps] extension-reminder run failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "extension-reminder run failed" });
+    }
+  });
+
+  // POST the internal-cron trigger (same x-internal-cron convention as
+  // /rental-operations/cron/run — the mount gate in server/routes.ts lets this
+  // exact path through). The dispatcher pokes on its own cadence, so the run
+  // decision is server-side:
+  //   · ET-hour gate: the 12:00 ET hour — inside every US recipient's
+  //     quiet-hours window (12 ET = 9 PT), so sends go now instead of queueing.
+  //   · watermark: skip if a sweep ran in the last 20 hours.
+  // `force` bypasses both for manual/backfill use. Live vs dry-run is decided
+  // ONLY by the durable arm toggle, never by this route.
+  router.post("/rental-operations/cron/extension-reminders", async (req, res) => {
+    try {
+      const force = req.query.force === "1" || req.query.force === "true" || req.body?.force === true;
+      const etHour = Number(new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York", hour: "numeric", hour12: false,
+      }).format(new Date()));
+      const RUN_HOURS = [12];
+      if (!force && !RUN_HOURS.includes(etHour)) {
+        return res.json({ ok: true, skipped: true, reason: `outside run hours (ET hour ${etHour}; runs during ${RUN_HOURS.join(" & ")})` });
+      }
+      if (extReminderInFlight) {
+        return res.json({ ok: true, skipped: true, reason: "a sweep is already in flight" });
+      }
+      const { ensureReminderTables } = await import("./extension-reminder");
+      await ensureReminderTables();
+      if (!force) {
+        const recent = await db.execute(sql`
+          SELECT 1 FROM vrm_rental_extension_reminder_runs
+          WHERE started_at > NOW() - INTERVAL '20 hours'
+          LIMIT 1
+        `);
+        if (recent.rows.length) {
+          return res.json({ ok: true, skipped: true, reason: "already ran within the last 20 hours" });
+        }
+      }
+      extReminderInFlight = true;
+      res.json({ ok: true, started: true, etHour, forced: force });
+      (async () => {
+        const { runExtensionReminderSweep } = await import("./extension-reminder");
+        const summary = await runExtensionReminderSweep({ actor: "cron", trigger: "cron" });
+        console.log(`[VRM/RentalOps] extension-reminder cron sweep: ${JSON.stringify({
+          live: summary.live, considered: summary.considered, sent: summary.sent,
+          queued: summary.queued, dryRun: summary.dryRun, skipped: summary.skipped, failed: summary.failed,
+        })}`);
+      })()
+        .catch((e) => console.error("[VRM/RentalOps] extension-reminder cron sweep FAILED:", e?.stack || e?.message || e))
+        .finally(() => { extReminderInFlight = false; });
+    } catch (e: any) {
+      extReminderInFlight = false;
+      console.error("[VRM/RentalOps] cron/extension-reminders failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "cron extension-reminders failed" });
     }
   });
 

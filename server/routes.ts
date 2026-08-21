@@ -949,7 +949,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           return next();
         }
       }
-      if (req.method === "POST" && (req.path === "/rental-operations/cron/run" || req.path === "/holman-po-queue/cron-refresh")) {
+      if (req.method === "POST" && (req.path === "/rental-operations/cron/run" || req.path === "/rental-operations/cron/extension-reminders" || req.path === "/holman-po-queue/cron-refresh")) {
         const internalToken = req.headers["x-internal-cron"];
         const expectedInternal = process.env.SESSION_SECRET;
         const expectedCron = process.env.NEXUS_CRON_SECRET;

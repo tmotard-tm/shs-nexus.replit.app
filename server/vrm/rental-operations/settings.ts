@@ -18,6 +18,15 @@ import { sql } from "drizzle-orm";
 /** The auto-text switch. OFF until Tyler validates the pickup-text findings. */
 export const SETTING_AUTO_TEXT_ON_READY = "auto_text_on_ready";
 
+/**
+ * The weekly rental-extension reminder arm switch. OFF = every sweep is a
+ * dry run (rows recorded, nothing texted). Same durable-toggle rationale as
+ * auto_text_on_ready: arming live texts must survive restarts and must not
+ * need a redeploy, and COMMS_SEND_LIVE is on in dev, so this flag is the ONLY
+ * thing standing between a test sweep and real technicians' phones.
+ */
+export const SETTING_EXTENSION_REMINDERS = "extension_reminders_enabled";
+
 export interface SettingRow {
   value: any;
   updated_by: string | null;
@@ -73,6 +82,17 @@ export async function isAutoTextOnReadyEnabled(): Promise<boolean> {
   } catch (e: any) {
     // A settings read failure must fail CLOSED: no auto-text on a broken read.
     console.warn("[VRM/Settings] auto-text read failed (treating as OFF):", e?.message || e);
+    return false;
+  }
+}
+
+/** The extension-reminder arm gate. Absent row or broken read = OFF, always. */
+export async function isExtensionRemindersEnabled(): Promise<boolean> {
+  try {
+    const s = await getSetting(SETTING_EXTENSION_REMINDERS);
+    return s?.value?.enabled === true;
+  } catch (e: any) {
+    console.warn("[VRM/Settings] extension-reminder read failed (treating as OFF):", e?.message || e);
     return false;
   }
 }
