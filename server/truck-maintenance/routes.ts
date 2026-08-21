@@ -35,7 +35,9 @@ import {
   getSetting,
   getApproachingThresholdTrucks,
   getFleetRoster,
+  getMissingOdometerReport,
   isCycleOpeningPaused,
+  type MissingOdometerCounts,
   recordConfirmedSlot,
   retryCycle,
   runDailySweep,
@@ -107,6 +109,17 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
         SELECT COUNT(*)::int AS n FROM fs_truck_maintenance_cycles WHERE status = 'booked'
       `);
 
+      // Trucks the sweep cannot see (no usable odometer). Isolated so a
+      // failure here degrades ONE number on the card — visibly, with the
+      // error text — instead of taking down the whole gates view.
+      let missingOdometer: MissingOdometerCounts | null = null;
+      let missingOdometerError: string | null = null;
+      try {
+        missingOdometer = (await getMissingOdometerReport()).counts;
+      } catch (err: any) {
+        missingOdometerError = err?.message || String(err);
+      }
+
       res.json({
         triggerMiles: MAINTENANCE_TRIGGER_MILES,
         blockDurationMinutes: MAINTENANCE_BLOCK_DURATION_MIN,
@@ -123,6 +136,8 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
         openTotal: Object.values(byStatus).reduce((a, b) => a + b, 0),
         bookedTotal: ((bookedTotal as any).rows ?? [])[0]?.n ?? 0,
         exclusionLabels: EXCLUSION_LABELS,
+        missingOdometer,
+        missingOdometerError,
       });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "status failed" });
@@ -188,6 +203,24 @@ export function registerTruckMaintenanceRoutes(app: Router): void {
       });
     } catch (err: any) {
       res.status(500).json({ message: err?.message || "approaching query failed" });
+    }
+  });
+
+  /**
+   * Missing-odometer report — read-only (Task #675).
+   *
+   * The trucks the sweep cannot see: active cache rows whose reconciled
+   * odometer is NULL or outside the 1,000–600,000-mile sanity window. Listed
+   * with what IS known (last reading, its date, its source) so a human can
+   * chase the feed. Purely informational — a missing reading is never zero
+   * miles and never opens a cycle.
+   */
+  app.get("/truck-maintenance/missing-odometer", requireStaff, async (_req, res) => {
+    try {
+      const report = await getMissingOdometerReport();
+      res.json(report);
+    } catch (err: any) {
+      res.status(500).json({ message: err?.message || "missing-odometer report failed" });
     }
   });
 

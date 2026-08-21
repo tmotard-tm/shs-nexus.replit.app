@@ -65,6 +65,27 @@ interface WorkflowStatus {
   openTotal: number;
   bookedTotal: number;
   exclusionLabels: Record<string, string>;
+  missingOdometer: { assigned: number; byov: number; unassigned: number; total: number } | null;
+  missingOdometerError: string | null;
+}
+
+interface MissingOdometerTruck {
+  truckNumber: string;
+  vin: string | null;
+  lastReading: number | null;
+  lastReadingDate: string | null;
+  lastReadingSource: string | null;
+  reason: string;
+  ldap: string | null;
+  techName: string | null;
+  district: string | null;
+}
+
+interface MissingOdometerReport {
+  counts: { assigned: number; byov: number; unassigned: number; total: number };
+  trucks: MissingOdometerTruck[];
+  reasonLabels: Record<string, string>;
+  generatedAt: string;
 }
 
 interface Cycle {
@@ -208,6 +229,13 @@ export default function TruckMaintenance() {
     refetchInterval: 60_000,
   });
 
+  const missingOdometerQuery = useQuery<MissingOdometerReport>({
+    queryKey: ["/api/fs/truck-maintenance/missing-odometer"],
+    // The report is served from a short server-side cache over daily-refreshed
+    // sources — 5 minutes keeps it current without hammering the TPMS mirror.
+    refetchInterval: 5 * 60_000,
+  });
+
   const cyclesQuery = useQuery<{ cycles: Cycle[] }>({
     queryKey: ["/api/fs/truck-maintenance/cycles", showClosed ? "all" : "open"],
     queryFn: async () => {
@@ -224,6 +252,7 @@ export default function TruckMaintenance() {
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/status"] });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/cycles"] });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/approaching"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/fs/truck-maintenance/missing-odometer"] });
   }
 
   const pauseMutation = useMutation({
@@ -406,6 +435,21 @@ export default function TruckMaintenance() {
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Trucks watermarked</span>
                   <span>{status.watermarks}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">No odometer reading</span>
+                  {status.missingOdometerError ? (
+                    <span className="text-red-700" title={status.missingOdometerError} data-testid="text-missing-odometer">
+                      unavailable
+                    </span>
+                  ) : (
+                    <span
+                      className={status.missingOdometer && status.missingOdometer.assigned > 0 ? "text-amber-700 font-medium" : undefined}
+                      data-testid="text-missing-odometer"
+                    >
+                      {status.missingOdometer ? status.missingOdometer.assigned : "—"}
+                    </span>
+                  )}
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Last sweep</span>
@@ -755,6 +799,82 @@ export default function TruckMaintenance() {
                         {t.odometerSource
                           ? <div>{t.odometerSource}</div>
                           : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* No usable odometer — the trucks the sweep cannot see (Task #675) */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4" />
+            No usable odometer reading
+          </CardTitle>
+          <CardDescription>
+            Assigned, non-BYOV trucks whose reconciled odometer is missing or outside the sanity window — the
+            sweep cannot see them, so their feed needs chasing. A missing reading is never treated as zero
+            miles and never opens a cycle.
+          </CardDescription>
+          {missingOdometerQuery.data ? (
+            <p className="text-xs text-muted-foreground mt-2" data-testid="text-missing-odometer-counts">
+              {missingOdometerQuery.data.counts.total.toLocaleString()} trucks without a usable reading
+              {" · "}{missingOdometerQuery.data.counts.assigned.toLocaleString()} assigned (listed below)
+              {" · "}{missingOdometerQuery.data.counts.unassigned.toLocaleString()} unassigned
+              {" · "}{missingOdometerQuery.data.counts.byov.toLocaleString()} BYOV
+            </p>
+          ) : null}
+        </CardHeader>
+        <CardContent>
+          {missingOdometerQuery.isLoading ? (
+            <Skeleton className="h-32 w-full" />
+          ) : missingOdometerQuery.isError ? (
+            <p className="text-sm text-red-700 flex items-center gap-2">
+              <AlertTriangle className="h-4 w-4" />
+              Could not load the missing-odometer report.
+            </p>
+          ) : !missingOdometerQuery.data || missingOdometerQuery.data.trucks.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              Every assigned, non-BYOV truck has a usable odometer reading.
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Truck</TableHead>
+                    <TableHead>Technician</TableHead>
+                    <TableHead>District</TableHead>
+                    <TableHead>Why unusable</TableHead>
+                    <TableHead className="text-right">Last reading</TableHead>
+                    <TableHead>Reading date / source</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {missingOdometerQuery.data.trucks.map((t) => (
+                    <TableRow key={t.truckNumber} data-testid={`row-missing-odometer-${t.truckNumber}`}>
+                      <TableCell className="font-medium">{t.truckNumber}</TableCell>
+                      <TableCell>
+                        {t.ldap ?? "—"}
+                        {t.techName
+                          ? <div className="text-xs text-muted-foreground">{t.techName}</div>
+                          : null}
+                      </TableCell>
+                      <TableCell>{t.district ?? "—"}</TableCell>
+                      <TableCell className="text-xs">
+                        {missingOdometerQuery.data?.reasonLabels?.[t.reason] ?? t.reason}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {t.lastReading != null ? fmtMiles(t.lastReading) : "none"}
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {t.lastReadingDate ? String(t.lastReadingDate).slice(0, 10) : "—"}
+                        {t.lastReadingSource ? <div>{t.lastReadingSource}</div> : null}
                       </TableCell>
                     </TableRow>
                   ))}

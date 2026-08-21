@@ -33,12 +33,14 @@ import {
 import {
   TEXT_CLAIM_STALE_MS,
   classifyBookingResult,
+  classifyMissingOdometer,
   classifyTextClaim,
   computeBookingDueAt,
   computeWatermarkAdvance,
   computeWindowEnd,
   isPlausibleOdometer,
   isWindowStale,
+  partitionMissingOdometerRows,
   resolveBookingDate,
   shouldOpenCycle,
   shouldRunDailySweep,
@@ -733,4 +735,71 @@ test("roster AMS action: failure past cooldown → start a fresh warm", () => {
 
 test("roster AMS action: cold and idle → start warm", () => {
   assert.equal(decideRosterAmsAction({ cacheReady: false, buildInFlight: false, lastFailureAt: null, now: 0, failureCooldownMs: 120_000 }), "start_warm");
+});
+
+/* ------------------------------------------- missing-odometer (Task #675) -- */
+
+test("classifyMissingOdometer is the exact complement of isPlausibleOdometer", () => {
+  for (const v of [null, undefined, "", "abc", Number.NaN, 0, 999, 1_000, 250_000, 600_000, 600_001, "999", "600001", "250000"]) {
+    const missing = classifyMissingOdometer(v as any);
+    const n = typeof v === "string" ? Number.parseInt(v, 10) : (v as number | null | undefined);
+    assert.equal(
+      missing === null,
+      isPlausibleOdometer(n),
+      `classify(${String(v)}) and isPlausibleOdometer must agree`,
+    );
+  }
+});
+
+test("classifyMissingOdometer names the cause", () => {
+  assert.equal(classifyMissingOdometer(null), "no_reading");
+  assert.equal(classifyMissingOdometer(undefined), "no_reading");
+  assert.equal(classifyMissingOdometer("garbage"), "no_reading");
+  assert.equal(classifyMissingOdometer(999), "below_minimum");
+  assert.equal(classifyMissingOdometer(0), "below_minimum");
+  assert.equal(classifyMissingOdometer(600_001), "above_maximum");
+  assert.equal(classifyMissingOdometer(1_000), null);
+  assert.equal(classifyMissingOdometer(600_000), null);
+  assert.equal(classifyMissingOdometer("42000"), null);
+});
+
+test("a missing reading can NEVER open a cycle, whatever the watermark", () => {
+  for (const v of [null, undefined, 0, 999, 600_001]) {
+    assert.notEqual(classifyMissingOdometer(v), null, `${String(v)} must classify as missing`);
+    assert.equal(shouldOpenCycle(v as any, 10_000), false);
+    assert.equal(shouldOpenCycle(v as any, 0), false);
+  }
+});
+
+test("partitionMissingOdometerRows: BYOV on the RAW number, unassigned counted not listed", () => {
+  const rows = [
+    { displayNumber: "88144", vin: "V1", lastReading: null, lastReadingDate: null, lastReadingSource: null, reason: "no_reading" as const },
+    { displayNumber: "012345", vin: "V2", lastReading: 700_000, lastReadingDate: "2026-08-01", lastReadingSource: "holman", reason: "above_maximum" as const },
+    { displayNumber: "54321", vin: "V3", lastReading: null, lastReadingDate: null, lastReadingSource: null, reason: "no_reading" as const },
+    { displayNumber: "99999", vin: null, lastReading: 12, lastReadingDate: "2026-01-01", lastReadingSource: "samsara", reason: "below_minimum" as const },
+  ];
+  const assignments = new Map([
+    ["12345", { ldap: "JDOE", name: "Jane Doe", district: "8320" }],
+    ["54321", { ldap: "BSMITH", name: "Bob Smith", district: null }],
+    // 88144 deliberately HAS an assignment — BYOV must still win.
+    ["88144", { ldap: "CBYOV", name: "Carl Byov", district: "1111" }],
+  ]);
+  const { counts, trucks } = partitionMissingOdometerRows(rows, assignments);
+  assert.deepEqual(counts, { assigned: 2, byov: 1, unassigned: 1, total: 4 });
+  assert.deepEqual(trucks.map((t) => t.truckNumber), ["012345", "54321"]);
+  const padded = trucks[0];
+  assert.equal(padded.ldap, "JDOE", "padded display number must still match its canonical assignment");
+  assert.equal(padded.lastReading, 700_000);
+  assert.equal(padded.reason, "above_maximum");
+  assert.equal(padded.lastReadingSource, "holman");
+  assert.equal(trucks[1].district, null);
+});
+
+test("partitionMissingOdometerRows: a 5-digit BYOV truck is BYOV even though padding would hide it", () => {
+  const { counts, trucks } = partitionMissingOdometerRows(
+    [{ displayNumber: "88144", vin: null, lastReading: null, lastReadingDate: null, lastReadingSource: null, reason: "no_reading" }],
+    new Map([["88144", { ldap: "X", name: null, district: null }]]),
+  );
+  assert.equal(counts.byov, 1);
+  assert.equal(trucks.length, 0);
 });

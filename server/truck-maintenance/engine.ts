@@ -271,6 +271,187 @@ export async function loadOdometerCandidates(): Promise<TruckCandidate[]> {
   return out;
 }
 
+/* ------------------------------------------------------------------------ *
+ * Missing-odometer visibility (Task #675)
+ *
+ * loadOdometerCandidates only surfaces trucks with a plausible reading, which
+ * is correct for the trigger — a missing reading must NEVER be treated as
+ * zero miles or as a reason to fire. But it also made those trucks invisible:
+ * not "excluded with a reason" like an in-repair truck, simply never present.
+ * This report makes the gap a number someone can watch and a list someone can
+ * chase, without touching the trigger in any way.
+ * ------------------------------------------------------------------------ */
+
+export type MissingOdometerReason = "no_reading" | "below_minimum" | "above_maximum";
+
+export const MISSING_ODOMETER_LABELS: Record<MissingOdometerReason, string> = {
+  no_reading: "No odometer reading on file",
+  below_minimum: `Reading below the ${ODOMETER_MIN.toLocaleString()}-mile sanity floor`,
+  above_maximum: `Reading above the ${ODOMETER_MAX.toLocaleString()}-mile sanity cap`,
+};
+
+/**
+ * Why a cached reading is unusable, or null when it is plausible. The exact
+ * complement of isPlausibleOdometer, split by cause so a human knows whether
+ * they are chasing a dead feed (no_reading) or a garbage one (out of bounds).
+ */
+export function classifyMissingOdometer(
+  value: number | string | null | undefined,
+): MissingOdometerReason | null {
+  if (value === null || value === undefined || value === "") return "no_reading";
+  const n = typeof value === "string" ? Number.parseInt(value, 10) : value;
+  if (typeof n !== "number" || !Number.isFinite(n)) return "no_reading";
+  if (n < ODOMETER_MIN) return "below_minimum";
+  if (n > ODOMETER_MAX) return "above_maximum";
+  return null;
+}
+
+export interface MissingOdometerTruck {
+  /** The number a human recognises (as stored on the cache row). */
+  truckNumber: string;
+  vin: string | null;
+  /** The raw cached value — data for the feed-chaser, never mileage. */
+  lastReading: number | null;
+  lastReadingDate: string | null;
+  lastReadingSource: string | null;
+  reason: MissingOdometerReason;
+  ldap: string | null;
+  techName: string | null;
+  district: string | null;
+}
+
+export interface MissingOdometerCounts {
+  /** Assigned, non-BYOV trucks with no usable reading — the number to watch. */
+  assigned: number;
+  byov: number;
+  unassigned: number;
+  total: number;
+}
+
+export interface MissingOdometerReport {
+  counts: MissingOdometerCounts;
+  /** The watchable gap: the assigned, non-BYOV trucks, with what is known. */
+  trucks: MissingOdometerTruck[];
+  reasonLabels: Record<MissingOdometerReason, string>;
+  generatedAt: string;
+}
+
+export interface MissingOdometerRawRow {
+  displayNumber: string;
+  vin: string | null;
+  lastReading: number | null;
+  lastReadingDate: string | null;
+  lastReadingSource: string | null;
+  reason: MissingOdometerReason;
+}
+
+/**
+ * Pure partition, mirroring the sweep's own scoping rules so this report and
+ * the trigger can never disagree about who is out of scope:
+ *  - BYOV decided on the RAW/trimmed number (padding first hides 5-digit BYOVs)
+ *  - assignment via the same canonical-number TPMS lookup the sweep uses
+ * Only the assigned, non-BYOV trucks are LISTED — they are the silent gap the
+ * task exists for — but every bucket is counted so nothing vanishes.
+ */
+export function partitionMissingOdometerRows(
+  rows: MissingOdometerRawRow[],
+  assignments: Map<string, TechAssignment>,
+): { counts: MissingOdometerCounts; trucks: MissingOdometerTruck[] } {
+  const counts: MissingOdometerCounts = { assigned: 0, byov: 0, unassigned: 0, total: rows.length };
+  const trucks: MissingOdometerTruck[] = [];
+  for (const row of rows) {
+    if (/^88/.test((row.displayNumber || "").trim())) {
+      counts.byov += 1;
+      continue;
+    }
+    const assignment = assignments.get(toCanonical(row.displayNumber)) ?? null;
+    if (!assignment) {
+      counts.unassigned += 1;
+      continue;
+    }
+    counts.assigned += 1;
+    trucks.push({
+      truckNumber: row.displayNumber,
+      vin: row.vin,
+      lastReading: row.lastReading,
+      lastReadingDate: row.lastReadingDate,
+      lastReadingSource: row.lastReadingSource,
+      reason: row.reason,
+      ldap: assignment.ldap,
+      techName: assignment.name,
+      district: assignment.district,
+    });
+  }
+  trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber, undefined, { numeric: true }));
+  return { counts, trucks };
+}
+
+// The TPMS enrichment reads the whole tpms_tech_profiles mirror, so the report
+// is cached briefly rather than rebuilt on every 60-second status poll. Short
+// TTL: the underlying sources refresh daily, five minutes cannot pin anything.
+const MISSING_ODOMETER_CACHE_TTL_MS = 5 * 60 * 1000;
+let missingOdometerCache: { at: number; report: MissingOdometerReport } | null = null;
+
+/**
+ * Trucks on the reconciled vehicle cache the sweep cannot see: active rows
+ * whose odometer is NULL or outside the sanity window. The inverse of
+ * loadOdometerCandidates' WHERE clause — same table, same bounds, same
+ * is_active scoping — so candidates + missing = the whole active cache.
+ */
+export async function getMissingOdometerReport(
+  opts: { force?: boolean } = {},
+): Promise<MissingOdometerReport> {
+  if (!opts.force && missingOdometerCache
+      && Date.now() - missingOdometerCache.at < MISSING_ODOMETER_CACHE_TTL_MS) {
+    return missingOdometerCache.report;
+  }
+  const r: any = await db.execute(sql`
+    SELECT holman_vehicle_number, vin, odometer, odometer_date, odometer_source
+      FROM holman_vehicles_cache
+     WHERE COALESCE(is_active, true) = true
+       AND (odometer IS NULL OR odometer < ${ODOMETER_MIN} OR odometer > ${ODOMETER_MAX})
+  `);
+  const rows = (r.rows ?? r ?? []) as Array<{
+    holman_vehicle_number: string;
+    vin: string | null;
+    odometer: number | string | null;
+    odometer_date: string | null;
+    odometer_source: string | null;
+  }>;
+
+  const raw: MissingOdometerRawRow[] = [];
+  for (const row of rows) {
+    const display = (row.holman_vehicle_number || "").trim();
+    if (!display) continue; // no truck number at all — nothing a human could chase
+    const reason = classifyMissingOdometer(row.odometer);
+    if (!reason) continue; // defensive: SQL and JS bounds should always agree
+    const parsed = typeof row.odometer === "string"
+      ? Number.parseInt(row.odometer, 10)
+      : row.odometer;
+    raw.push({
+      displayNumber: display,
+      vin: (row.vin || "").trim() || null,
+      lastReading: typeof parsed === "number" && Number.isFinite(parsed) ? parsed : null,
+      lastReadingDate: row.odometer_date,
+      lastReadingSource: row.odometer_source,
+      reason,
+    });
+  }
+
+  const assignments = raw.length > 0
+    ? await loadTechAssignments(raw.map((row) => row.displayNumber))
+    : new Map<string, TechAssignment>();
+  const { counts, trucks } = partitionMissingOdometerRows(raw, assignments);
+  const report: MissingOdometerReport = {
+    counts,
+    trucks,
+    reasonLabels: MISSING_ODOMETER_LABELS,
+    generatedAt: new Date().toISOString(),
+  };
+  missingOdometerCache = { at: Date.now(), report };
+  return report;
+}
+
 export interface WatermarkRow {
   truckNumber: string;
   lastServiceOdometer: number;

@@ -57,3 +57,5 @@ then hang forever (pool/WS keeps the event loop alive) — a piped `| tail` then
 shows NOTHING on timeout because the buffer never flushes. Run them with
 `--test-force-exit` (works with tsx, prints the TAP summary, exits cleanly),
 or via a console workflow writing to a logfile you poll.
+
+- Any test importing server code that opens the shared db pool never exits under `npx tsx --test`; always add `--test-force-exit`.
