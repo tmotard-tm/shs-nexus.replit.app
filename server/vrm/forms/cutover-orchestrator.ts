@@ -38,6 +38,7 @@ import {
   type StandardActivityArgs,
 } from "../dca-task-client";
 import { sendMessage } from "../../fleet-comms/outbound";
+import { isUniqueViolationOn } from "./db-errors";
 import { getNextAllowedSendTime, localHourToUtc, stateTimeZone } from "../../fleet-scope-reg-messaging";
 import {
   initializeSnowflakeService,
@@ -1546,7 +1547,10 @@ export async function createIntent(params: {
     // written at COMPLETION, never at intent creation.
     return { intent: inserted, created: true };
   } catch (e: any) {
-    if (String(e?.message ?? "").includes("vrm_workflow_intents_live_nonterminal_uq")) {
+    // Drizzle wraps the pg error ("Failed query: <sql>"); the constraint name
+    // lives on e.cause. Matching e.message here — the original code — matched
+    // NOTHING, so this race fell through to a generic 500.
+    if (isUniqueViolationOn(e, "vrm_workflow_intents_live_nonterminal_uq")) {
       throw new OrchestratorError("live_lock_held", "another live nonterminal intent already exists for this LDAP", 409);
     }
     throw e;

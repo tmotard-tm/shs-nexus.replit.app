@@ -18,6 +18,7 @@ import { db } from "../../db";
 // The canonical booked-SMS copy. Shared with the intent lane so a technician
 // gets the same words whichever path booked the car.
 import { renderRequestMsg1 } from "./cutover-orchestrator";
+import { isUniqueViolationOn } from "./db-errors";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { regionForState, REGION_OWNER } from "../rental-operations/region";
@@ -262,25 +263,6 @@ function normTruck(v: string): string {
 
 export function newRequestToken(): string {
   return crypto.randomBytes(16).toString("hex");
-}
-
-/**
- * Did this error come from one of the named unique indexes?
- *
- * Drizzle wraps the pg error: the thrown error's message is
- * "Failed query: <sql>" and the constraint name lives on e.cause
- * (message + .constraint). Checking only e.message — which both race
- * handlers originally did — matches NOTHING, so a genuine duplicate-key
- * race fell through to the generic 500. Proven on the box 2026-08-21 by
- * tests/rental-extension-token-door.test.ts. Walk the cause chain.
- */
-function isUniqueViolationOn(e: any, ...indexNames: string[]): boolean {
-  for (let err = e, depth = 0; err && depth < 5; err = err.cause, depth++) {
-    const msg = String(err?.message || "");
-    const constraint = String(err?.constraint || "");
-    if (indexNames.some((n) => constraint === n || msg.includes(n))) return true;
-  }
-  return false;
 }
 
 async function loadToken(token: string) {
