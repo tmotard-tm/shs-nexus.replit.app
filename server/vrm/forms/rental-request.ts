@@ -51,10 +51,13 @@ import {
   REQUEST_APPROVE_MONDAY_TEMPLATE_KEY,
 } from "../../../shared/rental-approval-sms";
 import { getNotificationTemplates } from "../storage";
+// Extension emails to Enterprise ride the shared SendGrid service (verified
+// sender = SENDGRID_EMAIL), not the comms SMS lane.
+import { sendEmail } from "../../email-service";
 import { runBookingExecutor } from "../etd/executor";
 // One list of bookable classes, shared by the picker route and the validator so
 // they cannot drift apart.
-import { REQUEST_CLASS_OPTIONS, resolveRequestClass } from "../etd/vehicle-class";
+import { REQUEST_CLASS_OPTIONS, ENTERPRISE_CLASS_MENU, resolveRequestClass } from "../etd/vehicle-class";
 
 // .b, 2026-08-14: the first five acknowledgements are now attested by ONE
 // checkbox listing them as bullets; the four terms of use stay individual.
@@ -618,6 +621,13 @@ async function alertFleet(r: {
   await sendSms(to.map((phone) => ({ phone, body })), `alert #${r.requestNo}`);
 }
 
+const EXTENSION_SUPPORT_EMAIL =
+  process.env.RENTAL_EXTENSION_EMAIL_TO || "NorthCentralAccountSupport@em.com";
+// Fleet asked that these two are ALWAYS copied on the extension email.
+const EXTENSION_SUPPORT_CC: string[] = (
+  process.env.RENTAL_EXTENSION_EMAIL_CC ||
+  "howard.anderson@transformco.com,tyler.morgan@transformco.com"
+).split(",").map((s) => s.trim()).filter(Boolean);
 /**
  * Tell the technician what happened.
  *
@@ -1631,7 +1641,12 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "request_type", "ext_repair_status", "ext_last_shop_contact_at",
          "ext_shop_said", "ext_expected_completion", "ext_time_needed",
          "detected_open_rentals", "type_mismatch", "type_mismatch_explanation",
-         "current_rental", "ack_snapshot"]],
+         "current_rental", "ack_snapshot",
+         // Extension→Enterprise email record. Same lesson again: the decide
+         // route UPDATEs these, so a skipped boot ALTER 500s every extension
+         // approval in prod while dev stays green.
+         "ext_reservation_number", "ext_days", "ext_email_state",
+         "ext_email_to", "ext_email_sent_at", "ext_email_error"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
       // Cutover tracking. Without this the survey pool, the ETD reservation and
@@ -1753,10 +1768,13 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
 
   /**
    * The classes Fleet may approve, served so the picker and the validator cannot
-   * disagree. The client used to hold its own hardcoded list.
+   * disagree. The client used to hold its own hardcoded list. `options` is the
+   * legacy five-label policy list (older clients, and the label→code mapping for
+   * previously stored values); `menu` is the fixed Enterprise-class dropdown the
+   * drawer now renders — every value resolves through the same validator.
    */
   router.get("/forms/rental-request/class-options", async (_req, res) => {
-    res.json({ options: REQUEST_CLASS_OPTIONS });
+    res.json({ options: REQUEST_CLASS_OPTIONS, menu: ENTERPRISE_CLASS_MENU });
   });
 
   /**
@@ -2495,6 +2513,15 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         });
       }
 
+      // EXTENSION approvals: Enterprise's Account Support extends by email and
+      // their required key is the reservation / RA number — which we do not
+      // reliably hold, so the approver supplies it. Days default to the weekly
+      // cadence (7) and stay editable.
+      const extReservation = String(req.body?.reservationNumber || "").trim().slice(0, 60);
+      const extDaysRaw = Number(req.body?.extensionDays);
+      const extDays = Number.isFinite(extDaysRaw)
+        ? Math.max(1, Math.min(30, Math.round(extDaysRaw))) : 7;
+
       // RETURN is "you have not given us enough to book this", which is a
       // different fact from "no". It must name what is missing, because a
       // send-back that just says incomplete sends the technician back to a
@@ -2537,6 +2564,16 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // rental with Enterprise manually. Pickup/return/branch are new-booking
       // concepts, so they are ignored rather than validated here.
       const isExtensionRow = String(cur?.request_type ?? "new") === "extension";
+
+      // Blocked exactly when the reservation number is missing: the approval
+      // AUTO-SENDS the Enterprise email, and an email without their key is a
+      // dead letter. Enforced server-side so API callers can't approve past it.
+      if (decision === "APPROVE" && isExtensionRow && !extReservation) {
+        return res.status(400).json({
+          message: "Enter the Enterprise reservation / RA number first — approving an "
+                 + "extension emails Enterprise automatically and they file by that number.",
+        });
+      }
 
       // A return date before the pickup silently produces a negative rental that
       // ETD answers with an empty class list and no explanation.
@@ -2618,6 +2655,12 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
             return_at = ${isExtensionRow ? sql`NULL` : sql`COALESCE(${returnAt}::timestamptz, return_at)`},
             approved_branch = ${isExtensionRow ? sql`NULL` : sql`COALESCE(${approvedBranch}, approved_branch)`},
             approval_sms_body = ${decision === "APPROVE" ? sql`${approveText}` : sql`approval_sms_body`},
+            -- The Enterprise email's facts, captured with the approval that
+            -- triggers it. Only an extension APPROVE writes them.
+            ext_reservation_number = ${decision === "APPROVE" && isExtensionRow
+              ? sql`${extReservation}` : sql`ext_reservation_number`},
+            ext_days = ${decision === "APPROVE" && isExtensionRow
+              ? sql`${extDays}` : sql`ext_days`},
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
               // string_to_array, not a bound JS array. Interpolating an array into
@@ -2682,9 +2725,57 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // manually after approval — the row is settled the moment it flips.
       if (decision === "APPROVE" && !isExtensionRow) void autoBookApprovedRequest(no);
 
+      // An extension APPROVE emails Enterprise instead. Fire-and-forget like
+      // the booking chain: the outcome is recorded on the row and the drawer
+      // watches it land through the list poll.
+      if (decision === "APPROVE" && isExtensionRow) void sendExtensionEmail(no, actor);
+
       res.json({ ok: true, decision });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "decide failed" });
+    }
+  });
+
+  /**
+   * (Re)send the Enterprise extension email for an approved extension —
+   * the drawer's quick action when a send failed or the reservation number
+   * needed correcting. Optional body fields update the row's reservation
+   * number / days before the send, so a typo is fixed and re-sent in one
+   * step. Synchronous on purpose: the click waits for the real outcome.
+   */
+  router.post("/forms/rental-request/:requestNo/extension-email", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      const actor = (req as any).user?.username || (req as any).user?.email || "unknown";
+      const resNo = String(req.body?.reservationNumber || "").trim().slice(0, 60);
+      const daysRaw = Number(req.body?.days);
+      const days = Number.isFinite(daysRaw) ? Math.max(1, Math.min(30, Math.round(daysRaw))) : null;
+      const { rows } = await db.execute(sql`
+        UPDATE vrm_rental_request
+        SET ext_reservation_number = COALESCE(NULLIF(${resNo}, ''), ext_reservation_number),
+            ext_days = COALESCE(${days}::integer, ext_days, 7),
+            updated_at = now()
+        WHERE request_no = ${no} AND COALESCE(request_type, 'new') = 'extension'
+          AND status = 'approved'
+        RETURNING ext_reservation_number
+      `);
+      const row = (rows as any[])[0];
+      if (!row) {
+        return res.status(409).json({
+          message: "Only an APPROVED extension can email Enterprise — approve it first.",
+        });
+      }
+      if (!String(row.ext_reservation_number || "").trim()) {
+        return res.status(400).json({
+          message: "Enter the Enterprise reservation / RA number first — they file by that number.",
+        });
+      }
+      const out = await sendExtensionEmail(no, actor);
+      if (out.state === "sent") return res.json({ ok: true, state: out.state, message: out.message });
+      if (out.state === "dry_run") return res.json({ ok: true, state: out.state, message: out.message });
+      return res.status(502).json({ message: out.message, state: out.state });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "extension email failed" });
     }
   });
 }
@@ -2949,3 +3040,91 @@ export async function liveRequestGuard(ldap: string): Promise<{
     blockExtension: asRef(liveExt ?? newInProgress),
   };
 }
+
+/**
+ * Compose and send the extension email for an approved extension request,
+ * recording the outcome on the row. Returns what it recorded so the resend
+ * route can answer synchronously. Never throws.
+ */
+async function sendExtensionEmail(requestNo: number, actor: string): Promise<{
+  state: "sent" | "failed" | "dry_run" | "skipped"; message: string;
+}> {
+  const record = async (state: string, error: string | null) => {
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+      SET ext_email_state = ${state},
+          ext_email_to = ${EXTENSION_SUPPORT_EMAIL},
+          ext_email_error = ${error},
+          ext_email_sent_at = ${state === "sent" ? sql`now()` : sql`ext_email_sent_at`},
+          updated_at = now()
+      WHERE request_no = ${requestNo}
+    `);
+  };
+  try {
+    const { rows } = await db.execute(sql`
+      SELECT tech_name, ldap, request_type, status,
+             ext_reservation_number, COALESCE(ext_days, 7) AS ext_days,
+             current_rental
+      FROM vrm_rental_request WHERE request_no = ${requestNo}
+    `);
+    const r = (rows as any[])[0];
+    if (!r || String(r.request_type) !== "extension" || r.status !== "approved") {
+      return { state: "skipped", message: "not an approved extension" };
+    }
+    const resNo = String(r.ext_reservation_number || "").trim();
+    if (!resNo) {
+      // The decide route refuses an extension approve without a reservation
+      // number, so this only fires for legacy rows approved pre-email.
+      await record("failed", "no reservation / RA number on the request");
+      return { state: "failed", message: "no reservation / RA number on the request" };
+    }
+    const days = Math.max(1, Math.min(30, Number(r.ext_days) || 7));
+    const renter = String(r.tech_name || r.ldap || "").trim();
+    const vendor = String(r.current_rental?.rental_vendor || "");
+    const subject = `Rental extension request — Res/RA #${resNo} — ${renter}`;
+    // Per their contact tips: renter's name + reservation/RA number, no other
+    // personal information.
+    const text =
+      `Hello,\n\n`
+      + `Please extend the following open rental on the Sears Home Services account:\n\n`
+      + `  Renter name:          ${renter}\n`
+      + `  Reservation / RA #:   ${resNo}\n`
+      + `  Additional days:      ${days}\n`
+      + (vendor ? `  Rental company:       ${vendor}\n` : "")
+      + `\nApproved by Sears Fleet (${actor}). Please reply to this email with any questions.\n\n`
+      + `Thank you,\nSears Fleet Management`;
+
+    if (!extensionEmailLive()) {
+      console.log(`[rental-request] extension email #${requestNo}: DRY RUN (live sends off) — would email ${EXTENSION_SUPPORT_EMAIL} (cc ${EXTENSION_SUPPORT_CC.join(", ")}): ${subject}`);
+      await record("dry_run", null);
+      return {
+        state: "dry_run",
+        message: "Email prepared but NOT sent — live email sends are off in this environment.",
+      };
+    }
+    const out = await sendEmail({
+      to: EXTENSION_SUPPORT_EMAIL,
+      cc: EXTENSION_SUPPORT_CC,
+      from: process.env.SENDGRID_EMAIL || "",
+      subject, text,
+    });
+    if (out.success) {
+      console.log(`[rental-request] extension email #${requestNo}: sent to ${EXTENSION_SUPPORT_EMAIL} (cc ${EXTENSION_SUPPORT_CC.join(", ")}, res ${resNo}, ${days} days)`);
+      await record("sent", null);
+      return { state: "sent", message: `Emailed ${EXTENSION_SUPPORT_EMAIL}.` };
+    }
+    const err = out.error || "send failed";
+    console.error(`[rental-request] extension email #${requestNo}: FAILED: ${err}`);
+    await record("failed", err.slice(0, 500));
+    return { state: "failed", message: err };
+  } catch (e: any) {
+    const err = String(e?.message || e).slice(0, 500);
+    console.error(`[rental-request] extension email #${requestNo}: threw:`, err);
+    try { await record("failed", err); } catch { /* recorded best-effort */ }
+    return { state: "failed", message: err };
+  }
+}
+
+const extensionEmailLive = (): boolean =>
+  process.env.RENTAL_EXTENSION_EMAIL_LIVE === "true" ||
+  (!!process.env.REPLIT_DEPLOYMENT && process.env.RENTAL_EXTENSION_EMAIL_LIVE !== "false");

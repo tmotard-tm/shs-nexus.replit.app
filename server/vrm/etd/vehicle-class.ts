@@ -262,6 +262,33 @@ export const REQUEST_CLASS_OPTIONS: Array<{ label: string; sipp: string; note: s
   { label: "pickup truck", sipp: "PPAR", note: "Rarely stocked; falls back to the largest SUV." },
 ];
 
+/**
+ * The fixed dropdown the approval drawer renders: every class Enterprise
+ * actually offers on its own reservation screen that policy allows Fleet to
+ * name, plus the codeless sedan default. Fleet asked for SET choices — the
+ * free-text/type-ahead picker made them delete "sedan" and guess what to
+ * type. Values are exactly what `resolveRequestClass` accepts (the SIPP
+ * codes in REQUEST_CLASS_CODES, or "sedan"), so the menu and the validator
+ * cannot drift; descriptions mirror Enterprise's own "…or similar" wording.
+ * PCAR/LCAR/premium codes stay out for the same policy reasons they are out
+ * of the ladders above.
+ */
+export const ENTERPRISE_CLASS_MENU: Array<{ value: string; label: string; note: string }> = [
+  { value: "sedan", label: "Sedan — smallest available (default)", note: "Walks the branch's sedans smallest-first, economy up to full-size." },
+  { value: "ECAR", label: "Economy car (ECAR)", note: "Mitsubishi Mirage or similar." },
+  { value: "CCAR", label: "Compact car (CCAR)", note: "Nissan Versa or similar." },
+  { value: "ICAR", label: "Intermediate car (ICAR)", note: "Toyota Corolla or similar." },
+  { value: "SCAR", label: "Standard car (SCAR)", note: "Volkswagen Jetta or similar." },
+  { value: "FCAR", label: "Full-size car (FCAR)", note: "Nissan Altima or similar." },
+  { value: "CFAR", label: "Compact SUV (CFAR)", note: "Hyundai Kona or similar." },
+  { value: "IFAR", label: "Intermediate SUV (IFAR)", note: "Nissan Rogue or similar." },
+  { value: "SFAR", label: "Standard SUV (SFAR)", note: "Chevrolet Equinox or similar." },
+  { value: "FFAR", label: "Full-size SUV (FFAR)", note: "Nissan Pathfinder or similar." },
+  { value: "MVAR", label: "Minivan (MVAR)", note: "Chrysler Pacifica or similar. The policy ceiling." },
+  { value: "RVAR", label: "Cargo van (RVAR)", note: "Ford Transit or similar. HVAC carve-out; falls back to a minivan." },
+  { value: "PPAR", label: "Pickup truck (PPAR)", note: "Ford F-150 or similar. Rarely stocked; falls back to the largest SUV." },
+];
+
 /** Every SIPP code a request may legitimately name, directly or via a label. */
 export const REQUEST_CLASS_CODES = new Set<string>([
   ...SEDAN_LADDER, ...ESCALATION_LADDER, "RVAR", "PPAR",

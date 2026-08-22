@@ -134,11 +134,20 @@ const keyStyle: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 11, 
 const valStyle: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, flex: 1, wordBreak: "break-word" };
 const btn: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 12.5, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 10px", cursor: "pointer" };
 
-export default function CutoverIntentPanel({ workflow, sourceId, intent, onChanged }: {
+export default function CutoverIntentPanel({ workflow, sourceId, intent, onChanged, hideStatus = false }: {
   workflow: "survey" | "request";
   sourceId: string;
   intent: any | null;
   onChanged: () => void;
+  /**
+   * Request-drawer mode: the drawer renders ONE consolidated booking status
+   * (verdict, plain-language failure, text state), so this panel must not
+   * repeat it — no phase pill, no failure boxes, no "Last error" row, no
+   * text-state line. The panel still contributes what the banner cannot:
+   * the reservation detail rows and every action button. Cutover mode never
+   * sets this; its rendering is unchanged.
+   */
+  hideStatus?: boolean;
 }) {
   const [busy, setBusy] = useState<string>("");
   const [err, setErr] = useState<string>("");
@@ -292,7 +301,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
         <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", flex: 1 }}>
           {isRequest ? "Rental booking workflow" : "Cutover workflow"}
         </div>
-        {intent && <IntentPill intent={intent} />}
+        {intent && !hideStatus && <IntentPill intent={intent} />}
       </div>
 
       {!intent ? (
@@ -361,7 +370,10 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                   ["Text 1 / Text 2", `${intent.msg1_state ?? "—"} / ${intent.msg2_state ?? "—"}`],
                 ] as Array<[string, unknown]>)),
             ["Latest attempt", attemptLine],
-            ["Last error", intent.last_error],
+            // The drawer's consolidated banner owns error display in request
+            // mode; repeating the raw line here is the duplication this panel
+            // mode exists to remove.
+            ["Last error", hideStatus ? "" : intent.last_error],
           ] as Array<[string, unknown]>)
             .filter(([, v]) => String(v ?? "").trim() !== "")
             .map(([k, v]) => (
@@ -375,7 +387,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
               previous run's verdict is history, not a live complaint — rendering it
               regardless of status is why a re-queued preview showed "Quoting…" next
               to a red failure box from the run before it. */}
-          {failures.length > 0 && !IN_FLIGHT.has(status) && (
+          {!hideStatus && failures.length > 0 && !IN_FLIGHT.has(status) && (
             <div style={{ marginTop: 8, padding: 8, background: colors.redLight, borderRadius: 8 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.red, marginBottom: 4 }}>
                 Server-reported failures
@@ -391,7 +403,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
           {/* The refusal itself. A "no reservation created" reconcile returns the intent
               to bookable, which is correct, but the operator still needs to see WHY the
               last commit was refused before pressing the engine again. */}
-          {attemptFailed && attempt?.error && (
+          {!hideStatus && attemptFailed && attempt?.error && (
             <div style={{ marginTop: 8, padding: 8, background: colors.redLight, borderRadius: 8 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: colors.red, marginBottom: 4 }}>
                 Last booking attempt refused{attemptWhen ? ` · ${attemptWhen}` : ""}
@@ -431,7 +443,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
               row gave no way to tell whether the person had actually been told. The
               runner sends its own SMS outside the intent, so this reads the recorded
               send rather than assuming msg1_state means anything on its own. */}
-          {isRequest && intent ? (
+          {isRequest && intent && !hideStatus ? (
             <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 12 }}>
               {(() => {
                 const m1 = intent?.reservation_evidence?.msg1;

@@ -10,11 +10,19 @@
  * multi-select filters with live counts, "N shown of M", search, sticky header,
  * row click opens the detail drawer, CSV of the filtered and sorted view.
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
-import CutoverIntentPanel, { IntentPill } from "../components/CutoverIntentPanel";
+import CutoverIntentPanel from "../components/CutoverIntentPanel";
+import {
+  deriveBookingStatus,
+  bookingBadge,
+  bookingSortKey,
+  BOOKABLE_REQUEST_STATUSES,
+  RETRYABLE_INTENT_STATUSES,
+  type BookingActionKind,
+} from "../lib/booking-status";
 import {
   etTodayISO,
   etDateISO,
@@ -81,6 +89,14 @@ interface Req {
   type_mismatch?: boolean | null;
   type_mismatch_explanation?: string | null;
   current_rental?: Record<string, any> | null;
+  // The Enterprise extension email record — approval auto-sends it; a dry
+  // run (dev) records state without stamping sent_at.
+  ext_reservation_number?: string | null;
+  ext_days?: number | null;
+  ext_email_state?: string | null;
+  ext_email_to?: string | null;
+  ext_email_sent_at?: string | null;
+  ext_email_error?: string | null;
 }
 
 const isExt = (r: Req | null | undefined) => String(r?.request_type ?? "new") === "extension";
@@ -271,16 +287,36 @@ const bookedWhen = (date?: string | null, time?: string | null) => {
     : stamp;
 };
 
-/** What the technician was actually told, never an assumption. */
-const MSG1_LABEL: Record<string, { text: string; tone: "ok" | "wait" | "bad" }> = {
-  sent: { text: "Technician texted.", tone: "ok" },
-  sent_duplicate: { text: "Technician texted.", tone: "ok" },
-  skipped_already_notified: { text: "Technician already had the confirmation.", tone: "ok" },
-  queued: { text: "Confirmation text QUEUED, not yet sent.", tone: "wait" },
-  released: { text: "Confirmation text released to the sender.", tone: "wait" },
-  pending: { text: "Confirmation text not sent yet.", tone: "wait" },
-  blocked: { text: "TEXT BLOCKED - the technician has NOT been told.", tone: "bad" },
+// Text-state labels (MSG1_LABEL) now live in lib/booking-status — the merged
+// verdict carries them, so the drawer and the list can never disagree.
+
+/** Badge tones from the status model, mapped to this page's palette. */
+const BADGE_TONE: Record<string, [string, string]> = {
+  ok: [colors.green, colors.greenLight],
+  bad: [colors.red, colors.redLight],
+  wait: [colors.accent, colors.accentLight],
+  muted: [colors.inkMuted, colors.background],
 };
+
+/**
+ * A drawer section: a labelled group that is ALWAYS fully visible. These
+ * briefly collapsed; Fleet vetoed that ("more clicks than the scroll it
+ * replaced"), so the drawer reads top-to-bottom in one scroll and the
+ * headers are landmarks, not doors.
+ */
+function Section({ title, innerRef, children }: {
+  title: string; innerRef?: Ref<HTMLDivElement>; children: ReactNode;
+}) {
+  return (
+    <div ref={innerRef} style={{ marginTop: 10, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10 }}>
+      <div style={{ padding: "10px 12px 0", fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted,
+                    textTransform: "uppercase", letterSpacing: "0.05em", fontWeight: 600 }}>
+        {title}
+      </div>
+      <div style={{ padding: "8px 12px 12px" }}>{children}</div>
+    </div>
+  );
+}
 
 // Default pickup for a freshly opened request: today in Eastern time, at the
 // top of the NEXT hour (3:xx pm ET -> 4:00 pm ET). Adding an hour to the
@@ -347,7 +383,20 @@ export default function RentalRequests() {
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [classDraft, setClassDraft] = useState("sedan");
-  const [showAcks, setShowAcks] = useState(false);
+  // The consolidated status card's quick actions (book now / staff retry).
+  const [quickBusy, setQuickBusy] = useState<"" | "book" | "retry" | "extemail">("");
+  // Staff view splits new requests from extensions: they read differently
+  // (booking pipeline vs. Enterprise email), so they queue differently.
+  const [tab, setTab] = useState<"new" | "extension">("new");
+  // Enterprise files extensions by reservation / RA number — which the row
+  // does not reliably hold — so the approver supplies it. Days default 7.
+  const [extResNo, setExtResNo] = useState("");
+  const [extDays, setExtDays] = useState("7");
+  const [quickMsg, setQuickMsg] = useState<{ text: string; bad: boolean } | null>(null);
+  const classBoxRef = useRef<HTMLDivElement>(null);
+  const pickupInputRef = useRef<HTMLInputElement>(null);
+  const workflowRef = useRef<HTMLDivElement>(null);
+  const sendBackRef = useRef<HTMLDivElement>(null);
   // The approval SMS the technician will receive. Server-rendered default,
   // editable in place; `smsEdited` pins the approver's words against the
   // refresh that follows a pickup-date change. New requests only — an
@@ -389,9 +438,39 @@ export default function RentalRequests() {
   // are the same list. It used to be a hardcoded array here, and nothing checked what
   // was typed: an unbookable value was stored happily and only failed hours later,
   // during the booking, with the technician already waiting.
-  const { data: classOpts } = useQuery<{ options: Array<{ label: string; sipp: string; note: string }> }>({
+  const { data: classOpts } = useQuery<{
+    options: Array<{ label: string; sipp: string; note: string }>;
+    menu?: Array<{ value: string; label: string; note: string }>;
+  }>({
     queryKey: ["/api/vrm/forms/rental-request/class-options"], staleTime: 60 * 60_000,
   });
+  // The fixed class dropdown — the classes Enterprise offers on its own
+  // screen, served next to the validator so the two cannot drift. Falls back
+  // to the legacy five-label policy list when the server predates the menu.
+  const classMenu = useMemo<Array<{ value: string; label: string; note: string }>>(() => {
+    if (classOpts?.menu?.length) return classOpts.menu;
+    return (classOpts?.options ?? []).map((o) => ({
+      value: o.label, label: o.sipp ? `${o.label} (${o.sipp})` : o.label, note: o.note,
+    }));
+  }, [classOpts]);
+  // Stored class text → the menu entry that means it. Older rows hold the
+  // free-text labels ("suv", "cargo van"); map them onto the code the server
+  // resolves them to, so the select shows the truth. A value nothing
+  // recognizes is kept verbatim — rendered as its own option, never hidden.
+  const menuClassValue = (stored: string | null | undefined): string => {
+    const s = normCls(stored);
+    if (!s) return "sedan";
+    const up = s.toUpperCase();
+    const hit = classMenu.find((m) => m.value === up || normCls(m.value) === s);
+    if (hit) return hit.value;
+    const legacy = (classOpts?.options ?? []).find((o) => normCls(o.label) === s);
+    if (legacy) {
+      const byCode = classMenu.find((m) => m.value === legacy.sipp);
+      if (byCode) return byCode.value;
+      if (!legacy.sipp) return "sedan";
+    }
+    return s;
+  };
   const { data: funnel } = useQuery<Record<string, any>>({
     queryKey: ["/api/vrm/forms/rental-request/funnel"], refetchInterval: 60_000,
   });
@@ -514,7 +593,7 @@ export default function RentalRequests() {
     };
   }>({
     queryKey: ["/api/vrm/forms/rental-request", detail?.request_no, "acknowledgements"],
-    enabled: showAcks && detail != null,
+    enabled: detail != null,
     queryFn: async () => {
       const res = await fetch(`/api/vrm/forms/rental-request/${detail!.request_no}/acknowledgements`);
       const j = await res.json().catch(() => ({}));
@@ -524,10 +603,10 @@ export default function RentalRequests() {
   });
 
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null; approvalSms?: string | null }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null; approvalSms?: string | null; reservationNumber?: string | null; extensionDays?: number | null }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null, approvalSms: v.approvalSms ?? null }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null, approvalSms: v.approvalSms ?? null, reservationNumber: v.reservationNumber ?? null, extensionDays: v.extensionDays ?? null }),
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(j?.message || "decision failed");
@@ -604,9 +683,85 @@ export default function RentalRequests() {
     qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
   };
 
+  // ── Quick corrective actions on the consolidated status card ──────────────
+  // These hit EXACTLY the endpoints the workflow panel already uses — the
+  // card adds proximity to the explanation, never a second code path.
+  const quickBook = async (requestNo: number) => {
+    setQuickBusy("book"); setQuickMsg(null);
+    try {
+      const r = await fetch(`/api/vrm/forms/rental-request/${requestNo}/book`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        credentials: "include", body: "{}",
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || "book failed");
+      setQuickMsg({ text: "Booking started — the outcome lands here in 20–30 seconds.", bad: false });
+    } catch (e: any) {
+      setQuickMsg({ text: e?.message || "book failed", bad: true });
+    } finally {
+      setQuickBusy(""); refreshIntents();
+    }
+  };
+  const quickRetry = async (intentId: number) => {
+    if (!window.confirm("Staff retry: the orchestrator re-reconciles before anything is re-attempted. Proceed?")) return;
+    setQuickBusy("retry"); setQuickMsg(null);
+    try {
+      const r = await fetch(`/api/vrm/forms/rental-survey/cutover/intents/${intentId}/retry`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        credentials: "include", body: JSON.stringify({}),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.message || "retry failed");
+      setQuickMsg({ text: "Retry accepted — reconciling with Enterprise now.", bad: false });
+    } catch (e: any) {
+      setQuickMsg({ text: e?.message || "retry failed", bad: true });
+    } finally {
+      setQuickBusy(""); refreshIntents();
+    }
+  };
+  // Resend the Enterprise extension email, carrying whatever reservation
+  // number / days the Decision inputs currently hold — so a typo fix and the
+  // resend are one click. Synchronous: the button waits for the real outcome.
+  const quickResendExtEmail = async (requestNo: number) => {
+    setQuickBusy("extemail"); setQuickMsg(null);
+    try {
+      const res = await fetch(`/api/vrm/forms/rental-request/${requestNo}/extension-email`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reservationNumber: extResNo.trim() || undefined,
+          days: Math.max(1, Math.min(30, Math.round(Number(extDays) || 7))),
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.message || "email failed");
+      setQuickMsg({ text: j?.message || "Email sent to Enterprise.", bad: false });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
+    } catch (e: any) {
+      setQuickMsg({ text: e?.message || "email failed", bad: true });
+    } finally {
+      setQuickBusy("");
+    }
+  };
+  // Every section is always visible, so a quick action just scrolls to and
+  // focuses its target — no section to open first.
+  const openWorkflowSection = () => {
+    workflowRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const jumpToClass = () => {
+    classBoxRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    classBoxRef.current?.querySelector("select")?.focus();
+  };
+  const jumpToPickup = () => {
+    pickupInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    pickupInputRef.current?.focus();
+  };
+
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return rows.filter((r) => {
+      // The tab is the first cut: extensions live on their own list. CSV
+      // export and sorting run on `filtered`, so they scope automatically.
+      if ((isExt(r) ? "extension" : "new") !== tab) return false;
       if (fDecision.length && !fDecision.includes(r.auto_decision ?? "")) return false;
       if (fCategory.length && !fCategory.includes(CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "")) return false;
       if (fStatus.length && !fStatus.includes(r.status)) return false;
@@ -614,13 +769,15 @@ export default function RentalRequests() {
       return [r.ldap, r.tech_name, r.truck_number, r.shop_name, r.shop_city, r.symptom]
         .some((v) => String(v ?? "").toLowerCase().includes(needle));
     });
-  }, [rows, q, fDecision, fCategory, fStatus]);
+  }, [rows, q, fDecision, fCategory, fStatus, tab]);
 
   const acc: Record<string, (r: Req) => unknown> = {
     no: (r) => r.request_no, ldap: (r) => r.ldap, name: (r) => r.tech_name,
     truck: (r) => r.truck_number,
     category: (r) => CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category,
     decision: (r) => r.auto_decision, rule: (r) => r.auto_rule, status: (r) => r.status,
+    // Problems first, then in-flight, then booked, then blank — the triage order.
+    booking: (r) => bookingSortKey(deriveBookingStatus(r, intentFor(r.request_no))),
     net: (r) => ((r as any).prof_net_with == null ? null : Number((r as any).prof_net_with)),
     shop: (r) => r.shop_name, appt: (r) => r.appointment_at, days: (r) => r.shop_estimated_days,
     created: (r) => r.created_at,
@@ -629,7 +786,9 @@ export default function RentalRequests() {
   const sorted = useMemo(() => {
     const cmp = sort.col ? makeSortComparator<Req>(acc[sort.col] ?? (() => ""), sort.dir) : null;
     return cmp ? [...filtered].sort(cmp) : filtered;
-  }, [filtered, sort]);
+    // `intents` feeds the booking sort accessor — a landed intent must resort.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, sort, intents]);
 
   const exportCsv = () => {
     const cols: Array<[string, (r: Req) => unknown]> = [
@@ -643,6 +802,16 @@ export default function RentalRequests() {
       ["auto_reason", (r) => r.auto_reason], ["status", (r) => r.status],
       ["net_with_rental", (r) => (r as any).prof_net_with ?? ""],
       ["vehicle_class", (r) => normCls(r.approved_vehicle_class) || "sedan"],
+      ["booking_outcome", (r) => {
+        const b = bookingBadge(deriveBookingStatus(r, intentFor(r.request_no)), r);
+        return b ? b.label.replace(/^✓ /, "") : "";
+      }],
+      ["booking_reference", (r) => r.etd_reference ?? r.ext_reservation_number ?? ""],
+      ["booking_branch", (r) => r.booked_facts?.branchName ?? r.nearest_branch_name ?? ""],
+      ["booking_note", (r) => {
+        const b = bookingBadge(deriveBookingStatus(r, intentFor(r.request_no)), r);
+        return b && b.tone === "bad" ? b.title : "";
+      }],
       ["decided_by", (r) => r.decided_by], ["decision_note", (r) => r.decision_note],
       ["actual_days_down", (r) => r.actual_days_down], ["claim_variance_days", (r) => r.claim_variance_days],
       ["created_at", (r) => r.created_at],
@@ -671,6 +840,12 @@ export default function RentalRequests() {
   const pctVerify = fnStarts > 0 ? Math.round(100 * fnVerifies / fnStarts) : null;
   const pctSubmit = fnVerifies > 0 ? Math.round(100 * fnSubmits / fnVerifies) : null;
   const hasAnyActivity = fnStarts > 0 || fnVerifies > 0 || fnSubmits > 0;
+
+  // The single merged verdict for the OPEN drawer row — recomputed as the
+  // list poll and the intent fetch land, so an outcome that arrives while
+  // the drawer is open shows up without reopening it.
+  const detailIntent = detail ? intentFor(detail.request_no) : null;
+  const bookingSt = detail ? deriveBookingStatus(detail, detailIntent) : null;
 
   return (
     <div style={{ padding: "18px 22px 40px" }}>
@@ -740,6 +915,25 @@ export default function RentalRequests() {
         Denials are the valuable number. Holman never told us what they talked people out of.
       </p>
 
+      {/* Two queues, one page: new requests ride the booking pipeline,
+          extensions ride the Enterprise email. Mixing them made both harder
+          to work. */}
+      <div style={{ display: "inline-flex", border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "hidden", marginBottom: 12 }}>
+        {(([["new", "New requests"], ["extension", "Extensions"]]) as Array<["new" | "extension", string]>).map(([key, label]) => {
+          const n = rows.filter((r) => (isExt(r) ? "extension" : "new") === key).length;
+          const active = tab === key;
+          return (
+            <button key={key} type="button" onClick={() => setTab(key)}
+                    style={{ border: "none", cursor: "pointer", padding: "8px 16px",
+                             fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 700 : 400,
+                             background: active ? colors.accent : colors.surface,
+                             color: active ? "#fff" : colors.ink }}>
+              {label} ({n})
+            </button>
+          );
+        })}
+      </div>
+
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ position: "relative", display: "inline-block" }}>
           <Search size={13} style={{ position: "absolute", left: 9, top: 9, color: colors.inkMuted }} />
@@ -778,6 +972,7 @@ export default function RentalRequests() {
               <SortHeader col="net" text="Net/day" sort={sort} setSort={setSort} />
               <SortHeader col="rule" text="Rule" sort={sort} setSort={setSort} />
               <SortHeader col="status" text="Status" sort={sort} setSort={setSort} />
+              <SortHeader col="booking" text="Booking" sort={sort} setSort={setSort} />
               <SortHeader col="shop" text="Shop" sort={sort} setSort={setSort} />
               <SortHeader col="appt" text="Goes in" sort={sort} setSort={setSort} />
               <SortHeader col="days" text="Days" sort={sort} setSort={setSort} />
@@ -829,6 +1024,10 @@ export default function RentalRequests() {
                           setPendingReason("");
                           setSmsBody("");
                         }
+                        // Seed the Enterprise-email inputs from the row so a
+                        // reopen shows what was (or will be) sent.
+                        setExtResNo(r.ext_reservation_number ?? "");
+                        setExtDays(String(r.ext_days ?? 7));
                         setSmsEdited(false);
                         setDateEdited(false);
                         // Unconditional: every OPEN is a fresh reconciliation
@@ -842,7 +1041,7 @@ export default function RentalRequests() {
                         setNote(MAINT_CATS.has(r.problem_category ?? "") && r.status === "pending" ? MAINT_SCRIPT : "");
                         setClassDraft(normCls(r.approved_vehicle_class) || "sedan");
                         setActionErr("");
-                        setShowAcks(false);
+                        setQuickMsg(null);
                       }}
                       style={{ cursor: "pointer" }}>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.request_no}</td>
@@ -878,9 +1077,28 @@ export default function RentalRequests() {
                     </td>
                     <td style={tdBase}>
                       {r.status}{r.decided_by ? ` · ${r.decided_by}` : ""}
-                      {intentFor(r.request_no) && (
-                        <span style={{ marginLeft: 6 }}><IntentPill intent={intentFor(r.request_no)} /></span>
-                      )}
+                    </td>
+                    {/* The booking outcome WITHOUT opening the drawer: booked
+                        reference + branch, failed with the plain-language
+                        reason on hover, in-flight indicator. One derivation
+                        shared with the drawer, so they can never disagree —
+                        this cell replaces the old status-cell intent pill. */}
+                    <td style={{ ...tdBase, maxWidth: 200 }}>
+                      {(() => {
+                        const badge = bookingBadge(deriveBookingStatus(r, intentFor(r.request_no)), r);
+                        if (!badge) return "—";
+                        const [fg, bg] = BADGE_TONE[badge.tone];
+                        return (
+                          <span title={badge.title}>
+                            <Pill text={badge.label} fg={fg} bg={bg} />
+                            {badge.sub && (
+                              <span style={{ marginLeft: 6, fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                                {badge.sub}
+                              </span>
+                            )}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td style={tdBase} title={r.shop_name ?? ""}>{r.shop_name || "—"}</td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{d10(r.appointment_at)}</td>
@@ -898,8 +1116,9 @@ export default function RentalRequests() {
         <div onClick={() => { suggestedFor.current = null; setDetail(null); }}
              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 60, display: "flex", justifyContent: "flex-end" }}>
           <div onClick={(e) => e.stopPropagation()}
-               style={{ width: 500, maxWidth: "94vw", height: "100%", overflowY: "auto", background: colors.background, borderLeft: `1px solid ${colors.rule}`, padding: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+               style={{ width: 520, maxWidth: "94vw", height: "100%", display: "flex", flexDirection: "column", background: colors.background, borderLeft: `1px solid ${colors.rule}` }}>
+            {/* Fixed header — the identity line never scrolls away. */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 20px 10px", borderBottom: `1px solid ${colors.rule}`, flexShrink: 0 }}>
               <div style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink }}>
                 #{detail.request_no} · {detail.tech_name || detail.ldap}
               </div>
@@ -908,6 +1127,8 @@ export default function RentalRequests() {
                 <X size={18} />
               </button>
             </div>
+            {/* Scrollable body between the fixed header and the pinned action bar. */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 20px" }}>
 
             {/* An extension is a different transaction: more time on the car
                 the technician already has. Say so before anything below reads
@@ -959,20 +1180,144 @@ export default function RentalRequests() {
               </div>
             )}
 
-            <div style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12, marginBottom: 14 }}>
-              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                Engine said
+            {/* Compact summary: truck, reason, and the engine's verdict on one
+                strip — the full detail rows follow further down the scroll. */}
+            <div style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: "8px 12px", marginBottom: 12 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "baseline", gap: 8 }}>
+                <span style={{ fontFamily: fonts.jetbrains, fontSize: 13, color: colors.ink }}>
+                  {detail.truck_number || "no truck"}
+                </span>
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted }}>
+                  {CATEGORY_LABEL[detail.problem_category ?? ""] ?? detail.problem_category ?? ""}
+                </span>
+                <span style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, marginLeft: "auto",
+                               color: (DECISION_TONE[detail.auto_decision ?? ""] ?? [colors.ink])[0] }}>
+                  {detail.auto_decision} · rule {detail.auto_rule}
+                </span>
               </div>
-              <div style={{ fontFamily: fonts.syne, fontSize: 17, fontWeight: 700, color: (DECISION_TONE[detail.auto_decision ?? ""] ?? [colors.ink])[0] }}>
-                {detail.auto_decision} · rule {detail.auto_rule}
-              </div>
-              <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>{detail.auto_reason}</div>
+              {detail.auto_reason && (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, marginTop: 3 }}>{detail.auto_reason}</div>
+              )}
             </div>
 
-            {/* Profitability factors — the decision inputs, shown BEFORE the
-                request's own story (same factors the new-rentals check uses).
-                Green when the tech is profitable WITH the rental. */}
-            <div style={{ marginBottom: 14, padding: "10px 12px", borderRadius: 10,
+            {/* ONE consolidated booking status: the request row's outcome and
+                the workflow intent's state merged into a single verdict, in
+                plain language, with the matching corrective action right
+                here. The raw machine text lives in the collapsed technical
+                expander; the workflow panel below repeats none of it. */}
+            {bookingSt && bookingSt.verdict !== "none" && (() => {
+              const TONE: Record<string, [string, string]> = {
+                booked: [colors.green, colors.greenLight],
+                extension_approved: [colors.green, colors.greenLight],
+                failed: [colors.red, colors.redLight],
+                attention: [colors.amber, colors.amberLight],
+                in_progress: [colors.accent, colors.accentLight],
+              };
+              const [fg, bg] = TONE[bookingSt.verdict] ?? [colors.inkMuted, colors.surface];
+              const canBookNow = detail.status === "approved" && !isExt(detail)
+                && (!detailIntent || BOOKABLE_REQUEST_STATUSES.has(String(detailIntent.status)));
+              const canRetryNow = !!detailIntent && RETRYABLE_INTENT_STATUSES.has(String(detailIntent.status));
+              // Each corrective action the status names, wired to the SAME
+              // endpoints/inputs the drawer already uses — proximity, never a
+              // second code path.
+              const ACTION_BTN: Partial<Record<BookingActionKind, { label: string; onClick: () => void; show: boolean; busy?: boolean; title?: string }>> = {
+                edit_class: { label: "Pick a different class", onClick: jumpToClass,
+                              show: !isExt(detail) && ["pending", "approved"].includes(detail.status) },
+                edit_pickup: { label: "Change pickup date", onClick: jumpToPickup, show: !isExt(detail) },
+                book_now: { label: "Book it now", onClick: () => quickBook(detail.request_no),
+                            show: canBookNow, busy: quickBusy === "book",
+                            title: "Quote, confirm, book in ETD, then text the technician. Safe to press again - a request that already holds a reservation is refused, never booked twice." },
+                retry_workflow: { label: "Retry (staff)", onClick: () => { if (detailIntent?.id) quickRetry(Number(detailIntent.id)); },
+                                  show: canRetryNow, busy: quickBusy === "retry" },
+                open_workflow: { label: "Open the booking workflow", onClick: openWorkflowSection, show: !isExt(detail) },
+                resend_extension_email: {
+                  label: "Resend the Enterprise email", onClick: () => quickResendExtEmail(detail.request_no),
+                  show: isExt(detail) && detail.status === "approved", busy: quickBusy === "extemail",
+                  title: "Sends the extension email again with the reservation number and days currently in the Decision box — fix a typo there first if that's what failed.",
+                },
+              };
+              const btns = bookingSt.actions.map((k) => ({ k, cfg: ACTION_BTN[k] }))
+                .filter((x): x is { k: BookingActionKind; cfg: NonNullable<typeof x.cfg> } => !!x.cfg && x.cfg.show);
+              return (
+                <div style={{ background: bg, border: `1px solid ${fg}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                  <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: fg, textTransform: "uppercase" }}>
+                    {bookingSt.headline}
+                  </div>
+                  {bookingSt.verdict === "booked" ? (
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
+                      {detail.etd_booked_at
+                        ? <>Reserved {new Date(detail.etd_booked_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET.</>
+                        : null}
+                      {(() => {
+                        const b = detail.booked_facts ?? undefined;
+                        const when = bookedWhen(b?.pickupDate, b?.pickupTime);
+                        const where = [b?.branchName ?? detail.nearest_branch_name, b?.branchAddress]
+                          .filter(Boolean).join(", ");
+                        if (!when && !where) return null;
+                        return (
+                          <> Pick up {when || "(no date recorded)"}
+                            {where ? ` at Enterprise ${where}` : ""}
+                            {b?.classCode ? ` — ${b.classCode}${b.classDescription ? ` (${b.classDescription})` : ""}` : ""}.
+                          </>
+                        );
+                      })()}
+                    </div>
+                  ) : bookingSt.summary ? (
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3, wordBreak: "break-word" }}>
+                      {bookingSt.summary}
+                    </div>
+                  ) : null}
+                  {/* What the technician was ACTUALLY told, never an assumption. */}
+                  {bookingSt.textState && (
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 12, marginTop: 4,
+                                  fontWeight: bookingSt.textState.tone === "bad" ? 700 : 500,
+                                  color: bookingSt.textState.tone === "ok" ? colors.green
+                                       : bookingSt.textState.tone === "bad" ? colors.red : colors.inkMuted }}>
+                      {bookingSt.textState.text}
+                    </div>
+                  )}
+                  {bookingSt.caution && (
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, marginTop: 4, wordBreak: "break-word" }}>
+                      {bookingSt.caution}
+                    </div>
+                  )}
+                  {btns.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                      {btns.map(({ k, cfg }) => (
+                        <button key={k} type="button" disabled={!!quickBusy} onClick={cfg.onClick} title={cfg.title}
+                                style={{ ...ctrl, cursor: "pointer", fontWeight: 600, color: fg, borderColor: fg, background: colors.surface }}>
+                          {cfg.busy ? "Working…" : cfg.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {quickMsg && (
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 12, marginTop: 6, color: quickMsg.bad ? colors.red : colors.ink }}>
+                      {quickMsg.text}
+                    </div>
+                  )}
+                  {/* The raw machine text, verbatim, for debugging — collapsed
+                      so it never competes with the plain-language verdict. */}
+                  {bookingSt.technical.length > 0 && (
+                    <details style={{ marginTop: 8 }}>
+                      <summary style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, cursor: "pointer" }}>
+                        Technical details
+                      </summary>
+                      <div style={{ marginTop: 4, display: "grid", gap: 3 }}>
+                        {bookingSt.technical.map((t, i) => (
+                          <div key={i} style={{ fontFamily: fonts.jetbrains, fontSize: 10.5, color: colors.inkMuted, wordBreak: "break-word" }}>{t}</div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Profitability factors — same factors the new-rentals check
+                uses, always in view. */}
+            <Section title="Profitability factors">
+            <div style={{ padding: "10px 12px", borderRadius: 10,
                           background: (detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0
                             ? colors.greenLight : colors.redLight,
                           border: `1px solid ${(detail as any).prof_net_with != null && Number((detail as any).prof_net_with) >= 0 ? colors.green : colors.red}` }}>
@@ -999,7 +1344,10 @@ export default function RentalRequests() {
                 </div>
               )}
             </div>
+            </Section>
 
+            {/* The request's full story — every captured field. */}
+            <Section title="Request details">
             {([["Truck", detail.truck_number], ["BYOV", detail.is_byov ? "yes" : ""],
                ["District / State", [detail.district, detail.home_state].filter(Boolean).join(" · ")],
                ["Reason", CATEGORY_LABEL[detail.problem_category ?? ""] ?? detail.problem_category],
@@ -1030,6 +1378,7 @@ export default function RentalRequests() {
                   <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, flex: 1, wordBreak: "break-word" }}>{String(v)}</div>
                 </div>
               ))}
+            </Section>
 
             {/* Extension context: what the extension is FOR, and the van
                 status update — the repair check-in Fleet reviews before
@@ -1084,43 +1433,41 @@ export default function RentalRequests() {
                 Hidden for extensions: an extension is more time on the SAME
                 unit, never a class decision. */}
             {!isExt(detail) && (
-            <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
+            <div ref={classBoxRef} style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
               <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
                 Vehicle class for the booking
               </div>
               {["pending", "approved"].includes(detail.status) ? (
-                <>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <input list="vrm-class-options" value={classDraft}
-                           onChange={(e) => setClassDraft(e.target.value)}
-                           placeholder="sedan" style={{ ...ctrl, flex: 1 }} />
-                    <datalist id="vrm-class-options">
-                      {(classOpts?.options ?? []).map((c) => (
-                        <option key={c.label} value={c.label}>{c.note}</option>
-                      ))}
-                    </datalist>
-                    <button type="button"
-                            disabled={classMut.isPending || !classDraft.trim()
-                              || normCls(classDraft) === (normCls(detail.approved_vehicle_class) || "sedan")
-                              || !(classOpts?.options ?? []).some((o) => o.label === normCls(classDraft))}
-                            onClick={() => classMut.mutate({ requestNo: detail.request_no, vehicleClass: classDraft })}
-                            style={{ ...ctrl, cursor: "pointer", fontWeight: 600 }}>
-                      {classMut.isPending ? "Saving…" : "Save"}
-                    </button>
-                  </div>
-                  <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "6px 0 0" }}>
-                    {(() => {
-                      const opts = classOpts?.options ?? [];
-                      const hit = opts.find((o) => o.label === normCls(classDraft));
-                      if (!classDraft.trim()) return "Sedan unless there is a reason to go bigger.";
-                      if (!hit) {
-                        return `"${classDraft.trim()}" is not a class we can book. Valid: `
-                             + opts.map((o) => o.label).join(", ") + ".";
-                      }
-                      return hit.sipp ? `${hit.sipp} — ${hit.note}` : hit.note;
-                    })()}
-                  </p>
-                </>
+                (() => {
+                  // Fixed choices, matching Enterprise's own class lineup —
+                  // no typing, no delete-and-guess. The chosen VALUE is what
+                  // saves, through the same endpoint as before.
+                  const value = menuClassValue(classDraft);
+                  const current = menuClassValue(detail.approved_vehicle_class);
+                  const chosen = classMenu.find((m) => m.value === value);
+                  return (
+                    <>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <select value={value} onChange={(e) => setClassDraft(e.target.value)}
+                                style={{ ...ctrl, flex: 1, cursor: "pointer" }}>
+                          {classMenu.map((m) => (
+                            <option key={m.value} value={m.value}>{m.label}</option>
+                          ))}
+                          {!chosen && <option value={value}>{value} — stored value not in the menu</option>}
+                        </select>
+                        <button type="button"
+                                disabled={classMut.isPending || value === current}
+                                onClick={() => classMut.mutate({ requestNo: detail.request_no, vehicleClass: value })}
+                                style={{ ...ctrl, cursor: "pointer", fontWeight: 600 }}>
+                          {classMut.isPending ? "Saving…" : "Save"}
+                        </button>
+                      </div>
+                      <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "6px 0 0" }}>
+                        {chosen?.note || "Sedan unless there is a reason to go bigger."}
+                      </p>
+                    </>
+                  );
+                })()
               ) : (
                 <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
                   {normCls(detail.approved_vehicle_class) || "sedan"}
@@ -1130,117 +1477,63 @@ export default function RentalRequests() {
             </div>
             )}
 
-            {/* The booking outcome, as the REQUEST ROW knows it. This is the
-                one place a failure that happened before any workflow intent
-                existed (eligibility gate, intent conflict) becomes visible —
-                the intent panel below can only show what an intent recorded.
-                An EXTENSION has no booking outcome by design: approved means
-                settled, and Fleet handles Enterprise manually. */}
-            {isExt(detail) ? (
-              detail.status === "approved" ? (
-                <div style={{ marginTop: 16, background: colors.greenLight, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "10px 12px" }}>
-                  <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.green }}>
-                    EXTENSION APPROVED — HANDLE WITH ENTERPRISE
-                  </div>
-                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
-                    Nothing books automatically. Extend the existing reservation with
-                    Enterprise manually; the technician was texted to keep the rental.
-                  </div>
-                </div>
-              ) : null
-            ) : detail.etd_booked_at ? (
-              <div style={{ marginTop: 16, background: colors.greenLight, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.green }}>
-                  BOOKED{detail.etd_reference ? ` — CONFIRMATION ${detail.etd_reference}` : ""}
-                </div>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
-                  Reserved {new Date(detail.etd_booked_at).toLocaleString("en-US", { timeZone: "America/New_York" })} ET.
-                  {(() => {
-                    const b = detail.booked_facts ?? undefined;
-                    const when = bookedWhen(b?.pickupDate, b?.pickupTime);
-                    const where = [b?.branchName ?? detail.nearest_branch_name, b?.branchAddress]
-                      .filter(Boolean).join(", ");
-                    if (!when && !where) return null;
-                    return (
-                      <> Pick up {when || "(no date recorded)"}
-                        {where ? ` at Enterprise ${where}` : ""}
-                        {b?.classCode ? ` — ${b.classCode}${b.classDescription ? ` (${b.classDescription})` : ""}` : ""}.
-                      </>
-                    );
-                  })()}
-                </div>
-                {/* What the technician was ACTUALLY told. This line used to assert
-                    "The technician was texted the confirmation number and branch."
-                    unconditionally, with nothing behind the claim - including for
-                    bookings whose text was still queued, or withheld outright. */}
-                {(() => {
-                  const st = String(detail.msg1_state ?? "");
-                  const info = MSG1_LABEL[st];
-                  const tone = info?.tone ?? "wait";
-                  const text = info?.text
-                    ?? (st ? `Text state: ${st}.` : "No confirmation text recorded for this booking.");
-                  return (
-                    <div style={{
-                      fontFamily: fonts.dmSans, fontSize: 12, marginTop: 4,
-                      fontWeight: tone === "bad" ? 700 : 500,
-                      color: tone === "ok" ? colors.green : tone === "bad" ? colors.red : colors.inkMuted,
-                    }}>
-                      {text}
-                    </div>
-                  );
-                })()}
-                {detail.intent_error ? (
-                  <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.red, marginTop: 4, wordBreak: "break-word" }}>
-                    {detail.intent_error}
-                  </div>
-                ) : null}
-              </div>
-            ) : detail.etd_error ? (
-              <div style={{ marginTop: 16, background: colors.redLight, border: `1px solid ${colors.red}`, borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.red }}>
-                  BOOKING FAILED
-                </div>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3, wordBreak: "break-word" }}>
-                  {detail.etd_error}
-                </div>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, marginTop: 4 }}>
-                  Fix the cause, then press APPROVE again — a request that already holds a
-                  reservation is refused, never booked twice. If the error says the workflow
-                  is parked, resolve it in the booking panel below first.
-                </div>
-              </div>
-            ) : detail.status === "approved" ? (
-              <div style={{ marginTop: 16, background: colors.accentLight, border: `1px solid ${colors.accent}`, borderRadius: 10, padding: "10px 12px" }}>
-                <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: colors.accent }}>
-                  BOOKING IN PROGRESS…
-                </div>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
-                  Quoting and reserving in Enterprise takes 20–30 seconds. The confirmation
-                  number (or the failure reason) will appear here — leave this open.
-                </div>
-              </div>
-            ) : null}
-
             {/* Booking workflow: only offered once the request is APPROVED
                 (the server's eligibility gate requires it anyway), or shown
                 read-only if an intent already exists. Never for extensions —
-                the orchestrator refuses extension intents outright. */}
-            {!isExt(detail) && (intentFor(detail.request_no) || detail.status === "approved") && (
-              <CutoverIntentPanel
-                workflow="request"
-                sourceId={String(detail.request_no)}
-                intent={intentFor(detail.request_no)}
-                onChanged={refreshIntents}
-              />
+                the orchestrator refuses extension intents outright. The
+                consolidated card above owns the STATUS story (hideStatus);
+                the panel contributes the step-by-step details and the full
+                set of staff actions. */}
+            {!isExt(detail) && (detailIntent || detail.status === "approved") && (
+              <Section title="Booking workflow" innerRef={workflowRef}>
+                <CutoverIntentPanel
+                  workflow="request"
+                  sourceId={String(detail.request_no)}
+                  intent={detailIntent}
+                  onChanged={refreshIntents}
+                  hideStatus
+                />
+              </Section>
             )}
 
-            <div style={{ marginTop: 16 }}>
-              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                Decide
-              </div>
+            {/* The decision inputs, always visible. The pinned bar's buttons
+                submit with whatever these fields hold — they are seeded on
+                every open. */}
+            <Section title="Decision">
               <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2}
                         placeholder="Note (required if you overrule the engine)"
                         style={{ ...ctrl, width: "100%", resize: "vertical", marginBottom: 8 }} />
+              {/* Approving an extension EMAILS Enterprise automatically, and
+                  they file by the reservation / RA number — which the row
+                  does not hold, so the approver reads it off the rental and
+                  types it here. Blank blocks the approve. */}
+              {isExt(detail) && (
+                <div style={{ marginBottom: 8 }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                    <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Res / RA #
+                    </span>
+                    <input type="text" value={extResNo} onChange={(e) => setExtResNo(e.target.value)}
+                           placeholder="Enterprise reservation or RA number (required to approve)"
+                           style={{ ...ctrl, flex: 1 }} data-testid="ext-res-input" />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                    <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Extra days
+                    </span>
+                    <input type="number" min={1} max={30} value={extDays}
+                           onChange={(e) => setExtDays(e.target.value)}
+                           style={{ ...ctrl, width: 90 }} data-testid="ext-days-input" />
+                    <span style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted }}>
+                      defaults to 7 — edit before approving
+                    </span>
+                  </div>
+                  <p style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, margin: 0 }}>
+                    Approving emails Enterprise Account Support ({detail.ext_email_to || "NorthCentralAccountSupport@em.com"})
+                    with the renter's name, this number, and the extra days — Howard Anderson and Tyler Morgan are always CC'd.
+                  </p>
+                </div>
+              )}
               {/* Pickup/return/branch are new-booking concepts. An extension
                   books nothing, so none of them apply — approving it is the
                   whole action. */}
@@ -1264,7 +1557,7 @@ export default function RentalRequests() {
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Pickup date
                 </span>
-                <input type="date" value={pickupDate}
+                <input type="date" value={pickupDate} ref={pickupInputRef}
                        onChange={(e) => { setPickupDate(e.target.value); setDateEdited(true); }}
                        style={{ ...ctrl, flex: 1 }} />
                 <input type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}
@@ -1385,6 +1678,83 @@ export default function RentalRequests() {
                 )}
               </div>
               </>)}
+            </Section>
+
+            {/* Send back as incomplete.
+                Kept apart from the three verdicts on purpose. This is not a
+                judgement about whether the technician should get a rental, it
+                is "we do not have enough to book one", and it has to name the
+                gap: a send-back that just says incomplete returns them to a
+                form they already believe they filled in. */}
+            <Section title="Send back for more information" innerRef={sendBackRef}>
+                <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
+                  {Object.entries(REASONS).map(([k, label]) => (
+                    <label key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, cursor: "pointer" }}>
+                      <input type="checkbox" checked={missing.includes(k)}
+                             onChange={(e) => setMissing((prev) =>
+                               e.target.checked ? [...prev, k] : prev.filter((x) => x !== k))} />
+                      <span>We still need {label}</span>
+                    </label>
+                  ))}
+                </div>
+                <button type="button" disabled={decide.isPending || !missing.length}
+                        onClick={() => decide.mutate({ requestNo: detail.request_no, decision: "RETURN", note, missing })}
+                        style={{ ...ctrl, cursor: missing.length ? "pointer" : "not-allowed", width: "100%",
+                                 color: DECISION_TONE.RETURN[0], background: DECISION_TONE.RETURN[1],
+                                 borderColor: DECISION_TONE.RETURN[0], fontWeight: 600,
+                                 opacity: missing.length ? 1 : 0.5 }}>
+                  SEND BACK{missing.length ? ` (${missing.length})` : ""}
+                </button>
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 6 }}>
+                  Texts the technician exactly what is missing plus the link. Their
+                  existing answers are kept, so they only add the gap.
+                </p>
+            </Section>
+
+            {/* The acknowledgement record — always in view like everything
+                else in the flat scroll: who signed, when, and the exact
+                bullet texts they attested to. */}
+            <Section title="Acknowledgements">
+              {ackLoading ? (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted }}>Loading…</div>
+              ) : ackError ? (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.red }}>
+                  {String((ackError as any)?.message || ackError)}
+                </div>
+              ) : ackRecord ? (
+                <div>
+                  {ackRecord.caveat && (
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 8, padding: "6px 8px", marginBottom: 8 }}>
+                      {ackRecord.caveat}
+                    </div>
+                  )}
+                  <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 5 }}>
+                    {(ackRecord.snapshot?.bullets ?? []).map((b) => (
+                      <li key={b.key} style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>{b.text}</li>
+                    ))}
+                  </ul>
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${colors.rule}` }}>
+                    Digitally signed by <b>{ackRecord.snapshot?.signerName || "(name not recorded)"}</b>
+                    {" "}({ackRecord.snapshot?.signerLdap})
+                    {ackRecord.snapshot?.signedAt
+                      ? <> on {new Date(ackRecord.snapshot.signedAt).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</>
+                      : null}
+                    {ackRecord.snapshot?.policyVersion ? <> · policy {ackRecord.snapshot.policyVersion}</> : null}
+                  </div>
+                </div>
+              ) : (
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted }}>
+                  No acknowledgement record for this request.
+                </div>
+              )}
+            </Section>
+            </div>
+
+            {/* Pinned action bar — the decision is always one glance away,
+                never at the bottom of a long scroll. Same buttons, same
+                gate, same mutation as before the restructure. */}
+            <div style={{ flexShrink: 0, borderTop: `1px solid ${colors.rule}`, background: colors.surface, padding: "10px 20px 12px" }}>
+              {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, margin: "0 0 8px" }}>{actionErr}</p>}
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
@@ -1408,11 +1778,21 @@ export default function RentalRequests() {
                                 });
                                 if (!gate.ok) { setActionErr(gate.message); return; }
                               }
+                              // The extension approve auto-sends the Enterprise
+                              // email, and Enterprise files by the reservation
+                              // number — no number, no approve. Server enforces
+                              // the same rule.
+                              if (d === "APPROVE" && isExt(detail) && !extResNo.trim()) {
+                                setActionErr("Enter the Enterprise reservation / RA number first — approving emails Enterprise and they file by that number.");
+                                return;
+                              }
                               decide.mutate({ requestNo: detail.request_no, decision: d, note,
                                 pickupAt: d === "APPROVE" && !isExt(detail) && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
                                 returnAt: d === "APPROVE" && !isExt(detail) && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
                                 approvedBranch: d === "APPROVE" && !isExt(detail) && approvedBranch.trim() ? approvedBranch.trim() : null,
-                                approvalSms: d === "APPROVE" && !isExt(detail) ? smsBody : null });
+                                approvalSms: d === "APPROVE" && !isExt(detail) ? smsBody : null,
+                                reservationNumber: d === "APPROVE" && isExt(detail) ? extResNo.trim() : null,
+                                extensionDays: d === "APPROVE" && isExt(detail) ? Math.max(1, Math.min(30, Math.round(Number(extDays) || 7))) : null });
                             }}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
                       {d === "APPROVE" && isExt(detail) ? "APPROVE EXTENSION" : d}
@@ -1420,81 +1800,12 @@ export default function RentalRequests() {
                   );
                 })}
               </div>
-
-              {/* Send back as incomplete.
-                  Kept apart from the three verdicts on purpose. This is not a
-                  judgement about whether the technician should get a rental, it
-                  is "we do not have enough to book one", and it has to name the
-                  gap: a send-back that just says incomplete returns them to a
-                  form they already believe they filled in. */}
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${colors.rule}` }}>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
-                  Or send it back for more information
-                </div>
-                <div style={{ display: "grid", gap: 4, marginBottom: 8 }}>
-                  {Object.entries(REASONS).map(([k, label]) => (
-                    <label key={k} style={{ display: "flex", gap: 8, alignItems: "flex-start", fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, cursor: "pointer" }}>
-                      <input type="checkbox" checked={missing.includes(k)}
-                             onChange={(e) => setMissing((prev) =>
-                               e.target.checked ? [...prev, k] : prev.filter((x) => x !== k))} />
-                      <span>We still need {label}</span>
-                    </label>
-                  ))}
-                </div>
-                <button type="button" disabled={decide.isPending || !missing.length}
-                        onClick={() => decide.mutate({ requestNo: detail.request_no, decision: "RETURN", note, missing })}
-                        style={{ ...ctrl, cursor: missing.length ? "pointer" : "not-allowed", width: "100%",
-                                 color: DECISION_TONE.RETURN[0], background: DECISION_TONE.RETURN[1],
-                                 borderColor: DECISION_TONE.RETURN[0], fontWeight: 600,
-                                 opacity: missing.length ? 1 : 0.5 }}>
-                  SEND BACK{missing.length ? ` (${missing.length})` : ""}
-                </button>
-                <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 6 }}>
-                  Texts the technician exactly what is missing plus the link. Their
-                  existing answers are kept, so they only add the gap.
-                </p>
-              </div>
-              {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, marginTop: 8 }}>{actionErr}</p>}
-            </div>
-
-            {/* The acknowledgement record — retrievable at any time, for both
-                new requests and extensions: who signed, when, and the exact
-                bullet texts they attested to. */}
-            <div style={{ marginTop: 16, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 12 }}>
-              <button type="button" onClick={() => setShowAcks((v) => !v)}
-                      style={{ ...ctrl, cursor: "pointer", fontWeight: 600, width: "100%" }}>
-                {showAcks ? "Hide acknowledgements" : "View acknowledgements"}
+              <button type="button"
+                      onClick={() => sendBackRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+                      style={{ background: "transparent", border: "none", cursor: "pointer",
+                               fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.accent, padding: "8px 0 0" }}>
+                Or send it back for more information…
               </button>
-              {showAcks && (
-                ackLoading ? (
-                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted, marginTop: 10 }}>Loading…</div>
-                ) : ackError ? (
-                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.red, marginTop: 10 }}>
-                    {String((ackError as any)?.message || ackError)}
-                  </div>
-                ) : ackRecord ? (
-                  <div style={{ marginTop: 10 }}>
-                    {ackRecord.caveat && (
-                      <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 8, padding: "6px 8px", marginBottom: 8 }}>
-                        {ackRecord.caveat}
-                      </div>
-                    )}
-                    <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 5 }}>
-                      {(ackRecord.snapshot?.bullets ?? []).map((b) => (
-                        <li key={b.key} style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>{b.text}</li>
-                      ))}
-                    </ul>
-                    <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, marginTop: 10, paddingTop: 8, borderTop: `1px solid ${colors.rule}` }}>
-                      Digitally signed by <b>{ackRecord.snapshot?.signerName || "(name not recorded)"}</b>
-                      {" "}({ackRecord.snapshot?.signerLdap})
-                      {ackRecord.snapshot?.signedAt
-                        ? <> on {new Date(ackRecord.snapshot.signedAt).toLocaleString("en-US", { timeZone: "America/New_York" })} ET</>
-                        : null}
-                      {ackRecord.snapshot?.policyVersion ? <> · policy {ackRecord.snapshot.policyVersion}</> : null}
-                    </div>
-                  </div>
-                ) : null
-              )}
             </div>
           </div>
         </div>

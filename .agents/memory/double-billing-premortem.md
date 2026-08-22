@@ -1,18 +1,25 @@
 ---
 name: Double-billing detection premortem
-description: Open failure modes of the cutover double-billed detector (direct-billing stamp + old-book comparison) found 2026-08-22, ranked; unfixed unless noted.
+description: Durable failure modes of the cutover double-billed detector (direct-billing stamp + old-book comparison); rules for any hardening work.
 ---
 
 # Double-billing detection premortem (2026-08-22, architect-verified)
 
-Detector = direct-billing stamp on vrm_rental_cutover + comparison vs the anchored ECARS book, surfaced on Cutover Tracking. Ranked risks, all verified in code:
+Detector = direct-billing stamp on vrm_rental_cutover + comparison vs the anchored ECARS book, surfaced on Cutover Tracking.
 
-1. **[FIXED 2026-08-22] Silence reads as clean (worst).** Stamp and comparison now carry REQUIRED 'ok'|'failed' statuses (default 'failed', flipped only on success) + destructive failure toasts; the conflict toast is gated on comparison having run. Rule stands for any future step added to this chain.
-2. **[PARTIALLY FIXED 2026-08-22] Coverage gaps.** Blind report rows (REVIEW/unresolved/racf-less → stats.switchoverBlindRows) and sighted techs with no cutover row (switchoverUnmatchedLdaps, zero-rowcount stamps) now counted + toasted. STILL OPEN: cutover rows outside the payload population (reservation_status='booked' filter) remain invisible to the comparison.
-3. **[FIXED 2026-08-22] Unknown ≠ clean.** direct_billing_effective + a 4th amber "switched — old book UNKNOWN" bucket (effective + book_state='unanchored'); payload carries billing_unknown. The effective predicate is computed ONCE in SQL (spell out last_seen IS NOT NULL or a voided row with NULL last_seen leaks SQL NULL into the JSON payload).
-4. **[FIXED 2026-08-22] Write-once stamp correction path.** Audited void/unvoid: direct_billing_voided_at/by/void_reason current state + append-only direct_billing_void_history (both actions logged); a LATER report sighting (last_seen > voided_at) supersedes a void automatically. Sighting history never mutated. Consumers must key on effective, never confirmed_at.
-5. **[FIXED 2026-08-22] Stale ECARS book.** Import result carries oldBookAsOf/AgeDays/Stale (unknown age = stale); conflict toast is freshness-qualified and a stale-book caution fires even on zero conflicts.
-6. **[FIXED 2026-08-22] Prod schema drift = page-breaking.** The 3 direct_billing_* columns are now in the vrm_rental_cutover schema-health REQUIRED list; a skipped boot ALTER (see partial-boot-migrations) is caught pre-flight instead of 500ing the cutover endpoint.
-7. **[FIXED 2026-08-22] racf-vs-ldap alias mismatch** — zero-rowcount stamps are now collected as switchoverUnmatchedLdaps and surfaced in the upload toast, so a silent stamp miss is visible per upload.
+**Standing rules (why: silent false negatives are this detector's worst failure class):**
+- Every step in the stamp/comparison chain must carry a REQUIRED 'ok'|'failed' status defaulting to 'failed' (flipped only on success), with destructive failure toasts; success-signal-by-silence is forbidden for any future step added to the chain.
+- Never present a failed, stale, or unknown comparison as clean — unknown ≠ clean. A stamped row whose book is 'unanchored' is UNKNOWN, not "old book clear"; it needs its own bucket.
+- Treat "stamped 0 rows" as a signal to audit, not a no-op.
+- Consumers key on the effective predicate (computed ONCE in SQL), never confirmed_at; sighting history is never mutated — corrections are audited void/unvoid rows, and a LATER report sighting supersedes a void automatically.
 
-**How to apply:** any hardening work on this detector starts from #1/#2 (silent false negatives beat cosmetic fixes); never present a failed/stale/unknown comparison as clean; treat "stamped 0 rows" as a signal, not a no-op.
+**State as of 2026-08-22 (all verified in code):**
+1. FIXED — silence-reads-as-clean: stamp + comparison carry required statuses with failure toasts; conflict toast gated on the comparison having run.
+2. PARTIALLY FIXED — coverage gaps: blind report rows (REVIEW/unresolved/racf-less) and sighted techs with no cutover row are counted + toasted. STILL OPEN: cutover rows outside the payload population (reservation_status='booked' filter) remain invisible to the comparison.
+3. FIXED — unknown ≠ clean: direct_billing_effective + amber "switched — old book UNKNOWN" bucket; payload carries billing_unknown (spell out last_seen IS NOT NULL or a voided row leaks SQL NULL into the JSON).
+4. FIXED — write-once stamp correction: audited void/unvoid (current-state columns + append-only void history).
+5. FIXED — stale ECARS book: import result carries oldBookAsOf/AgeDays/Stale (unknown age = stale); conflict toast freshness-qualified; stale-book caution fires even on zero conflicts.
+6. FIXED — prod schema drift: direct_billing_* columns are in the vrm_rental_cutover schema-health REQUIRED list (see partial-boot-migrations).
+7. FIXED — racf-vs-ldap alias mismatch: zero-rowcount stamps surface as switchoverUnmatchedLdaps in the upload toast.
+
+**How to apply:** hardening starts from the remaining coverage gap (#2) and the silence rules above — silent false negatives beat cosmetic fixes.

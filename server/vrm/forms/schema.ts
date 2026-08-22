@@ -310,7 +310,20 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS type_mismatch             boolean NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS type_mismatch_explanation text,
       ADD COLUMN IF NOT EXISTS current_rental            jsonb,
-      ADD COLUMN IF NOT EXISTS ack_snapshot              jsonb;
+      ADD COLUMN IF NOT EXISTS ack_snapshot              jsonb,
+      -- Extension handling with Enterprise moved from "call them" to a formal
+      -- email to their Account Support team. The approval captures the
+      -- reservation/RA number (their required key — we do not reliably hold
+      -- it, staff read it off the rental) and the extra days, and the send is
+      -- recorded here. ext_email_sent_at is stamped ONLY on a real accepted
+      -- send — never on a dry run — so its presence always means Enterprise
+      -- was actually emailed.
+      ADD COLUMN IF NOT EXISTS ext_reservation_number    text,
+      ADD COLUMN IF NOT EXISTS ext_days                  integer,
+      ADD COLUMN IF NOT EXISTS ext_email_state           text,
+      ADD COLUMN IF NOT EXISTS ext_email_to              text,
+      ADD COLUMN IF NOT EXISTS ext_email_sent_at         timestamptz,
+      ADD COLUMN IF NOT EXISTS ext_email_error           text;
     CREATE INDEX IF NOT EXISTS vrm_rental_request_type_idx
       ON vrm_rental_request (request_type);
   `);
