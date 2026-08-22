@@ -803,6 +803,41 @@ export async function stampCutoverBillingSwitchover(
   return { techs: sightings.size, stamped };
 }
 
+// ── old-billing comparison ───────────────────────────────────────────────────
+
+/**
+ * Tyler 2026-08-22 (follow-up): after stamping switchovers, the import must
+ * "run a comparison to the old enterprise billing reports" — a tech now
+ * confirmed on the DIRECT account who is STILL open on the OLD enterprise
+ * (ECARS) billing is being billed twice, and the old ticket needs closing.
+ *
+ * The old-billing state is NOT re-derived here: the cutover payload's
+ * anchored-ticket/fallback joins (survey.ts) are the single source of that
+ * fact, so this is a pure filter over payload rows. 'open' and 'rolled' both
+ * count — 'rolled' is the old ticket rewritten past the swap date, the
+ * double-billing shape task #738 named explicitly.
+ */
+export interface OldBillingConflict {
+  ldap: string;
+  tech_name: string | null;
+  truck_number: string | null;
+  book_state: string;          // 'open' | 'rolled'
+  anchor_tickets: string;      // old ECARS ticket number(s) to close
+}
+
+export function findOldBillingConflicts(rows: Array<Record<string, unknown>>): OldBillingConflict[] {
+  return rows
+    .filter((r) => r.direct_billing_confirmed_at != null
+      && (r.holman_book_state === "open" || r.holman_book_state === "rolled"))
+    .map((r) => ({
+      ldap: String(r.ldap ?? ""),
+      tech_name: (r.tech_name as string | null) ?? null,
+      truck_number: (r.truck_number as string | null) ?? null,
+      book_state: String(r.holman_book_state),
+      anchor_tickets: String(r.anchor_tickets ?? ""),
+    }));
+}
+
 // ── importer ─────────────────────────────────────────────────────────────────
 
 export interface DirectImportResult extends IngestResult {
@@ -812,6 +847,8 @@ export interface DirectImportResult extends IngestResult {
   /** resolved techs seen on this report / cutover rows actually stamped */
   switchoverTechs?: number;
   switchoverStamped?: number;
+  /** switched techs STILL open on the old enterprise (ECARS) billing — double-billed */
+  oldBillingConflicts?: OldBillingConflict[];
 }
 
 export async function importDirectBillingReport(input: {
@@ -862,6 +899,24 @@ export async function importDirectBillingReport(input: {
     console.warn("[VRM/RentalOps] direct import: cutover switchover stamp failed (non-fatal):", e?.message || e);
   }
 
+  // Comparison against the OLD enterprise billing — runs AFTER the stamp so
+  // this upload's own switchovers are included. Dynamic import + best-effort:
+  // a payload hiccup must not fail the import, and the payload query is the
+  // one true derivation of book state (never duplicated here).
+  let oldBillingConflicts: OldBillingConflict[] | undefined;
+  try {
+    const { buildCutoverStatusPayload } = await import("../forms/survey");
+    const payload = await buildCutoverStatusPayload();
+    oldBillingConflicts = findOldBillingConflicts(payload?.rows ?? []);
+    if (oldBillingConflicts.length) {
+      console.warn(`[VRM/RentalOps] direct import: ${oldBillingConflicts.length} switched tech(s) STILL on the old enterprise billing (double-billed): ${oldBillingConflicts.map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}`);
+    } else {
+      console.log("[VRM/RentalOps] direct import: old-billing comparison clean — no switched tech still open on the old enterprise book");
+    }
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] direct import: old-billing comparison failed (non-fatal):", e?.message || e);
+  }
+
   // best-effort enrichment, same as the MasterARI path (cached AMS = fast)
   let poLanded: number | undefined, openRepairTrucks: number | undefined, amsWithStatus: number | undefined;
   try {
@@ -888,5 +943,6 @@ export async function importDirectBillingReport(input: {
     totalCases: p.totalCases, resolved: p.resolved, review: p.review, exception: p.exception,
     dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus,
     headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
+    oldBillingConflicts,
   };
 }

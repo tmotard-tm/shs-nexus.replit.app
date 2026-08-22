@@ -15,7 +15,7 @@ import JSZip from "jszip";
 import {
   parseSharedStrings, parseSheetXml, parseXlsxGrid, mapDirectRows,
   coerceReportDate, extractReplacesTicket, resolveDirectRow, buildDirectCases,
-  assertPlausibleReport,
+  assertPlausibleReport, findOldBillingConflicts,
   type DirectBillingRow, type DirectResolveCtx, type RosterLite,
 } from "../server/vrm/rental-operations/direct-billing-import";
 
@@ -451,6 +451,37 @@ test("switchovers: a RESOLVED identity WITHOUT a roster racf never stamps (no LD
   assert.equal(res.ldap, null);
   const { switchovers } = buildDirectCases([row({ replacesTicket: "7H2K9Q" })], ctx, Date.now());
   assert.equal(switchovers.size, 0);
+});
+
+// ── old-billing comparison ───────────────────────────────────────────────────
+
+test("old-billing comparison: only SWITCHED techs still open/rolled on the old book conflict", () => {
+  const rows = [
+    // switched + old ticket still open -> conflict
+    { ldap: "CMORAL1", tech_name: "MORALES,CARLOS J", truck_number: "23132",
+      direct_billing_confirmed_at: "2026-08-22T15:00:00Z", holman_book_state: "open",
+      anchor_tickets: "7H2K9Q" },
+    // switched + old ticket ROLLED past the swap -> conflict too (double-billing shape)
+    { ldap: "NOKONK1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+      holman_book_state: "rolled", anchor_tickets: "" },
+    // switched + old book clear -> clean cutover, no conflict
+    { ldap: "COKONK1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+      holman_book_state: "", anchor_tickets: "AB12CD" },
+    // NOT switched + old book open -> not this comparison's business
+    { ldap: "JRIVER1", direct_billing_confirmed_at: null, holman_book_state: "open",
+      anchor_tickets: "ZZ99XX" },
+    // switched + pended/unanchored -> never a conflict (unknown ≠ double-billed)
+    { ldap: "PKANTZ1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+      holman_book_state: "pended", anchor_tickets: "" },
+    { ldap: "LSLATE1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+      holman_book_state: "unanchored", anchor_tickets: "" },
+  ];
+  const conflicts = findOldBillingConflicts(rows as any);
+  assert.deepEqual(conflicts.map((c) => c.ldap).sort(), ["CMORAL1", "NOKONK1"]);
+  const first = conflicts.find((c) => c.ldap === "CMORAL1")!;
+  assert.equal(first.book_state, "open");
+  assert.equal(first.anchor_tickets, "7H2K9Q");
+  assert.equal(first.truck_number, "23132");
 });
 
 test("feed carries the resolution audit trail", () => {

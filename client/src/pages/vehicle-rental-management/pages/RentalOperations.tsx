@@ -688,12 +688,23 @@ export default function RentalOperations() {
       const j = await res.json().catch(() => ({}));
       await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k })));
       const s = j?.result?.stats;
+      // The old-billing comparison (Tyler 2026-08-22): switched techs still
+      // open on the OLD enterprise book are double-billed — that deserves its
+      // own loud toast, not a clause buried in the import summary.
+      const conflicts: any[] = j?.result?.oldBillingConflicts ?? [];
       toast({
         title: "Direct-billing report imported",
         description: s
-          ? `${j?.result?.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review`
+          ? `${j?.result?.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review · ${j?.result?.switchoverStamped ?? 0} cutover switchovers stamped`
           : `${j?.result?.totalCases ?? "?"} cases`,
       });
+      if (conflicts.length) {
+        toast({
+          title: `${conflicts.length} tech${conflicts.length === 1 ? "" : "s"} still on the OLD enterprise billing`,
+          description: `Switched to direct billing but the old ticket is still open (double-billed): ${conflicts.slice(0, 6).map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}${conflicts.length > 6 ? ` +${conflicts.length - 6} more` : ""} — see Cutover Tracking.`,
+          variant: "destructive",
+        });
+      }
     },
     onError: (e: any) => toast({ title: "Direct-billing import failed", description: String(e?.message || e), variant: "destructive" }),
   });

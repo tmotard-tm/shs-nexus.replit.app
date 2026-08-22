@@ -85,6 +85,8 @@ interface Payload {
   by_holman_book?: Record<string, number>;
   /** rows confirmed billing on the direct account (seen on the direct report) */
   billing_switched?: number;
+  /** switched rows STILL open/rolled on the old enterprise book (double-billed) */
+  double_billed?: number;
   /** Enterprise book snapshot freshness — the truth ceiling of every book state. */
   book?: {
     as_of: string | null;
@@ -134,6 +136,27 @@ function bookTone(state: string | null | undefined): { label: string; fg: string
   return { label: "off the book", fg: colors.greenDeep, bg: colors.greenDeepLight, bold: false };
 }
 
+/**
+ * The direct-vs-Holman billing comparison bucket (Tyler 2026-08-22: "we have
+ * to know on the cutover page who is still being billed by Holman, especially
+ * if they are also being billed on the new direct billing report"). ONE
+ * predicate shared by the KPI, the facet panel, the row tint, the cell
+ * warning and the CSV so they can never disagree.
+ */
+function billingKeyOf(r: Row): "double" | "switched" | "not_on_direct" {
+  const onOldBook = r.holman_book_state === "open" || r.holman_book_state === "rolled";
+  // != null, not truthiness: the server's double_billed count uses non-null,
+  // and the two predicates must never disagree.
+  if (r.direct_billing_confirmed_at != null) return onOldBook ? "double" : "switched";
+  return "not_on_direct";
+}
+
+const BILLING_TONE: Record<string, { label: string; fg: string; bg: string }> = {
+  double:        { label: "DOUBLE BILLED — direct + Holman", fg: colors.red,       bg: colors.redLight },
+  switched:      { label: "switched — old book clear",        fg: colors.greenDeep, bg: colors.greenDeepLight },
+  not_on_direct: { label: "not on direct report yet",         fg: colors.inkMuted,  bg: colors.accentLight },
+};
+
 function fmtDate(s: string | null): string {
   if (!s) return "";
   const d = new Date(s);
@@ -158,6 +181,7 @@ export default function CutoverTracking() {
   const [stageFilter, setStageFilter] = useState<string[]>([]);
   const [dayFilter, setDayFilter] = useState<string[]>([]);
   const [bookFilter, setBookFilter] = useState<string[]>([]);
+  const [billingFilter, setBillingFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<{ col: string | null; dir: SortDir }>({ col: null, dir: null });
 
   const rows = data?.rows ?? [];
@@ -186,12 +210,22 @@ export default function CutoverTracking() {
     return m;
   }, [rows]);
 
+  const billingCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of rows) {
+      const k = billingKeyOf(r);
+      m[k] = (m[k] || 0) + 1;
+    }
+    return m;
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let out = rows.filter((r) => {
       if (stageFilter.length && !stageFilter.includes(r.stage)) return false;
       if (dayFilter.length && !dayFilter.includes(r.route_block_date || "(not scheduled)")) return false;
       if (bookFilter.length && !bookFilter.includes(r.holman_book_state ?? "")) return false;
+      if (billingFilter.length && !billingFilter.includes(billingKeyOf(r))) return false;
       if (!q) return true;
       return [r.ldap, r.tech_name, r.truck_number, r.branch_name, r.etd_reference,
               r.rental_branch_city, r.holman_book_state, r.anchor_tickets]
@@ -209,7 +243,7 @@ export default function CutoverTracking() {
       });
     }
     return out;
-  }, [rows, search, stageFilter, dayFilter, bookFilter, sort]);
+  }, [rows, search, stageFilter, dayFilter, bookFilter, billingFilter, sort]);
 
   function toggleSort(col: string) {
     setSort((s) =>
@@ -243,9 +277,10 @@ export default function CutoverTracking() {
       ["Book match", (r) => r.holman_book_match ?? ""],
       ["Anchor tickets", (r) => r.anchor_tickets ?? ""],
       ["Book as of", () => data?.book?.as_of ?? ""],
-      ["Billing switched", (r) => r.direct_billing_confirmed_at ? "yes" : ""],
+      ["Billing switched", (r) => r.direct_billing_confirmed_at != null ? "yes" : ""],
       ["Switch confirmed", (r) => r.direct_billing_confirmed_at ?? ""],
       ["Direct-billing RA", (r) => r.direct_billing_ra ?? ""],
+      ["Double billed", (r) => billingKeyOf(r) === "double" ? "yes" : ""],
     ];
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const csv = [cols.map((c) => esc(c[0])).join(",")]
@@ -269,7 +304,12 @@ export default function CutoverTracking() {
   ).length;
   const rolled = rows.filter((r) => r.holman_book_state === "rolled").length;
   const unanchored = rows.filter((r) => r.holman_book_state === "unanchored").length;
-  const billingSwitched = rows.filter((r) => r.direct_billing_confirmed_at).length;
+  const billingSwitched = rows.filter((r) => r.direct_billing_confirmed_at != null).length;
+  // Switched to the direct account yet still open/rolled on the OLD enterprise
+  // book — the comparison the direct-billing import runs; these are double-
+  // billed until the old ticket closes. Same predicate as the server's
+  // double_billed count so the card and the rows can never disagree.
+  const doubleBilled = rows.filter((r) => billingKeyOf(r) === "double").length;
 
   const card = {
     background: colors.surface, border: `1px solid ${colors.rule}`,
@@ -331,6 +371,9 @@ export default function CutoverTracking() {
       sub: "no old ticket on record — book state unknown" },
     { label: "Billing switched", value: billingSwitched, icon: CheckCircle2, tone: colors.greenDeep,
       sub: "confirmed on the Enterprise direct-billing report" },
+    { label: "Double billed", value: doubleBilled, icon: AlertTriangle,
+      tone: doubleBilled > 0 ? colors.red : colors.inkMuted,
+      sub: "switched to direct but STILL on the old enterprise book" },
   ];
 
   const book = data?.book;
@@ -400,7 +443,8 @@ export default function CutoverTracking() {
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))",
+                    gap: 12, marginBottom: 18 }}>
         <div style={card}>
           <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
                         letterSpacing: "0.05em", textTransform: "uppercase",
@@ -477,6 +521,37 @@ export default function CutoverTracking() {
             );
           })}
         </div>
+
+        <div style={card}>
+          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
+                        letterSpacing: "0.05em", textTransform: "uppercase",
+                        color: colors.inkMuted, marginBottom: 10 }}>
+            Billing comparison (direct vs Holman)
+          </div>
+          {(["double", "switched", "not_on_direct"] as const)
+            // Keep a bucket visible while it is ACTIVELY selected even if its
+            // count dropped to zero on a refresh — otherwise the filter that
+            // is emptying the table has no visible control to switch off.
+            .filter((k) => billingCounts[k] || billingFilter.includes(k))
+            .map((k) => {
+              const tone = BILLING_TONE[k];
+              const on = billingFilter.includes(k);
+              return (
+                <button key={k}
+                  onClick={() => setBillingFilter((f) => on ? f.filter((x) => x !== k) : [...f, k])}
+                  style={{ display: "flex", width: "100%", alignItems: "center", gap: 8,
+                           padding: "5px 8px", marginBottom: 3, borderRadius: 7, cursor: "pointer",
+                           border: `1px solid ${on ? tone.fg : "transparent"}`,
+                           background: on ? tone.bg : "transparent", textAlign: "left" }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 3, background: tone.fg }} />
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
+                                 flex: 1, fontWeight: k === "double" ? 700 : 400 }}>{tone.label}</span>
+                  <span style={{ fontFamily: fonts.jetbrains, fontSize: 13, fontWeight: 700,
+                                 color: tone.fg }}>{billingCounts[k] ?? 0}</span>
+                </button>
+              );
+            })}
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
@@ -489,8 +564,8 @@ export default function CutoverTracking() {
                           border: `1px solid ${colors.rule}`, background: colors.surface,
                           fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }} />
         </div>
-        {(stageFilter.length > 0 || dayFilter.length > 0 || bookFilter.length > 0 || search) && (
-          <button onClick={() => { setStageFilter([]); setDayFilter([]); setBookFilter([]); setSearch(""); }}
+        {(stageFilter.length > 0 || dayFilter.length > 0 || bookFilter.length > 0 || billingFilter.length > 0 || search) && (
+          <button onClick={() => { setStageFilter([]); setDayFilter([]); setBookFilter([]); setBillingFilter([]); setSearch(""); }}
                   style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 11px",
                            borderRadius: 8, border: `1px solid ${colors.rule}`,
                            background: colors.surface, cursor: "pointer",
@@ -536,8 +611,11 @@ export default function CutoverTracking() {
           <tbody>
             {filtered.map((r) => {
               const tone = stageTone(r.stage);
+              // A double-billed technician is the row this page exists to
+              // surface — tint the whole line so it cannot hide in the table.
+              const isDouble = billingKeyOf(r) === "double";
               return (
-                <tr key={r.ldap}>
+                <tr key={r.ldap} style={isDouble ? { background: colors.redLight } : undefined}>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.ldap}</td>
                   <td style={td}>{r.tech_name}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>
@@ -617,13 +695,19 @@ export default function CutoverTracking() {
                       title={r.direct_billing_ra
                         ? `RA ${r.direct_billing_ra}${r.direct_billing_file_date ? ` · report ${r.direct_billing_file_date}` : ""}`
                         : undefined}>
-                    {r.direct_billing_confirmed_at
+                    {r.direct_billing_confirmed_at != null
                       ? <span style={{ color: colors.greenDeep, fontWeight: 700 }}>
                           switched ✓
                           <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 400,
                                         color: colors.inkMuted }}>
                             {fmtDate(r.direct_billing_confirmed_at)}
                           </div>
+                          {isDouble && (
+                            <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
+                                          color: colors.red }}>
+                              ⚠ still on old book
+                            </div>
+                          )}
                         </span>
                       : <span style={{ color: colors.inkMuted }}>—</span>}
                   </td>

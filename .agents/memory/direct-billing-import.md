@@ -28,5 +28,12 @@ The import stamps `vrm_rental_cutover.direct_billing_confirmed_at` for every ide
 - Deliberately OUTSIDE cutover-anchor.ts Holman-book logic: that lane anchors the OLD `source='enterprise'` ECARS tickets; this stamp confirms the NEW direct-billed rental. Keep them separate.
 - Stamp runs best-effort after case persist (non-fatal on failure — next upload re-stamps idempotently).
 
+## Old-billing comparison (double-billed = switched + still on Holman book)
+Tyler's control question: "who is still billed by Holman, especially if also on the new direct report."
+- **One predicate everywhere:** double-billed = `direct_billing_confirmed_at != null` AND `holman_book_state IN ('open','rolled')`. Server (`findOldBillingConflicts` + payload `double_billed`) and client (`billingKeyOf` — KPI, facet, row tint, cell warning, CSV) must share it; non-null check, never truthiness.
+- Book state is NEVER re-derived: the comparison is a pure filter over `buildCutoverStatusPayload()` rows (single source of the anchored-ticket join). Import calls it AFTER the stamp via dynamic import, best-effort — a payload hiccup can't fail the upload, but a comparison warning in logs means "no result", not "clean".
+- 'pended'/'unanchored'/'' never conflict — unknown ≠ double-billed. 'rolled' DOES conflict (old ticket rewritten past swap = the classic double-bill shape).
+- Facet UI: an actively-selected zero-count bucket must stay rendered or the filter emptying the table has no visible off-switch.
+
 ## Destructive imports need role gates
 Full-state report imports are admin/developer-gated (`requireImportOperator`, before multer) — the `/api/vrm` session check only proves login (same lesson as fs-router-auth-gap).

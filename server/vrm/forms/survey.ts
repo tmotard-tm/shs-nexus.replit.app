@@ -1954,6 +1954,10 @@ export async function buildCutoverStatusPayload(): Promise<any> {
         by_holman_book: tally("holman_book_state"),
         // positive direct-billing-report confirmations among these rows
         billing_switched: (rows as any[]).filter((r) => r.direct_billing_confirmed_at != null).length,
+        // switched to the direct account yet STILL open/rolled on the old
+        // enterprise book — double-billed; the old ticket needs closing
+        double_billed: (rows as any[]).filter((r) => r.direct_billing_confirmed_at != null
+          && (r.holman_book_state === "open" || r.holman_book_state === "rolled")).length,
         book: {
           as_of: bookMeta.as_of ?? null,
           landed_at: bookMeta.landed_at ?? null,
