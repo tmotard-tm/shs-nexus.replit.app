@@ -15,8 +15,8 @@ import JSZip from "jszip";
 import {
   parseSharedStrings, parseSheetXml, parseXlsxGrid, mapDirectRows,
   coerceReportDate, extractReplacesTicket, resolveDirectRow, buildDirectCases,
-  assertPlausibleReport, findOldBillingConflicts,
-  type DirectBillingRow, type DirectResolveCtx, type RosterLite,
+  assertPlausibleReport, findOldBillingConflicts, importDirectBillingReport,
+  type DirectBillingRow, type DirectResolveCtx, type RosterLite, type DirectImportDeps,
 } from "../server/vrm/rental-operations/direct-billing-import";
 
 // ── fixture builders ─────────────────────────────────────────────────────────
@@ -495,6 +495,118 @@ test("old-billing comparison: only EFFECTIVELY switched techs still open/rolled 
   assert.equal(first.book_state, "open");
   assert.equal(first.anchor_tickets, "7H2K9Q");
   assert.equal(first.truck_number, "23132");
+});
+
+// ── importer step-failure wiring ─────────────────────────────────────────────
+// A failed upload must never quietly look like a clean double-billing check:
+// when the stamp or comparison step throws mid-import, the result MUST carry
+// status 'failed' — never 'ok', never absent. Collaborators are injected via
+// the importer's test seam; the try/catch orchestration under test is the
+// REAL importDirectBillingReport body.
+
+/** ctx where the fixture row resolves (so a switchover sighting exists). */
+function resolvableCtx(): DirectResolveCtx {
+  const r = roster({});
+  return ctxOf({
+    intentByConfirmation: new Map([["777", { ldap: "CMORAL1", techName: null, truckNumber: null }]]),
+    rosterByRacf: new Map([["CMORAL1", r]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+    // deliberately NO techTruckByLdap: truckless keeps the PO-land path idle
+  });
+}
+
+function importDeps(over: Partial<DirectImportDeps> = {}): Partial<DirectImportDeps> {
+  return {
+    loadCtx: async () => resolvableCtx(),
+    persist: async () => ({
+      runId: "run-test", resolved: 1, review: 0, exception: 0, dropped: 0,
+      totalCases: 1, enterpriseCount: 0, holmanCount: 0, pendedCount: 0,
+    }),
+    stampSwitchover: async () => ({ techs: 1, stamped: 1, unmatched: [] }),
+    buildCutoverPayload: async () => ({ rows: [], book: { as_of: "2026-08-21", age_days: 1, stale: false } }),
+    landPoHistory: async () => ({ posLanded: 0, openRepairTrucks: 0 }),
+    enrichAms: async () => ({ withStatus: 0 }),
+    ...over,
+  };
+}
+
+test("importer: a throwing stamp step lands switchoverStampStatus 'failed' — the import still succeeds", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ stampSwitchover: async () => { throw new Error("vrm_rental_cutover: connection reset mid-UPDATE"); } }),
+  );
+  assert.equal(res.switchoverStampStatus, "failed");
+  // the failed step's numbers must be ABSENT, not zero-shaped-clean
+  assert.equal(res.switchoverStamped, undefined);
+  assert.equal(res.switchoverTechs, undefined);
+  assert.equal(res.switchoverUnmatchedLdaps, undefined);
+  // the comparison still ran and reports independently
+  assert.equal(res.oldBillingComparisonStatus, "ok");
+  assert.equal(res.runId, "run-test", "a stamp failure must never fail the import itself");
+});
+
+test("importer: a throwing old-book comparison lands oldBillingComparisonStatus 'failed' while the stamp stays 'ok'", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ buildCutoverPayload: async () => { throw new Error("payload query timeout"); } }),
+  );
+  assert.equal(res.oldBillingComparisonStatus, "failed");
+  // no conflicts array: 'failed' + undefined, never an empty-array-that-reads-clean
+  assert.equal(res.oldBillingConflicts, undefined);
+  assert.equal(res.oldBookAsOf, undefined);
+  assert.equal(res.switchoverStampStatus, "ok");
+  assert.equal(res.switchoverStamped, 1);
+});
+
+test("importer: both steps failing yields 'failed'/'failed' and the statuses are ALWAYS present keys", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({
+      stampSwitchover: async () => { throw new Error("boom-stamp"); },
+      buildCutoverPayload: async () => { throw new Error("boom-payload"); },
+    }),
+  );
+  assert.equal(res.switchoverStampStatus, "failed");
+  assert.equal(res.oldBillingComparisonStatus, "failed");
+  // the keys must exist on the result object — absent would render as clean
+  assert.ok("switchoverStampStatus" in res);
+  assert.ok("oldBillingComparisonStatus" in res);
+  assert.equal(res.runId, "run-test");
+});
+
+test("importer: clean run reports 'ok'/'ok' and carries conflicts, unmatched LDAPs and book freshness through", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({
+      stampSwitchover: async () => ({ techs: 1, stamped: 0, unmatched: ["CMORAL1"] }),
+      buildCutoverPayload: async () => ({
+        rows: [{ ldap: "CMORAL1", direct_billing_effective: true, holman_book_state: "open", anchor_tickets: "7H2K9Q" }],
+        book: { as_of: "2026-08-20", age_days: 2, stale: false },
+      }),
+    }),
+  );
+  assert.equal(res.switchoverStampStatus, "ok");
+  assert.equal(res.oldBillingComparisonStatus, "ok");
+  assert.deepEqual(res.switchoverUnmatchedLdaps, ["CMORAL1"]);
+  assert.equal(res.oldBillingConflicts?.length, 1);
+  assert.equal(res.oldBillingConflicts?.[0].ldap, "CMORAL1");
+  assert.equal(res.oldBookAsOf, "2026-08-20");
+  assert.equal(res.oldBookAgeDays, 2);
+  assert.equal(res.oldBookStale, false);
+});
+
+test("importer: unknown book freshness reads STALE, never fresh", async () => {
+  const noBook = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ buildCutoverPayload: async () => ({ rows: [] }) }), // no book meta at all
+  );
+  assert.equal(noBook.oldBillingComparisonStatus, "ok");
+  assert.equal(noBook.oldBookStale, true, "missing book meta must read as stale");
+  const nullStale = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ buildCutoverPayload: async () => ({ rows: [], book: { as_of: null, age_days: null, stale: true } }) }),
+  );
+  assert.equal(nullStale.oldBookStale, true);
 });
 
 test("feed carries the resolution audit trail", () => {

@@ -889,12 +889,27 @@ export interface DirectImportResult extends IngestResult {
   oldBookStale?: boolean;
 }
 
+/**
+ * Test seam: every DB/side-effect collaborator of the importer is injectable
+ * so the failure wiring (a throwing step MUST land status 'failed', never
+ * 'ok', never absent) is provable without a database. Production callers pass
+ * nothing and get the real implementations — behavior is unchanged.
+ */
+export interface DirectImportDeps {
+  loadCtx: typeof loadDirectResolveCtx;
+  persist: typeof persistRentalCases;
+  stampSwitchover: typeof stampCutoverBillingSwitchover;
+  buildCutoverPayload: () => Promise<any>;
+  landPoHistory: (trucks: string[]) => Promise<{ posLanded: number; openRepairTrucks: number }>;
+  enrichAms: () => Promise<{ withStatus: number }>;
+}
+
 export async function importDirectBillingReport(input: {
   buffer?: Buffer;
   rows?: DirectBillingRow[];       // pre-parsed (tests / JSON path)
   fileDate?: string | null;
   sourceLabel?: string;
-}): Promise<DirectImportResult> {
+}, deps: Partial<DirectImportDeps> = {}): Promise<DirectImportResult> {
   const now = Date.now();
   let rows = input.rows ?? [];
   let headerRow = -1, matchedCols = 0;
@@ -908,10 +923,10 @@ export async function importDirectBillingReport(input: {
   }
   assertPlausibleReport(rows);
 
-  const ctx = await loadDirectResolveCtx();
+  const ctx = await (deps.loadCtx ?? loadDirectResolveCtx)();
   const { cases, presets, stats, switchovers } = buildDirectCases(rows, ctx, now);
 
-  const p = await persistRentalCases({
+  const p = await (deps.persist ?? persistRentalCases)({
     runType: "manual_direct_billing_import",
     sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
     fileDate: input.fileDate ?? null,
@@ -929,7 +944,7 @@ export async function importDirectBillingReport(input: {
   let switchoverUnmatchedLdaps: string[] | undefined;
   let switchoverStampStatus: "ok" | "failed" = "failed";
   try {
-    const st = await stampCutoverBillingSwitchover(switchovers, {
+    const st = await (deps.stampSwitchover ?? stampCutoverBillingSwitchover)(switchovers, {
       fileDate: input.fileDate ?? null,
       sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
     });
@@ -951,8 +966,11 @@ export async function importDirectBillingReport(input: {
   let oldBookAgeDays: number | null | undefined;
   let oldBookStale: boolean | undefined;
   try {
-    const { buildCutoverStatusPayload } = await import("../forms/survey");
-    const payload = await buildCutoverStatusPayload();
+    const buildPayload = deps.buildCutoverPayload ?? (async () => {
+      const { buildCutoverStatusPayload } = await import("../forms/survey");
+      return buildCutoverStatusPayload();
+    });
+    const payload = await buildPayload();
     oldBillingConflicts = findOldBillingConflicts(payload?.rows ?? []);
     // Freshness of the OLD book snapshot the comparison ran against
     // (premortem #5): unknown age reads as stale, never as fresh.
@@ -972,18 +990,24 @@ export async function importDirectBillingReport(input: {
   // best-effort enrichment, same as the MasterARI path (cached AMS = fast)
   let poLanded: number | undefined, openRepairTrucks: number | undefined, amsWithStatus: number | undefined;
   try {
-    const { landPoHistory } = await import("./po-history");
+    const land = deps.landPoHistory ?? (async (trucks: string[]) => {
+      const { landPoHistory } = await import("./po-history");
+      return landPoHistory(trucks);
+    });
     const trucked = cases.map((c) => c.vehicle_number_padded).filter(Boolean);
     if (trucked.length) {
-      const po = await landPoHistory(trucked);
+      const po = await land(trucked);
       poLanded = po.posLanded; openRepairTrucks = po.openRepairTrucks;
     }
   } catch (e: any) {
     console.warn("[VRM/RentalOps] direct import PO land failed (non-fatal):", e?.message || e);
   }
   try {
-    const { enrichCasesWithAms } = await import("./ams-enrich");
-    const ams = await enrichCasesWithAms({ cachedOnly: true });
+    const enrich = deps.enrichAms ?? (async () => {
+      const { enrichCasesWithAms } = await import("./ams-enrich");
+      return enrichCasesWithAms({ cachedOnly: true });
+    });
+    const ams = await enrich();
     amsWithStatus = ams.withStatus;
   } catch (e: any) {
     console.warn("[VRM/RentalOps] direct import AMS enrich failed (non-fatal):", e?.message || e);

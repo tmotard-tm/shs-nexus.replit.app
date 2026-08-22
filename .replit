@@ -172,6 +172,10 @@ args = "bucket-queue-unit"
 task = "workflow.run"
 args = "cutover-orchestrator-unit"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "cutover-intents-db"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -292,9 +296,9 @@ args = "npx tsx --test tests/cutover-orchestrator-unit.test.ts tests/cutover-rou
 name = "cutover-intents-db"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts tests/direct-billing-void-db.test.ts"
