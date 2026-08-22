@@ -138,6 +138,23 @@ export function requireCronOrStaff(req: any, res: any, next: any): void {
 }
 
 /**
+ * Audited human-correction actions: a signed-in session ONLY. The internal
+ * cron bearer is deliberately REJECTED — these routes exist to append "WHO
+ * did WHAT and WHY" to an audit history, and a bearer-only call has no
+ * identity, so the actor would be recorded as "unknown", defeating the
+ * trail's entire purpose. If an automation ever legitimately needs to void,
+ * it must be given a named service identity, not the shared cron key.
+ * Exported for route auth tests.
+ */
+export function requireStaffSession(req: any, res: any, next: any): void {
+  if (req.user) return next();
+  res.status(403).json({
+    message: "signed-in session required — this is an audited action and the actor must be a named person (the internal-cron bearer is not accepted here)",
+    code: "session_only",
+  });
+}
+
+/**
  * LIVE-mode RBAC (repair spec §6, dark phase only): while the arming flag is
  * OFF, any session-lane mutation that creates or advances a LIVE intent
  * requires an admin/developer session. Once VRM_CONTRACT_BLOCK_ENABLED is

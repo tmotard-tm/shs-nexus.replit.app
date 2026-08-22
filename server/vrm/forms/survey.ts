@@ -20,7 +20,7 @@ import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { sendStandardActivity } from "../dca-task-client";
 import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
-import { requireCronOrStaff } from "./cutover-intents-routes";
+import { requireCronOrStaff, requireStaffSession } from "./cutover-intents-routes";
 import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 import { buildCutoverBlockArgs } from "./cutover-block-args";
 import { anchorCutoverRow } from "./cutover-anchor";
@@ -1735,10 +1735,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    *          automatically (last_seen_at > voided_at) — fresh vendor
    *          evidence beats a stale human assertion.
    * unvoid — reverses a mistaken void. Requires a reason too; both events
-   *          are logged with the actor. Session-only in practice (the path
-   *          is not on the cron-bearer allowlist).
+   *          are logged with the actor. Session-only, ENFORCED: the gate is
+   *          requireStaffSession, which rejects the internal-cron bearer, so
+   *          the audit actor can never be "unknown" — every event names the
+   *          signed-in person who took it.
    */
-  router.post("/forms/rental-survey/cutover/:ldap/billing-void", requireCronOrStaff, async (req, res) => {
+  router.post("/forms/rental-survey/cutover/:ldap/billing-void", requireStaffSession, async (req, res) => {
     try {
       const ldap = String(req.params.ldap || "").trim().toUpperCase();
       const action = String(req.body?.action || "void");

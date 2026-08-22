@@ -74,10 +74,14 @@ async function payloadRow(ldap: string): Promise<any> {
   return (payload.rows as any[]).find((r) => String(r.ldap ?? "").toUpperCase() === ldap);
 }
 
-async function postVoid(ldap: string, body: Record<string, unknown>): Promise<{ status: number; body: any }> {
+async function postVoid(
+  ldap: string,
+  body: Record<string, unknown>,
+  extraHeaders: Record<string, string> = {},
+): Promise<{ status: number; body: any }> {
   const res = await fetch(`${baseUrl}/api/vrm/forms/rental-survey/cutover/${ldap}/billing-void`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...extraHeaders },
     body: JSON.stringify(body),
   });
   return { status: res.status, body: await res.json().catch(() => null) };
@@ -91,9 +95,13 @@ before(async () => {
 
   const app = express();
   app.use(express.json());
-  // requireCronOrStaff passes any signed-in session; the route reads
-  // user.username as the audit actor.
-  app.use((req, _res, next) => { (req as any).user = { username: ACTOR, role: "admin" }; next(); });
+  // requireStaffSession passes only a signed-in session; the route reads
+  // user.username as the audit actor. Requests carrying x-test-anon get NO
+  // req.user, simulating a bearer-only automation call for the auth tests.
+  app.use((req, _res, next) => {
+    if (!req.headers["x-test-anon"]) (req as any).user = { username: ACTOR, role: "admin" };
+    next();
+  });
   const router = express.Router();
   registerRentalSurveyAdminRoutes(router);
   app.use("/api/vrm", router);
@@ -226,6 +234,50 @@ describe("predicate edge cases", () => {
     const row = await payloadRow(LDAP);
     assert.equal(typeof row.direct_billing_effective, "boolean");
     assert.equal(row.direct_billing_effective, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe("auth gate — the audit actor must be a named person, never the automation key", () => {
+  const LDAP = `${LDAP_PREFIX}AU1`;
+
+  test("a bearer-only request (VALID x-internal-cron, no session) is refused and mutates nothing", async () => {
+    const bearer = process.env.SESSION_SECRET || process.env.NEXUS_CRON_SECRET;
+    assert.ok(bearer, "test env must provide SESSION_SECRET or NEXUS_CRON_SECRET to prove the bearer lane is closed");
+    await insertCutover(LDAP);
+
+    const r = await postVoid(
+      LDAP,
+      { action: "void", reason: "automation should never be able to say this" },
+      { "x-test-anon": "1", "x-internal-cron": bearer! },
+    );
+    assert.equal(r.status, 403, "a valid cron bearer must NOT open the billing-void route");
+    assert.equal(r.body?.code, "session_only");
+
+    const row = await cutoverRow(LDAP);
+    assert.equal(row.direct_billing_voided_at, null, "refused bearer call must not void");
+    assert.equal(row.direct_billing_void_history, null, "refused bearer call must append NOTHING");
+  });
+
+  test("no session and no bearer is refused too", async () => {
+    const r = await postVoid(
+      LDAP,
+      { action: "void", reason: "anonymous calls have no audit identity" },
+      { "x-test-anon": "1" },
+    );
+    assert.equal(r.status, 403);
+    assert.equal(r.body?.code, "session_only");
+  });
+
+  test("a signed-in session still passes and the history names that person", async () => {
+    const r = await postVoid(LDAP, { action: "void", reason: "named-person void after bearer refusals" });
+    assert.equal(r.status, 200);
+    const row = await cutoverRow(LDAP);
+    assert.equal(row.direct_billing_voided_by, ACTOR, "the audit trail must name the signed-in person");
+    const hist = row.direct_billing_void_history as any[];
+    assert.equal(hist.length, 1, "only the session-lane void may have landed");
+    assert.equal(hist[0].by, ACTOR);
   });
 });
 
