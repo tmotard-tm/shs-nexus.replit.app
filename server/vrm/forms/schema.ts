@@ -960,5 +960,29 @@ export async function initFormsSchema(): Promise<void> {
     `);
   }
 
+  // Task #738: anchor each cutover to the SPECIFIC old Enterprise ticket(s)
+  // it is meant to end. The book-state match used to be truck-number-only, so
+  // a reassigned truck's NEW renter kept the old cutover "still billing"
+  // forever. book_anchor_tickets is the list of ticket numbers snapshotted at
+  // booking (or backfilled); book_anchor_detail carries the evidence rows.
+  // Same steady-state-zero-DDL pattern as the workflow mirror columns above.
+  const { rows: anchorCols } = await db.execute(sql`
+    SELECT count(*)::int AS n FROM information_schema.columns
+    WHERE table_name = 'vrm_rental_cutover'
+      AND column_name IN ('book_anchor_tickets','book_anchor_detail','book_anchor_at','book_anchor_source')
+  `);
+  if (Number((anchorCols as any[])[0]?.n ?? 0) < 4) {
+    await db.execute(sql`
+      BEGIN;
+      SET LOCAL lock_timeout = '5s';
+      ALTER TABLE vrm_rental_cutover
+        ADD COLUMN IF NOT EXISTS book_anchor_tickets jsonb,
+        ADD COLUMN IF NOT EXISTS book_anchor_detail  jsonb,
+        ADD COLUMN IF NOT EXISTS book_anchor_at      timestamptz,
+        ADD COLUMN IF NOT EXISTS book_anchor_source  text;
+      COMMIT;
+    `);
+  }
+
   console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover, vrm_rental_workflow_intents)");
 }

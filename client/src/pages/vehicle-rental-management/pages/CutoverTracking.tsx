@@ -52,8 +52,19 @@ interface Row {
   supervisor_ldap?: string | null;
   supervisor_phone?: string | null;
   stage: string;
-  /** '' off the Holman book, 'open' still billing on it, 'pended' closing. */
+  /**
+   * '' off the Holman book, 'open' still billing on it, 'rolled' the anchored
+   * ticket was rewritten with a rental start on/after the ETD pickup (possible
+   * double-billing), 'pended' closing, 'unanchored' no anchored ticket and no
+   * identity-verified truck match — the book state is unknown for this row.
+   */
   holman_book_state?: string | null;
+  /** 'anchored' driven by the row's own old ticket(s); 'fallback' identity-verified truck match; 'none'. */
+  holman_book_match?: string | null;
+  /** The anchored old Enterprise ticket number(s), comma-joined. */
+  anchor_tickets?: string | null;
+  book_anchor_at?: string | null;
+  book_anchor_source?: string | null;
 }
 
 interface Payload {
@@ -62,6 +73,13 @@ interface Payload {
   by_reservation: Record<string, number>;
   by_route_block: Record<string, number>;
   by_holman_book?: Record<string, number>;
+  /** Enterprise book snapshot freshness — the truth ceiling of every book state. */
+  book?: {
+    as_of: string | null;
+    landed_at: string | null;
+    age_days: number | null;
+    stale: boolean;
+  };
   rows: Row[];
 }
 
@@ -89,6 +107,21 @@ function stageTone(stage: string): { fg: string; bg: string } {
   return { fg: colors.inkMuted, bg: colors.accentLight };
 }
 
+/**
+ * One book-state → label/colour map so the column, the facet panel and the
+ * KPI all say the same thing. 'rolled' is deliberately louder than 'open':
+ * an anchored ticket restarted on/after the ETD pickup day is the old rental
+ * rolling past the swap — likely double-billing, not routine lag.
+ */
+function bookTone(state: string | null | undefined): { label: string; fg: string; bg: string; bold: boolean } {
+  const s = state ?? "";
+  if (s === "open") return { label: "still billing", fg: colors.amber, bg: colors.amberLight, bold: true };
+  if (s === "rolled") return { label: "rolled past swap", fg: colors.red, bg: colors.redLight, bold: true };
+  if (s === "pended") return { label: "pended", fg: colors.inkSoft, bg: colors.accentLight, bold: false };
+  if (s === "unanchored") return { label: "no anchor", fg: colors.inkMuted, bg: colors.accentLight, bold: false };
+  return { label: "off the book", fg: colors.greenDeep, bg: colors.greenDeepLight, bold: false };
+}
+
 function fmtDate(s: string | null): string {
   if (!s) return "";
   const d = new Date(s);
@@ -112,6 +145,7 @@ export default function CutoverTracking() {
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string[]>([]);
   const [dayFilter, setDayFilter] = useState<string[]>([]);
+  const [bookFilter, setBookFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<{ col: string | null; dir: SortDir }>({ col: null, dir: null });
 
   const rows = data?.rows ?? [];
@@ -131,14 +165,24 @@ export default function CutoverTracking() {
     return m;
   }, [rows]);
 
+  const bookCounts = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const r of rows) {
+      const k = r.holman_book_state ?? "";
+      m[k] = (m[k] || 0) + 1;
+    }
+    return m;
+  }, [rows]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     let out = rows.filter((r) => {
       if (stageFilter.length && !stageFilter.includes(r.stage)) return false;
       if (dayFilter.length && !dayFilter.includes(r.route_block_date || "(not scheduled)")) return false;
+      if (bookFilter.length && !bookFilter.includes(r.holman_book_state ?? "")) return false;
       if (!q) return true;
       return [r.ldap, r.tech_name, r.truck_number, r.branch_name, r.etd_reference,
-              r.rental_branch_city, r.holman_book_state]
+              r.rental_branch_city, r.holman_book_state, r.anchor_tickets]
         .some((v) => String(v ?? "").toLowerCase().includes(q));
     });
     if (sort.col && sort.dir) {
@@ -153,7 +197,7 @@ export default function CutoverTracking() {
       });
     }
     return out;
-  }, [rows, search, stageFilter, dayFilter, sort]);
+  }, [rows, search, stageFilter, dayFilter, bookFilter, sort]);
 
   function toggleSort(col: string) {
     setSort((s) =>
@@ -183,6 +227,10 @@ export default function CutoverTracking() {
       ["Supervisor phone", (r) => r.supervisor_phone ?? ""],
       ["Block live", (r) => r.route_block_live == null ? "" : r.route_block_live ? "yes" : "TEST"],
       ["Block problem", (r) => r.route_block_error ?? ""],
+      ["On Holman book", (r) => bookTone(r.holman_book_state).label],
+      ["Book match", (r) => r.holman_book_match ?? ""],
+      ["Anchor tickets", (r) => r.anchor_tickets ?? ""],
+      ["Book as of", () => data?.book?.as_of ?? ""],
     ];
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const csv = [cols.map((c) => esc(c[0])).join(",")]
@@ -201,7 +249,11 @@ export default function CutoverTracking() {
   const blocked = rows.filter(
     (r) => r.route_block_status === "filed" && r.route_block_live === true,
   ).length;
-  const stillOnBook = rows.filter((r) => r.holman_book_state === "open").length;
+  const stillOnBook = rows.filter(
+    (r) => r.holman_book_state === "open" || r.holman_book_state === "rolled",
+  ).length;
+  const rolled = rows.filter((r) => r.holman_book_state === "rolled").length;
+  const unanchored = rows.filter((r) => r.holman_book_state === "unanchored").length;
 
   const card = {
     background: colors.surface, border: `1px solid ${colors.rule}`,
@@ -254,8 +306,16 @@ export default function CutoverTracking() {
     { label: "Route block filed", value: blocked, icon: CalendarClock, tone: colors.purple,
       sub: `${rows.length - blocked} have no live block` },
     { label: "Still on the Holman book", value: stillOnBook, icon: AlertTriangle, tone: colors.amber,
-      sub: "booked, but the car has not been collected" },
+      sub: rolled > 0
+        ? `${rolled} rolled past the swap — possible double-billing`
+        : "their own old ticket is still open" },
+    { label: "Rolled past swap", value: rolled, icon: AlertTriangle, tone: colors.red,
+      sub: "old ticket restarted on/after the ETD pickup day" },
+    { label: "No anchor", value: unanchored, icon: AlertTriangle, tone: colors.inkMuted,
+      sub: "no old ticket on record — book state unknown" },
   ];
+
+  const book = data?.book;
 
   return (
     <div style={{ padding: "22px 26px", background: colors.background, minHeight: "100%" }}>
@@ -277,10 +337,30 @@ export default function CutoverTracking() {
         </button>
       </div>
       <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft,
-                  margin: "0 0 18px" }}>
+                  margin: "0 0 10px" }}>
         Complete records only: a technician appears here once their Enterprise reservation is
         booked and their route block is filed. Until both happen, they are not on this page.
       </p>
+
+      {/* The book column is only as truthful as the snapshot behind it — the
+          Enterprise sync has gapped 3–6 days. Say WHEN the book was last read,
+          loudly when that was days ago, so "still billing" reads as "still
+          billing as of the 19th", never as live truth. */}
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 7, marginBottom: 18,
+                    padding: "6px 12px", borderRadius: 8,
+                    border: `1px solid ${book?.stale ? colors.amber : colors.rule}`,
+                    background: book?.stale ? colors.amberLight : colors.surface }}>
+        {book?.stale && <AlertTriangle size={14} color={colors.amber} />}
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 12.5,
+                       color: book?.stale ? colors.amber : colors.inkSoft,
+                       fontWeight: book?.stale ? 700 : 400 }}>
+          {book?.as_of
+            ? <>Enterprise book snapshot as of {fmtDay(book.as_of)}
+                {book.age_days != null && book.age_days > 0 && ` (${book.age_days} day${book.age_days === 1 ? "" : "s"} old)`}
+                {book.stale && " — STALE, book states may lag reality"}</>
+            : "Enterprise book snapshot date unknown — book states cannot be trusted"}
+        </span>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))",
                     gap: 12, marginBottom: 18 }}>
@@ -302,7 +382,7 @@ export default function CutoverTracking() {
         ))}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 18 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 18 }}>
         <div style={card}>
           <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
                         letterSpacing: "0.05em", textTransform: "uppercase",
@@ -353,6 +433,32 @@ export default function CutoverTracking() {
             );
           })}
         </div>
+
+        <div style={card}>
+          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
+                        letterSpacing: "0.05em", textTransform: "uppercase",
+                        color: colors.inkMuted, marginBottom: 10 }}>
+            On Holman book{book?.as_of ? ` (as of ${fmtDay(book.as_of)})` : ""}
+          </div>
+          {Object.entries(bookCounts).sort((a, b) => b[1] - a[1]).map(([k, n]) => {
+            const tone = bookTone(k);
+            const on = bookFilter.includes(k);
+            return (
+              <button key={k || "(off)"}
+                onClick={() => setBookFilter((f) => on ? f.filter((x) => x !== k) : [...f, k])}
+                style={{ display: "flex", width: "100%", alignItems: "center", gap: 8,
+                         padding: "5px 8px", marginBottom: 3, borderRadius: 7, cursor: "pointer",
+                         border: `1px solid ${on ? tone.fg : "transparent"}`,
+                         background: on ? tone.bg : "transparent", textAlign: "left" }}>
+                <span style={{ width: 9, height: 9, borderRadius: 3, background: tone.fg }} />
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
+                               flex: 1 }}>{tone.label}</span>
+                <span style={{ fontFamily: fonts.jetbrains, fontSize: 13, fontWeight: 700,
+                               color: tone.fg }}>{n}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
@@ -365,8 +471,8 @@ export default function CutoverTracking() {
                           border: `1px solid ${colors.rule}`, background: colors.surface,
                           fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }} />
         </div>
-        {(stageFilter.length > 0 || dayFilter.length > 0 || search) && (
-          <button onClick={() => { setStageFilter([]); setDayFilter([]); setSearch(""); }}
+        {(stageFilter.length > 0 || dayFilter.length > 0 || bookFilter.length > 0 || search) && (
+          <button onClick={() => { setStageFilter([]); setDayFilter([]); setBookFilter([]); setSearch(""); }}
                   style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 11px",
                            borderRadius: 8, border: `1px solid ${colors.rule}`,
                            background: colors.surface, cursor: "pointer",
@@ -467,13 +573,25 @@ export default function CutoverTracking() {
                       ? fmtDay(r.route_block_date)
                       : <span style={{ color: colors.inkMuted }}>—</span>}
                   </td>
-                  <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}>
-                    {r.holman_book_state === "open" ? (
-                      <span style={{ color: colors.amber, fontWeight: 700 }}>still billing</span>
-                    ) : r.holman_book_state === "pended" ? (
-                      <span style={{ color: colors.inkSoft }}>pended</span>
-                    ) : (
-                      <span style={{ color: colors.greenDeep }}>off the book</span>
+                  <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}
+                      title={r.anchor_tickets ? `anchored ticket(s): ${r.anchor_tickets}` : undefined}>
+                    {(() => {
+                      const tone = bookTone(r.holman_book_state);
+                      return (
+                        <span style={{ color: tone.fg, fontWeight: tone.bold ? 700 : 400 }}>
+                          {tone.label}
+                        </span>
+                      );
+                    })()}
+                    {/* A truck-number match is a guess, not evidence — say so. */}
+                    {r.holman_book_match === "fallback" && (
+                      <div style={{ fontSize: 11, color: colors.inkMuted }}>
+                        truck match — no anchored ticket
+                      </div>
+                    )}
+                    {r.anchor_tickets && (
+                      <div style={{ fontFamily: fonts.jetbrains, fontSize: 11,
+                                    color: colors.inkMuted }}>{r.anchor_tickets}</div>
                     )}
                   </td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.district || "\u2014"}</td>
@@ -491,7 +609,7 @@ export default function CutoverTracking() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={11} style={{ ...td, textAlign: "center", color: colors.inkMuted,
+                <td colSpan={12} style={{ ...td, textAlign: "center", color: colors.inkMuted,
                                          padding: 30 }}>
                   {rows.length === 0
                     ? "No complete records yet. A technician appears here once their reservation is booked and their route block is filed."

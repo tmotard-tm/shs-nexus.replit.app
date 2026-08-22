@@ -200,17 +200,28 @@ function surfaces() {
   // SETS diverge — that is clock noise, not surface drift, so rebuild once
   // before letting the strict comparisons run.
   surfacesP ??= (async () => {
-    let master = await buildMasterBoardPayload(false);
-    let region = await buildByRegionPayload(false);
     const keysOf = (p: AnyRow) => JSON.stringify((p.rows as AnyRow[]).map((r) => r.case_key).sort());
-    if (keysOf(master) !== keysOf(region)) {
-      console.log("# case sets diverged (ingest raced the build) — rebuilding once");
-      master = await buildMasterBoardPayload(false);
-      region = await buildByRegionPayload(false);
+    const build = async () => {
+      const master = await buildMasterBoardPayload(false);
+      const region = await buildByRegionPayload(false);
+      const queue = await buildTodaysQueue();
+      const exec = await getExecutiveSummary();
+      return { master, region, queue, exec };
+    };
+    // Coherent = the four payloads were computed over the same case set. When
+    // an ingest — or, during validation runs, another suite's DB fixtures on
+    // this shared dev database — lands between two reads, the sets diverge by
+    // rows that exist in one snapshot and not the other. That is clock noise,
+    // not surface drift, so rebuild before letting strict comparisons run.
+    const coherent = (s: { master: AnyRow; region: AnyRow; exec: AnyRow }) =>
+      keysOf(s.master) === keysOf(s.region)
+      && s.exec.headline?.openTotal === (s.master.rows as AnyRow[]).length;
+    let s = await build();
+    for (let i = 0; i < 2 && !coherent(s); i++) {
+      console.log("# surfaces diverged (ingest or concurrent fixtures raced the build) — rebuilding");
+      s = await build();
     }
-    const queue = await buildTodaysQueue();
-    const exec = await getExecutiveSummary();
-    return { master, region, queue, exec };
+    return s;
   })();
   return surfacesP;
 }

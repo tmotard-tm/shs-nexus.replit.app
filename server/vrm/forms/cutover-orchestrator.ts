@@ -45,6 +45,7 @@ import {
   getSnowflakeService,
   isSnowflakeConfigured,
 } from "../../snowflake-service";
+import { anchorCutoverRow } from "./cutover-anchor";
 
 // ---------------------------------------------------------------------------
 // Constants & flag
@@ -1402,7 +1403,7 @@ export async function finalizeCompletion(intentId: number, observedStatus: strin
     msg1: intent.msg1_state,
     msg2: intent.msg2_state,
   };
-  return await db.transaction(async (tx) => {
+  const completed = await db.transaction(async (tx) => {
     const { rows: flipped } = await tx.execute(sql`
       UPDATE vrm_rental_workflow_intents SET status = 'completed', updated_at = now()
       WHERE id = ${intentId} AND status = ${observedStatus}
@@ -1454,6 +1455,19 @@ export async function finalizeCompletion(intentId: number, observedStatus: strin
     `);
     return true;
   });
+  if (completed) {
+    // Task #738: snapshot the tech's OWN open Enterprise ticket(s) onto the
+    // tracking row so the book-state page can tell "old rental still open"
+    // from "some other renter's ticket on the reassigned truck". Best-effort
+    // and outside the transaction — completion must never fail on tracking
+    // bookkeeping. NOT forced: completion can run well after record-booking
+    // already anchored, and the old ticket may have dropped off the book in
+    // between — a forced re-snapshot would record [] and erase that evidence.
+    // The anchor identifies the OLD rental, which never changes on re-books,
+    // so an existing non-empty anchor always wins; empty ones still upgrade.
+    await anchorCutoverRow(String(intent.ldap).toUpperCase(), "booking");
+  }
+  return completed;
 }
 
 export async function createIntent(params: {

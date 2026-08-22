@@ -23,6 +23,7 @@ import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
 import { requireCronOrStaff } from "./cutover-intents-routes";
 import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 import { buildCutoverBlockArgs } from "./cutover-block-args";
+import { anchorCutoverRow } from "./cutover-anchor";
 
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
@@ -1687,6 +1688,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             reservation_error  = EXCLUDED.reservation_error,
             updated_at         = now()
         `);
+        // Task #738: snapshot the tech's own open Enterprise ticket(s) so the
+        // tracking page can anchor its book state to the SPECIFIC old rental.
+        // Write-once (no force): the external runner re-posts results, and a
+        // later re-post must not overwrite the booking-time evidence with a
+        // book that may already have dropped the old ticket.
+        if (status === "booked") await anchorCutoverRow(ldap, "booking");
         recorded++;
       }
       res.json({ recorded });
@@ -1709,7 +1716,26 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    */
   router.get("/forms/rental-survey/cutover-status", async (_req, res) => {
     try {
-      const { rows } = await db.execute(sql`
+      res.json(await buildCutoverStatusPayload());
+    } catch (error: any) {
+      console.error("[survey] cutover-status failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "cutover-status failed" });
+    }
+  });
+
+  // End-to-end cutover workflow intents (task #646): intent-owned booking,
+  // block filing, messaging and readbacks. Registered last — the module owns
+  // everything under /forms/rental-survey/cutover/* plus the rental-request
+  // parity lane.
+  registerCutoverIntentRoutes(router);
+}
+
+/**
+ * The cutover-status payload, exported so the book-state matrix (task #738)
+ * is testable against real fixture rows without an HTTP session.
+ */
+export async function buildCutoverStatusPayload(): Promise<any> {
+  const { rows } = await db.execute(sql`
         SELECT c.ldap, c.tech_name, c.truck_number, c.van_status,
                s.rental_branch_city, s.rental_branch_state, s.surveyed_at,
                s.shop_name, s.shop_city, s.shop_state, s.shop_phone,
@@ -1734,21 +1760,33 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                  -- arrived yet. Booking somebody today for tomorrow is not a
                  -- failure and must not read as one. Only call it not-collected
                  -- once the pickup day has actually passed.
-                 --
-                 -- The date test is written [0-9] and not the backslash-d
-                 -- shorthand on purpose: inside a drizzle tagged template JS
-                 -- cooks \d down to a bare d before drizzle ever sees it.
-                 WHEN COALESCE(hb.book_state, '') = 'open'
-                  AND left(c.reservation_start, 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-                  AND left(c.reservation_start, 10)::date
-                      < (now() AT TIME ZONE 'America/New_York')::date
+                 WHEN hb.book_state IN ('open', 'rolled')
+                  AND pd.pickup_day IS NOT NULL
+                  AND pd.pickup_day
+                      < to_char((now() AT TIME ZONE 'America/New_York')::date, 'YYYY-MM-DD')
                                                                THEN 'not collected'
-                 WHEN COALESCE(hb.book_state, '') = 'open'      THEN 'scheduled'
+                 WHEN hb.book_state IN ('open', 'rolled')       THEN 'scheduled'
                  ELSE 'complete'
                END AS stage,
-               COALESCE(hb.book_state, '') AS holman_book_state,
+               hb.book_state AS holman_book_state,
+               hb.book_match AS holman_book_match,
+               COALESCE((SELECT string_agg(t, ', ' ORDER BY t)
+                         FROM jsonb_array_elements_text(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) t), '')
+                 AS anchor_tickets,
+               c.book_anchor_at, c.book_anchor_source,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
+        -- Pickup day, parsed once, kept as TEXT on purpose: reservation_start
+        -- is a free text column, and a regex-shaped-but-impossible date (e.g.
+        -- '2026-02-31') would make ::date THROW and 500 the whole payload.
+        -- ISO 'YYYY-MM-DD' strings compare correctly as text, so no cast is
+        -- ever needed. The date test is written [0-9] and not the backslash-d
+        -- shorthand because inside a drizzle tagged template JS cooks \d down
+        -- to a bare d before drizzle ever sees it.
+        LEFT JOIN LATERAL (
+          SELECT CASE WHEN left(COALESCE(c.reservation_start, ''), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                      THEN left(c.reservation_start, 10) END AS pickup_day
+        ) pd ON TRUE
         LEFT JOIN LATERAL (
           SELECT NULLIF(btrim(a2.district_no::text),'') AS district,
                  ma.tech_name  AS supervisor_name,
@@ -1777,22 +1815,78 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           ORDER BY s.created_at DESC
           LIMIT 1
         ) s ON true
-        -- Still on the Holman rental book? Matched on the cutover truck number and
-        -- on the feed's own enterprise id.
+        -- Still on the Holman rental book? Task #738: driven by the ANCHORED
+        -- old ticket(s), never by "any open ticket sharing the truck number" —
+        -- that match kept a reassigned truck's NEW renter billing against the
+        -- old cutover forever. (The old enterprise_id_feed arm was dead: the
+        -- feed leaves it blank on every row.)
         LEFT JOIN LATERAL (
-          SELECT CASE
-                   WHEN bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN')   THEN 'open'
-                   WHEN bool_or(upper(COALESCE(c2.ticket_status, '')) = 'PENDED') THEN 'pended'
-                   ELSE ''
-                 END AS book_state
+          SELECT
+            -- A ticket that is still OPEN but was REWRITTEN with a rental
+            -- start on/after the ETD pickup day reads as the old rental
+            -- rolling onto or past the swap — possible double-billing, its
+            -- own state, not a plain "still billing".
+            bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN'
+                    AND NOT (pd.pickup_day IS NOT NULL AND c2.rental_start_date IS NOT NULL
+                             AND to_char(c2.rental_start_date, 'YYYY-MM-DD') >= pd.pickup_day)) AS open_plain,
+            bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN'
+                    AND pd.pickup_day IS NOT NULL AND c2.rental_start_date IS NOT NULL
+                    AND to_char(c2.rental_start_date, 'YYYY-MM-DD') >= pd.pickup_day)           AS open_rolled,
+            bool_or(upper(COALESCE(c2.ticket_status, '')) = 'PENDED')     AS pended
           FROM vrm_rental_operations_cases c2
           WHERE c2.present_in_latest
+            -- ECARS/Holman book only: enterprise_direct rows are the NEW
+            -- direct-billed replacements under the same vendor string.
+            AND c2.source = 'enterprise'
             AND upper(COALESCE(c2.rental_vendor, '')) LIKE 'ENTERPRISE%'
-            AND (
-              upper(COALESCE(c2.enterprise_id_feed, '')) = upper(c.ldap)
-              OR NULLIF(ltrim(regexp_replace(COALESCE(c2.vehicle_number, ''), '[^0-9]', '', 'g'), '0'), '')
-                 = NULLIF(ltrim(regexp_replace(COALESCE(c.truck_number, ''), '[^0-9]', '', 'g'), '0'), '')
-            )
+            AND upper(btrim(COALESCE(c2.ticket_number, ''))) IN (
+              SELECT upper(btrim(t))
+              FROM jsonb_array_elements_text(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) t)
+        ) ab ON TRUE
+        -- Fallback for rows with no anchor: truck match, but only when the
+        -- case's resolved identity (or a human override) maps to THIS tech —
+        -- a renter-name-verified truck match, labeled as such in the payload.
+        LEFT JOIN LATERAL (
+          SELECT
+            bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN'
+                    AND NOT (pd.pickup_day IS NOT NULL AND c2.rental_start_date IS NOT NULL
+                             AND to_char(c2.rental_start_date, 'YYYY-MM-DD') >= pd.pickup_day)) AS open_plain,
+            bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN'
+                    AND pd.pickup_day IS NOT NULL AND c2.rental_start_date IS NOT NULL
+                    AND to_char(c2.rental_start_date, 'YYYY-MM-DD') >= pd.pickup_day)           AS open_rolled,
+            bool_or(upper(COALESCE(c2.ticket_status, '')) = 'PENDED')     AS pended,
+            count(*)                                                      AS matched
+          FROM vrm_rental_operations_cases c2
+          JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c2.case_key
+          JOIN all_techs a3
+            ON a3.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+           AND upper(a3.tech_racfid) = upper(c.ldap)
+          WHERE jsonb_array_length(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) = 0
+            AND (ir.override_employee_id IS NOT NULL OR upper(COALESCE(ir.state, '')) = 'RESOLVED')
+            AND c2.present_in_latest
+            AND c2.source = 'enterprise'
+            AND upper(COALESCE(c2.rental_vendor, '')) LIKE 'ENTERPRISE%'
+            AND NULLIF(ltrim(regexp_replace(COALESCE(c2.vehicle_number, ''), '[^0-9]', '', 'g'), '0'), '')
+                = NULLIF(ltrim(regexp_replace(COALESCE(c.truck_number, ''), '[^0-9]', '', 'g'), '0'), '')
+        ) fb ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            CASE WHEN jsonb_array_length(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) > 0 THEN 'anchored'
+                 WHEN COALESCE(fb.matched, 0) > 0                                          THEN 'fallback'
+                 ELSE 'none' END AS book_match,
+            CASE
+              WHEN jsonb_array_length(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) > 0 THEN
+                CASE WHEN COALESCE(ab.open_plain, false)  THEN 'open'
+                     WHEN COALESCE(ab.open_rolled, false) THEN 'rolled'
+                     WHEN COALESCE(ab.pended, false)      THEN 'pended'
+                     ELSE '' END
+              WHEN COALESCE(fb.matched, 0) > 0 THEN
+                CASE WHEN COALESCE(fb.open_plain, false)  THEN 'open'
+                     WHEN COALESCE(fb.open_rolled, false) THEN 'rolled'
+                     WHEN COALESCE(fb.pended, false)      THEN 'pended'
+                     ELSE '' END
+              ELSE 'unanchored'
+            END AS book_state
         ) hb ON TRUE
         -- Widened 2026-08-20: previously this required a filed, live route block,
         -- so a booked reservation with no block was absent from the page rather
@@ -1811,23 +1905,52 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         return out;
       };
 
-      res.json({
+      // Task #738: the book state is only as truthful as the Enterprise book
+      // snapshot behind it — the sporadic sync has gapped 3–6 days. Surface
+      // the snapshot's as-of date and flag it stale so "still billing" can be
+      // read as "still billing as of the 19th", not as live truth.
+      const { rows: bookMetaRows } = await db.execute(sql`
+        SELECT max(left(file_date, 10)) AS as_of,
+               max(finished_at) AS landed_at
+        FROM vrm_rental_operations_import_runs
+        WHERE status = 'completed'
+          -- file_date is VARCHAR; only trust rows carrying a real date shape.
+          -- NO ::date cast anywhere: a regex-shaped-but-impossible value
+          -- ('2026-02-31') would make the cast THROW and 500 the endpoint.
+          -- ISO text max() picks the latest day correctly on its own; the
+          -- day-diff is computed in TS where a bad date degrades to null.
+          AND left(COALESCE(file_date, ''), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+          AND run_type IN ('scheduled_sync', 'manual_enterprise_import')
+      `);
+      const bookMeta = (bookMetaRows as any[])[0] ?? {};
+      // Age in days vs ET today. An as_of that is not a REAL calendar day
+      // (unparseable, or one the Date engine would silently normalize, e.g.
+      // '2026-02-31' → Mar 3) yields null, which the payload treats as
+      // "stale/unknown" — never a wrong-but-confident age.
+      let ageDays: number | null = null;
+      if (bookMeta.as_of) {
+        const asOfMs = Date.parse(`${bookMeta.as_of}T00:00:00Z`);
+        const roundTrips = Number.isFinite(asOfMs)
+          && new Date(asOfMs).toISOString().slice(0, 10) === String(bookMeta.as_of);
+        const etToday = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+        const todayMs = Date.parse(`${etToday}T00:00:00Z`);
+        if (roundTrips && Number.isFinite(todayMs)) {
+          ageDays = Math.round((todayMs - asOfMs) / 86_400_000);
+        }
+      }
+
+      return {
         total: rows.length,
         by_stage: tally("stage"),
         by_reservation: tally("reservation_status"),
         by_route_block: tally("route_block_status"),
         by_holman_book: tally("holman_book_state"),
+        book: {
+          as_of: bookMeta.as_of ?? null,
+          landed_at: bookMeta.landed_at ?? null,
+          age_days: ageDays,
+          stale: ageDays == null ? true : ageDays >= 3,
+        },
         rows,
-      });
-    } catch (error: any) {
-      console.error("[survey] cutover-status failed:", error?.message || error);
-      res.status(500).json({ message: error?.message || "cutover-status failed" });
-    }
-  });
-
-  // End-to-end cutover workflow intents (task #646): intent-owned booking,
-  // block filing, messaging and readbacks. Registered last — the module owns
-  // everything under /forms/rental-survey/cutover/* plus the rental-request
-  // parity lane.
-  registerCutoverIntentRoutes(router);
+      };
 }
