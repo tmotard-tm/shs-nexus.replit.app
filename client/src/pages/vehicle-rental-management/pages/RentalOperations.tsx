@@ -687,22 +687,52 @@ export default function RentalOperations() {
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
       await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k })));
-      const s = j?.result?.stats;
+      const r = j?.result ?? {};
+      const s = r.stats;
       // The old-billing comparison (Tyler 2026-08-22): switched techs still
       // open on the OLD enterprise book are double-billed — that deserves its
       // own loud toast, not a clause buried in the import summary.
-      const conflicts: any[] = j?.result?.oldBillingConflicts ?? [];
+      const conflicts: any[] = r.oldBillingConflicts ?? [];
       toast({
         title: "Direct-billing report imported",
         description: s
-          ? `${j?.result?.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review · ${j?.result?.switchoverStamped ?? 0} cutover switchovers stamped`
-          : `${j?.result?.totalCases ?? "?"} cases`,
+          ? `${r.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review · ${r.switchoverStamped ?? 0} cutover switchovers stamped`
+          : `${r.totalCases ?? "?"} cases`,
       });
-      if (conflicts.length) {
+      // Premortem fix: silence must never read as clean. If a step failed the
+      // operator gets told the check DID NOT HAPPEN — an absent conflict toast
+      // otherwise looks identical to a clean comparison.
+      if (r.switchoverStampStatus === "failed") {
+        toast({
+          title: "Cutover stamping FAILED",
+          description: "Switchovers from this upload are NOT reflected on Cutover Tracking. Re-upload the report to retry (stamping is idempotent).",
+          variant: "destructive",
+        });
+      }
+      if (r.oldBillingComparisonStatus === "failed") {
+        toast({
+          title: "Double-billing check did not run",
+          description: "The comparison against the old enterprise billing failed on this upload — NOT a clean result. Cutover Tracking still shows live state; check it directly.",
+          variant: "destructive",
+        });
+      } else if (conflicts.length) {
         toast({
           title: `${conflicts.length} tech${conflicts.length === 1 ? "" : "s"} still on the OLD enterprise billing`,
           description: `Switched to direct billing but the old ticket is still open (double-billed): ${conflicts.slice(0, 6).map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}${conflicts.length > 6 ? ` +${conflicts.length - 6} more` : ""} — see Cutover Tracking.`,
           variant: "destructive",
+        });
+      }
+      // Premortem fix: coverage gaps are part of the result, not a footnote —
+      // these techs were NOT checked for double-billing at all.
+      const blind = Number(s?.switchoverBlindRows ?? 0);
+      const unmatched: string[] = r.switchoverUnmatchedLdaps ?? [];
+      if (blind > 0 || unmatched.length > 0) {
+        const parts = [];
+        if (blind > 0) parts.push(`${blind} report row${blind === 1 ? "" : "s"} with unresolved identity (not compared)`);
+        if (unmatched.length > 0) parts.push(`${unmatched.length} switched tech${unmatched.length === 1 ? "" : "s"} with no cutover row (${unmatched.slice(0, 5).join(", ")}${unmatched.length > 5 ? ` +${unmatched.length - 5} more` : ""})`);
+        toast({
+          title: "Double-billing check has blind spots on this upload",
+          description: parts.join(" · "),
         });
       }
     },

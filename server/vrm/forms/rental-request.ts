@@ -1639,7 +1639,13 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       // rather than broken.
       ["vrm_rental_cutover",
         ["ldap", "reservation_status", "etd_reference", "reserved_at",
-         "route_block_status", "route_block_project_id", "route_block_filed_at"]],
+         "route_block_status", "route_block_project_id", "route_block_filed_at",
+         // Direct-billing switchover stamp. The cutover status SELECT
+         // hard-references these; if a boot ALTER is skipped the whole page
+         // 500s in prod — same lesson as above: a health check that omits
+         // what it guards is worse than none.
+         "direct_billing_confirmed_at", "direct_billing_last_seen_at",
+         "direct_billing_evidence"]],
     ];
     try {
       const problems: string[] = [];

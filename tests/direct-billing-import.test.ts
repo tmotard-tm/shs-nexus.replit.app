@@ -406,7 +406,7 @@ test("switchovers: RESOLVED rows yield one sighting per tech LDAP; REVIEW and un
     rosterByEmployeeId: new Map([["E1", r]]),
     techTruckByLdap: new Map([["CMORAL1", "23132"]]),
   });
-  const { switchovers } = buildDirectCases([
+  const { switchovers, stats } = buildDirectCases([
     row({ reservation: "777" }),                        // RESOLVED -> sighting
     row({ reservation: "555", lastName: "SMITH" }),     // surname clash -> REVIEW, no sighting
     row({ raNumber: "98XYZ1", lastName: "NOSUCHNAME" }),// unresolved -> no sighting
@@ -417,6 +417,9 @@ test("switchovers: RESOLVED rows yield one sighting per tech LDAP; REVIEW and un
   assert.equal(s.ra, "12ABC7");
   assert.equal(s.reservation, "777");
   assert.equal(s.method, "direct:reservation");
+  // Premortem: the two rows that produced no sighting are the comparison's
+  // blind spot and MUST be counted — silence never reads as full coverage.
+  assert.equal(stats.switchoverBlindRows, 2);
 });
 
 test("switchovers: collected per ROW before the truck dedupe, latest rental wins as evidence", () => {
@@ -430,13 +433,14 @@ test("switchovers: collected per ROW before the truck dedupe, latest rental wins
     rosterByEmployeeId: new Map([["E1", r]]),
     techTruckByLdap: new Map([["CMORAL1", "23132"]]),
   });
-  const { cases, switchovers } = buildDirectCases([
+  const { cases, switchovers, stats } = buildDirectCases([
     row({ reservation: "1", rentalDate: "2026-07-01", raNumber: "OLD111" }),
     row({ reservation: "2", rentalDate: "2026-08-15", raNumber: "NEW222" }),
   ], ctx, Date.now());
   assert.equal(cases.length, 1);           // deduped to one case…
   assert.equal(switchovers.size, 1);       // …but the tech is still sighted
   assert.equal(switchovers.get("CMORAL1")!.ra, "NEW222"); // latest rental is the evidence
+  assert.equal(stats.switchoverBlindRows, 0); // full coverage — no blind spot
 });
 
 test("switchovers: a RESOLVED identity WITHOUT a roster racf never stamps (no LDAP to key on)", () => {
@@ -449,8 +453,10 @@ test("switchovers: a RESOLVED identity WITHOUT a roster racf never stamps (no LD
   const res = resolveDirectRow(row({ replacesTicket: "7H2K9Q" }), ctx);
   assert.equal(res.preset?.state, "RESOLVED");
   assert.equal(res.ldap, null);
-  const { switchovers } = buildDirectCases([row({ replacesTicket: "7H2K9Q" })], ctx, Date.now());
+  const { switchovers, stats } = buildDirectCases([row({ replacesTicket: "7H2K9Q" })], ctx, Date.now());
   assert.equal(switchovers.size, 0);
+  // racf-less RESOLVED is still a coverage gap for the comparison — counted.
+  assert.equal(stats.switchoverBlindRows, 1);
 });
 
 // ── old-billing comparison ───────────────────────────────────────────────────

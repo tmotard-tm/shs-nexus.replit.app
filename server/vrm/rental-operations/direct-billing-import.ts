@@ -530,6 +530,13 @@ export interface DirectBuildStats {
   unresolved: number;             // fell through to the standard name resolver
   byMethod: Record<string, number>;
   dedupedAway: number;
+  /**
+   * Premortem fix (2026-08-22): report rows that produced NO switchover
+   * sighting — identity REVIEW/unresolved or racf-less. These techs were NOT
+   * compared against the old billing; the operator must see the blind spot,
+   * not assume the double-billing check covered the whole report.
+   */
+  switchoverBlindRows: number;
 }
 
 /**
@@ -555,6 +562,7 @@ export function buildDirectCases(rows: DirectBillingRow[], ctx: DirectResolveCtx
   const stats: DirectBuildStats = {
     parsedRows: rows.length, withTruck: 0, truckless: 0,
     presetResolved: 0, presetReview: 0, unresolved: 0, byMethod: {}, dedupedAway: 0,
+    switchoverBlindRows: 0,
   };
 
   for (const row of rows) {
@@ -569,6 +577,10 @@ export function buildDirectCases(rows: DirectBillingRow[], ctx: DirectResolveCtx
           rentalDate: row.rentalDate, method: r.method ?? "unknown",
         });
       }
+    } else {
+      // No sighting possible — this row's tech is invisible to the
+      // double-billing comparison. Counted so the gap is never silent.
+      stats.switchoverBlindRows++;
     }
     const padded = r.truck ? toDisplayNumber(r.truck) : "";
     // case_key IS the truck everywhere downstream (Holman cache, portal hist,
@@ -783,8 +795,12 @@ export async function loadDirectResolveCtx(): Promise<DirectResolveCtx> {
 export async function stampCutoverBillingSwitchover(
   sightings: Map<string, SwitchoverSighting>,
   meta: { fileDate: string | null; sourceLabel: string },
-): Promise<{ techs: number; stamped: number }> {
+): Promise<{ techs: number; stamped: number; unmatched: string[] }> {
   let stamped = 0;
+  // Premortem fix (2026-08-22): a sighting whose UPDATE hits zero rows is a
+  // resolved, direct-billed tech with NO cutover row — invisible on the page.
+  // "Stamped 0 rows" is a signal, not a no-op; collect and surface them.
+  const unmatched: string[] = [];
   for (const s of Array.from(sightings.values())) {
     const evidence = JSON.stringify({
       ra: s.ra, reservation: s.reservation, rentalDate: s.rentalDate,
@@ -798,9 +814,11 @@ export async function stampCutoverBillingSwitchover(
           updated_at                  = now()
       WHERE upper(trim(ldap)) = ${s.ldap}
     `);
-    stamped += Number((r as any).rowCount ?? 0);
+    const n = Number((r as any).rowCount ?? 0);
+    stamped += n;
+    if (n === 0) unmatched.push(s.ldap);
   }
-  return { techs: sightings.size, stamped };
+  return { techs: sightings.size, stamped, unmatched };
 }
 
 // ── old-billing comparison ───────────────────────────────────────────────────
@@ -847,6 +865,15 @@ export interface DirectImportResult extends IngestResult {
   /** resolved techs seen on this report / cutover rows actually stamped */
   switchoverTechs?: number;
   switchoverStamped?: number;
+  /**
+   * Premortem fix (2026-08-22): silence must never read as clean. These are
+   * ALWAYS set — 'failed' means the step did not run and the operator must be
+   * told, because the toast otherwise looks identical to a clean result.
+   */
+  switchoverStampStatus: "ok" | "failed";
+  oldBillingComparisonStatus: "ok" | "failed";
+  /** resolved+sighted techs with NO cutover row — stamp matched nothing, invisible on the page */
+  switchoverUnmatchedLdaps?: string[];
   /** switched techs STILL open on the old enterprise (ECARS) billing — double-billed */
   oldBillingConflicts?: OldBillingConflict[];
 }
@@ -888,13 +915,17 @@ export async function importDirectBillingReport(input: {
   // cases landed: a stamping hiccup must not fail an otherwise-good import
   // (the next upload re-stamps — sightings are idempotent).
   let switchoverTechs: number | undefined, switchoverStamped: number | undefined;
+  let switchoverUnmatchedLdaps: string[] | undefined;
+  let switchoverStampStatus: "ok" | "failed" = "failed";
   try {
     const st = await stampCutoverBillingSwitchover(switchovers, {
       fileDate: input.fileDate ?? null,
       sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
     });
     switchoverTechs = st.techs; switchoverStamped = st.stamped;
-    console.log(`[VRM/RentalOps] direct import: billing switchover stamped on ${st.stamped} cutover row(s) (${st.techs} resolved tech(s) on the report)`);
+    switchoverUnmatchedLdaps = st.unmatched;
+    switchoverStampStatus = "ok";
+    console.log(`[VRM/RentalOps] direct import: billing switchover stamped on ${st.stamped} cutover row(s) (${st.techs} resolved tech(s) on the report${st.unmatched.length ? `; NO cutover row for: ${st.unmatched.join(", ")}` : ""})`);
   } catch (e: any) {
     console.warn("[VRM/RentalOps] direct import: cutover switchover stamp failed (non-fatal):", e?.message || e);
   }
@@ -904,10 +935,12 @@ export async function importDirectBillingReport(input: {
   // a payload hiccup must not fail the import, and the payload query is the
   // one true derivation of book state (never duplicated here).
   let oldBillingConflicts: OldBillingConflict[] | undefined;
+  let oldBillingComparisonStatus: "ok" | "failed" = "failed";
   try {
     const { buildCutoverStatusPayload } = await import("../forms/survey");
     const payload = await buildCutoverStatusPayload();
     oldBillingConflicts = findOldBillingConflicts(payload?.rows ?? []);
+    oldBillingComparisonStatus = "ok";
     if (oldBillingConflicts.length) {
       console.warn(`[VRM/RentalOps] direct import: ${oldBillingConflicts.length} switched tech(s) STILL on the old enterprise billing (double-billed): ${oldBillingConflicts.map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}`);
     } else {
@@ -943,6 +976,7 @@ export async function importDirectBillingReport(input: {
     totalCases: p.totalCases, resolved: p.resolved, review: p.review, exception: p.exception,
     dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus,
     headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
+    switchoverStampStatus, oldBillingComparisonStatus, switchoverUnmatchedLdaps,
     oldBillingConflicts,
   };
 }
