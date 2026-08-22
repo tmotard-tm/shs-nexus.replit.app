@@ -434,6 +434,37 @@ export function deriveBookingStatus(
     };
   }
 
+  // A reservation that EXISTS (or probably exists) but has not been verified
+  // yet. The server's own book door refuses these outright — reservation_state
+  // booked_unverified/unknown blocks /book — so this surface must never read
+  // as "not booked" or advise re-running the chain: describing an existing
+  // reservation as absent is exactly how double bookings happen.
+  const resState = String(intent?.reservation_state ?? "");
+  if (resState === "booked_unverified" || intentStatus === "awaiting_verification") {
+    return {
+      verdict: "attention",
+      headline: "Reservation created — verifying",
+      summary:
+        "Enterprise created this reservation, but the confirmation readback has not landed yet. " +
+        "Do not book again — the workflow verifies and finishes on its own; open it below if this " +
+        "has been sitting a while.",
+      actions: ["open_workflow"],
+      technical, textState: null, caution: null, reference,
+    };
+  }
+  // reservation_state 'unknown' outside a parked status (a stuck 'booking'
+  // intent, a mid-recovery sweep): same rule as booking_unknown — a
+  // reservation MAY exist, so never present a re-book.
+  if (resState === "unknown" && !PARKED_INTENT.has(intentStatus)) {
+    return {
+      verdict: "attention",
+      headline: "Booking needs attention",
+      summary: UNKNOWN_OUTCOME_EXPLANATION.summary,
+      actions: ["open_workflow"],
+      technical, textState: null, caution: null, reference,
+    };
+  }
+
   // Anything below only matters once a decision kicked a booking off (or a
   // failure/parked intent was left behind by one).
   const hasAnySignal =

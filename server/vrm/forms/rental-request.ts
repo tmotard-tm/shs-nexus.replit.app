@@ -623,11 +623,18 @@ async function alertFleet(r: {
 
 const EXTENSION_SUPPORT_EMAIL =
   process.env.RENTAL_EXTENSION_EMAIL_TO || "NorthCentralAccountSupport@em.com";
-// Fleet asked that these two are ALWAYS copied on the extension email.
-const EXTENSION_SUPPORT_CC: string[] = (
-  process.env.RENTAL_EXTENSION_EMAIL_CC ||
-  "howard.anderson@transformco.com,tyler.morgan@transformco.com"
-).split(",").map((s) => s.trim()).filter(Boolean);
+// Fleet asked that these two are ALWAYS copied on the extension email — so the
+// env override ADDS recipients, it never removes the defaults (the drawer tells
+// staff these two are always CC'd, and that has to stay true). Entries must
+// look like an email address so a malformed env value can't become a bad
+// SendGrid header.
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EXTENSION_SUPPORT_CC: string[] = Array.from(new Set([
+  "howard.anderson@transformco.com",
+  "tyler.morgan@transformco.com",
+  ...(process.env.RENTAL_EXTENSION_EMAIL_CC || "")
+    .split(",").map((s) => s.trim()).filter((s) => EMAIL_SHAPE.test(s)),
+]));
 /**
  * Tell the technician what happened.
  *
@@ -2673,8 +2680,18 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
             returned_at    = ${decision === "RETURN" ? sql`now()` : sql`returned_at`},
             return_count   = ${decision === "RETURN" ? sql`return_count + 1` : sql`return_count`},
             updated_at = now()
-        WHERE request_no = ${Number(req.params.requestNo)} AND status <> 'booked'
-        RETURNING request_no
+        -- Self-join capture of the PRE-update status, locked FOR UPDATE so two
+        -- concurrent decides serialize: side effects below (the extension
+        -- email) must fire on the TRANSITION into approved, not on every
+        -- replayed APPROVE — cur.status from the earlier SELECT is a stale
+        -- read and cannot make that call race-free.
+        FROM (SELECT request_no AS prev_rn, status AS prev_status
+              FROM vrm_rental_request
+              WHERE request_no = ${Number(req.params.requestNo)}
+              FOR UPDATE) old
+        WHERE vrm_rental_request.request_no = old.prev_rn
+          AND vrm_rental_request.status <> 'booked'
+        RETURNING vrm_rental_request.request_no, old.prev_status
       `);
       if (!(upd as any[]).length) {
         return res.status(409).json({
@@ -2682,6 +2699,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
                  + "changing the decision here would leave a live rental on a denied request.",
         });
       }
+      const prevStatus = String((upd as any[])[0]?.prev_status ?? "");
 
       // Close the loop. A decision that only lands in a table is invisible to
       // the one person waiting on it, and silence is what drives the call to
@@ -2727,8 +2745,15 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
 
       // An extension APPROVE emails Enterprise instead. Fire-and-forget like
       // the booking chain: the outcome is recorded on the row and the drawer
-      // watches it land through the list poll.
-      if (decision === "APPROVE" && isExtensionRow) void sendExtensionEmail(no, actor);
+      // watches it land through the list poll. Only on the TRANSITION into
+      // approved — a replayed APPROVE on an already-approved row must not
+      // email Enterprise a duplicate extension request; the dedicated resend
+      // route is the deliberate re-send path. The auto flag additionally
+      // refuses to repeat a send that already succeeded (e.g. deny→re-approve
+      // after the email landed).
+      if (decision === "APPROVE" && isExtensionRow && prevStatus !== "approved") {
+        void sendExtensionEmail(no, actor, { auto: true });
+      }
 
       res.json({ ok: true, decision });
     } catch (e: any) {
@@ -3046,7 +3071,9 @@ export async function liveRequestGuard(ldap: string): Promise<{
  * recording the outcome on the row. Returns what it recorded so the resend
  * route can answer synchronously. Never throws.
  */
-async function sendExtensionEmail(requestNo: number, actor: string): Promise<{
+async function sendExtensionEmail(
+  requestNo: number, actor: string, opts?: { auto?: boolean },
+): Promise<{
   state: "sent" | "failed" | "dry_run" | "skipped"; message: string;
 }> {
   const record = async (state: string, error: string | null) => {
@@ -3064,14 +3091,24 @@ async function sendExtensionEmail(requestNo: number, actor: string): Promise<{
     const { rows } = await db.execute(sql`
       SELECT tech_name, ldap, request_type, status,
              ext_reservation_number, COALESCE(ext_days, 7) AS ext_days,
-             current_rental
+             ext_email_state, current_rental
       FROM vrm_rental_request WHERE request_no = ${requestNo}
     `);
     const r = (rows as any[])[0];
     if (!r || String(r.request_type) !== "extension" || r.status !== "approved") {
       return { state: "skipped", message: "not an approved extension" };
     }
-    const resNo = String(r.ext_reservation_number || "").trim();
+    // The automatic (decision-triggered) path never repeats a send that
+    // already landed — Enterprise filing the same extension twice is the
+    // exact duplicate this guards. A human clicking the resend button is
+    // deliberate and stays allowed.
+    if (opts?.auto && String(r.ext_email_state || "") === "sent") {
+      return { state: "skipped", message: "extension email already sent — use Resend to send again" };
+    }
+    // Header-injection guard: resNo and renter reach the email SUBJECT
+    // header and are staff/DB input — a CR/LF inside would append headers.
+    const clean = (s: string) => s.replace(/[\r\n]+/g, " ").trim();
+    const resNo = clean(String(r.ext_reservation_number || ""));
     if (!resNo) {
       // The decide route refuses an extension approve without a reservation
       // number, so this only fires for legacy rows approved pre-email.
@@ -3079,8 +3116,8 @@ async function sendExtensionEmail(requestNo: number, actor: string): Promise<{
       return { state: "failed", message: "no reservation / RA number on the request" };
     }
     const days = Math.max(1, Math.min(30, Number(r.ext_days) || 7));
-    const renter = String(r.tech_name || r.ldap || "").trim();
-    const vendor = String(r.current_rental?.rental_vendor || "");
+    const renter = clean(String(r.tech_name || r.ldap || ""));
+    const vendor = clean(String(r.current_rental?.rental_vendor || ""));
     const subject = `Rental extension request — Res/RA #${resNo} — ${renter}`;
     // Per their contact tips: renter's name + reservation/RA number, no other
     // personal information.

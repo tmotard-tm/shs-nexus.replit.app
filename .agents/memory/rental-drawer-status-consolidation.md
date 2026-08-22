@@ -33,6 +33,18 @@ Howard Anderson and Tyler Morgan (transformco.com) are ALWAYS CC'd on the extens
 
 **How to apply:** The email is external-vendor mail, so it is env-gated: live only under a deployment or an explicit live flag; a dry run records its state but NEVER stamps the sent-at column (a stamped dry run reads as "Enterprise knows" forever). Send-state feeds the same shared booking-status derivation (sent = success w/ reference, failed = attention + resend action, dry_run = caution with NO reference so the badge can't claim a send). Resend endpoint accepts corrected number/days so a typo fix and resend are one click.
 
+## Unverified reservations never read as "not booked"
+
+**Rule:** In the shared derivation, intent reservation_state `booked_unverified` (or status `awaiting_verification`) and non-parked `unknown` are ATTENTION states that must never surface a book-now/re-run suggestion — the server's book door already refuses these states, and the drawer must agree with it.
+
+**Why:** Post-merge review caught these falling through to "Approved but not booked — book it now", i.e. describing an existing Enterprise reservation as absent, which is exactly how double bookings happen.
+
+## Extension email auto-send is transition-gated
+
+**Rule:** The decide route captures the PRE-update status atomically (UPDATE…FROM self-join with FOR UPDATE) and auto-emails Enterprise only on the transition INTO approved; the auto path additionally refuses to repeat a send already recorded as sent. The resend button is the sole deliberate re-send path. Subject-bound values (reservation number, renter, vendor) are CR/LF-stripped; the CC env override ADDS to the two always-CC'd defaults, never replaces them.
+
+**Why:** A replayed/double-clicked APPROVE previously fired a duplicate extension request at Enterprise per click, and a CC override silently falsified the drawer's "always CC'd" promise.
+
 ## Verification probe trap
 
 `request_no` is a bigserial — JSON list responses carry it as a **string**, so strict `=== 1220` probes silently find nothing. Compare loosely or String() both sides when replaying client predicates over API rows.

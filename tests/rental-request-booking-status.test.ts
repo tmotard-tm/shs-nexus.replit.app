@@ -328,3 +328,37 @@ test("sort ranks problems first, then in-flight, then booked, then blank", () =>
   assert.deepEqual([...ranks].sort((a, b) => a - b), ranks, "already in problems-first order");
   assert.equal(new Set(ranks).size, ranks.length, "each verdict has a distinct rank");
 });
+
+// ── Unverified/unknown reservations must never read as "not booked" ─────────
+// The server's book door refuses reservation_state booked_unverified/unknown
+// outright; the drawer must agree. Describing an existing reservation as
+// absent (and offering "book now") is exactly how double bookings happen.
+
+test("booked_unverified intent reads as an existing reservation being verified — never a re-book", () => {
+  const r = req({ status: "approved", decided_at: new Date(NOW - 30 * 60_000).toISOString() });
+  const s = deriveBookingStatus(r, {
+    id: 9, status: "awaiting_verification", reservation_state: "booked_unverified",
+  }, NOW);
+  assert.equal(s.verdict, "attention");
+  assert.match(s.headline, /Reservation created/);
+  assert.ok(!s.actions.includes("book_now"), "must not offer book_now over a live reservation");
+  assert.ok(!s.headline.includes("Approved but not booked"));
+});
+
+test("awaiting_verification status alone (state lagging) still blocks the re-book read", () => {
+  const r = req({ status: "approved", decided_at: new Date(NOW - 30 * 60_000).toISOString() });
+  const s = deriveBookingStatus(r, { id: 9, status: "awaiting_verification" }, NOW);
+  assert.equal(s.verdict, "attention");
+  assert.match(s.headline, /Reservation created/);
+  assert.ok(!s.actions.includes("book_now"));
+});
+
+test("reservation_state unknown outside a parked status gets the unknown-outcome caution, not in-progress/stalled", () => {
+  const r = req({ status: "approved", decided_at: new Date(NOW - 30 * 60_000).toISOString() });
+  const s = deriveBookingStatus(r, {
+    id: 9, status: "booking", reservation_state: "unknown",
+  }, NOW);
+  assert.equal(s.verdict, "attention");
+  assert.match(s.summary, /could not tell whether Enterprise actually created/);
+  assert.ok(!s.actions.includes("book_now"));
+});
