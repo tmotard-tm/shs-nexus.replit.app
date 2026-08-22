@@ -354,6 +354,12 @@ export interface DirectResolution {
   truck: string | null;              // canonical TPMS truck of the resolved tech
   method: string | null;
   truckSource: "tpms" | "intent" | null;
+  /**
+   * The resolved tech's RACF/LDAP — set ONLY when the identity is RESOLVED and
+   * the roster row carries a racf. Drives the cutover billing-switchover stamp
+   * (a REVIEW guess must never mark a cutover "switched").
+   */
+  ldap: string | null;
 }
 
 function resolvedFromRoster(r: RosterLite, method: string, confidence: "high" | "medium"): IdentityResolution {
@@ -400,6 +406,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
         return {
           preset: resolvedFromRoster(roster, "direct:reservation", "high"),
           truck: t.truck, method: "direct:reservation", truckSource: t.truckSource,
+          ldap: (roster.racf ?? intent.ldap).toUpperCase(),
         };
       }
       if (roster) {
@@ -409,7 +416,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
             reason: `reservation ${row.reservation} was booked for ${roster.tech_name} but the report surname is "${row.lastName}"`,
             candidates: [candidateOf(roster)], method: "direct:reservation", confidence: "low",
           },
-          truck: null, method: "direct:reservation", truckSource: null,
+          truck: null, method: "direct:reservation", truckSource: null, ldap: null,
         };
       }
       // booked LDAP unknown to the roster — carry the booking evidence, no truck assertion beyond TPMS
@@ -420,7 +427,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
           reason: `reservation ${row.reservation} booked for LDAP ${intent.ldap}${intent.techName ? ` (${intent.techName})` : ""}, not on the roster`,
           method: "direct:reservation", confidence: "low",
         },
-        truck: t.truck, method: "direct:reservation", truckSource: t.truckSource,
+        truck: t.truck, method: "direct:reservation", truckSource: t.truckSource, ldap: null,
       };
     }
   }
@@ -434,14 +441,14 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
       if (surnameAgrees(row.lastName, name)) {
         if (roster) {
           const t = truckOf(roster, null, ctx);
-          return { preset: resolvedFromRoster(roster, "direct:prior_ticket", "high"), truck: t.truck, method: "direct:prior_ticket", truckSource: t.truckSource };
+          return { preset: resolvedFromRoster(roster, "direct:prior_ticket", "high"), truck: t.truck, method: "direct:prior_ticket", truckSource: t.truckSource, ldap: roster.racf?.toUpperCase() ?? null };
         }
         return {
           preset: {
             state: "RESOLVED", employee_id: prior.employeeId, tech_name: prior.techName,
             district_no: prior.district, confidence: "medium", method: "direct:prior_ticket",
           },
-          truck: null, method: "direct:prior_ticket", truckSource: null,
+          truck: null, method: "direct:prior_ticket", truckSource: null, ldap: null,
         };
       }
       if (roster) {
@@ -451,7 +458,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
             reason: `old ticket ${row.replacesTicket} belongs to ${name} but the report surname is "${row.lastName}"`,
             candidates: [candidateOf(roster)], method: "direct:prior_ticket", confidence: "low",
           },
-          truck: null, method: "direct:prior_ticket", truckSource: null,
+          truck: null, method: "direct:prior_ticket", truckSource: null, ldap: null,
         };
       }
     }
@@ -470,14 +477,14 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
         const roster = tt.employee_id ? ctx.rosterByEmployeeId.get(tt.employee_id) ?? null : null;
         const live = truckOf(roster, null, ctx); // roster racf -> live TPMS truck
         if (roster) {
-          return { preset: resolvedFromRoster(roster, "direct:truck_ref", "high"), truck: live.truck, method: "direct:truck_ref", truckSource: live.truckSource };
+          return { preset: resolvedFromRoster(roster, "direct:truck_ref", "high"), truck: live.truck, method: "direct:truck_ref", truckSource: live.truckSource, ldap: roster.racf?.toUpperCase() ?? null };
         }
         return {
           preset: {
             state: "RESOLVED", employee_id: tt.employee_id || null, tech_name: tt.tech_name,
             district_no: tt.district_no ?? null, confidence: "medium", method: "direct:truck_ref",
           },
-          truck: live.truck, method: "direct:truck_ref", truckSource: live.truckSource,
+          truck: live.truck, method: "direct:truck_ref", truckSource: live.truckSource, ldap: null,
         };
       }
     }
@@ -497,12 +504,12 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
     }
     if (cands.length === 1) {
       const t = truckOf(cands[0], null, ctx);
-      return { preset: resolvedFromRoster(cands[0], "direct:surname_unique", "medium"), truck: t.truck, method: "direct:surname_unique", truckSource: t.truckSource };
+      return { preset: resolvedFromRoster(cands[0], "direct:surname_unique", "medium"), truck: t.truck, method: "direct:surname_unique", truckSource: t.truckSource, ldap: cands[0].racf?.toUpperCase() ?? null };
     }
   }
 
   // nothing conclusive — let the standard resolver produce REVIEW/EXCEPTION evidence
-  return { preset: null, truck: null, method: null, truckSource: null };
+  return { preset: null, truck: null, method: null, truckSource: null, ldap: null };
 }
 
 // ── case building ────────────────────────────────────────────────────────────
@@ -525,10 +532,26 @@ export interface DirectBuildStats {
   dedupedAway: number;
 }
 
+/**
+ * One sighting per resolved technician: "this tech's rental is on the
+ * direct-billing report" — the positive proof their billing switchover
+ * happened. Collected per ROW (before the per-truck dedupe) so a tech whose
+ * rows all deduped away still counts.
+ */
+export interface SwitchoverSighting {
+  ldap: string;
+  ra: string;
+  reservation: string | null;
+  rentalDate: string | null;
+  method: string;
+}
+
 export function buildDirectCases(rows: DirectBillingRow[], ctx: DirectResolveCtx, now: number): {
   cases: RentalCase[]; presets: Map<string, IdentityResolution>; stats: DirectBuildStats;
+  switchovers: Map<string, SwitchoverSighting>;
 } {
   const byKey = new Map<string, { c: RentalCase; preset: IdentityResolution | null }>();
+  const switchovers = new Map<string, SwitchoverSighting>();
   const stats: DirectBuildStats = {
     parsedRows: rows.length, withTruck: 0, truckless: 0,
     presetResolved: 0, presetReview: 0, unresolved: 0, byMethod: {}, dedupedAway: 0,
@@ -536,6 +559,17 @@ export function buildDirectCases(rows: DirectBillingRow[], ctx: DirectResolveCtx
 
   for (const row of rows) {
     const r = resolveDirectRow(row, ctx);
+    // RESOLVED identities only — a REVIEW guess must never mark a cutover
+    // "billing switched". Latest rental per tech wins as the evidence row.
+    if (r.preset?.state === "RESOLVED" && r.ldap) {
+      const prev = switchovers.get(r.ldap);
+      if (!prev || (row.rentalDate ?? "") > (prev.rentalDate ?? "")) {
+        switchovers.set(r.ldap, {
+          ldap: r.ldap, ra: row.raNumber, reservation: row.reservation,
+          rentalDate: row.rentalDate, method: r.method ?? "unknown",
+        });
+      }
+    }
     const padded = r.truck ? toDisplayNumber(r.truck) : "";
     // case_key IS the truck everywhere downstream (Holman cache, portal hist,
     // fleet status all join on it) — so a trucked case keys by truck, and only
@@ -610,7 +644,7 @@ export function buildDirectCases(rows: DirectBillingRow[], ctx: DirectResolveCtx
       stats.unresolved++;
     }
   }
-  return { cases, presets, stats };
+  return { cases, presets, stats, switchovers };
 }
 
 function rowFeed(row: DirectBillingRow): Record<string, any> {
@@ -728,12 +762,56 @@ export async function loadDirectResolveCtx(): Promise<DirectResolveCtx> {
   return { truckTechs, techTruckByLdap, rosterByRacf, rosterByEmployeeId, rosterBySurname, intentByConfirmation, priorCaseByTicket };
 }
 
+// ── cutover billing-switchover stamp ─────────────────────────────────────────
+
+/**
+ * Mark cutover candidates whose rental now appears on the direct-billing
+ * report as "billing switchover complete" (Tyler 2026-08-22: the import must
+ * automatically update the cutover screen).
+ *
+ * Semantics:
+ * - confirmed_at is WRITE-ONCE (COALESCE): once a tech was seen billing on
+ *   the direct account, the switchover HAPPENED. Absence from a later report
+ *   means the rental ended — still switched, never un-switched.
+ * - last_seen_at/evidence refresh on every import, so the page can say how
+ *   recent the sighting is.
+ * - Only identity-RESOLVED rows reach this (collected in buildDirectCases);
+ *   REVIEW evidence never stamps.
+ * - Deliberately OUTSIDE cutover-anchor.ts's book logic: that anchors the OLD
+ *   'enterprise' (ECARS) tickets; this confirms the NEW direct-billed rental.
+ */
+export async function stampCutoverBillingSwitchover(
+  sightings: Map<string, SwitchoverSighting>,
+  meta: { fileDate: string | null; sourceLabel: string },
+): Promise<{ techs: number; stamped: number }> {
+  let stamped = 0;
+  for (const s of Array.from(sightings.values())) {
+    const evidence = JSON.stringify({
+      ra: s.ra, reservation: s.reservation, rentalDate: s.rentalDate,
+      method: s.method, fileDate: meta.fileDate, sourceLabel: meta.sourceLabel,
+    });
+    const r = await db.execute(sql`
+      UPDATE vrm_rental_cutover
+      SET direct_billing_confirmed_at = COALESCE(direct_billing_confirmed_at, now()),
+          direct_billing_last_seen_at = now(),
+          direct_billing_evidence     = ${evidence}::jsonb,
+          updated_at                  = now()
+      WHERE upper(trim(ldap)) = ${s.ldap}
+    `);
+    stamped += Number((r as any).rowCount ?? 0);
+  }
+  return { techs: sightings.size, stamped };
+}
+
 // ── importer ─────────────────────────────────────────────────────────────────
 
 export interface DirectImportResult extends IngestResult {
   headerRow: number;
   matchedCols: number;
   stats: DirectBuildStats;
+  /** resolved techs seen on this report / cutover rows actually stamped */
+  switchoverTechs?: number;
+  switchoverStamped?: number;
 }
 
 export async function importDirectBillingReport(input: {
@@ -756,7 +834,7 @@ export async function importDirectBillingReport(input: {
   assertPlausibleReport(rows);
 
   const ctx = await loadDirectResolveCtx();
-  const { cases, presets, stats } = buildDirectCases(rows, ctx, now);
+  const { cases, presets, stats, switchovers } = buildDirectCases(rows, ctx, now);
 
   const p = await persistRentalCases({
     runType: "manual_direct_billing_import",
@@ -768,6 +846,21 @@ export async function importDirectBillingReport(input: {
     presetResolutions: presets,
     fingerprint: `direct;rows:${rows.length};trucked:${stats.withTruck};file:${input.fileDate ?? "n/a"}`,
   });
+
+  // Billing-switchover stamp on the cutover scoreboard. Best-effort AFTER the
+  // cases landed: a stamping hiccup must not fail an otherwise-good import
+  // (the next upload re-stamps — sightings are idempotent).
+  let switchoverTechs: number | undefined, switchoverStamped: number | undefined;
+  try {
+    const st = await stampCutoverBillingSwitchover(switchovers, {
+      fileDate: input.fileDate ?? null,
+      sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
+    });
+    switchoverTechs = st.techs; switchoverStamped = st.stamped;
+    console.log(`[VRM/RentalOps] direct import: billing switchover stamped on ${st.stamped} cutover row(s) (${st.techs} resolved tech(s) on the report)`);
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] direct import: cutover switchover stamp failed (non-fatal):", e?.message || e);
+  }
 
   // best-effort enrichment, same as the MasterARI path (cached AMS = fast)
   let poLanded: number | undefined, openRepairTrucks: number | undefined, amsWithStatus: number | undefined;
@@ -794,6 +887,6 @@ export async function importDirectBillingReport(input: {
     enterpriseCount: p.enterpriseCount, holmanCount: p.holmanCount, pendedCount: p.pendedCount,
     totalCases: p.totalCases, resolved: p.resolved, review: p.review, exception: p.exception,
     dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus,
-    headerRow, matchedCols, stats,
+    headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
   };
 }

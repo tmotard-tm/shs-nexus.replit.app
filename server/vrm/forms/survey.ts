@@ -1774,6 +1774,13 @@ export async function buildCutoverStatusPayload(): Promise<any> {
                          FROM jsonb_array_elements_text(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) t), '')
                  AS anchor_tickets,
                c.book_anchor_at, c.book_anchor_source,
+               -- Billing switchover proof (2026-08-22): stamped by the manual
+               -- direct-billing import when this tech's rental shows up on the
+               -- Enterprise direct-account report. Write-once — see
+               -- direct-billing-import.ts stampCutoverBillingSwitchover.
+               c.direct_billing_confirmed_at, c.direct_billing_last_seen_at,
+               c.direct_billing_evidence->>'ra'       AS direct_billing_ra,
+               c.direct_billing_evidence->>'fileDate' AS direct_billing_file_date,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
         -- Pickup day, parsed once, kept as TEXT on purpose: reservation_start
@@ -1945,6 +1952,8 @@ export async function buildCutoverStatusPayload(): Promise<any> {
         by_reservation: tally("reservation_status"),
         by_route_block: tally("route_block_status"),
         by_holman_book: tally("holman_book_state"),
+        // positive direct-billing-report confirmations among these rows
+        billing_switched: (rows as any[]).filter((r) => r.direct_billing_confirmed_at != null).length,
         book: {
           as_of: bookMeta.as_of ?? null,
           landed_at: bookMeta.landed_at ?? null,

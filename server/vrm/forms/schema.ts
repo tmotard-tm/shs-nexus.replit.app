@@ -984,5 +984,29 @@ export async function initFormsSchema(): Promise<void> {
     `);
   }
 
+  // Billing switchover confirmation: the Enterprise direct-billing report
+  // ("Rental Agreement Detail Open Ticket Report") is the positive proof that
+  // a cutover actually finished — the tech's rental is billing on the
+  // TransformCo direct account. The manual direct-billing import stamps these
+  // on identity-RESOLVED report rows. confirmed_at is WRITE-ONCE: dropping off
+  // a later report means the rental ended (still switched), never un-switched.
+  // Same steady-state-zero-DDL pattern as the blocks above.
+  const { rows: dbCols } = await db.execute(sql`
+    SELECT count(*)::int AS n FROM information_schema.columns
+    WHERE table_name = 'vrm_rental_cutover'
+      AND column_name IN ('direct_billing_confirmed_at','direct_billing_last_seen_at','direct_billing_evidence')
+  `);
+  if (Number((dbCols as any[])[0]?.n ?? 0) < 3) {
+    await db.execute(sql`
+      BEGIN;
+      SET LOCAL lock_timeout = '5s';
+      ALTER TABLE vrm_rental_cutover
+        ADD COLUMN IF NOT EXISTS direct_billing_confirmed_at timestamptz,
+        ADD COLUMN IF NOT EXISTS direct_billing_last_seen_at timestamptz,
+        ADD COLUMN IF NOT EXISTS direct_billing_evidence     jsonb;
+      COMMIT;
+    `);
+  }
+
   console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover, vrm_rental_workflow_intents)");
 }

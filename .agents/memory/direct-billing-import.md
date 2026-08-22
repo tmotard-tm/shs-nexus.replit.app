@@ -21,5 +21,12 @@ Displayed truck = the resolved tech's **live TPMS assignment only**. Never a rep
 - While a live `enterprise_direct` case holds a case_key, feed rows for that key are dropped in persist; feeds reclaim automatically when the direct case leaves the report.
 - **Override-expiry trap:** the PO-based identity-override expiry would wipe every human override the moment a case flips to the PO-less direct source — and in changeover the renter is the same person. Direct source is excluded; a PO-less case is no evidence the rental turned over.
 
+## Cutover billing-switchover stamp (write-once)
+The import stamps `vrm_rental_cutover.direct_billing_confirmed_at` for every identity-**RESOLVED** report row with a roster racf — REVIEW guesses never stamp ("never render a guess as fact").
+- **Write-once by design:** absence from a later report means the rental *ended*, never "un-switched" — confirmed_at is COALESCE-protected; only last_seen/evidence refresh. Any future "clear the stamp" request contradicts this semantic and needs Tyler's sign-off.
+- Sightings are collected per ROW **before** the per-truck dedupe (a tech whose rows all dedupe away still counts); latest rentalDate wins as evidence.
+- Deliberately OUTSIDE cutover-anchor.ts Holman-book logic: that lane anchors the OLD `source='enterprise'` ECARS tickets; this stamp confirms the NEW direct-billed rental. Keep them separate.
+- Stamp runs best-effort after case persist (non-fatal on failure — next upload re-stamps idempotently).
+
 ## Destructive imports need role gates
 Full-state report imports are admin/developer-gated (`requireImportOperator`, before multer) — the `/api/vrm` session check only proves login (same lesson as fs-router-auth-gap).

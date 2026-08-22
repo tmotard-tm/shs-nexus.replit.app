@@ -65,6 +65,16 @@ interface Row {
   anchor_tickets?: string | null;
   book_anchor_at?: string | null;
   book_anchor_source?: string | null;
+  /**
+   * Billing switchover proof: set when this tech's rental appeared on the
+   * Enterprise DIRECT-billing report (write-once — dropping off a later
+   * report means the rental ended, still switched). Stamped automatically by
+   * the direct-billing import.
+   */
+  direct_billing_confirmed_at?: string | null;
+  direct_billing_last_seen_at?: string | null;
+  direct_billing_ra?: string | null;
+  direct_billing_file_date?: string | null;
 }
 
 interface Payload {
@@ -73,6 +83,8 @@ interface Payload {
   by_reservation: Record<string, number>;
   by_route_block: Record<string, number>;
   by_holman_book?: Record<string, number>;
+  /** rows confirmed billing on the direct account (seen on the direct report) */
+  billing_switched?: number;
   /** Enterprise book snapshot freshness — the truth ceiling of every book state. */
   book?: {
     as_of: string | null;
@@ -231,6 +243,9 @@ export default function CutoverTracking() {
       ["Book match", (r) => r.holman_book_match ?? ""],
       ["Anchor tickets", (r) => r.anchor_tickets ?? ""],
       ["Book as of", () => data?.book?.as_of ?? ""],
+      ["Billing switched", (r) => r.direct_billing_confirmed_at ? "yes" : ""],
+      ["Switch confirmed", (r) => r.direct_billing_confirmed_at ?? ""],
+      ["Direct-billing RA", (r) => r.direct_billing_ra ?? ""],
     ];
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const csv = [cols.map((c) => esc(c[0])).join(",")]
@@ -254,6 +269,7 @@ export default function CutoverTracking() {
   ).length;
   const rolled = rows.filter((r) => r.holman_book_state === "rolled").length;
   const unanchored = rows.filter((r) => r.holman_book_state === "unanchored").length;
+  const billingSwitched = rows.filter((r) => r.direct_billing_confirmed_at).length;
 
   const card = {
     background: colors.surface, border: `1px solid ${colors.rule}`,
@@ -313,6 +329,8 @@ export default function CutoverTracking() {
       sub: "old ticket restarted on/after the ETD pickup day" },
     { label: "No anchor", value: unanchored, icon: AlertTriangle, tone: colors.inkMuted,
       sub: "no old ticket on record — book state unknown" },
+    { label: "Billing switched", value: billingSwitched, icon: CheckCircle2, tone: colors.greenDeep,
+      sub: "confirmed on the Enterprise direct-billing report" },
   ];
 
   const book = data?.book;
@@ -501,6 +519,7 @@ export default function CutoverTracking() {
                 ["etd_reference", "Reservation"], ["branch_name", "Branch"],
                 ["route_block_status", "Route block"], ["route_block_date", "Block day"],
                 ["holman_book_state", "On Holman book"],
+                ["direct_billing_confirmed_at", "Billing switched"],
                 ["district", "Dist"], ["supervisor_name", "Supervisor"]]
                 .map(([col, label]) => (
                 <th key={col} style={th} onClick={() => toggleSort(col)}>
@@ -594,6 +613,20 @@ export default function CutoverTracking() {
                                     color: colors.inkMuted }}>{r.anchor_tickets}</div>
                     )}
                   </td>
+                  <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}
+                      title={r.direct_billing_ra
+                        ? `RA ${r.direct_billing_ra}${r.direct_billing_file_date ? ` · report ${r.direct_billing_file_date}` : ""}`
+                        : undefined}>
+                    {r.direct_billing_confirmed_at
+                      ? <span style={{ color: colors.greenDeep, fontWeight: 700 }}>
+                          switched ✓
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 400,
+                                        color: colors.inkMuted }}>
+                            {fmtDate(r.direct_billing_confirmed_at)}
+                          </div>
+                        </span>
+                      : <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.district || "\u2014"}</td>
                   <td style={{ ...td, fontSize: 12 }} title={r.supervisor_ldap ?? ""}>
                     {r.supervisor_name
@@ -609,7 +642,7 @@ export default function CutoverTracking() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={12} style={{ ...td, textAlign: "center", color: colors.inkMuted,
+                <td colSpan={13} style={{ ...td, textAlign: "center", color: colors.inkMuted,
                                          padding: 30 }}>
                   {rows.length === 0
                     ? "No complete records yet. A technician appears here once their reservation is booked and their route block is filed."

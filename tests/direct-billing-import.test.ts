@@ -393,6 +393,66 @@ test("buildDirectCases: two rentals landing on one truck keep the LATEST rental 
   assert.equal(stats.dedupedAway, 1);
 });
 
+// ── billing-switchover sightings (cutover stamp input) ──────────────────────
+
+test("switchovers: RESOLVED rows yield one sighting per tech LDAP; REVIEW and unresolved never do", () => {
+  const r = roster({});
+  const ctx = ctxOf({
+    intentByConfirmation: new Map([
+      ["777", { ldap: "CMORAL1", techName: null, truckNumber: null }],
+      ["555", { ldap: "CMORAL1", techName: null, truckNumber: null }],
+    ]),
+    rosterByRacf: new Map([["CMORAL1", r]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+    techTruckByLdap: new Map([["CMORAL1", "23132"]]),
+  });
+  const { switchovers } = buildDirectCases([
+    row({ reservation: "777" }),                        // RESOLVED -> sighting
+    row({ reservation: "555", lastName: "SMITH" }),     // surname clash -> REVIEW, no sighting
+    row({ raNumber: "98XYZ1", lastName: "NOSUCHNAME" }),// unresolved -> no sighting
+  ], ctx, Date.now());
+
+  assert.equal(switchovers.size, 1);
+  const s = switchovers.get("CMORAL1")!;
+  assert.equal(s.ra, "12ABC7");
+  assert.equal(s.reservation, "777");
+  assert.equal(s.method, "direct:reservation");
+});
+
+test("switchovers: collected per ROW before the truck dedupe, latest rental wins as evidence", () => {
+  const r = roster({});
+  const ctx = ctxOf({
+    intentByConfirmation: new Map([
+      ["1", { ldap: "CMORAL1", techName: null, truckNumber: null }],
+      ["2", { ldap: "CMORAL1", techName: null, truckNumber: null }],
+    ]),
+    rosterByRacf: new Map([["CMORAL1", r]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+    techTruckByLdap: new Map([["CMORAL1", "23132"]]),
+  });
+  const { cases, switchovers } = buildDirectCases([
+    row({ reservation: "1", rentalDate: "2026-07-01", raNumber: "OLD111" }),
+    row({ reservation: "2", rentalDate: "2026-08-15", raNumber: "NEW222" }),
+  ], ctx, Date.now());
+  assert.equal(cases.length, 1);           // deduped to one case…
+  assert.equal(switchovers.size, 1);       // …but the tech is still sighted
+  assert.equal(switchovers.get("CMORAL1")!.ra, "NEW222"); // latest rental is the evidence
+});
+
+test("switchovers: a RESOLVED identity WITHOUT a roster racf never stamps (no LDAP to key on)", () => {
+  // tier-2 prior-ticket resolution with no roster row: identity is medium-
+  // RESOLVED via the old case, but there is no racf — the cutover table is
+  // keyed by LDAP, so this row must not produce a sighting.
+  const ctx = ctxOf({
+    priorCaseByTicket: new Map([["7H2K9Q", { employeeId: "E9", techName: "MORALES,CARLOS J", district: "8321" }]]),
+  });
+  const res = resolveDirectRow(row({ replacesTicket: "7H2K9Q" }), ctx);
+  assert.equal(res.preset?.state, "RESOLVED");
+  assert.equal(res.ldap, null);
+  const { switchovers } = buildDirectCases([row({ replacesTicket: "7H2K9Q" })], ctx, Date.now());
+  assert.equal(switchovers.size, 0);
+});
+
 test("feed carries the resolution audit trail", () => {
   const r = roster({});
   const ctx = ctxOf({
