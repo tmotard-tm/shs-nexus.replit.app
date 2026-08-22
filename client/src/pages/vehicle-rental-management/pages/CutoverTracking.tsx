@@ -17,7 +17,8 @@
  * sorted view. Inline styles from ../lib/constants like the rest of VRM.
  */
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/queryClient";
 import {
   ArrowUp, ArrowDown, ArrowUpDown, Search, Download, X, Loader2,
   CheckCircle2, CalendarClock, AlertTriangle,
@@ -75,6 +76,16 @@ interface Row {
   direct_billing_last_seen_at?: string | null;
   direct_billing_ra?: string | null;
   direct_billing_file_date?: string | null;
+  /** Audited void (premortem #4): a human declared the stamp erroneous. */
+  direct_billing_voided_at?: string | null;
+  direct_billing_voided_by?: string | null;
+  direct_billing_void_reason?: string | null;
+  /**
+   * THE effective-stamp predicate, computed server-side in SQL: stamped AND
+   * not voided (a later report sighting supersedes a void). Every billing
+   * surface on this page keys on this, never on confirmed_at directly.
+   */
+  direct_billing_effective?: boolean | null;
 }
 
 interface Payload {
@@ -87,6 +98,8 @@ interface Payload {
   billing_switched?: number;
   /** switched rows STILL open/rolled on the old enterprise book (double-billed) */
   double_billed?: number;
+  /** switched rows whose old-book state is UNANCHORED — unknown, not clean */
+  billing_unknown?: number;
   /** Enterprise book snapshot freshness — the truth ceiling of every book state. */
   book?: {
     as_of: string | null;
@@ -143,16 +156,36 @@ function bookTone(state: string | null | undefined): { label: string; fg: string
  * predicate shared by the KPI, the facet panel, the row tint, the cell
  * warning and the CSV so they can never disagree.
  */
-function billingKeyOf(r: Row): "double" | "switched" | "not_on_direct" {
-  const onOldBook = r.holman_book_state === "open" || r.holman_book_state === "rolled";
-  // != null, not truthiness: the server's double_billed count uses non-null,
-  // and the two predicates must never disagree.
-  if (r.direct_billing_confirmed_at != null) return onOldBook ? "double" : "switched";
-  return "not_on_direct";
+/**
+ * Stamp in force? Prefer the server's SQL-computed predicate; the local
+ * fallback (older payload in flight) is deliberately conservative — a void
+ * with no visible supersede reads as not-switched.
+ */
+function stampEffective(r: Row): boolean {
+  if (typeof r.direct_billing_effective === "boolean") return r.direct_billing_effective;
+  // Exact mirror of the SQL: confirmed AND (no void OR a LATER sighting
+  // supersedes it). An unparseable date reads as not-superseded (voided).
+  if (r.direct_billing_confirmed_at == null) return false;
+  if (r.direct_billing_voided_at == null) return true;
+  const seen = Date.parse(r.direct_billing_last_seen_at ?? "");
+  const voided = Date.parse(r.direct_billing_voided_at);
+  return Number.isFinite(seen) && Number.isFinite(voided) && seen > voided;
+}
+
+function billingKeyOf(r: Row): "double" | "unknown" | "switched" | "not_on_direct" {
+  if (!stampEffective(r)) return "not_on_direct";
+  const s = r.holman_book_state;
+  if (s === "open" || s === "rolled") return "double";
+  // Premortem #3: 'unanchored' means the old-book state is UNKNOWN for this
+  // row (no ticket anchor, no identity-verified truck match). Unknown ≠
+  // clean — it must never wear the green "old book clear" label.
+  if (s === "unanchored") return "unknown";
+  return "switched";
 }
 
 const BILLING_TONE: Record<string, { label: string; fg: string; bg: string }> = {
   double:        { label: "DOUBLE BILLED — direct + Holman", fg: colors.red,       bg: colors.redLight },
+  unknown:       { label: "switched — old book UNKNOWN",     fg: colors.amber,     bg: colors.amberLight },
   switched:      { label: "switched — old book clear",        fg: colors.greenDeep, bg: colors.greenDeepLight },
   not_on_direct: { label: "not on direct report yet",         fg: colors.inkMuted,  bg: colors.accentLight },
 };
@@ -183,6 +216,29 @@ export default function CutoverTracking() {
   const [bookFilter, setBookFilter] = useState<string[]>([]);
   const [billingFilter, setBillingFilter] = useState<string[]>([]);
   const [sort, setSort] = useState<{ col: string | null; dir: SortDir }>({ col: null, dir: null });
+
+  // Audited stamp correction (premortem #4). The reason is mandatory — it IS
+  // the audit trail. A later direct report sighting the tech supersedes the
+  // void automatically; unvoid is only for a void made in error.
+  const voidMut = useMutation({
+    mutationFn: (v: { ldap: string; action: "void" | "unvoid"; reason: string }) =>
+      apiRequest("POST",
+        `/api/vrm/forms/rental-survey/cutover/${encodeURIComponent(v.ldap)}/billing-void`,
+        { action: v.action, reason: v.reason }),
+    onSuccess: () => refetch(),
+    onError: (e: any) => window.alert(e?.message || "billing-void failed"),
+  });
+
+  function promptVoid(ldap: string, action: "void" | "unvoid") {
+    const reason = window.prompt(
+      action === "void"
+        ? `Mark ${ldap}'s direct-billing stamp as ERRONEOUS?\n\nReason (required, kept as the audit trail):`
+        : `Restore ${ldap}'s direct-billing stamp?\n\nReason (required):`);
+    const trimmed = (reason ?? "").trim();
+    if (!trimmed) return;
+    if (trimmed.length < 5) { window.alert("Reason must be at least 5 characters."); return; }
+    voidMut.mutate({ ldap, action, reason: trimmed });
+  }
 
   const rows = data?.rows ?? [];
 
@@ -277,10 +333,13 @@ export default function CutoverTracking() {
       ["Book match", (r) => r.holman_book_match ?? ""],
       ["Anchor tickets", (r) => r.anchor_tickets ?? ""],
       ["Book as of", () => data?.book?.as_of ?? ""],
-      ["Billing switched", (r) => r.direct_billing_confirmed_at != null ? "yes" : ""],
+      ["Billing switched", (r) => stampEffective(r) ? "yes" : ""],
       ["Switch confirmed", (r) => r.direct_billing_confirmed_at ?? ""],
       ["Direct-billing RA", (r) => r.direct_billing_ra ?? ""],
       ["Double billed", (r) => billingKeyOf(r) === "double" ? "yes" : ""],
+      ["Billing comparison", (r) => BILLING_TONE[billingKeyOf(r)]?.label ?? ""],
+      ["Stamp voided", (r) => stampEffective(r) || r.direct_billing_confirmed_at == null
+        ? "" : `yes${r.direct_billing_void_reason ? `: ${r.direct_billing_void_reason}` : ""}`],
     ];
     const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
     const csv = [cols.map((c) => esc(c[0])).join(",")]
@@ -304,7 +363,9 @@ export default function CutoverTracking() {
   ).length;
   const rolled = rows.filter((r) => r.holman_book_state === "rolled").length;
   const unanchored = rows.filter((r) => r.holman_book_state === "unanchored").length;
-  const billingSwitched = rows.filter((r) => r.direct_billing_confirmed_at != null).length;
+  // Effective stamps only — a voided stamp is NOT switched (matches the
+  // server's billing_switched count and every facet bucket on this page).
+  const billingSwitched = rows.filter(stampEffective).length;
   // Switched to the direct account yet still open/rolled on the OLD enterprise
   // book — the comparison the direct-billing import runs; these are double-
   // billed until the old ticket closes. Same predicate as the server's
@@ -528,7 +589,7 @@ export default function CutoverTracking() {
                         color: colors.inkMuted, marginBottom: 10 }}>
             Billing comparison (direct vs Holman)
           </div>
-          {(["double", "switched", "not_on_direct"] as const)
+          {(["double", "unknown", "switched", "not_on_direct"] as const)
             // Keep a bucket visible while it is ACTIVELY selected even if its
             // count dropped to zero on a refresh — otherwise the filter that
             // is emptying the table has no visible control to switch off.
@@ -695,21 +756,58 @@ export default function CutoverTracking() {
                       title={r.direct_billing_ra
                         ? `RA ${r.direct_billing_ra}${r.direct_billing_file_date ? ` · report ${r.direct_billing_file_date}` : ""}`
                         : undefined}>
-                    {r.direct_billing_confirmed_at != null
-                      ? <span style={{ color: colors.greenDeep, fontWeight: 700 }}>
-                          switched ✓
-                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 400,
-                                        color: colors.inkMuted }}>
-                            {fmtDate(r.direct_billing_confirmed_at)}
-                          </div>
-                          {isDouble && (
-                            <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
-                                          color: colors.red }}>
-                              ⚠ still on old book
+                    {(() => {
+                      const voidBtn = (action: "void" | "unvoid", label: string) => (
+                        <button onClick={() => promptVoid(r.ldap, action)}
+                                disabled={voidMut.isPending}
+                                title={action === "void"
+                                  ? "Mark this stamp as erroneous (audited; a later report re-sighting the tech supersedes the void)"
+                                  : "Restore a stamp that was voided by mistake"}
+                                style={{ display: "block", background: "none", border: "none", padding: 0,
+                                         cursor: "pointer", fontFamily: fonts.dmSans, fontSize: 10.5,
+                                         color: colors.inkMuted, textDecoration: "underline" }}>
+                          {label}
+                        </button>
+                      );
+                      if (stampEffective(r)) {
+                        return (
+                          <span style={{ color: colors.greenDeep, fontWeight: 700 }}>
+                            switched ✓
+                            <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 400,
+                                          color: colors.inkMuted }}>
+                              {fmtDate(r.direct_billing_confirmed_at ?? null)}
                             </div>
-                          )}
-                        </span>
-                      : <span style={{ color: colors.inkMuted }}>—</span>}
+                            {isDouble && (
+                              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
+                                            color: colors.red }}>
+                                ⚠ still on old book
+                              </div>
+                            )}
+                            {billingKeyOf(r) === "unknown" && (
+                              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700,
+                                            color: colors.amber }}>
+                                old book UNKNOWN
+                              </div>
+                            )}
+                            {voidBtn("void", "mark erroneous")}
+                          </span>
+                        );
+                      }
+                      if (r.direct_billing_confirmed_at != null) {
+                        // Stamped but voided (and not superseded by a newer sighting).
+                        return (
+                          <span style={{ color: colors.inkMuted }}
+                                title={`voided${r.direct_billing_voided_by ? ` by ${r.direct_billing_voided_by}` : ""}${r.direct_billing_void_reason ? `: ${r.direct_billing_void_reason}` : ""}`}>
+                            stamp voided
+                            <div style={{ fontSize: 11 }}>
+                              {fmtDate(r.direct_billing_voided_at ?? null)}
+                            </div>
+                            {voidBtn("unvoid", "restore stamp")}
+                          </span>
+                        );
+                      }
+                      return <span style={{ color: colors.inkMuted }}>—</span>;
+                    })()}
                   </td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.district || "\u2014"}</td>
                   <td style={{ ...td, fontSize: 12 }} title={r.supervisor_ldap ?? ""}>

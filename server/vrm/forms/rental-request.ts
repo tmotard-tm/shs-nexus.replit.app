@@ -1645,7 +1645,9 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          // 500s in prod — same lesson as above: a health check that omits
          // what it guards is worse than none.
          "direct_billing_confirmed_at", "direct_billing_last_seen_at",
-         "direct_billing_evidence"]],
+         "direct_billing_evidence",
+         "direct_billing_voided_at", "direct_billing_voided_by",
+         "direct_billing_void_reason", "direct_billing_void_history"]],
     ];
     try {
       const problems: string[] = [];

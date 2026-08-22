@@ -461,25 +461,32 @@ test("switchovers: a RESOLVED identity WITHOUT a roster racf never stamps (no LD
 
 // ── old-billing comparison ───────────────────────────────────────────────────
 
-test("old-billing comparison: only SWITCHED techs still open/rolled on the old book conflict", () => {
+test("old-billing comparison: only EFFECTIVELY switched techs still open/rolled on the old book conflict", () => {
   const rows = [
     // switched + old ticket still open -> conflict
     { ldap: "CMORAL1", tech_name: "MORALES,CARLOS J", truck_number: "23132",
-      direct_billing_confirmed_at: "2026-08-22T15:00:00Z", holman_book_state: "open",
+      direct_billing_effective: true, holman_book_state: "open",
       anchor_tickets: "7H2K9Q" },
     // switched + old ticket ROLLED past the swap -> conflict too (double-billing shape)
-    { ldap: "NOKONK1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+    { ldap: "NOKONK1", direct_billing_effective: true,
       holman_book_state: "rolled", anchor_tickets: "" },
     // switched + old book clear -> clean cutover, no conflict
-    { ldap: "COKONK1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+    { ldap: "COKONK1", direct_billing_effective: true,
       holman_book_state: "", anchor_tickets: "AB12CD" },
     // NOT switched + old book open -> not this comparison's business
-    { ldap: "JRIVER1", direct_billing_confirmed_at: null, holman_book_state: "open",
+    { ldap: "JRIVER1", direct_billing_effective: false, holman_book_state: "open",
       anchor_tickets: "ZZ99XX" },
+    // stamped but VOIDED (effective=false) + old book open -> a human declared
+    // the stamp erroneous; must NOT conflict (premortem #4)
+    { ldap: "VVOIDD1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+      direct_billing_effective: false, holman_book_state: "open", anchor_tickets: "QQ11WW" },
+    // field ABSENT entirely (old payload shape) -> reads as not-switched, never switched
+    { ldap: "MABSNT1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+      holman_book_state: "open", anchor_tickets: "" },
     // switched + pended/unanchored -> never a conflict (unknown ≠ double-billed)
-    { ldap: "PKANTZ1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+    { ldap: "PKANTZ1", direct_billing_effective: true,
       holman_book_state: "pended", anchor_tickets: "" },
-    { ldap: "LSLATE1", direct_billing_confirmed_at: "2026-08-22T15:00:00Z",
+    { ldap: "LSLATE1", direct_billing_effective: true,
       holman_book_state: "unanchored", anchor_tickets: "" },
   ];
   const conflicts = findOldBillingConflicts(rows as any);

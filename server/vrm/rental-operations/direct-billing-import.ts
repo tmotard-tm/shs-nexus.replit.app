@@ -845,7 +845,10 @@ export interface OldBillingConflict {
 
 export function findOldBillingConflicts(rows: Array<Record<string, unknown>>): OldBillingConflict[] {
   return rows
-    .filter((r) => r.direct_billing_confirmed_at != null
+    // direct_billing_effective is the payload's SQL-computed predicate:
+    // stamped AND not voided (a later sighting supersedes a void). Strict
+    // === true — a missing field must read as not-switched, never as switched.
+    .filter((r) => r.direct_billing_effective === true
       && (r.holman_book_state === "open" || r.holman_book_state === "rolled"))
     .map((r) => ({
       ldap: String(r.ldap ?? ""),
@@ -876,6 +879,14 @@ export interface DirectImportResult extends IngestResult {
   switchoverUnmatchedLdaps?: string[];
   /** switched techs STILL open on the old enterprise (ECARS) billing — double-billed */
   oldBillingConflicts?: OldBillingConflict[];
+  /**
+   * Premortem #5: the comparison is only as fresh as the OLD book snapshot
+   * behind it. Carried so the toast can say "vs old book as of X (N days
+   * old)" — a clean result against a stale book is a weaker claim.
+   */
+  oldBookAsOf?: string | null;
+  oldBookAgeDays?: number | null;
+  oldBookStale?: boolean;
 }
 
 export async function importDirectBillingReport(input: {
@@ -936,10 +947,18 @@ export async function importDirectBillingReport(input: {
   // one true derivation of book state (never duplicated here).
   let oldBillingConflicts: OldBillingConflict[] | undefined;
   let oldBillingComparisonStatus: "ok" | "failed" = "failed";
+  let oldBookAsOf: string | null | undefined;
+  let oldBookAgeDays: number | null | undefined;
+  let oldBookStale: boolean | undefined;
   try {
     const { buildCutoverStatusPayload } = await import("../forms/survey");
     const payload = await buildCutoverStatusPayload();
     oldBillingConflicts = findOldBillingConflicts(payload?.rows ?? []);
+    // Freshness of the OLD book snapshot the comparison ran against
+    // (premortem #5): unknown age reads as stale, never as fresh.
+    oldBookAsOf = payload?.book?.as_of ?? null;
+    oldBookAgeDays = payload?.book?.age_days ?? null;
+    oldBookStale = payload?.book?.stale !== false;
     oldBillingComparisonStatus = "ok";
     if (oldBillingConflicts.length) {
       console.warn(`[VRM/RentalOps] direct import: ${oldBillingConflicts.length} switched tech(s) STILL on the old enterprise billing (double-billed): ${oldBillingConflicts.map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}`);
@@ -977,6 +996,6 @@ export async function importDirectBillingReport(input: {
     dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus,
     headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
     switchoverStampStatus, oldBillingComparisonStatus, switchoverUnmatchedLdaps,
-    oldBillingConflicts,
+    oldBillingConflicts, oldBookAsOf, oldBookAgeDays, oldBookStale,
   };
 }

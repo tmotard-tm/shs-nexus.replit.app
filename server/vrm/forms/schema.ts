@@ -991,19 +991,32 @@ export async function initFormsSchema(): Promise<void> {
   // on identity-RESOLVED report rows. confirmed_at is WRITE-ONCE: dropping off
   // a later report means the rental ended (still switched), never un-switched.
   // Same steady-state-zero-DDL pattern as the blocks above.
+  // The voided_* trio is the audited correction path (premortem #4): a human
+  // can declare a stamp erroneous WITHOUT touching the sighting history — the
+  // void is superseded automatically when a LATER report sights the tech
+  // again (direct_billing_last_seen_at > direct_billing_voided_at).
   const { rows: dbCols } = await db.execute(sql`
     SELECT count(*)::int AS n FROM information_schema.columns
     WHERE table_name = 'vrm_rental_cutover'
-      AND column_name IN ('direct_billing_confirmed_at','direct_billing_last_seen_at','direct_billing_evidence')
+      AND column_name IN ('direct_billing_confirmed_at','direct_billing_last_seen_at','direct_billing_evidence',
+                          'direct_billing_voided_at','direct_billing_voided_by','direct_billing_void_reason',
+                          'direct_billing_void_history')
   `);
-  if (Number((dbCols as any[])[0]?.n ?? 0) < 3) {
+  if (Number((dbCols as any[])[0]?.n ?? 0) < 7) {
     await db.execute(sql`
       BEGIN;
       SET LOCAL lock_timeout = '5s';
       ALTER TABLE vrm_rental_cutover
         ADD COLUMN IF NOT EXISTS direct_billing_confirmed_at timestamptz,
         ADD COLUMN IF NOT EXISTS direct_billing_last_seen_at timestamptz,
-        ADD COLUMN IF NOT EXISTS direct_billing_evidence     jsonb;
+        ADD COLUMN IF NOT EXISTS direct_billing_evidence     jsonb,
+        ADD COLUMN IF NOT EXISTS direct_billing_voided_at    timestamptz,
+        ADD COLUMN IF NOT EXISTS direct_billing_voided_by    text,
+        ADD COLUMN IF NOT EXISTS direct_billing_void_reason  text,
+        -- Append-only event log: every void AND unvoid keeps its actor,
+        -- reason and timestamp here forever — clearing the current-state
+        -- columns on unvoid must never erase the audit trail.
+        ADD COLUMN IF NOT EXISTS direct_billing_void_history jsonb;
       COMMIT;
     `);
   }

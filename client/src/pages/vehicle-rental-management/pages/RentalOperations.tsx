@@ -715,12 +715,25 @@ export default function RentalOperations() {
           description: "The comparison against the old enterprise billing failed on this upload — NOT a clean result. Cutover Tracking still shows live state; check it directly.",
           variant: "destructive",
         });
-      } else if (conflicts.length) {
-        toast({
-          title: `${conflicts.length} tech${conflicts.length === 1 ? "" : "s"} still on the OLD enterprise billing`,
-          description: `Switched to direct billing but the old ticket is still open (double-billed): ${conflicts.slice(0, 6).map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}${conflicts.length > 6 ? ` +${conflicts.length - 6} more` : ""} — see Cutover Tracking.`,
-          variant: "destructive",
-        });
+      } else {
+        // Premortem #5: qualify every comparison verdict with the OLD book's
+        // freshness — "clean vs a week-old book" is a much weaker claim.
+        const bookQual = r.oldBookAsOf
+          ? `old book as of ${r.oldBookAsOf}${r.oldBookAgeDays != null ? ` (${r.oldBookAgeDays}d old)` : ""}`
+          : "old book age UNKNOWN";
+        if (conflicts.length) {
+          toast({
+            title: `${conflicts.length} tech${conflicts.length === 1 ? "" : "s"} still on the OLD enterprise billing`,
+            description: `Switched to direct billing but the old ticket is still open (double-billed): ${conflicts.slice(0, 6).map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}${conflicts.length > 6 ? ` +${conflicts.length - 6} more` : ""} — vs ${bookQual}; see Cutover Tracking.`,
+            variant: "destructive",
+          });
+        }
+        if (r.oldBookStale) {
+          toast({
+            title: "Old-book snapshot is stale",
+            description: `The double-billing comparison ran against the ${bookQual}. ${conflicts.length ? "There may be more conflicts than shown." : "A clean result against a stale book may miss newer double-billing."} Sync the Enterprise book to firm it up.`,
+          });
+        }
       }
       // Premortem fix: coverage gaps are part of the result, not a footnote —
       // these techs were NOT checked for double-billing at all.

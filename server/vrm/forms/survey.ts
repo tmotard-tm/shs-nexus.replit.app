@@ -1723,6 +1723,78 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Premortem #4: audited correction path for an erroneous direct-billing
+   * stamp. One bad Enterprise row would otherwise be a PERMANENT red
+   * "double billed" line (the stamp is write-once) — cry-wolf erosion.
+   *
+   * void   — declares the current stamp erroneous. Sighting history
+   *          (confirmed_at / last_seen_at / evidence) is NEVER mutated;
+   *          the void rides its own columns with actor + reason as audit.
+   *          A LATER report sighting the tech again supersedes the void
+   *          automatically (last_seen_at > voided_at) — fresh vendor
+   *          evidence beats a stale human assertion.
+   * unvoid — reverses a mistaken void. Requires a reason too; both events
+   *          are logged with the actor. Session-only in practice (the path
+   *          is not on the cron-bearer allowlist).
+   */
+  router.post("/forms/rental-survey/cutover/:ldap/billing-void", requireCronOrStaff, async (req, res) => {
+    try {
+      const ldap = String(req.params.ldap || "").trim().toUpperCase();
+      const action = String(req.body?.action || "void");
+      const reason = String(req.body?.reason || "").trim();
+      if (!ldap) return res.status(400).json({ message: "ldap required" });
+      if (action !== "void" && action !== "unvoid") {
+        return res.status(400).json({ message: "action must be 'void' or 'unvoid'" });
+      }
+      if (reason.length < 5) {
+        return res.status(400).json({ message: "a reason (at least 5 characters) is required — it is the audit trail" });
+      }
+      const actor = String((req as any).user?.username || (req as any).user?.email || "unknown").slice(0, 80);
+      // Both actions append to direct_billing_void_history — an append-only
+      // event log, so an unvoid clearing the current-state columns can never
+      // erase who voided/restored what, when, or why.
+      const historyEvent = sql`COALESCE(direct_billing_void_history, '[]'::jsonb)
+            || jsonb_build_object('action', ${action}::text, 'at', now(),
+                                  'by', ${actor}::text, 'reason', ${reason}::text)`;
+      if (action === "void") {
+        const r = await db.execute(sql`
+          UPDATE vrm_rental_cutover
+          SET direct_billing_voided_at   = now(),
+              direct_billing_voided_by   = ${actor},
+              direct_billing_void_reason = ${reason},
+              direct_billing_void_history = ${historyEvent},
+              updated_at                 = now()
+          WHERE upper(trim(ldap)) = ${ldap}
+            AND direct_billing_confirmed_at IS NOT NULL
+        `);
+        if (!Number((r as any).rowCount ?? 0)) {
+          return res.status(404).json({ message: "no stamped cutover row for that LDAP" });
+        }
+        console.log(`[survey] direct-billing stamp VOIDED for ${ldap} by ${actor}: ${reason}`);
+      } else {
+        const r = await db.execute(sql`
+          UPDATE vrm_rental_cutover
+          SET direct_billing_voided_at   = NULL,
+              direct_billing_voided_by   = NULL,
+              direct_billing_void_reason = NULL,
+              direct_billing_void_history = ${historyEvent},
+              updated_at                 = now()
+          WHERE upper(trim(ldap)) = ${ldap}
+            AND direct_billing_voided_at IS NOT NULL
+        `);
+        if (!Number((r as any).rowCount ?? 0)) {
+          return res.status(404).json({ message: "no voided stamp for that LDAP" });
+        }
+        console.log(`[survey] direct-billing stamp UNVOIDED for ${ldap} by ${actor}: ${reason}`);
+      }
+      res.json({ ok: true, ldap, action });
+    } catch (error: any) {
+      console.error("[survey] billing-void failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "billing-void failed" });
+    }
+  });
+
   // End-to-end cutover workflow intents (task #646): intent-owned booking,
   // block filing, messaging and readbacks. Registered last — the module owns
   // everything under /forms/rental-survey/cutover/* plus the rental-request
@@ -1781,6 +1853,21 @@ export async function buildCutoverStatusPayload(): Promise<any> {
                c.direct_billing_confirmed_at, c.direct_billing_last_seen_at,
                c.direct_billing_evidence->>'ra'       AS direct_billing_ra,
                c.direct_billing_evidence->>'fileDate' AS direct_billing_file_date,
+               c.direct_billing_voided_at, c.direct_billing_voided_by,
+               c.direct_billing_void_reason,
+               -- Premortem #4: THE effective-stamp predicate, computed once in
+               -- SQL so the page buckets, the payload counts and the import's
+               -- conflict scan can never disagree. A void is superseded when a
+               -- LATER report sights the tech again (evidence beats a stale
+               -- human assertion; the void columns stay as audit).
+               -- last_seen IS NOT NULL is spelled out so a voided row with a
+               -- NULL last_seen yields FALSE, not SQL NULL (NULL > x = NULL
+               -- would leak a non-boolean into the JSON payload).
+               (c.direct_billing_confirmed_at IS NOT NULL
+                AND (c.direct_billing_voided_at IS NULL
+                     OR (c.direct_billing_last_seen_at IS NOT NULL
+                         AND c.direct_billing_last_seen_at > c.direct_billing_voided_at)))
+                 AS direct_billing_effective,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
         -- Pickup day, parsed once, kept as TEXT on purpose: reservation_start
@@ -1953,11 +2040,17 @@ export async function buildCutoverStatusPayload(): Promise<any> {
         by_route_block: tally("route_block_status"),
         by_holman_book: tally("holman_book_state"),
         // positive direct-billing-report confirmations among these rows
-        billing_switched: (rows as any[]).filter((r) => r.direct_billing_confirmed_at != null).length,
+        // (effective = stamped and not voided; the SQL predicate above)
+        billing_switched: (rows as any[]).filter((r) => r.direct_billing_effective === true).length,
         // switched to the direct account yet STILL open/rolled on the old
         // enterprise book — double-billed; the old ticket needs closing
-        double_billed: (rows as any[]).filter((r) => r.direct_billing_confirmed_at != null
+        double_billed: (rows as any[]).filter((r) => r.direct_billing_effective === true
           && (r.holman_book_state === "open" || r.holman_book_state === "rolled")).length,
+        // Premortem #3: switched but the old book state is UNANCHORED — no
+        // ticket anchor and no identity-verified truck match, so the old book
+        // is UNKNOWN for this row. Unknown ≠ clean; its own bucket.
+        billing_unknown: (rows as any[]).filter((r) => r.direct_billing_effective === true
+          && r.holman_book_state === "unanchored").length,
         book: {
           as_of: bookMeta.as_of ?? null,
           landed_at: bookMeta.landed_at ?? null,
