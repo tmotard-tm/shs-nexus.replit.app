@@ -38,15 +38,23 @@ async function cleanup() {
   await db.execute(sql`DELETE FROM all_techs WHERE employee_id LIKE 'ZZ999%'`);
 }
 
-async function seedCutover(ldap: string, truck: string, extra?: { anchors?: string[]; start?: string }) {
+async function seedCutover(ldap: string, truck: string, extra?: {
+  anchors?: string[]; start?: string;
+  // task #748 fixtures: non-booked rows carrying a direct-billing stamp
+  status?: string; stampedAt?: string; voidedAt?: string;
+}) {
   await db.execute(sql`
     INSERT INTO vrm_rental_cutover
       (ldap, tech_name, truck_number, reservation_status, reservation_start,
-       route_block_status, route_block_live, book_anchor_tickets, book_anchor_source)
-    VALUES (${ldap}, ${"TEST, " + ldap}, ${truck}, 'booked', ${extra?.start ?? "2026-08-14T08:00"},
+       route_block_status, route_block_live, book_anchor_tickets, book_anchor_source,
+       direct_billing_confirmed_at, direct_billing_last_seen_at, direct_billing_voided_at)
+    VALUES (${ldap}, ${"TEST, " + ldap}, ${truck}, ${extra?.status ?? "booked"}, ${extra?.start ?? "2026-08-14T08:00"},
             'filed', true,
             ${extra?.anchors ? JSON.stringify(extra.anchors) : null}::jsonb,
-            ${extra?.anchors ? "backfill" : null})
+            ${extra?.anchors ? "backfill" : null},
+            ${extra?.stampedAt ?? null}::timestamptz,
+            ${extra?.stampedAt ?? null}::timestamptz,
+            ${extra?.voidedAt ?? null}::timestamptz)
   `);
 }
 
@@ -122,6 +130,22 @@ describe("cutover book anchoring (task #738)", () => {
     //    must not 500 and must still classify via text comparison.
     await seedCutover("ZZANC6", "99906", { anchors: ["ZZTK6"], start: "2026-02-31T08:00" });
     await seedCase({ caseKey: "ZZANC-6", truck: "99906", ticket: "ZZTK6", start: "2026-08-20" });
+
+    // 7. Task #748: billing-switched stamp on a RELEASED (non-booked) row with
+    //    the anchored old ticket still open. Off the page's booked-only scope,
+    //    but the double-billing comparison must still see it.
+    await seedCutover("ZZANC7", "99907", {
+      anchors: ["ZZTK7"], status: "released", stampedAt: "2026-08-21T12:00:00Z",
+    });
+    await seedCase({ caseKey: "ZZANC-7", truck: "99907", ticket: "ZZTK7", start: "2026-08-01" });
+
+    // 8. Task #748 counter-case: stamp VOIDED (not superseded by a later
+    //    sighting) on a released row → not effective, stays out even widened.
+    await seedCutover("ZZANC8", "99908", {
+      anchors: ["ZZTK8"], status: "released",
+      stampedAt: "2026-08-20T12:00:00Z", voidedAt: "2026-08-21T12:00:00Z",
+    });
+    await seedCase({ caseKey: "ZZANC-8", truck: "99908", ticket: "ZZTK8", start: "2026-08-01" });
   });
 
   after(async () => {
@@ -266,5 +290,28 @@ describe("cutover book anchoring (task #738)", () => {
     const r = rowFor(p, "ZZANC5");
     assert.equal(r.holman_book_state, "open");
     assert.equal(r.holman_book_match, "anchored");
+  });
+
+  test("task #748: includeAllStamped admits stamped non-booked rows; the page's default scope is unchanged", async () => {
+    // Default (page) payload: booked-only — the released rows must be absent.
+    const p = await buildCutoverStatusPayload();
+    assert.ok(!(p.rows as any[]).some((x) => x.ldap === "ZZANC7"), "released row stays off the page payload");
+    assert.ok(!(p.rows as any[]).some((x) => x.ldap === "ZZANC8"), "voided released row stays off the page payload");
+
+    // Widened (importer) payload: the effectively-stamped released row IS
+    // scanned, with the same book-state derivation as booked rows.
+    const w = await buildCutoverStatusPayload({ includeAllStamped: true });
+    const r = rowFor(w, "ZZANC7");
+    assert.equal(r.reservation_status, "released");
+    assert.equal(r.direct_billing_effective, true);
+    assert.equal(r.holman_book_state, "open", "anchored open ticket still derives on a non-booked row");
+    assert.equal(r.holman_book_match, "anchored");
+
+    // A VOIDED stamp (not superseded by a later sighting) is not effective —
+    // widening must not resurrect it.
+    assert.ok(!(w.rows as any[]).some((x) => x.ldap === "ZZANC8"), "voided stamp stays out even when widened");
+
+    // Booked rows are still present in the widened payload (superset, not swap).
+    assert.ok((w.rows as any[]).some((x) => x.ldap === "ZZANC2"), "booked rows remain in the widened payload");
   });
 });

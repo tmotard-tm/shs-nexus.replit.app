@@ -841,6 +841,12 @@ export interface OldBillingConflict {
   truck_number: string | null;
   book_state: string;          // 'open' | 'rolled'
   anchor_tickets: string;      // old ECARS ticket number(s) to close
+  /**
+   * Task #748: carried so the toast can flag conflicts on rows OUTSIDE the
+   * Cutover Tracking page's booked-only scope (released/failed/manual rows
+   * are scanned too, but the operator won't find them on the page).
+   */
+  reservation_status: string | null;
 }
 
 export function findOldBillingConflicts(rows: Array<Record<string, unknown>>): OldBillingConflict[] {
@@ -856,6 +862,7 @@ export function findOldBillingConflicts(rows: Array<Record<string, unknown>>): O
       truck_number: (r.truck_number as string | null) ?? null,
       book_state: String(r.holman_book_state),
       anchor_tickets: String(r.anchor_tickets ?? ""),
+      reservation_status: (r.reservation_status as string | null) ?? null,
     }));
 }
 
@@ -887,6 +894,14 @@ export interface DirectImportResult extends IngestResult {
   oldBookAsOf?: string | null;
   oldBookAgeDays?: number | null;
   oldBookStale?: boolean;
+  /**
+   * Task #748 (premortem #2): stamped techs whose cutover row is NOT
+   * reservation_status='booked' (released, failed, manually managed). They are
+   * invisible on the Cutover Tracking page (deliberate page scope) but ARE
+   * scanned by this comparison — the toast counts them so the coverage claim
+   * stays honest.
+   */
+  comparisonNonBookedStamped?: number;
 }
 
 /**
@@ -965,13 +980,20 @@ export async function importDirectBillingReport(input: {
   let oldBookAsOf: string | null | undefined;
   let oldBookAgeDays: number | null | undefined;
   let oldBookStale: boolean | undefined;
+  let comparisonNonBookedStamped: number | undefined;
   try {
+    // Task #748: includeAllStamped widens the scan beyond the page's
+    // booked-only scope — a stamped tech on a released/failed/manual row can
+    // still be double-billed and must not be invisible to this comparison.
     const buildPayload = deps.buildCutoverPayload ?? (async () => {
       const { buildCutoverStatusPayload } = await import("../forms/survey");
-      return buildCutoverStatusPayload();
+      return buildCutoverStatusPayload({ includeAllStamped: true });
     });
     const payload = await buildPayload();
-    oldBillingConflicts = findOldBillingConflicts(payload?.rows ?? []);
+    const payloadRows: Array<Record<string, unknown>> = payload?.rows ?? [];
+    oldBillingConflicts = findOldBillingConflicts(payloadRows);
+    comparisonNonBookedStamped = payloadRows.filter((r) =>
+      r.direct_billing_effective === true && r.reservation_status !== "booked").length;
     // Freshness of the OLD book snapshot the comparison ran against
     // (premortem #5): unknown age reads as stale, never as fresh.
     oldBookAsOf = payload?.book?.as_of ?? null;
@@ -979,9 +1001,12 @@ export async function importDirectBillingReport(input: {
     oldBookStale = payload?.book?.stale !== false;
     oldBillingComparisonStatus = "ok";
     if (oldBillingConflicts.length) {
-      console.warn(`[VRM/RentalOps] direct import: ${oldBillingConflicts.length} switched tech(s) STILL on the old enterprise billing (double-billed): ${oldBillingConflicts.map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}`);
+      console.warn(`[VRM/RentalOps] direct import: ${oldBillingConflicts.length} switched tech(s) STILL on the old enterprise billing (double-billed): ${oldBillingConflicts.map((c) => `${c.ldap}${c.reservation_status && c.reservation_status !== "booked" ? ` [${c.reservation_status}]` : ""}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}`);
     } else {
       console.log("[VRM/RentalOps] direct import: old-billing comparison clean — no switched tech still open on the old enterprise book");
+    }
+    if (comparisonNonBookedStamped) {
+      console.log(`[VRM/RentalOps] direct import: comparison also covered ${comparisonNonBookedStamped} stamped tech(s) without a booked reservation (off the Cutover Tracking page scope)`);
     }
   } catch (e: any) {
     console.warn("[VRM/RentalOps] direct import: old-billing comparison failed (non-fatal):", e?.message || e);
@@ -1021,5 +1046,6 @@ export async function importDirectBillingReport(input: {
     headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
     switchoverStampStatus, oldBillingComparisonStatus, switchoverUnmatchedLdaps,
     oldBillingConflicts, oldBookAsOf, oldBookAgeDays, oldBookStale,
+    comparisonNonBookedStamped,
   };
 }

@@ -609,6 +609,30 @@ test("importer: unknown book freshness reads STALE, never fresh", async () => {
   assert.equal(nullStale.oldBookStale, true);
 });
 
+test("old-billing comparison: non-booked rows conflict too and carry reservation_status (task #748)", () => {
+  // Task #748 (premortem #2): the widened payload feeds rows whose
+  // reservation_status is NOT 'booked' (released/failed/manual). The filter
+  // must treat them exactly like booked rows — switched + open/rolled is a
+  // conflict regardless of reservation state — and pass the status through so
+  // the toast can flag conflicts the Cutover Tracking page will not show.
+  const rows = [
+    { ldap: "RRELSD1", direct_billing_effective: true, holman_book_state: "open",
+      anchor_tickets: "RL01AA", reservation_status: "released" },
+    { ldap: "FFAILD1", direct_billing_effective: true, holman_book_state: "rolled",
+      anchor_tickets: "", reservation_status: "failed" },
+    { ldap: "BBOOKD1", direct_billing_effective: true, holman_book_state: "open",
+      anchor_tickets: "BK01AA", reservation_status: "booked" },
+    // non-booked but old book clear → clean, no conflict
+    { ldap: "CCLEAN1", direct_billing_effective: true, holman_book_state: "",
+      anchor_tickets: "CL01AA", reservation_status: "released" },
+  ];
+  const conflicts = findOldBillingConflicts(rows as any);
+  assert.deepEqual(conflicts.map((c) => c.ldap).sort(), ["BBOOKD1", "FFAILD1", "RRELSD1"]);
+  assert.equal(conflicts.find((c) => c.ldap === "RRELSD1")!.reservation_status, "released");
+  assert.equal(conflicts.find((c) => c.ldap === "FFAILD1")!.reservation_status, "failed");
+  assert.equal(conflicts.find((c) => c.ldap === "BBOOKD1")!.reservation_status, "booked");
+});
+
 test("feed carries the resolution audit trail", () => {
   const r = roster({});
   const ctx = ctxOf({

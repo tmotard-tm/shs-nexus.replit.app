@@ -693,10 +693,15 @@ export default function RentalOperations() {
       // open on the OLD enterprise book are double-billed — that deserves its
       // own loud toast, not a clause buried in the import summary.
       const conflicts: any[] = r.oldBillingConflicts ?? [];
+      // Task #748: the comparison also scans stamped techs whose cutover row
+      // is NOT booked (released/failed/manual — off the Cutover Tracking
+      // page's deliberate scope). Counted here so the coverage claim is
+      // honest: these techs WERE checked even though the page won't show them.
+      const nonBookedChecked = Number(r.comparisonNonBookedStamped ?? 0);
       toast({
         title: "Direct-billing report imported",
         description: s
-          ? `${r.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review · ${r.switchoverStamped ?? 0} cutover switchovers stamped`
+          ? `${r.totalCases ?? "?"} cases · ${s.withTruck} matched tech→truck · ${s.truckless} without a truck · ${(s.presetReview ?? 0) + (s.unresolved ?? 0)} need identity review · ${r.switchoverStamped ?? 0} cutover switchovers stamped${nonBookedChecked > 0 ? ` · ${nonBookedChecked} stamped tech${nonBookedChecked === 1 ? "" : "s"} without a booked reservation also checked` : ""}`
           : `${r.totalCases ?? "?"} cases`,
       });
       // Premortem fix: silence must never read as clean. If a step failed the
@@ -724,7 +729,7 @@ export default function RentalOperations() {
         if (conflicts.length) {
           toast({
             title: `${conflicts.length} tech${conflicts.length === 1 ? "" : "s"} still on the OLD enterprise billing`,
-            description: `Switched to direct billing but the old ticket is still open (double-billed): ${conflicts.slice(0, 6).map((c) => `${c.ldap}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}${conflicts.length > 6 ? ` +${conflicts.length - 6} more` : ""} — vs ${bookQual}; see Cutover Tracking.`,
+            description: `Switched to direct billing but the old ticket is still open (double-billed): ${conflicts.slice(0, 6).map((c) => `${c.ldap}${c.reservation_status && c.reservation_status !== "booked" ? ` [${c.reservation_status} — not on Cutover Tracking]` : ""}${c.anchor_tickets ? ` (tkt ${c.anchor_tickets})` : ""}`).join(", ")}${conflicts.length > 6 ? ` +${conflicts.length - 6} more` : ""} — vs ${bookQual}; see Cutover Tracking.`,
             variant: "destructive",
           });
         }

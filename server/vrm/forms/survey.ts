@@ -1806,7 +1806,30 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
  * The cutover-status payload, exported so the book-state matrix (task #738)
  * is testable against real fixture rows without an HTTP session.
  */
-export async function buildCutoverStatusPayload(): Promise<any> {
+export async function buildCutoverStatusPayload(opts?: {
+  /**
+   * Task #748 (double-billing premortem #2): the PAGE deliberately shows only
+   * reservation_status='booked' rows (Tyler's scope call), but the direct-
+   * billing import's old-book comparison must also see a tech who was stamped
+   * "billing switched" on a row that is NOT booked (released, failed, manually
+   * managed) — otherwise that tech can be double-billed invisibly. When true,
+   * the WHERE widens to booked OR effectively-stamped; the book-state joins
+   * are identical, so this stays the one true derivation of book state.
+   */
+  includeAllStamped?: boolean;
+}): Promise<any> {
+  // Premortem #4: THE effective-stamp predicate, defined ONCE and interpolated
+  // wherever it is needed (SELECT below, and the widened WHERE) so the page
+  // buckets, the payload counts and the import's conflict scan can never
+  // disagree. A void is superseded when a LATER report sights the tech again
+  // (evidence beats a stale human assertion; the void columns stay as audit).
+  // last_seen IS NOT NULL is spelled out so a voided row with a NULL last_seen
+  // yields FALSE, not SQL NULL (NULL > x = NULL would leak a non-boolean into
+  // the JSON payload).
+  const effectiveStampSql = sql`(c.direct_billing_confirmed_at IS NOT NULL
+                 AND (c.direct_billing_voided_at IS NULL
+                      OR (c.direct_billing_last_seen_at IS NOT NULL
+                          AND c.direct_billing_last_seen_at > c.direct_billing_voided_at)))`;
   const { rows } = await db.execute(sql`
         SELECT c.ldap, c.tech_name, c.truck_number, c.van_status,
                s.rental_branch_city, s.rental_branch_state, s.surveyed_at,
@@ -1855,18 +1878,11 @@ export async function buildCutoverStatusPayload(): Promise<any> {
                c.direct_billing_evidence->>'fileDate' AS direct_billing_file_date,
                c.direct_billing_voided_at, c.direct_billing_voided_by,
                c.direct_billing_void_reason,
-               -- Premortem #4: THE effective-stamp predicate, computed once in
-               -- SQL so the page buckets, the payload counts and the import's
-               -- conflict scan can never disagree. A void is superseded when a
-               -- LATER report sights the tech again (evidence beats a stale
-               -- human assertion; the void columns stay as audit).
-               -- last_seen IS NOT NULL is spelled out so a voided row with a
-               -- NULL last_seen yields FALSE, not SQL NULL (NULL > x = NULL
-               -- would leak a non-boolean into the JSON payload).
-               (c.direct_billing_confirmed_at IS NOT NULL
-                AND (c.direct_billing_voided_at IS NULL
-                     OR (c.direct_billing_last_seen_at IS NOT NULL
-                         AND c.direct_billing_last_seen_at > c.direct_billing_voided_at)))
+               -- Premortem #4: the effective-stamp predicate (defined once in
+               -- TS above, interpolated here and in the WHERE) so the page
+               -- buckets, the payload counts and the import's conflict scan
+               -- can never disagree.
+               ${effectiveStampSql}
                  AS direct_billing_effective,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
@@ -1986,7 +2002,13 @@ export async function buildCutoverStatusPayload(): Promise<any> {
         -- so a booked reservation with no block was absent from the page rather
         -- than shown as a problem. That is how 8 technicians ended up holding a
         -- week-long car nobody had told them about.
-        WHERE c.reservation_status = 'booked'
+        -- Task #748: includeAllStamped (importer's double-billing scan only)
+        -- additionally admits ANY row with an effective direct-billing stamp,
+        -- whatever its reservation_status — a released/failed/manual row whose
+        -- tech is confirmed on the direct account can still be double-billed.
+        -- The page route calls with no options, so its scope is unchanged.
+        WHERE (c.reservation_status = 'booked'
+               ${opts?.includeAllStamped ? sql`OR ${effectiveStampSql}` : sql``})
         ORDER BY c.ldap
       `);
 
