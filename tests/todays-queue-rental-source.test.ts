@@ -1,10 +1,12 @@
 /**
- * Payload-contract test for the rental-origin badge (task: catch any change
- * that silently drops the Holman/direct-bill badge from the queue cards).
+ * Payload-contract tests for the queue-card affordances the builder stamps as
+ * plain object-literal fields (no type-level guard): the rental-origin badge
+ * AND the tech-contact fields behind the text/call-the-tech affordances.
  *
- * The badge vocabulary itself is covered by tests/rental-origin-badge.test.ts;
- * what was NOT covered is the builder contract: server/todays-queue.ts stamps
- * `rentalSource` at THREE separate construction sites —
+ * Rental badge: the vocabulary itself is covered by
+ * tests/rental-origin-badge.test.ts; what was NOT covered is the builder
+ * contract: server/todays-queue.ts stamps `rentalSource` at THREE separate
+ * construction sites —
  *   1. actionable queue items (the decoration post-pass),
  *   2. no-action EXTRAS (sold/declined dead-ends classify() dropped),
  *   3. the unclaimed-trucks no-action mapping —
@@ -14,6 +16,19 @@
  * field is an OWN PROPERTY with the right value on all three row shapes, for
  * all three vocabulary cases: 'enterprise' (Holman book), 'enterprise_direct'
  * (manual direct-billing report), and null (no case / legacy source).
+ *
+ * Tech contact: only actionable ITEMS render a contact affordance (OpsQueue's
+ * TechPhoneLink deep-links item.techPhone; the "Text" button gates on
+ * item.caseKey and sends through the pickup-text lane, which re-resolves the
+ * number from fs_comms_contacts server-side — the card fields are
+ * display/deep-link only). The builder stamps them once, in the decoration
+ * post-pass:
+ *   techLdap  = case tech_ldap (the comms key), else null;
+ *   techPhone = comms-directory phone by LDAP first, fs_trucks TPMS-mirror
+ *               phone as fallback, else EXPLICIT null (never absent).
+ * The tests below pin all three legs plus the send-lane key (caseKey), so a
+ * refactor dropping any of them from the item shape fails loudly instead of
+ * silently killing the button.
  *
  * Stubbing style: patch the shared module instances the builder reads through
  * (fleetScopeStorage.getAllTrucks, db.execute, fsDb.execute) — every query the
@@ -70,9 +85,17 @@ const truck = (over: Record<string, any>) => ({
 
 // Site 1 — actionable items. 'Tags' rows survive to step 6 and classify to
 // tags_registration_hold, so they stay on the items list and get decorated.
+// Tech-contact legs ride these same four rows:
+//   11111 — case LDAP with a comms-directory phone AND a differing fs_trucks
+//           mirror phone → the comms number must win (it's the number a queue
+//           text actually dials — fs_comms_contacts is the send-path truth).
+//   22222 — case LDAP with NO comms contact but an fs_trucks mirror phone →
+//           display falls back to the mirror.
+//   33333 — no LDAP, no phone anywhere → EXPLICIT nulls, never absent.
+//   30003 — no case at all → techLdap null; no send-lane key.
 const itemTrucks = [
-  truck({ truckNumber: "11111", mainStatus: "Tags" }), // case → 'enterprise'
-  truck({ truckNumber: "22222", mainStatus: "Tags" }), // case → 'enterprise_direct'
+  truck({ truckNumber: "11111", mainStatus: "Tags", techPhone: "999-888-7777" }), // case → 'enterprise'
+  truck({ truckNumber: "22222", mainStatus: "Tags", techPhone: "888-555-1234" }), // case → 'enterprise_direct'
   truck({ truckNumber: "33333", mainStatus: "Tags" }), // case with NULL source
   truck({ truckNumber: "30003", mainStatus: "Tags" }), // no case at all
 ];
@@ -103,6 +126,7 @@ const caseRow = (
   truckNumber: string,
   source: string | null,
   assignedTruck: string | null = null,
+  ldap: string | null = null,
 ) => ({
   case_key: caseKey,
   vehicle_number_padded: truckNumber,
@@ -110,13 +134,13 @@ const caseRow = (
   ams_status: null,
   case_source: source,
   tech_district: null,
-  tech_ldap: null,
+  tech_ldap: ldap,
   assigned_truck: assignedTruck,
 });
 
 const caseRows = [
-  caseRow("C1", "11111", "enterprise"),
-  caseRow("C2", "22222", "enterprise_direct"),
+  caseRow("C1", "11111", "enterprise", null, "LDAP1"),
+  caseRow("C2", "22222", "enterprise_direct", null, "LDAP2"),
   caseRow("C3", "33333", null),
   // The declined trucks' techs are all already driving truck 77777 (whose own
   // PO is open per poRows below) — the classify() [] dead-end combination.
@@ -126,6 +150,16 @@ const caseRows = [
   caseRow("C7", "66661", "enterprise"),
   caseRow("C8", "66662", "enterprise_direct"),
   caseRow("C9", "66663", null),
+];
+
+// Comms directory (fs_comms_contacts — the send-path source of truth).
+// LDAP1's row is deliberately lower-cased: the builder upper-cases contact
+// LDAPs before keying, so this also pins the normalization. LDAP2 has NO row
+// (fs_trucks fallback leg). ZZZZ9 is an unrelated contact that must not leak
+// onto anyone's card.
+const commsContactRows = [
+  { ldap: "ldap1", phone: "(555) 123-0001", phone_digits: "5551230001" },
+  { ldap: "ZZZZ9", phone: "(555) 000-9999", phone_digits: "5550009999" },
 ];
 
 // loadQueuePoContext row: truck 77777 (the replacement) has an OPEN repair PO,
@@ -179,7 +213,11 @@ const textOf = (q: unknown): string => {
 (db as any).select = () => {
   throw new Error("test stub: no live DB");
 };
-(fsDb as any).execute = async () => ({ rows: [] });
+(fsDb as any).execute = async (q: unknown) => {
+  const text = textOf(q);
+  if (text.includes("fs_comms_contacts")) return { rows: commsContactRows };
+  return { rows: [] };
+};
 
 after(async () => {
   delete (db as any).execute;
@@ -267,5 +305,92 @@ describe("todays-queue builder stamps rentalSource on every row shape", () => {
   test("sweep: EVERY emitted row carries the field, whatever shape built it", () => {
     for (const it of q.items) hasOwnSource(it, "queue item");
     for (const n of q.noAction) hasOwnSource(n, "no-action row");
+  });
+});
+
+// ── tech-contact contract (text/call-the-tech affordances) ──────────────────
+// Actionable ITEMS are the only row shape that renders a contact affordance
+// (OpsQueue: TechPhoneLink on techPhone, "Text" button gated on caseKey).
+// NoAction rows carry no contact fields by design — nothing renders one there.
+
+const hasOwnContact = (row: any, field: string) =>
+  assert.ok(
+    Object.hasOwn(row, field),
+    `queue item for truck ${row.truckNumber} must carry an own '${field}' property — ` +
+      "a builder refactor dropped a tech-contact field (decoration post-pass in server/todays-queue.ts); " +
+      "the text/call-the-tech affordance would silently vanish or dead-end",
+  );
+
+describe("todays-queue builder stamps tech contact fields on actionable items", () => {
+  let q: TodaysQueue;
+  let byTruck: Map<string, any>;
+  before(async () => {
+    q = await buildTodaysQueue();
+    byTruck = new Map(q.items.map((i) => [i.truckNumber, i]));
+  });
+
+  test("comms-directory phone wins over the fs_trucks mirror (send-path truth is what's displayed)", () => {
+    const it = byTruck.get("11111");
+    assert.ok(it, "expected an actionable item for truck 11111");
+    hasOwnContact(it, "techLdap");
+    hasOwnContact(it, "techPhone");
+    assert.equal(it.techLdap, "LDAP1", "techLdap must carry the case's comms key");
+    // fs_trucks says 999-888-7777, but the comms directory (what a queue text
+    // actually dials) says otherwise — the card must show the comms number.
+    assert.equal(it.techPhone, "(555) 123-0001",
+      "techPhone must prefer the fs_comms_contacts directory number (lower-case contact LDAP must still match)");
+  });
+
+  test("no comms contact → fs_trucks mirror phone as display fallback", () => {
+    const it = byTruck.get("22222");
+    assert.ok(it, "expected an actionable item for truck 22222");
+    assert.equal(it.techLdap, "LDAP2");
+    assert.equal(it.techPhone, "888-555-1234",
+      "with no fs_comms_contacts row for the LDAP, techPhone falls back to the fs_trucks TPMS mirror");
+  });
+
+  test("no phone anywhere → explicit nulls, never absent", () => {
+    const it = byTruck.get("33333");
+    assert.ok(it, "expected an actionable item for truck 33333");
+    hasOwnContact(it, "techLdap");
+    hasOwnContact(it, "techPhone");
+    assert.equal(it.techLdap, null, "case without tech_ldap → techLdap is explicit null");
+    assert.equal(it.techPhone, null, "no comms row, no mirror phone → techPhone is explicit null");
+  });
+
+  test("send-lane key: caseKey is what the Text button and pickup-text lane run on", () => {
+    // The card's phone fields are display/deep-link only; the send lane
+    // re-resolves the number from fs_comms_contacts by case. The payload key
+    // it needs is caseKey — the Text button gates on it and the modal POSTs
+    // /master/:caseKey/pickup-text.
+    for (const [truckNo, expected] of [
+      ["11111", "C1"],
+      ["22222", "C2"],
+      ["33333", "C3"],
+      ["30003", null], // no case → no send lane; must be explicit null
+    ] as const) {
+      const it = byTruck.get(truckNo);
+      assert.ok(it, `expected an actionable item for truck ${truckNo}`);
+      hasOwnContact(it, "caseKey");
+      assert.equal(it.caseKey, expected, `item ${truckNo} caseKey`);
+    }
+    const noCase = byTruck.get("30003");
+    assert.equal(noCase.techLdap, null, "no case → techLdap explicit null");
+    assert.equal(noCase.techPhone, null, "no case, no mirror phone → techPhone explicit null");
+  });
+
+  test("unrelated comms contacts never leak onto a card", () => {
+    for (const it of q.items) {
+      assert.notEqual(it.techPhone, "(555) 000-9999",
+        `truck ${it.truckNumber} picked up an unrelated contact's phone`);
+    }
+  });
+
+  test("sweep: EVERY actionable item carries both contact fields as own properties", () => {
+    assert.ok(q.items.length > 0, "sweep needs items");
+    for (const it of q.items) {
+      hasOwnContact(it, "techLdap");
+      hasOwnContact(it, "techPhone");
+    }
   });
 });
