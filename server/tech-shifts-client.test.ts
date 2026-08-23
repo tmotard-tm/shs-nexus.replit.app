@@ -74,6 +74,44 @@ function ok(data: RawShiftRow[]) {
 assert.equal(isTechShiftsConfigured({} as NodeJS.ProcessEnv), false);
 assert.equal(isTechShiftsConfigured({ TECH_SHIFTS_API_KEY: "  " } as NodeJS.ProcessEnv), false, "blank key is not configured");
 assert.equal(isTechShiftsConfigured(ENV), true);
+// The Replit secret was created as TECHS_SHIFTS_API_KEY (plural "TECHS");
+// both spellings must configure the feed, plural preferred.
+assert.equal(
+  isTechShiftsConfigured({ TECHS_SHIFTS_API_KEY: "k" } as NodeJS.ProcessEnv),
+  true,
+  "plural secret name (the one configured in Replit) counts as configured",
+);
+assert.equal(
+  isTechShiftsConfigured({ TECHS_SHIFTS_API_KEY: " ", TECH_SHIFTS_API_KEY: "" } as NodeJS.ProcessEnv),
+  false,
+  "blank values under both names are not configured",
+);
+
+{
+  // Precedence: when both spellings are set, the plural one is sent upstream.
+  const seenKeys: Array<string | undefined> = [];
+  const impl = (async (_input: any, init: any) => {
+    seenKeys.push(init?.headers?.["X-API-Key"]);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ success: true, meta: { totalRecords: 0 }, data: [] }),
+      text: async () => "",
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+  // Distinct dates: fetchShiftRows caches by query key only (not by env), so
+  // reusing the dates of the CONFIG_MISSING test below would serve its call
+  // from this test's cache entry and swallow the expected rejection.
+  await fetchShiftRows(
+    { startDate: "2026-09-06", endDate: "2026-09-07" },
+    {
+      env: { TECHS_SHIFTS_API_KEY: "plural-key", TECH_SHIFTS_API_KEY: "legacy-key" } as NodeJS.ProcessEnv,
+      fetchImpl: impl,
+    },
+  );
+  assert.equal(seenKeys[0], "plural-key", "TECHS_SHIFTS_API_KEY wins when both spellings are set");
+  clearTechShiftsCache();
+}
 
 await assert.rejects(
   () => fetchShiftRows({ startDate: "2026-08-23", endDate: "2026-08-24" }, { env: {} as NodeJS.ProcessEnv }),

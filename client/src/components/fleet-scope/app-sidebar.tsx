@@ -14,6 +14,7 @@ import {
   SidebarRail,
 } from "@/components/ui/sidebar";
 import {
+  CalendarDays,
   Car,
   LayoutDashboard,
   ClipboardList,
@@ -47,6 +48,7 @@ const navGroups = [
     items: [
       { title: "All Vehicles", href: "/fleet-scope", icon: Car },
       { title: "Vehicle Search", href: "/fleet-scope/vehicle-search", icon: Search },
+      { title: "Tech Schedules", href: "/fleet-scope/tech-schedules", icon: CalendarDays },
       { title: "Spares", href: "/fleet-scope/spares", icon: Truck },
       { title: "Park My Fleet", href: "/fleet-scope/pmf", icon: ParkingCircle },
       { title: "Registration", href: "/fleet-scope/registration", icon: FileText },

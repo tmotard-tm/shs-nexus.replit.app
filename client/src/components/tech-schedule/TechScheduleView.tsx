@@ -113,7 +113,7 @@ export function useTechSchedule(ldap: string, start: string, end: string, enable
 export function describeScheduleError(error: unknown): { notConfigured: boolean; message: string } {
   const raw = String((error as Error)?.message ?? error ?? "");
   return {
-    notConfigured: raw.startsWith("503:") || /TECH_SHIFTS_API_KEY/.test(raw),
+    notConfigured: raw.startsWith("503:") || /TECHS?_SHIFTS_API_KEY/.test(raw),
     message: raw,
   };
 }
@@ -370,7 +370,7 @@ export function TechScheduleView({
           </div>
           <div style={{ color: colors.inkSoft, fontSize: 11.5, wordBreak: "break-word" }}>
             {notConfigured
-              ? "Add TECH_SHIFTS_API_KEY to Replit Secrets to turn this on."
+              ? "Add TECHS_SHIFTS_API_KEY to Replit Secrets to turn this on."
               : raw}
           </div>
         </div>
@@ -701,7 +701,7 @@ export function TechSchedulePickupCheck({
         <AlertTriangle size={13} style={{ flexShrink: 0, marginTop: 1 }} />
         <span>
           {notConfigured
-            ? "Schedule feed not connected (add TECH_SHIFTS_API_KEY to Replit Secrets)."
+            ? "Schedule feed not connected (add TECHS_SHIFTS_API_KEY to Replit Secrets)."
             : `Schedule unavailable — ${message}`}
         </span>
       </div>

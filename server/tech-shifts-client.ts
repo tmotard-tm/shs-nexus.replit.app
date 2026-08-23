@@ -5,7 +5,7 @@
  *   GET {TECH_SHIFTS_BASE_URL}/api/shifts/export
  *       ?startDate=YYYY-MM-DD&endDate=YYYY-MM-DD
  *       [&enterpriseId=LDAP] [&district=NNNN] [&shift=SHIFT_NAME]
- *   Header: X-API-Key: {TECH_SHIFTS_API_KEY}
+ *   Header: X-API-Key: {TECHS_SHIFTS_API_KEY} (legacy name TECH_SHIFTS_API_KEY also accepted)
  *
  * WHY THIS EXISTS ALONGSIDE fetchScheduleWindow()
  * -----------------------------------------------
@@ -171,12 +171,21 @@ export interface TechShiftsClientOptions {
   timeoutMs?: number;
 }
 
+/**
+ * The secret was created in Replit as TECHS_SHIFTS_API_KEY (plural "TECHS"),
+ * while this client was written against TECH_SHIFTS_API_KEY. Accept both so
+ * neither renaming the secret nor this code can silently unconfigure the feed.
+ */
+function readApiKey(env: NodeJS.ProcessEnv): string | undefined {
+  return env.TECHS_SHIFTS_API_KEY?.trim() || env.TECH_SHIFTS_API_KEY?.trim() || undefined;
+}
+
 function getConfig(env: NodeJS.ProcessEnv): { baseUrl: string; apiKey: string } {
-  const apiKey = env.TECH_SHIFTS_API_KEY?.trim();
+  const apiKey = readApiKey(env);
   if (!apiKey) {
     throw new TechShiftsError(
       "CONFIG_MISSING",
-      "TECH_SHIFTS_API_KEY is not set in Replit Secrets; the tech-shifts feed answers 401 without it",
+      "TECHS_SHIFTS_API_KEY is not set in Replit Secrets; the tech-shifts feed answers 401 without it",
     );
   }
   const raw = env.TECH_SHIFTS_BASE_URL?.trim() || DEFAULT_BASE_URL;
@@ -190,7 +199,7 @@ function getConfig(env: NodeJS.ProcessEnv): { baseUrl: string; apiKey: string } 
 }
 
 export function isTechShiftsConfigured(env: NodeJS.ProcessEnv = process.env): boolean {
-  return !!env.TECH_SHIFTS_API_KEY?.trim();
+  return !!readApiKey(env);
 }
 
 function mapUpstreamFailure(status: number, body: string): TechShiftsError {

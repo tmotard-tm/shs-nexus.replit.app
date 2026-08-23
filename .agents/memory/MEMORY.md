@@ -147,3 +147,4 @@
 - [Cutover billing-switched evidence](cutover-billing-switched-evidence.md) — effective = live direct-book presence OR stamp; void wins over book evidence; import-time-only stamps go dead when prod imports predate the code.
 - [Viewport-fit UI guards](viewport-fit-guard.md) — assert pane-bottom window at 2 sizes (one size can be pixel-identical); shared lib scripts/lib/viewport-guard.ts; bind shells h-screen+min-w-0, never clamp tall-header pages.
 - [Cutover Holman-book anchoring](cutover-book-anchoring.md) — enterprise_direct rows share vendor 'Enterprise Rent-A-Car' with the ECARS book (filter source='enterprise'); case rows overwrite per truck → book state rides booking-time ticket anchors, never force-overwrite non-empty ones.
+- [Tech shifts schedule feed](tech-shifts-feed.md) — secret name is plural TECHS_SHIFTS_API_KEY (client takes both); fetchShiftRows caches by query only (env-blind — test trap); VRM page + Fleet Scope wrapper + request drawer.

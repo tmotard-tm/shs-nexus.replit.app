@@ -110,7 +110,7 @@ export function registerTechScheduleRoutes(router: Router): void {
       return res.json({
         configured: false,
         reachable: false,
-        message: "TECH_SHIFTS_API_KEY is not set in Replit Secrets",
+        message: "TECHS_SHIFTS_API_KEY is not set in Replit Secrets",
       });
     }
     const today = etTodayISO();

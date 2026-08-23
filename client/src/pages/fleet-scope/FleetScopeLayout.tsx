@@ -23,6 +23,7 @@ import ToolAudit from "./ToolAudit";
 import CallHistory from "./CallHistory";
 import TechProfitability from "./TechProfitability";
 import TodaysQueue from "./TodaysQueue";
+import TechSchedules from "./TechSchedules";
 import { VehicleSearch, DiscrepancyFinder } from "./PlaceholderPages";
 import NotFound from "@/pages/not-found";
 
@@ -85,6 +86,7 @@ export default function FleetScopeLayout() {
                 <Route path="/fleet-scope/rental-profitability" component={TechProfitability} />
                 <Route path="/fleet-scope/queue" component={TodaysQueue} />
                 <Route path="/fleet-scope/vehicle-search" component={VehicleSearch} />
+                <Route path="/fleet-scope/tech-schedules" component={TechSchedules} />
                 <Route path="/fleet-scope/discrepancies" component={DiscrepancyFinder} />
                 <Route component={NotFound} />
               </Switch>
