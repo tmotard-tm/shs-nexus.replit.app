@@ -172,3 +172,17 @@ uri = "file://docs/training/rental-request-sop/Rental-Request-and-Extension-SOP.
 type = "pdf"
 title = "Rental Request & Extension SOP (v1.0)"
 description = "15-page training document with live screenshots: technician walkthroughs for the new-rental and extension forms (every question and what a good answer looks like), the messages techs can see, and the Fleet staff review/approval procedure."
+
+[[outputs]]
+id = "pluI0dtjVDpt_zUObJjHw"
+uri = "file://docs/training/rental-request-sop/Technician-Rental-Guide.pdf"
+type = "pdf"
+title = "Technician Rental Guide (v1.0)"
+description = "Tech-facing handout: how to reach the form, step-by-step walkthroughs for a new rental and an extension with every question explained, and the messages a tech may see. Safe to circulate to technicians."
+
+[[outputs]]
+id = "R-OykAHuX3c0142Xyu3Np"
+uri = "file://docs/training/rental-request-sop/Fleet-Staff-Rental-Review-SOP.pdf"
+type = "pdf"
+title = "Fleet Staff Rental Review SOP (v1.0)"
+description = "Internal staff procedure: what the intake form enforces before a request reaches you, the Rental Requests board and decision drawer, approval mechanics for new rentals and extensions, deny/defer/send-back, and the status glossary."
