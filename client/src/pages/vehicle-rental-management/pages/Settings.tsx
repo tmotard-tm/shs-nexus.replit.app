@@ -489,6 +489,8 @@ const TEMPLATE_LABELS: Record<string, string> = {
   email_body_template_deny: "Email body (Deny)",
   sms_template_approve: "SMS body (Approve — tech-facing)",
   sms_template_deny_tech: "SMS body (Deny — tech-facing)",
+  sms_template_deny_holman_redirect: "SMS body (Holman deny — new-process redirect, tech-facing)",
+  sms_template_deny_holman_switched: "SMS body (Holman deny — already on direct billing, tech-facing)",
   sms_template_request_approve: "SMS body (Rental request approved — tech-facing)",
   sms_template_request_approve_monday: "SMS body (Rental request approved, Monday pickup — tech-facing)",
 };
@@ -498,6 +500,8 @@ const TEMPLATE_KEYS = [
   "email_body_template_deny",
   "sms_template_approve",
   "sms_template_deny_tech",
+  "sms_template_deny_holman_redirect",
+  "sms_template_deny_holman_switched",
   "sms_template_request_approve",
   "sms_template_request_approve_monday",
 ] as const;
@@ -516,6 +520,15 @@ const TEMPLATE_DEFAULTS: Record<string, string> = {
   sms_template_request_approve_monday: REQUEST_APPROVE_SMS_MONDAY_DEFAULT,
   sms_template_deny_tech:
     "Good Morning {{tech_first_name}}, This is the Fleet team. Unfortunately the rental you requested this morning is unable to be approved due to the company's current guidelines. While your vehicle is in the shop you have a couple of options.\n\nEnroll in BYOV to drive your own vehicle to run your route and continue working while ALSO getting paid for every mile driven - you pay for your gas and get a weekly Tax Free reimbursement.\n\nThe only other option in the meantime is you would have your route cleared and be without the ability to run a route until your van is fixed. To enroll your vehicle temporarily simply go to:\n{{byov_link}}\n\nreview the program, enroll using the temporary option in the Enroll section at the upper right side. Note a $100 bonus is available after the first week on BYOV Temporary.",
+  // Sent on every Holman-queue Deny (new request or extension) for a tech who
+  // was never moved to direct billing. Mirrors the server default in
+  // notification-dispatcher.ts — keep in sync.
+  sms_template_deny_holman_redirect:
+    "Good Morning {{tech_first_name}}, this is the Fleet team. Rental requests and extensions through Holman are no longer approved — rentals are now handled through our new process, so this request was denied.\n\nTo get or keep a rental while your van is in the shop, submit a rental request here:\n{{rental_request_link}}\n\nCalling Holman or the rental branch will not get a rental approved or extended.",
+  // Sent on a Holman-queue Deny when the tech is ALREADY booked on the new
+  // direct-billing process (didn't follow the process).
+  sms_template_deny_holman_switched:
+    "Good Morning {{tech_first_name}}, this is the Fleet team. Your rental was already switched to our new direct-billing process (reservation {{etd_reference}}). Requesting a rental or extension through Holman is not the correct process, and that request has been denied.\n\nIf you still need a rental, submit a rental request here:\n{{rental_request_link}}\n\nOr stop by your Enterprise branch and have them confirm your rental is on the new direct billing.",
 };
 
 /** Returns unknown {{tokens}} present in `body` that are NOT in `allowed`. */
@@ -553,6 +566,8 @@ function TemplateEditor({
     templateKey === "sms_template_deny" ||
     templateKey === "sms_template_approve" ||
     templateKey === "sms_template_deny_tech" ||
+    templateKey === "sms_template_deny_holman_redirect" ||
+    templateKey === "sms_template_deny_holman_switched" ||
     templateKey === "sms_template_request_approve" ||
     templateKey === "sms_template_request_approve_monday";
   const isEmailBody = templateKey === "email_body_template_deny";

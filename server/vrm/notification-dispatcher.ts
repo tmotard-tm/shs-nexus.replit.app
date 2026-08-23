@@ -348,6 +348,105 @@ export async function enqueueDenialSmsForTech(args: {
   return { smsQueued: !!ins, skipped: false };
 }
 
+// ─── New-process redirect denial (Holman-originated requests) ──────────────
+
+/**
+ * Public rental-request form — the destination every Holman-originated
+ * request gets redirected to. Same base-URL convention as the rest of the
+ * forms module (rental-request.ts).
+ */
+const RENTAL_REQUEST_LINK =
+  (process.env.PUBLIC_BASE_URL || "https://SHS-Nexus.replit.app").replace(/\/+$/, "") + "/rental-request";
+
+/**
+ * Policy (Fleet leadership, 2026-08-23): rentals are no longer approved
+ * through Holman — new requests AND extensions arriving on the Holman
+ * awaiting grid are denied and the tech is redirected to the new
+ * rental-request process. Two variants:
+ *
+ *  - redirect  — tech was never moved to direct billing: point them at the
+ *                rental-request form.
+ *  - switched  — tech is ALREADY booked on the new direct-billing process
+ *                and called Holman anyway ("didn't follow the process"):
+ *                same redirect plus the Enterprise-branch billing option.
+ *
+ * Both are Settings-overridable (sms_template_deny_holman_redirect /
+ * sms_template_deny_holman_switched) like every other VRM template.
+ */
+export const HOLMAN_REDIRECT_SMS_BODY_TEMPLATE =
+  "Good Morning {{tech_first_name}}, this is the Fleet team. Rental requests " +
+  "and extensions through Holman are no longer approved — rentals are now " +
+  "handled through our new process, so this request was denied.\n\n" +
+  "To get or keep a rental while your van is in the shop, submit a rental " +
+  "request here:\n{{rental_request_link}}\n\n" +
+  "Calling Holman or the rental branch will not get a rental approved or extended.";
+
+export const HOLMAN_SWITCHED_SMS_BODY_TEMPLATE =
+  "Good Morning {{tech_first_name}}, this is the Fleet team. Your rental was " +
+  "already switched to our new direct-billing process (reservation " +
+  "{{etd_reference}}). Requesting a rental or extension through Holman is not " +
+  "the correct process, and that request has been denied.\n\n" +
+  "If you still need a rental, submit a rental request here:\n" +
+  "{{rental_request_link}}\n\n" +
+  "Or stop by your Enterprise branch and have them confirm your rental is on " +
+  "the new direct billing.";
+
+/**
+ * Tech-facing denial SMS for a Holman-queue deny under the new-process
+ * policy. Same channel ('sms_tech_deny', idempotent per decision), same
+ * one-way sender and phone-trust rules as enqueueDenialSmsForTech — only the
+ * copy differs, branched on the tech's direct-billing standing.
+ */
+export async function enqueueHolmanRedirectDenialSmsForTech(args: {
+  decisionId: string;
+  techLdap: string;
+  techName?: string | null;
+  standing: "booked" | "none";
+  etdReference?: string | null;
+}): Promise<{ smsQueued: boolean; skipped: boolean }> {
+  const phone = (await getTechPhone(args.techLdap)) ?? "";
+
+  const templates = await loadTemplateMap();
+  const custom = args.standing === "booked"
+    ? templates.sms_template_deny_holman_switched.trim()
+    : templates.sms_template_deny_holman_redirect.trim();
+  const tmpl = custom || (args.standing === "booked"
+    ? HOLMAN_SWITCHED_SMS_BODY_TEMPLATE
+    : HOLMAN_REDIRECT_SMS_BODY_TEMPLATE);
+  const vars: Record<string, string> = {
+    tech_first_name: firstName(args.techName ?? null) || args.techLdap,
+    tech_full_name: args.techName ?? args.techLdap,
+    tech_ldap: args.techLdap,
+    decision_date: todayLocalDate(),
+    rental_request_link: RENTAL_REQUEST_LINK,
+    // Blank reference renders as "reservation on file" rather than a hole.
+    etd_reference: (args.etdReference ?? "").trim() || "on file",
+  };
+  const body = renderTemplate(tmpl, vars);
+  const payload = { subject: null, body, isHtml: false, senderKey: "vrm_approval_oneway" as const };
+
+  if (!phone) {
+    await enqueueNotification({
+      decisionId: args.decisionId,
+      channel: "sms_tech_deny",
+      recipient: "(missing)",
+      payload,
+      status: "skipped",
+      error: "tech has no phone number on file",
+    });
+    return { smsQueued: false, skipped: true };
+  }
+
+  const ins = await enqueueNotification({
+    decisionId: args.decisionId,
+    channel: "sms_tech_deny",
+    recipient: phone,
+    payload,
+    status: "queued",
+  });
+  return { smsQueued: !!ins, skipped: false };
+}
+
 /**
  * Called from the /profitability/log route after an Approved decision is
  * recorded. Enqueues a single SMS to the requesting technician (idempotent
@@ -442,7 +541,9 @@ type TemplateKey =
   | "email_subject_template_deny"
   | "email_body_template_deny"
   | "sms_template_approve"
-  | "sms_template_deny_tech";
+  | "sms_template_deny_tech"
+  | "sms_template_deny_holman_redirect"
+  | "sms_template_deny_holman_switched";
 type TemplateMap = Record<TemplateKey, string>;
 
 /**
@@ -458,6 +559,8 @@ async function loadTemplateMap(): Promise<TemplateMap> {
     email_body_template_deny: "",
     sms_template_approve: "",
     sms_template_deny_tech: "",
+    sms_template_deny_holman_redirect: "",
+    sms_template_deny_holman_switched: "",
   };
   try {
     const rows = await getNotificationTemplates();

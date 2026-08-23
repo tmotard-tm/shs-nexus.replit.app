@@ -85,10 +85,11 @@ import {
   overrideHolmanPoTechMatch, updateHolmanPoProfitability,
   acquireHolmanWalkLease, releaseHolmanWalkLease, recordHolmanApprover,
   getQueueStatusesForPoNumbers, ACTIONABLE_PO_STATUSES,
+  getDirectBillingStandingForLdap,
 } from "./holman-rental-po-storage";
 import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
   resolveRentersForVehicles } from "../holman-portal-service";
-import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
+import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, enqueueHolmanRedirectDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
 import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
@@ -2188,6 +2189,22 @@ export function registerVrmRoutes(): Router {
       "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
       "byov_link",
     ]),
+    // Tech-facing denial SMS for Holman-originated requests under the
+    // new-process policy (2026-08-23): every request or extension arriving on
+    // the Holman awaiting grid is denied and the tech is redirected to the
+    // rental-request form. {{rental_request_link}} expands to the public
+    // /rental-request form URL. Empty body = the dispatcher's built-in copy.
+    sms_template_deny_holman_redirect: new Set([
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
+      "rental_request_link",
+    ]),
+    // Variant for a tech ALREADY booked on direct billing who called Holman
+    // anyway. {{etd_reference}} is their reservation number ("on file" when
+    // we don't have it).
+    sms_template_deny_holman_switched: new Set([
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
+      "rental_request_link", "etd_reference",
+    ]),
     // Rental-request approval acknowledgement (the /decide APPROVE text the
     // drawer previews and lets the approver edit). Two variants: the everyday
     // copy, and the Friday→Monday roll which adds the SHSAI Uber-home line.
@@ -2629,17 +2646,24 @@ export function registerVrmRoutes(): Router {
     },
     decidedByName: string,
     decision: "approved" | "denied",
+    // New-process policy (2026-08-23): Holman-queue denies redirect the tech
+    // to the rental-request form instead of the BYOV pitch. The deny route
+    // passes the tech's direct-billing standing so the SMS branches between
+    // "submit a new request" and "you're already switched — didn't follow the
+    // process". Absent (approve path / legacy callers) = legacy behavior.
+    denyRedirect?: { standing: "booked" | "none"; etdReference: string | null },
   ): Promise<string | null> {
     const ldap = (po.techLdap ?? "").trim().toUpperCase();
     if (!ldap) {
       console.warn(`[VRM/HolmanPO] ${decision} PO ${po.poNumber}: no matched tech — decision NOT logged. Resolve the rental-request name first.`);
       return null;
     }
+    // A blank vehicle number must NOT abort the pipeline: the Holman postback
+    // already applied by the time we get here, so bailing out silently dropped
+    // the Decision Log row AND the tech SMS (under the new-process policy that
+    // means a tech is denied with no redirect text at all). Only the Full Log
+    // upsert genuinely needs the vehicle number — skip just that, loudly.
     const veh = String(po.vehicleNumber ?? "").trim();
-    if (!veh) {
-      console.warn(`[VRM/HolmanPO] ${decision} PO ${po.poNumber}: no vehicle number — decision NOT logged.`);
-      return null;
-    }
     let snap: any = null;
     try {
       const rows = await getProfitabilitySnapshotRows([ldap]);
@@ -2669,7 +2693,10 @@ export function registerVrmRoutes(): Router {
       supervisorName: snap?.supervisorName ?? null,
       supervisorLdap: snap?.supervisorLdap ?? null,
       supervisorPhone: snap?.supervisorPhone ?? null,
-      notes: `Holman PO ${po.poNumber} ${decision} from rental queue`,
+      notes: `Holman PO ${po.poNumber} ${decision} from rental queue`
+        + (decision === "denied" && denyRedirect
+          ? ` — new-process redirect (direct billing: ${denyRedirect.standing === "booked" ? `booked${denyRedirect.etdReference ? ` ${denyRedirect.etdReference}` : ""} — process not followed` : "none"})`
+          : ""),
     });
 
     if (decision === "denied") {
@@ -2688,7 +2715,15 @@ export function registerVrmRoutes(): Router {
       })
         .then(() => triggerImmediateDispatch(`holman deny supervisor ${decisionRow.id}`))
         .catch((err: any) => console.error("[VRM/HolmanPO] deny supervisor notify failed:", err?.message ?? err));
-      enqueueDenialSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null })
+      // New-process policy: Holman-queue denies send the redirect copy
+      // (branched on direct-billing standing) instead of the BYOV pitch.
+      // Legacy callers without a standing keep the old copy.
+      (denyRedirect
+        ? enqueueHolmanRedirectDenialSmsForTech({
+            decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null,
+            standing: denyRedirect.standing, etdReference: denyRedirect.etdReference,
+          })
+        : enqueueDenialSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null }))
         .then(() => triggerImmediateDispatch(`holman deny tech ${decisionRow.id}`))
         .catch((err: any) => console.error("[VRM/HolmanPO] deny tech SMS failed:", err?.message ?? err));
       enqueueDcaMakeUnavailableForDecision(decisionRow.id).catch((err: any) =>
@@ -2699,17 +2734,21 @@ export function registerVrmRoutes(): Router {
         .catch((err: any) => console.error("[VRM/HolmanPO] approval SMS failed:", err?.message ?? err));
     }
 
-    try {
-      await upsertFullLogFromDecision({
-        techLdap: ldap,
-        techName: po.techName ?? null,
-        decidedByName,
-        decision,
-        notes: null,
-        rentalVehicleNumber: veh,
-      });
-    } catch (e: any) {
-      console.error("[VRM/HolmanPO] full-log upsert failed:", e?.message);
+    if (!veh) {
+      console.warn(`[VRM/HolmanPO] ${decision} PO ${po.poNumber}: no vehicle number — Full Log row skipped (decision ${decisionRow.id} + notifications still recorded).`);
+    } else {
+      try {
+        await upsertFullLogFromDecision({
+          techLdap: ldap,
+          techName: po.techName ?? null,
+          decidedByName,
+          decision,
+          notes: null,
+          rentalVehicleNumber: veh,
+        });
+      } catch (e: any) {
+        console.error("[VRM/HolmanPO] full-log upsert failed:", e?.message);
+      }
     }
 
     console.log(`[VRM/HolmanPO] decision logged: ${decision} ${ldap} po=${po.poNumber} decisionId=${decisionRow.id}`);
@@ -3188,7 +3227,15 @@ export function registerVrmRoutes(): Router {
       // tech/supervisor SMS + DCA make-unavailable), for full parity.
       if (holmanResult.success && holmanResult.confirmed) {
         const updated = await markHolmanPoDenied(id, who);
-        const decisionId = await recordHolmanDecision(updated ?? row, who, "denied").catch((e: any) => {
+        // Direct-billing standing decides WHICH new-process SMS the tech gets.
+        // A lookup failure degrades to 'none' (still the correct new-process
+        // redirect, just without the "already switched" framing) — never let
+        // it fail the deny after Holman already confirmed the Decline.
+        const standing = await getDirectBillingStandingForLdap(row.techLdap).catch((e: any) => {
+          console.error(`[VRM/HolmanPO] direct-billing standing lookup failed for ${row.techLdap} — sending plain redirect copy:`, e?.message);
+          return { standing: "none" as const, etdReference: null };
+        });
+        const decisionId = await recordHolmanDecision(updated ?? row, who, "denied", standing).catch((e: any) => {
           console.error("[VRM] holman deny decision-log failed:", e?.message);
           return null;
         });

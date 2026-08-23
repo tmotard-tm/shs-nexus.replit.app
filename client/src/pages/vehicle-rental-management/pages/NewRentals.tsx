@@ -2247,6 +2247,19 @@ export default function NewRentals() {
                     ? `PO ${po.poNumber} for ${po.driverName ?? "unknown driver"} ($${Number(po.additionalRequestedAmt ?? 0).toFixed(2)}). This will execute the approval on the Holman portal.`
                     : `PO ${po.poNumber} for ${po.driverName ?? "unknown driver"}. This will submit the Decline on the Holman portal.`}
                 </p>
+                {!isApprove && (
+                  <p style={{
+                    fontFamily: fonts.dmSans, fontSize: 12, margin: "0 0 16px", lineHeight: 1.45,
+                    color: po.directBillingStanding === "booked" ? colors.red : colors.inkMuted,
+                    padding: "8px 10px", borderRadius: 8,
+                    border: `1px solid ${po.directBillingStanding === "booked" ? colors.red : colors.rule}`,
+                    background: (po.directBillingStanding === "booked" ? colors.red : colors.inkMuted) + "0d",
+                  }}>
+                    {po.directBillingStanding === "booked"
+                      ? <>The tech is <strong>already on the new direct-billing process</strong>{po.cutoverEtdReference ? ` (reservation ${po.cutoverEtdReference})` : ""}. They'll be texted that going through Holman isn't the correct process, with the rental-request link and the Enterprise-branch billing option. Edit the wording in Settings → Notification templates.</>
+                      : <>The tech will be texted that Holman rentals are over under the new process, with a link to submit a rental request. Edit the wording in Settings → Notification templates.</>}
+                  </p>
+                )}
                 <input
                   type="text"
                   placeholder="Your name (required)"
@@ -2416,6 +2429,39 @@ export default function NewRentals() {
                             {po.techLdap} — {po.techName}
                           </div>
                         )}
+                        {/* New-process policy (8/23): every Holman-originated request —
+                            new or extension — gets denied with the redirect text. The
+                            badges tell the operator which kind this is and whether the
+                            tech is ALREADY on direct billing (didn't follow process). */}
+                        {!terminal && (
+                          <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
+                            <span
+                              title={po.requestKind === "extension"
+                                ? "A reopen of a PO already decided — Holman re-authorizing the same PO number (weekly rental extension pattern)."
+                                : "First time this PO has hit the queue."}
+                              style={{
+                                fontFamily: fonts.dmSans, fontSize: 9.5, fontWeight: 700,
+                                color: po.requestKind === "extension" ? colors.amber : colors.inkMuted,
+                                border: `1px solid ${po.requestKind === "extension" ? colors.amber : colors.rule}`,
+                                padding: "1px 6px", borderRadius: 4, letterSpacing: "0.04em",
+                              }}
+                            >
+                              {po.requestKind === "extension" ? "EXTENSION" : "NEW REQUEST"}
+                            </span>
+                            {po.directBillingStanding === "booked" && (
+                              <span
+                                title={`This tech was already switched to the new direct-billing process${po.cutoverEtdReference ? ` (reservation ${po.cutoverEtdReference})` : ""} and called Holman anyway. Deny sends the "already switched — didn't follow the process" text.`}
+                                style={{
+                                  fontFamily: fonts.dmSans, fontSize: 9.5, fontWeight: 700,
+                                  color: "#fff", backgroundColor: colors.red,
+                                  padding: "1px 6px", borderRadius: 4, letterSpacing: "0.04em",
+                                }}
+                              >
+                                ON DIRECT BILLING — PROCESS NOT FOLLOWED
+                              </span>
+                            )}
+                          </div>
+                        )}
                         {failed && po.holmanApproveError && (
                           <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.red, fontWeight: 600, marginTop: 4, maxWidth: 460, lineHeight: 1.35 }}>
                             {failLabel} in Holman — not approved: {po.holmanApproveError}
@@ -2504,22 +2550,25 @@ export default function NewRentals() {
                               <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>view only</span>
                             )}
                             {canApproveHolman && (<>
-                            <button
-                              onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("approve"); }}
-                              style={{
-                                fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
-                                color: "#fff", backgroundColor: colors.green,
-                                border: "none", borderRadius: 6, padding: "5px 12px", cursor: "pointer",
-                              }}
-                            >{failed ? "Retry" : "Approve"}</button>
+                            {/* New-process policy: Deny is the pre-set path for every
+                                Holman-originated request, so it carries the filled
+                                (primary) style; Approve stays available but demoted. */}
                             <button
                               onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("deny"); }}
                               style={{
                                 fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
-                                color: colors.red, backgroundColor: "transparent",
-                                border: `1px solid ${colors.red}`, borderRadius: 6, padding: "5px 12px", cursor: "pointer",
+                                color: "#fff", backgroundColor: colors.red,
+                                border: "none", borderRadius: 6, padding: "5px 12px", cursor: "pointer",
                               }}
-                            >Deny</button>
+                            >Deny — new process</button>
+                            <button
+                              onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("approve"); }}
+                              style={{
+                                fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
+                                color: colors.green, backgroundColor: "transparent",
+                                border: `1px solid ${colors.green}`, borderRadius: 6, padding: "5px 12px", cursor: "pointer",
+                              }}
+                            >{failed ? "Retry" : "Approve"}</button>
                             </>)}
                             </div>
                           </div>

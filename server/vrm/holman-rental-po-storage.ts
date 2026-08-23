@@ -39,6 +39,23 @@ export interface HolmanRentalPoRow {
   reopenReason: string | null;
   district: string | null;
   state: string | null;
+  /**
+   * How this authorization round arrived. 'extension' = a reopen of a PO we
+   * already decided (weekly rental extensions re-authorize the SAME PO number);
+   * 'new' = first time this PO has hit the queue. Under the new-process policy
+   * BOTH kinds get the redirect denial — the badge just tells the operator
+   * which one they're looking at.
+   */
+  requestKind: "extension" | "new";
+  /**
+   * Whether this tech was already moved to the new direct-billing process
+   * (vrm_rental_cutover by LDAP): a booked reservation, a live book anchor, or
+   * an un-voided direct-billing confirmation. 'booked' techs calling Holman
+   * did not follow the process — the deny sends the switched-billing message
+   * and the row carries a loud staff alert.
+   */
+  directBillingStanding: "booked" | "none";
+  cutoverEtdReference: string | null;
 }
 
 interface EnrichRow {
@@ -307,7 +324,10 @@ export async function listHolmanPoQueue(
   // carry both a terminated and an active row per racfid, so the LIMIT 1 inside
   // each lookup is load-bearing - a plain join would duplicate those rows.
   const result = await db.execute(sql`
-    SELECT q.*, tl.district AS "district", tl.state AS "state"
+    SELECT q.*, tl.district AS "district", tl.state AS "state",
+      CASE WHEN q."reopenCount" > 0 THEN 'extension' ELSE 'new' END AS "requestKind",
+      CASE WHEN co.booked THEN 'booked' ELSE 'none' END AS "directBillingStanding",
+      co.etd_reference AS "cutoverEtdReference"
     FROM (
       SELECT ${sql.raw(SELECT_COLS)} FROM holman_rental_po_queue
       WHERE status IN (${statusList})
@@ -322,9 +342,49 @@ export async function listHolmanPoQueue(
         ) AS district,
         (SELECT a2.home_state FROM all_techs a2 WHERE UPPER(a2.tech_racfid) = UPPER(q."techLdap") LIMIT 1) AS state
     ) tl ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT ${sql.raw(CUTOVER_BOOKED_PREDICATE)} AS booked, c.etd_reference
+      FROM vrm_rental_cutover c
+      WHERE UPPER(c.ldap) = UPPER(q."techLdap")
+      LIMIT 1
+    ) co ON TRUE
     ORDER BY q."scrapedAt" DESC
   `);
   return result.rows as unknown as HolmanRentalPoRow[];
+}
+
+/**
+ * "Already on the new direct-billing process" — one predicate, shared by the
+ * queue listing lateral and the deny-time standing check so the badge the
+ * operator saw and the SMS the tech receives can never disagree. Booked
+ * reservation OR a live book anchor OR an un-voided direct-billing
+ * confirmation; a voided stamp does NOT count.
+ */
+const CUTOVER_BOOKED_PREDICATE = `(
+  c.reservation_status = 'booked'
+  OR c.book_anchor_at IS NOT NULL
+  OR (c.direct_billing_confirmed_at IS NOT NULL AND c.direct_billing_voided_at IS NULL)
+)`;
+
+/**
+ * Deny-time re-check of the tech's direct-billing standing (fresher than the
+ * listing row the operator loaded). Missing/blank LDAP or no cutover row =
+ * 'none'.
+ */
+export async function getDirectBillingStandingForLdap(
+  ldap: string | null | undefined,
+): Promise<{ standing: "booked" | "none"; etdReference: string | null }> {
+  const key = (ldap ?? "").trim();
+  if (!key) return { standing: "none", etdReference: null };
+  const result = await db.execute(sql`
+    SELECT ${sql.raw(CUTOVER_BOOKED_PREDICATE)} AS booked, c.etd_reference AS "etdReference"
+    FROM vrm_rental_cutover c
+    WHERE UPPER(c.ldap) = UPPER(${key})
+    LIMIT 1
+  `);
+  const row = result.rows[0] as { booked: boolean | null; etdReference: string | null } | undefined;
+  if (!row) return { standing: "none", etdReference: null };
+  return { standing: row.booked ? "booked" : "none", etdReference: row.etdReference ?? null };
 }
 
 /**
