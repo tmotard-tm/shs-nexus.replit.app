@@ -53,11 +53,14 @@ export default function RouteReadyLayout() {
     : "/vehicle-rental-management/executive-summary";
 
   return (
-    <div className="flex min-h-screen w-full" style={{ backgroundColor: colors.background }}>
+    // h-screen (not min-h-screen) binds the height chain so `main` is the
+    // scroll container and the shell always fits the viewport; guarded by
+    // scripts/check-vrm-ops-queue-viewport.ts (see viewport-fit-guard).
+    <div className="flex h-screen w-full" style={{ backgroundColor: colors.background }}>
       <RouteReadySidebar />
       <div className="flex-1 flex flex-col min-w-0">
         <RouteReadyTopbar title={title} />
-        <main className="flex-1 overflow-auto" style={{ padding: 32 }}>
+        <main className="flex-1 min-h-0 overflow-auto" data-testid="vrm-main" style={{ padding: 32 }}>
           <Switch>
             {/* Dashboard and Active Rentals were scrapped 2026-07-11; old
                 bookmarks land on New Rentals instead of a dead pane. */}

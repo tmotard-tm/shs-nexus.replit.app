@@ -1012,7 +1012,11 @@ export default function TodaysQueue() {
   const generatedAt = data?.generatedAt ? new Date(data.generatedAt) : null;
 
   return (
-    <div className="flex flex-col h-full">
+    // No h-full clamp: the header stack (title + bucket bar + work-type strip)
+    // is ~600px tall, so clamping to the viewport would crush the queue list
+    // to a keyhole. The page flows inside the shell's scrollable <main>
+    // (FleetScopeLayout binds the height chain); the header stays sticky.
+    <div className="flex flex-col">
       <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-3 space-y-2">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
@@ -1041,6 +1045,7 @@ export default function TodaysQueue() {
               className="h-8 gap-1.5"
               onClick={() => refetch()}
               disabled={isFetching}
+              data-testid="button-refresh-queue"
             >
               <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
               Refresh
@@ -1158,7 +1163,7 @@ export default function TodaysQueue() {
         </div>
       )}
 
-      <div className="flex-1 overflow-auto">
+      <div className="flex-1 overflow-auto" data-testid="queue-pane">
         {isLoading ? (
           <div className="flex items-center justify-center h-48 text-muted-foreground text-base">
             <RefreshCw className="h-4 w-4 animate-spin mr-2" />

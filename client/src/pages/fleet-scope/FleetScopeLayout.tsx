@@ -30,9 +30,16 @@ export default function FleetScopeLayout() {
   return (
     <UserProvider>
       <SidebarProvider>
-        <div className="fleet-scope-layout min-h-screen flex w-full">
+        {/* h-screen (not min-h-screen) binds the height chain so `main` is the
+            scroll container and pages can build viewport-fit flex layouts;
+            guarded by scripts/check-*-viewport.ts (see viewport-fit-guard). */}
+        <div className="fleet-scope-layout h-screen flex w-full">
           <AppSidebar />
-          <SidebarInset>
+          {/* min-w-0 lets the inset shrink below content min-width (the fleet
+              table is 2000px wide) so wide tables scroll inside their own
+              overflow-x containers instead of pushing the whole document
+              wider than a 13" laptop screen. */}
+          <SidebarInset className="min-w-0">
             <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-4">
               <GlobalNavMenu inline />
               <Separator orientation="vertical" className="h-4" />
@@ -53,7 +60,7 @@ export default function FleetScopeLayout() {
               <span className="text-muted-foreground text-sm">/</span>
               <span className="text-sm font-medium text-foreground">Fleet Scope</span>
             </header>
-            <main className="flex-1 overflow-auto">
+            <main className="flex-1 min-h-0 overflow-auto" data-testid="fleet-scope-main">
               <Switch>
                 <Route path="/fleet-scope" component={AllVehicles} />
                 <Route path="/fleet-scope/dashboard" component={Dashboard} />

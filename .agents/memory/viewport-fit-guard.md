@@ -27,3 +27,26 @@ past), via a stable `data-testid="inbox-pane"` hook.
 two viewport sizes, (2) assert the flex-filled container's bottom edge window,
 not just absence of page scroll, and (3) sabotage-test both failure modes
 (hardcoded height AND removed height wrapper) before trusting it green.
+
+# Lessons from generalizing the guard to other screens
+
+**Bind the shell, not the page.** An `h-screen` shell with a scrollable main
+gives every page "no document scroll" for free while document-style pages keep
+their UX. Never clamp a page root whose header stack is tall — a viewport-bound
+flex chain crushes the content list to a useless keyhole.
+
+**Flex shrink silently neutralizes a hardcoded-height sabotage.** A fixed
+height on a flex child with default shrink just shrinks back to available
+space and the guard stays green; pin it with `shrink-0` or the sabotage proves
+nothing.
+
+**Horizontal overflow is a first-class failure mode.** A wide inner table
+propagates min-content width through any flex inset lacking `min-w-0`, pushing
+the whole document sideways so toolbar buttons sit past the right edge at
+every size. Guards need a doc-scrollWidth assertion plus
+primary-action-in-viewport (which checks x too).
+
+**tsx + page.evaluate:** esbuild's keepNames injects `__name` into function
+args, so nested functions inside `page.evaluate(() => ...)` throw
+`ReferenceError: __name is not defined` in the browser — pass the evaluate
+body as a plain string instead.

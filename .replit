@@ -180,6 +180,18 @@ args = "cutover-intents-db"
 task = "workflow.run"
 args = "comms-inbox-viewport"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "todays-queue-viewport"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "vrm-ops-queue-viewport"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "all-vehicles-viewport"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -314,6 +326,39 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx scripts/check-comms-inbox-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "todays-queue-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-todays-queue-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "vrm-ops-queue-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-vrm-ops-queue-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "all-vehicles-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-all-vehicles-viewport.ts"
 
 [workflows.workflow.metadata]
 isValidation = true
