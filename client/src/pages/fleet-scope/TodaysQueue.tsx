@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Bot, CalendarDays, PhoneCall, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { rentalOriginOf } from "../vehicle-rental-management/lib/case-model";
 import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
 import { DispatchLucaCallButton } from "@/components/fleet-scope/DispatchLucaCallButton";
 
@@ -91,6 +92,8 @@ interface QueueItem {
   // Persona-bucket decoration (server/todays-queue.ts)
   key?: string;
   caseKey?: string | null;
+  /** Rental origin — 'enterprise_direct' (direct billing) vs Holman-book sources. */
+  rentalSource?: string | null;
   owner?: string;
   ownerBasis?: string;
   region?: string | null;
@@ -131,6 +134,9 @@ interface NoActionItem {
   techName: string | null;
   fleetScopeStatus: string;
   holmanStatus: string | null;
+  caseKey?: string | null;
+  /** Rental origin — 'enterprise_direct' (direct billing) vs Holman-book sources. */
+  rentalSource?: string | null;
 }
 
 interface Bucket {
@@ -621,12 +627,29 @@ function SpareChip({ item }: { item: QueueItem }) {
 const ROW_LABEL_CLS = "text-[11px] font-bold uppercase tracking-wider text-muted-foreground leading-[19px]";
 const ROW_TEXT_CLS = "text-sm text-muted-foreground leading-[19px]";
 
+/** Rental origin callout — Holman-issued (book) vs direct billing (manual
+ * Enterprise report). Same vocabulary as the VRM boards/drawer/queue; renders
+ * nothing when the origin is unknown (never assert an origin we can't prove). */
+function RentalOriginPill({ source }: { source?: string | null }) {
+  const o = rentalOriginOf(source);
+  if (!o) return null;
+  return (
+    <span title={o.hint} className={cn(
+      "rounded-full border px-1.5 text-[9px] font-bold uppercase tracking-wide leading-[14px] whitespace-nowrap",
+      o.kind === "direct"
+        ? "border-purple-500 text-purple-700 bg-purple-50 dark:text-purple-300 dark:bg-purple-900/20"
+        : "border-blue-500 text-blue-700 bg-blue-50 dark:text-blue-300 dark:bg-blue-900/20",
+    )}>{o.label}</span>
+  );
+}
+
 /** WHO column: truck number on top, then tech name / owner stacked. */
 function IdentityCell({ item, dismissed }: { item: QueueItem; dismissed: boolean }) {
   return (
     <div className="flex flex-col gap-0.5 min-w-0">
       <div className="flex items-baseline gap-2">
         <span className={cn("font-mono text-base font-semibold", dismissed && "line-through")}>{item.truckNumber}</span>
+        <RentalOriginPill source={item.rentalSource} />
         {item.techState && <span className={ROW_LABEL_CLS}>{item.techState}</span>}
       </div>
       {item.techName && (
@@ -1390,6 +1413,7 @@ export default function TodaysQueue() {
                         onClick={() => handleRowClick(item.truckId)}
                       >
                         <span className="font-mono text-base">{item.truckNumber}</span>
+                        <RentalOriginPill source={item.rentalSource} />
                         {item.techName && <span className="text-sm text-muted-foreground">{item.techName}</span>}
                         <StatusPill label="FS" value={item.fleetScopeStatus} />
                         <StatusPill label="PO" value={item.holmanStatus} />

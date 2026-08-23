@@ -46,3 +46,15 @@ Parse/plausibility failures throw BEFORE persist creates its run row, and the UI
 
 ## Ambiguous RACF never stamps
 `all_techs` can hold ONE racf on multiple distinct employee_ids (reused/reassigned LDAP); a stamp keyed by it could mark the WRONG tech switched. Rule: reservation-tier resolution (identity DERIVED from the LDAP) degrades to REVIEW; other tiers (identity from prior ticket / truck / unique surname) stay RESOLVED but null the stamping ldap so the row counts as a VISIBLE blind spot (`switchoverBlindRows`), never a silent skip. Only distinct employee_ids make a racf ambiguous — term+active rows of the same person share one employee_id.
+
+## Rental origin badge (Holman vs direct bill)
+One vocabulary for every rental surface lives in the client case-model helper
+`rentalOriginOf(source)`: `enterprise_direct` → "direct bill",
+`enterprise`/`holman_non_enterprise` → "holman", anything else → **null (no
+badge)**. **Why:** cases.source has no NOT NULL/default, so a null/legacy value
+carries no proof of billing origin — defaulting unknowns to "holman" would
+print a false billing claim on a money surface. **How to apply:** any new
+surface showing a rental must call this helper and render nothing on null;
+queue payloads carry it as `rentalSource` (stamped in the todays-queue builder
+on items AND both no-action row constructions — a badge missing from one
+surface reads as "different billing" to ops).

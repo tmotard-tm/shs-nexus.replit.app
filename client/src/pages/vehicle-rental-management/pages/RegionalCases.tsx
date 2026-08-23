@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours, phoneSearchMatches } from "../lib/format";
-import { workloadBucketOf, isNewHire, isUrgentEmp, isDeclinedAuction, daysSince, type MasterRow } from "../lib/case-model";
+import { workloadBucketOf, isNewHire, isUrgentEmp, isDeclinedAuction, daysSince, rentalOriginOf, type MasterRow } from "../lib/case-model";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
 import { DetailPanel } from "../components/case-detail-panel";
 import { LIST_QUERY_KEYS } from "../lib/query-keys";
@@ -882,8 +882,8 @@ export default function RegionalCases() {
       </th>
     );
   };
-  const Chip = ({ text, fg, bg }: { text: string; fg: string; bg: string }) => (
-    <span style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.03em", marginLeft: 6 }}>{text}</span>
+  const Chip = ({ text, fg, bg, title }: { text: string; fg: string; bg: string; title?: string }) => (
+    <span title={title} style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.03em", marginLeft: 6 }}>{text}</span>
   );
 
   if (isLoading) return <div style={{ fontFamily: fonts.dmSans, color: colors.inkMuted, padding: 40 }}>Loading rental operations…</div>;
@@ -1048,6 +1048,11 @@ export default function RegionalCases() {
                     {r.case_key}
                     {r.ready_verified && <Chip text="VERIFIED" fg={colors.green} bg={colors.greenLight} />}
                     {r.research_active && !r.ready_verified && <Chip text="RESEARCH" fg={colors.amber} bg={colors.amberLight} />}
+                    {(() => { const o = rentalOriginOf(r.source); return o && (
+                      <Chip text={o.label} title={o.hint}
+                        fg={o.kind === "direct" ? colors.purple : colors.blue}
+                        bg={o.kind === "direct" ? colors.purpleLight : colors.blueLight} />
+                    ); })()}
                   </td>
                   <td style={tdStyle}>
                     {r.renter_name_raw}

@@ -27,6 +27,7 @@ import {
   RefreshCw, X, Pencil, Lock, Bot, AlertTriangle, ChevronRight, Copy,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
+import { rentalOriginOf } from "../lib/case-model";
 import { fmtDate, fmtDateTime, fmtPhone } from "../lib/format";
 import { LIST_QUERY_KEYS } from "../lib/query-keys";
 import { describeAction } from "../lib/activity-log";
@@ -663,7 +664,20 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(15,23,42,0.55)", padding: 24 }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 900, maxWidth: "94vw", maxHeight: "90vh", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 16, overflowY: "auto", boxShadow: "0 24px 70px rgba(0,0,0,0.4)", position: "relative" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: colors.background, borderBottom: `1px solid ${colors.rule}` }}>
-          <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
+            {/* Rental origin callout — Holman-issued (book) vs direct billing
+                (manual Enterprise report), same vocabulary as every board row. */}
+            {(() => {
+              const o = rentalOriginOf(c?.source);
+              if (!o) return null;
+              const fg = o.kind === "direct" ? colors.purple : colors.blue;
+              const bg = o.kind === "direct" ? colors.purpleLight : colors.blueLight;
+              return (
+                <span title={o.hint} style={{ fontFamily: fonts.dmSans, fontSize: 10.5, fontWeight: 700, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "2px 9px", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{o.label}</span>
+              );
+            })()}
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" onClick={() => scrapeMut.mutate(activeTruck)} disabled={scrapeMut.isPending} title={`Pull truck ${activeTruck}'s current POs + comments live from Holman`}
               style={{ background: colors.surface, border: `1px solid ${colors.accent}`, borderRadius: 8, cursor: "pointer", color: colors.accent, padding: "5px 10px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>

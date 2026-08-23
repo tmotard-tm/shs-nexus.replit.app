@@ -166,3 +166,21 @@ export function isNewHire(r: { employee_status: string | null; employee_status_d
 export function isUrgentEmp(r: { employee_status: string | null }): boolean {
   return r.employee_status === "Terminated" || r.employee_status === "On Leave";
 }
+
+/** Rental origin — who issued (and therefore who bills) the rental. ONE
+ * vocabulary for every surface that shows a rental (boards, drawer, queues):
+ * `enterprise_direct` rows come from the manual Enterprise direct-billing
+ * report (Enterprise bills SHS directly — NOT on the Holman book); the two
+ * feed sources (`enterprise` ECARS, `holman_non_enterprise`) are Holman-issued
+ * rentals billed through the Holman book. Anything else (null/legacy/unknown)
+ * returns null — a billing-origin badge must never assert an origin the data
+ * can't prove, so every surface renders NOTHING for unknown sources. */
+export function rentalOriginOf(source: string | null | undefined): { kind: "direct" | "holman"; label: string; hint: string } | null {
+  if (source === "enterprise_direct") {
+    return { kind: "direct", label: "direct bill", hint: "Direct-billing rental — Enterprise bills SHS directly (manual report import); not issued through the Holman book" };
+  }
+  if (source === "enterprise" || source === "holman_non_enterprise") {
+    return { kind: "holman", label: "holman", hint: "Holman-issued rental — billed through the Holman book (ECARS feed)" };
+  }
+  return null;
+}

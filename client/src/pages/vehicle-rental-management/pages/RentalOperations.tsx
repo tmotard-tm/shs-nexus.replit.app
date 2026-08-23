@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours, phoneSearchMatches } from "../lib/format";
-import { workloadBucketOf, isNewHire, isUrgentEmp, isDeclinedAuction, daysSince, type MasterRow as VrmCaseRow } from "../lib/case-model";
+import { workloadBucketOf, isNewHire, isUrgentEmp, isDeclinedAuction, daysSince, rentalOriginOf, type MasterRow as VrmCaseRow } from "../lib/case-model";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
 import { DetailPanel } from "../components/case-detail-panel";
 import { LIST_QUERY_KEYS } from "../lib/query-keys";
@@ -884,8 +884,8 @@ export default function RentalOperations() {
       </th>
     );
   };
-  const Chip = ({ text, fg, bg }: { text: string; fg: string; bg: string }) => (
-    <span style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.03em", marginLeft: 6 }}>{text}</span>
+  const Chip = ({ text, fg, bg, title }: { text: string; fg: string; bg: string; title?: string }) => (
+    <span title={title} style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.03em", marginLeft: 6 }}>{text}</span>
   );
 
   if (isLoading) return <div style={{ fontFamily: fonts.dmSans, color: colors.inkMuted, padding: 40 }}>Loading rental operations…</div>;
@@ -1152,6 +1152,9 @@ export default function RentalOperations() {
                 ? (r.reconciledShop?.shopPhone ?? null)
                 : (r.portal_shop_phone ?? null);
               const hireDays = daysSince(r.employee_status_date);
+              // Rental origin callout — Holman-issued vs direct billing, on
+              // every row (Tyler 2026-08-23: callout everywhere a rental shows).
+              const origin = rentalOriginOf(r.source);
               return (
                 <tr key={r.case_key} onClick={() => setPanelKey(r.case_key)} style={{ cursor: "pointer", background: tint, opacity: r.operator_mark === "closed" ? 0.72 : 1 }}>
                   <td style={{ ...tdStyle, textAlign: "right", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{i + 1}</td>
@@ -1169,6 +1172,11 @@ export default function RentalOperations() {
                     )}
                     {r.research_active && !r.ready_verified && (
                       <Chip text="RESEARCH" fg={colors.amber} bg={colors.amberLight} />
+                    )}
+                    {origin && (
+                      <Chip text={origin.label} title={origin.hint}
+                        fg={origin.kind === "direct" ? colors.purple : colors.blue}
+                        bg={origin.kind === "direct" ? colors.purpleLight : colors.blueLight} />
                     )}
                   </td>
                   <td style={tdStyle}>

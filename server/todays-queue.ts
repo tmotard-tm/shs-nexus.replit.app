@@ -121,6 +121,10 @@ export type QueueItem = {
    *  canonical (unpadded) truck number. Fits case_key VARCHAR(10). */
   key?: string;
   caseKey?: string | null;
+  /** vrm_rental_operations_cases.source for the rental behind this row —
+   *  'enterprise'/'holman_non_enterprise' (Holman book) vs 'enterprise_direct'
+   *  (manual direct-billing report). Null/absent when no case matched. */
+  rentalSource?: string | null;
   owner?: string;
   ownerBasis?: string;
   region?: Region | null;
@@ -211,6 +215,8 @@ export type NoActionItem = {
   fleetScopeStatus: string;
   holmanStatus: string | null;
   caseKey: string | null;
+  /** Rental origin (see QueueItem.rentalSource). */
+  rentalSource?: string | null;
   /** Why this case carries no queue action today (declined/auction dead-ends). */
   reason?: string | null;
 };
@@ -405,6 +411,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     // what splits "source a replacement" from "replacement already assigned".
     db.execute(sql`
       SELECT c.case_key, c.vehicle_number_padded, c.vehicle_number, c.ams_status,
+             c.source AS case_source,
              i.resolved_district AS tech_district,
              UPPER(TRIM(atr.tech_racfid)) AS tech_ldap,
              COALESCE(rt.tpms_truck, atr.truck_lu, atr.last_known_truck_lu) AS assigned_truck
@@ -474,6 +481,10 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   const ldapByCase = new Map<string, string>();
   const assignedTruckByCase = new Map<string, string>();
   const amsStatusByCase = new Map<string, string | null>();
+  // Rental origin (vrm_rental_operations_cases.source): Holman-issued book
+  // rentals vs the manual Enterprise direct-billing report — the queue cards
+  // badge every rental with this, same vocabulary as the boards/drawer.
+  const sourceByCase = new Map<string, string | null>();
   for (const r of ((caseResult as any).rows ?? []) as any[]) {
     const ck = String(r.case_key);
     caseKeyByCanon.set(canon(r.vehicle_number_padded ?? r.vehicle_number ?? r.case_key), ck);
@@ -481,6 +492,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     if (r.tech_ldap) ldapByCase.set(ck, String(r.tech_ldap));
     if (r.assigned_truck) assignedTruckByCase.set(ck, String(r.assigned_truck));
     amsStatusByCase.set(ck, r.ams_status != null ? String(r.ams_status) : null);
+    sourceByCase.set(ck, r.case_source != null ? String(r.case_source) : null);
   }
 
   const phoneByLdap = new Map<string, string>();
@@ -1232,6 +1244,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
         fleetScopeStatus: it.fleetScopeStatus,
         holmanStatus: it.holmanStatus,
         caseKey,
+        rentalSource: caseKey ? sourceByCase.get(caseKey) ?? null : null,
         reason: assignedDiffers && assignedInRepair
           ? `Sold/declined — tech's replacement ${assignedRaw} is in the shop (LUCA tracking)`
           : 'No queue-actionable classification today',
@@ -1282,6 +1295,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     const topDef = CLASSIFICATION_BY_KEY.get(top.key)!;
     it.key = key;
     it.caseKey = caseKey;
+    it.rentalSource = caseKey ? sourceByCase.get(caseKey) ?? null : null;
     it.readyVerified = verified ? { by: verified.by, at: verified.at.toISOString() } : null;
     it.research = research ? { by: research.by, at: research.at.toISOString() } : null;
     // Phone-confirmed ready evidence (shop-confirmed bucket): every confirmed-
@@ -1494,6 +1508,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
         fleetScopeStatus: t.mainStatus ?? '',
         holmanStatus: getHolmanStatus(t.truckNumber),
         caseKey: caseKeyByCanon.get(canon(t.truckNumber)) ?? null,
+        rentalSource: sourceByCase.get(caseKeyByCanon.get(canon(t.truckNumber)) ?? '') ?? null,
       })),
   ];
 
