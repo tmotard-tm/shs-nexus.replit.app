@@ -368,6 +368,34 @@ export const SHOP_STRICT_CTE = sql`
   )
 `;
 
+// The renter's OWN assigned truck — TPMS FIRST, roster fallback. ONE shared
+// fragment for every surface that answers "what truck is this renter actually
+// assigned to", composed after a `LEFT JOIN all_techs atr` (the fragment
+// references `atr`). Exposes `rt.tpms_truck` (strictly the TPMS pick, null if
+// TPMS has none) and `ownp.own_pad` (5-padded final answer).
+//
+// Why TPMS first: all_techs.truck_lu is a historical Snowflake field and goes
+// stale — on 2026-07-31 truck 46911 still named a terminated Ronald Owens there
+// while TPMS had Mark Adams Jr on it that morning. getRentalOpsMaster was fixed
+// then, but the LUCA rental-list feed and the case drawer kept their own
+// roster-only copies: on 2026-08-23 the list feed shipped a stale ASSIGNED_TRUCK
+// to LUCA on 42 of 384 rentals (26 of 225 direct-billed — e.g. Keith Griffin
+// reported as 21503 while live TPMS said 029753), which is exactly the
+// "billing items on LUCA don't match the real truck numbers" failure. Every
+// consumer now composes this fragment so the surfaces cannot drift again.
+// LIMIT 1 is load-bearing: a tech can appear on more than one TPMS row.
+export const OWN_TRUCK_LATERALS = sql`
+    LEFT JOIN LATERAL (
+      SELECT t.truck_no AS tpms_truck
+      FROM tpms_last_known_truck_tech t
+      WHERE UPPER(TRIM(t.enterprise_id)) = UPPER(TRIM(atr.tech_racfid))
+      ORDER BY t.last_seen_at DESC NULLS LAST
+      LIMIT 1
+    ) rt ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(rt.tpms_truck, atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+    ) ownp ON true`;
+
 // LUCA workload buckets (Tyler's workload rule) live in ./workload — pure, so
 // they are unit-testable without a DB. Re-exported here for callers.
 export { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
@@ -826,18 +854,9 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     LEFT JOIN holman_vehicles_cache hv ON hv.vehicle_number_display = c.case_key
     LEFT JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
-    -- Live truck assignment for the renter. LIMIT 1 is load-bearing: a tech can
-    -- appear on more than one TPMS row.
-    LEFT JOIN LATERAL (
-      SELECT t.truck_no AS tpms_truck
-      FROM tpms_last_known_truck_tech t
-      WHERE UPPER(TRIM(t.enterprise_id)) = UPPER(TRIM(atr.tech_racfid))
-      ORDER BY t.last_seen_at DESC NULLS LAST
-      LIMIT 1
-    ) rt ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(rt.tpms_truck, atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
-    ) ownp ON true
+    -- Live truck assignment for the renter (shared OWN_TRUCK_LATERALS: TPMS
+    -- first, roster fallback — see the fragment's doc block).
+    ${OWN_TRUCK_LATERALS}
     LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
     LEFT JOIN vrm_holman_portal_hist aph ON aph.truck_no = ownp.own_pad
     LEFT JOIN LATERAL (
@@ -1624,9 +1643,11 @@ export async function getLucaRentalList(): Promise<any> {
     -- the renter's OWN assigned truck (+ its open-PO count under the SAME
     -- reconciled po_eff rule), and the per-truck PO-history counts.
     LEFT JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
-    LEFT JOIN LATERAL (
-      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
-    ) ownp ON true
+    -- ASSIGNED_TRUCK must be the renter's REAL truck (Tyler's transfer rule:
+    -- anything going to LUCA carries the tech's TPMS-assigned truck). The
+    -- shared fragment is TPMS-first; the roster-only copy that used to live
+    -- here shipped 42 stale assigned trucks to LUCA (2026-08-23).
+    ${OWN_TRUCK_LATERALS}
     LEFT JOIN po_agg po  ON po.truck  = c.case_key
     LEFT JOIN po_agg apo ON apo.truck = ownp.own_pad
     -- Shop of record: the MOST RECENT qualifying repair PO (strict date order),
@@ -2239,9 +2260,10 @@ async function readAmsStatusForTruck(truckPadded: string): Promise<string | null
  */
 export async function resolveAssignedTruckForCase(caseKey: string): Promise<string | null> {
   const r = await db.execute(sql`
-    SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+    SELECT ownp.own_pad
     FROM vrm_rental_identity_resolutions i
     JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+    ${OWN_TRUCK_LATERALS}
     WHERE i.case_key = ${caseKey} LIMIT 1
   `);
   return (r.rows[0] as any)?.own_pad ?? null;
@@ -2297,12 +2319,13 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
                    FROM vrm_rental_operation_actions
                    WHERE case_key = ${caseKey} AND target_truck IS NULL
                    ORDER BY created_at DESC`),
-    // the renter's ASSIGNED truck — same all_techs join + 5-pad expression as
-    // getRentalOpsMaster's ownp LATERAL (override employee id wins)
+    // the renter's ASSIGNED truck — the SAME shared TPMS-first fragment as
+    // getRentalOpsMaster and the LUCA list feed (override employee id wins)
     db.execute(sql`
-      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+      SELECT ownp.own_pad
       FROM vrm_rental_identity_resolutions i
       JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+      ${OWN_TRUCK_LATERALS}
       WHERE i.case_key = ${caseKey} LIMIT 1
     `),
   ]);

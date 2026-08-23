@@ -15,6 +15,7 @@ import { sql } from "drizzle-orm";
 import { getSnowflakeService } from "../../snowflake-service";
 import { toDisplayNumber, toCanonical, toHolmanRef } from "../../vehicle-number-utils";
 import { classifyPoVendor, type PoClassLine } from "./vendor-class";
+import { OWN_TRUCK_LATERALS } from "./read-repository";
 
 const PO_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS";
 
@@ -146,13 +147,14 @@ export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryRes
     const r = await db.execute(sql`SELECT vehicle_number_padded FROM vrm_rental_operations_cases WHERE present_in_latest = true`);
     caseKeys = (r.rows as any[]).map((x) => x.vehicle_number_padded);
     const assigned = await db.execute(sql`
-      SELECT DISTINCT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+      SELECT DISTINCT ownp.own_pad
       FROM vrm_rental_operations_cases c
       JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
       JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+      ${OWN_TRUCK_LATERALS}
       WHERE c.present_in_latest = true
         AND (c.ams_status ILIKE '%declin%' OR c.ams_status ILIKE '%auction%')
-        AND COALESCE(atr.truck_lu, atr.last_known_truck_lu) IS NOT NULL
+        AND ownp.own_pad IS NOT NULL
     `);
     const seen = new Set(caseKeys);
     for (const a of assigned.rows as any[]) {

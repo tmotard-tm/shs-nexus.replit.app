@@ -38,7 +38,7 @@ import { classifyPoVendor, isNeverShopVendor, type PoClassLine } from "./vendor-
 import { maybeExtractShopFromComments } from "./shop-comment-extract";
 // THE reconciliation, imported — never re-typed here. See the note above
 // findScrapeTargets for what the previous hand-copy cost.
-import { poEffectiveCte, SHOP_PICK_CTE, cleanPhone } from "./read-repository";
+import { poEffectiveCte, SHOP_PICK_CTE, cleanPhone, OWN_TRUCK_LATERALS } from "./read-repository";
 
 const BATCH = 8;                 // vehicles per worker invocation (Chromium is sequential)
 const WORKER_TIMEOUT_MS = 300_000;
@@ -89,14 +89,14 @@ const UNIVERSE_CTE = sql`
     FROM vrm_rental_operations_cases c
     WHERE c.present_in_latest = true
     UNION
-    SELECT own.own_pad AS truck
+    SELECT ownp.own_pad AS truck
     FROM vrm_rental_operations_cases c
     JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
-    JOIN LATERAL (SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad) own ON true
+    ${OWN_TRUCK_LATERALS}
     WHERE c.present_in_latest = true
       AND (c.ams_status ILIKE '%declin%' OR c.ams_status ILIKE '%auction%')
-      AND own.own_pad IS NOT NULL
+      AND ownp.own_pad IS NOT NULL
   )
 `;
 
@@ -925,14 +925,14 @@ export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; exp
       -- UNIVERSE_CTE's assigned arm, but with NO declined/auction filter: the
       -- assigned-truck tab can set a lock on ANY case, so every case must
       -- keep its assigned truck's lock alive while it is on the board.
-      SELECT own.own_pad AS truck, c.present_in_latest,
+      SELECT ownp.own_pad AS truck, c.present_in_latest,
              GREATEST(COALESCE(c.dropped_from_feed_at, 'epoch'::timestamptz),
                       COALESCE(c.last_seen_at,         'epoch'::timestamptz)) AS board_clock
       FROM vrm_rental_operations_cases c
       JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
       JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
-      JOIN LATERAL (SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad) own ON true
-      WHERE own.own_pad IS NOT NULL
+      ${OWN_TRUCK_LATERALS}
+      WHERE ownp.own_pad IS NOT NULL
     ),
     ref_agg AS (
       SELECT truck, bool_or(present_in_latest) AS on_board, max(board_clock) AS last_on_board
