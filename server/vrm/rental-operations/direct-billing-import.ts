@@ -911,6 +911,47 @@ export function findOldBillingConflicts(rows: Array<Record<string, unknown>>): O
     }));
 }
 
+// ── off-page double-billing scan (task #774) ─────────────────────────────────
+
+/**
+ * Task #774: the anchored comparison above only covers techs WITH cutover
+ * rows. Direct-billed techs with NO booked cutover row live on the off-page
+ * list (survey.ts buildDirectOffPagePayload), whose identity-based old-book
+ * test can find a double-bill too — but only when someone opens the page.
+ * The import now counts those alongside the anchored conflicts.
+ *
+ * The predicates are NOT re-derived here: buildDirectOffPagePayload is the
+ * single source of the off-page rules (identity-based match only — these rows
+ * have no anchor tickets so a truck-number fallback would be a guess; a
+ * resolved-but-roster-less tech is 'unknown', never silently clean). This is
+ * a pure filter over its rows, same as findOldBillingConflicts.
+ */
+export interface OffPageDoubleBill {
+  case_key: string;
+  ldap: string;
+  tech_name: string | null;
+  ra_number: string | null;
+  /** old ECARS ticket number(s) to close */
+  old_tickets: string;
+}
+
+export function findOffPageDoubleBills(rows: Array<Record<string, unknown>>): OffPageDoubleBill[] {
+  return rows
+    // 'open' is the only double-bill verdict in this population — there is no
+    // 'rolled' (rolled is defined relative to an ETD pickup day these techs
+    // lack). 'pended' is context, and 'unknown' (unresolved identity or no
+    // canonical roster LDAP) is a blind spot counted separately: unknown ≠
+    // clean, but it is not a verdict either.
+    .filter((r) => r.old_book_state === "open")
+    .map((r) => ({
+      case_key: String(r.case_key ?? ""),
+      ldap: String(r.ldap ?? ""),
+      tech_name: (r.tech_name as string | null) ?? null,
+      ra_number: (r.ra_number as string | null) ?? null,
+      old_tickets: String(r.old_tickets ?? ""),
+    }));
+}
+
 // ── upload preflight (premortem #1/#4: wrong/stale/collapsed file guards) ────
 
 /** Last completed direct-billing import — the yardstick a new upload is judged against. */
@@ -1138,6 +1179,18 @@ export interface DirectImportResult extends IngestResult {
    */
   switchoverStampStatus: "ok" | "failed";
   oldBillingComparisonStatus: "ok" | "failed";
+  /**
+   * Task #774: off-page scan status — same "silence never reads clean"
+   * contract as the two statuses above; ALWAYS set, 'failed' means the scan
+   * did not run and the operator must be told.
+   */
+  offPageCheckStatus: "ok" | "failed";
+  /** off-page direct-billed techs (no booked cutover row) still OPEN on the old book — double-billed */
+  offPageDoubleBills?: OffPageDoubleBill[];
+  /** off-page rows the scan could NOT check (identity unresolved / no roster LDAP) — unknown ≠ clean */
+  offPageUnknownIdentity?: number;
+  /** total off-page rows the scan looked at */
+  offPageTotal?: number;
   /** resolved+sighted techs with NO cutover row — stamp matched nothing, invisible on the page */
   switchoverUnmatchedLdaps?: string[];
   /** switched techs STILL open on the old enterprise (ECARS) billing — double-billed */
@@ -1173,6 +1226,8 @@ export interface DirectImportDeps {
   persist: typeof persistRentalCases;
   stampSwitchover: typeof stampCutoverBillingSwitchover;
   buildCutoverPayload: () => Promise<any>;
+  /** Task #774: off-page list builder (survey.ts buildDirectOffPagePayload) */
+  buildOffPagePayload: () => Promise<any>;
   landPoHistory: (trucks: string[]) => Promise<{ posLanded: number; openRepairTrucks: number }>;
   enrichAms: () => Promise<{ withStatus: number }>;
   /** last successful import — yardstick for the count/date upload guards */
@@ -1309,6 +1364,36 @@ export async function importDirectBillingReport(input: {
     console.warn("[VRM/RentalOps] direct import: old-billing comparison failed (non-fatal):", e?.message || e);
   }
 
+  // Task #774: the comparison above only sees techs WITH cutover rows.
+  // Direct-billed techs with NO booked cutover row are scanned by the
+  // off-page list's identity-based old-book test — run it here (AFTER
+  // persist, so THIS upload's population is what gets scanned) with the same
+  // best-effort contract and an independent status: a failure must read as
+  // "did not run", never as clean.
+  let offPageDoubleBills: OffPageDoubleBill[] | undefined;
+  let offPageCheckStatus: "ok" | "failed" = "failed";
+  let offPageUnknownIdentity: number | undefined;
+  let offPageTotal: number | undefined;
+  try {
+    const buildOffPage = deps.buildOffPagePayload ?? (async () => {
+      const { buildDirectOffPagePayload } = await import("../forms/survey");
+      return buildDirectOffPagePayload();
+    });
+    const op = await buildOffPage();
+    const opRows: Array<Record<string, unknown>> = op?.rows ?? [];
+    offPageDoubleBills = findOffPageDoubleBills(opRows);
+    offPageUnknownIdentity = opRows.filter((r) => r.old_book_state === "unknown").length;
+    offPageTotal = opRows.length;
+    offPageCheckStatus = "ok";
+    if (offPageDoubleBills.length) {
+      console.warn(`[VRM/RentalOps] direct import: ${offPageDoubleBills.length} OFF-PAGE direct-billed tech(s) still OPEN on the old enterprise book (double-billed, no booked cutover row): ${offPageDoubleBills.map((c) => `${c.ldap || c.tech_name || c.case_key}${c.old_tickets ? ` (tkt ${c.old_tickets})` : ""}`).join(", ")}`);
+    } else {
+      console.log(`[VRM/RentalOps] direct import: off-page double-billing scan clean — ${offPageTotal} off-page row(s) checked${offPageUnknownIdentity ? `, ${offPageUnknownIdentity} unknown-identity NOT checkable` : ""}`);
+    }
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] direct import: off-page double-billing scan failed (non-fatal):", e?.message || e);
+  }
+
   // best-effort enrichment, same as the MasterARI path (cached AMS = fast)
   let poLanded: number | undefined, openRepairTrucks: number | undefined, amsWithStatus: number | undefined;
   try {
@@ -1359,5 +1444,6 @@ export async function importDirectBillingReport(input: {
     switchoverStampStatus, oldBillingComparisonStatus, switchoverUnmatchedLdaps,
     oldBillingConflicts, oldBookAsOf, oldBookAgeDays, oldBookStale,
     comparisonNonBookedStamped, preflight,
+    offPageCheckStatus, offPageDoubleBills, offPageUnknownIdentity, offPageTotal,
   };
 }

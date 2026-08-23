@@ -733,6 +733,9 @@ export default function RentalOperations() {
       // own poll fires.
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-survey/cutover-status"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/imports/direct-billing/runs"] });
+      // Task #774: the import reshapes the off-page population too (cases
+      // swept/added, identities re-resolved) — refresh its standing list.
+      qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-survey/direct-offpage"] });
       const r = j?.result ?? {};
       const s = r.stats;
       // The old-billing comparison (Tyler 2026-08-22): switched techs still
@@ -783,6 +786,36 @@ export default function RentalOperations() {
           toast({
             title: "Old-book snapshot is stale",
             description: `The double-billing comparison ran against the ${bookQual}. ${conflicts.length ? "There may be more conflicts than shown." : "A clean result against a stale book may miss newer double-billing."} Sync the Enterprise book to firm it up.`,
+          });
+        }
+      }
+      // Task #774: the comparison above only covers techs WITH cutover rows.
+      // Direct-billed techs with NO booked cutover row are scanned by the
+      // off-page identity-based old-book test (the standing list on Cutover
+      // Tracking) — a double-bill there gets the same loud toast, and a
+      // failed scan must never look like a clean one.
+      if (r.offPageCheckStatus === "failed") {
+        toast({
+          title: "Off-page double-billing check did not run",
+          description: "The scan of direct-billed techs WITHOUT a booked cutover row failed on this upload — NOT a clean result. Check the off-page section on Cutover Tracking directly.",
+          variant: "destructive",
+        });
+      } else {
+        const offPage: any[] = r.offPageDoubleBills ?? [];
+        if (offPage.length) {
+          toast({
+            title: `${offPage.length} off-page tech${offPage.length === 1 ? "" : "s"} still on the OLD enterprise billing`,
+            description: `Direct-billed with NO booked cutover row, and the old ticket is still open (double-billed): ${offPage.slice(0, 6).map((c) => `${c.tech_name || c.ldap || c.case_key}${c.old_tickets ? ` (tkt ${c.old_tickets})` : ""}`).join(", ")}${offPage.length > 6 ? ` +${offPage.length - 6} more` : ""} — see the off-page section on Cutover Tracking.`,
+            variant: "destructive",
+          });
+        }
+        // unknown ≠ clean: rows with unresolved identity (or no roster LDAP)
+        // could not be checked at all — say so instead of staying silent.
+        const offPageUnknown = Number(r.offPageUnknownIdentity ?? 0);
+        if (offPageUnknown > 0) {
+          toast({
+            title: "Off-page rows not checkable",
+            description: `${offPageUnknown} off-page direct-billed row${offPageUnknown === 1 ? "" : "s"} with unresolved identity (or no roster LDAP) could not be checked for double-billing — unknown is NOT clean; resolve identity on Cutover Tracking's off-page section.`,
           });
         }
       }

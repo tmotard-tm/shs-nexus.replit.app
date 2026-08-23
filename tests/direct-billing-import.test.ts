@@ -15,7 +15,7 @@ import JSZip from "jszip";
 import {
   parseSharedStrings, parseSheetXml, parseXlsxGrid, mapDirectRows,
   coerceReportDate, extractReplacesTicket, resolveDirectRow, buildDirectCases,
-  assertPlausibleReport, findOldBillingConflicts, importDirectBillingReport,
+  assertPlausibleReport, findOldBillingConflicts, findOffPageDoubleBills, importDirectBillingReport,
   computeDirectPreflight, rentalDateRangeOf, DirectImportBlockedError,
   previewDirectBillingReport,
   type DirectBillingRow, type DirectResolveCtx, type RosterLite, type DirectImportDeps,
@@ -527,6 +527,9 @@ function importDeps(over: Partial<DirectImportDeps> = {}): Partial<DirectImportD
     }),
     stampSwitchover: async () => ({ techs: 1, stamped: 1, unmatched: [] }),
     buildCutoverPayload: async () => ({ rows: [], book: { as_of: "2026-08-21", age_days: 1, stale: false } }),
+    // hermetic off-page seam (task #774): the default dynamic-imports survey.ts
+    // and reads the REAL dev DB — never let that happen in these fixtures.
+    buildOffPagePayload: async () => ({ rows: [] }),
     landPoHistory: async () => ({ posLanded: 0, openRepairTrucks: 0 }),
     enrichAms: async () => ({ withStatus: 0 }),
     // Hermetic ledger/baseline seams: without these the defaults read the REAL
@@ -640,6 +643,66 @@ test("old-billing comparison: non-booked rows conflict too and carry reservation
   assert.equal(conflicts.find((c) => c.ldap === "RRELSD1")!.reservation_status, "released");
   assert.equal(conflicts.find((c) => c.ldap === "FFAILD1")!.reservation_status, "failed");
   assert.equal(conflicts.find((c) => c.ldap === "BBOOKD1")!.reservation_status, "booked");
+});
+
+// ── off-page double-billing scan (task #774) ─────────────────────────────────
+
+test("off-page scan: only identity-verdict OPEN rows count; pended/unknown/clear never do (task #774)", () => {
+  const rows = [
+    // resolved identity + old book OPEN → double-billed
+    { case_key: "d1", ldap: "CMORAL1", tech_name: "MORALES,CARLOS J", ra_number: "12ABC7",
+      old_book_state: "open", old_tickets: "7H2K9Q" },
+    // pended is context, not a double-bill verdict
+    { case_key: "d2", ldap: "PKANTZ1", old_book_state: "pended", old_tickets: "PP11QQ" },
+    // unknown = identity unresolved or roster-less — a blind spot, NOT a verdict
+    { case_key: "d3", ldap: null, old_book_state: "unknown", old_tickets: "" },
+    // resolved + old book clear → clean
+    { case_key: "d4", ldap: "COKONK1", old_book_state: "", old_tickets: "" },
+  ];
+  const bills = findOffPageDoubleBills(rows as any);
+  assert.deepEqual(bills.map((b) => b.case_key), ["d1"]);
+  assert.equal(bills[0].ldap, "CMORAL1");
+  assert.equal(bills[0].old_tickets, "7H2K9Q");
+  assert.equal(bills[0].ra_number, "12ABC7");
+});
+
+test("importer: a throwing off-page scan lands offPageCheckStatus 'failed' while the other steps stay 'ok'", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ buildOffPagePayload: async () => { throw new Error("off-page payload query timeout"); } }),
+  );
+  assert.equal(res.offPageCheckStatus, "failed");
+  // the failed scan's numbers must be ABSENT, not zero-shaped-clean
+  assert.equal(res.offPageDoubleBills, undefined);
+  assert.equal(res.offPageUnknownIdentity, undefined);
+  assert.equal(res.offPageTotal, undefined);
+  assert.equal(res.switchoverStampStatus, "ok");
+  assert.equal(res.oldBillingComparisonStatus, "ok");
+  assert.equal(res.runId, "run-test", "an off-page scan failure must never fail the import itself");
+});
+
+test("importer: off-page scan carries double-bills and the unknown-identity blind count through (task #774)", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({
+      buildOffPagePayload: async () => ({
+        rows: [
+          { case_key: "d1", ldap: "CMORAL1", tech_name: "MORALES,CARLOS J", old_book_state: "open", old_tickets: "7H2K9Q" },
+          { case_key: "d2", ldap: "PKANTZ1", old_book_state: "pended", old_tickets: "" },
+          { case_key: "d3", ldap: null, old_book_state: "unknown", old_tickets: "" },
+        ],
+      }),
+    }),
+  );
+  assert.equal(res.offPageCheckStatus, "ok");
+  assert.equal(res.offPageDoubleBills?.length, 1);
+  assert.equal(res.offPageDoubleBills?.[0].ldap, "CMORAL1");
+  assert.equal(res.offPageDoubleBills?.[0].old_tickets, "7H2K9Q");
+  assert.equal(res.offPageUnknownIdentity, 1);
+  assert.equal(res.offPageTotal, 3);
+  // independent from the anchored comparison — both statuses present
+  assert.ok("offPageCheckStatus" in res);
+  assert.equal(res.oldBillingComparisonStatus, "ok");
 });
 
 test("feed carries the resolution audit trail", () => {
