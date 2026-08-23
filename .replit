@@ -176,6 +176,10 @@ args = "cutover-orchestrator-unit"
 task = "workflow.run"
 args = "cutover-intents-db"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "comms-inbox-viewport"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -302,3 +306,14 @@ outputType = "console"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts tests/direct-billing-void-db.test.ts"
+
+[[workflows.workflow]]
+name = "comms-inbox-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-comms-inbox-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true

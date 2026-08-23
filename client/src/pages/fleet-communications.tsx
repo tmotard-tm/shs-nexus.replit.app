@@ -977,7 +977,7 @@ export default function FleetCommunications() {
       {/* flex-1 min-h-0 fill (not viewport math): whatever height the header
           and tabs take, the pane absorbs the rest, so the composer is always
           on-screen and only the thread list + conversation scroll. */}
-      <div className="flex flex-1 min-h-0 gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+      <div className="flex flex-1 min-h-0 gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden" data-testid="inbox-pane">
         {/* Thread list */}
         <div className={`${selectedId ? "hidden md:flex" : "flex"} w-full md:w-80 md:flex-shrink-0 border-r border-slate-200 dark:border-slate-800 flex-col bg-slate-50/70 dark:bg-slate-950/40`}>
           <div className="p-3 border-b border-slate-200 dark:border-slate-800 space-y-2">

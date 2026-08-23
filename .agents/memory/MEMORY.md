@@ -145,4 +145,5 @@
 - [Samsara Snowflake table quirks](samsara-snowflake-tables.md) — MAINT_ID = vehicle id (no VEHICLE_ID in maintenance/odometer); STREAM has LATITUDE/LONGITUDE not LAT/LNG; sibling event tables audited OK; probe real columns first.
 - [Public-form screenshot / SOP recipe](form-screenshot-sop-recipe.md) — never submit (live SMS), pick LDAPs via the identity-resolution join, mask PII in-DOM, target Radix selects by placeholder text.
 - [Cutover billing-switched evidence](cutover-billing-switched-evidence.md) — effective = live direct-book presence OR stamp; void wins over book evidence; import-time-only stamps go dead when prod imports predate the code.
+- [Viewport-fit UI guards](viewport-fit-guard.md) — one viewport can't prove no hardcoded height (calc can be pixel-identical); overflow-hidden blinds page-scroll checks — assert pane-bottom window at 2 sizes.
 - [Cutover Holman-book anchoring](cutover-book-anchoring.md) — enterprise_direct rows share vendor 'Enterprise Rent-A-Car' with the ECARS book (filter source='enterprise'); case rows overwrite per truck → book state rides booking-time ticket anchors, never force-overwrite non-empty ones.
