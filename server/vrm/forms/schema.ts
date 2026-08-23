@@ -1034,5 +1034,26 @@ export async function initFormsSchema(): Promise<void> {
     `);
   }
 
+  // Task #759: Samsara evidence check on breakdown/accident requests. The
+  // verdict is ADVISORY (a badge for the reviewer, never a gate); the snapshot
+  // is the structured evidence behind it; checked_at ages the badge honestly.
+  // Same steady-state-zero-DDL pattern as the blocks above.
+  const { rows: samsaraCols } = await db.execute(sql`
+    SELECT count(*)::int AS n FROM information_schema.columns
+    WHERE table_name = 'vrm_rental_request'
+      AND column_name IN ('samsara_verdict','samsara_evidence','samsara_checked_at')
+  `);
+  if (Number((samsaraCols as any[])[0]?.n ?? 0) < 3) {
+    await db.execute(sql`
+      BEGIN;
+      SET LOCAL lock_timeout = '5s';
+      ALTER TABLE vrm_rental_request
+        ADD COLUMN IF NOT EXISTS samsara_verdict    text,
+        ADD COLUMN IF NOT EXISTS samsara_evidence   jsonb,
+        ADD COLUMN IF NOT EXISTS samsara_checked_at timestamptz;
+      COMMIT;
+    `);
+  }
+
   console.log("[VRM] forms schema ready (vrm_form_tokens, vrm_rental_tech_survey, vrm_rental_cutover, vrm_rental_workflow_intents)");
 }

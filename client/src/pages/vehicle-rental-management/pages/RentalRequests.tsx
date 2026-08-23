@@ -97,6 +97,28 @@ interface Req {
   ext_email_to?: string | null;
   ext_email_sent_at?: string | null;
   ext_email_error?: string | null;
+  // Samsara evidence check (breakdown/accident only). ADVISORY: a badge and
+  // an evidence panel for the reviewer, never a gate on any decision.
+  samsara_verdict?: string | null;
+  samsara_evidence?: SamsaraEvidence | null;
+  samsara_checked_at?: string | null;
+}
+
+/** The evidence snapshot the server stamps on breakdown/accident requests. */
+interface SamsaraEvidence {
+  category?: string;
+  occurredAt?: string | null;
+  checkedAt?: string;
+  vehicle?: { samsaraVehicleId: string; samsaraName: string; vin: string | null } | null;
+  sources?: Record<string, { status: "ok" | "error" | "skipped"; error?: string }>;
+  faultCodes?: Array<{ faultCode: string; description: string | null; source: string; status: string | null }>;
+  maintenanceDtcs?: Array<{ code: string | null; description: string | null; checkEngine: boolean; lastSeen: string | null }>;
+  safetyEvents?: Array<{ timeUtc: string; label: string | null; gForce: number | null; nearIncident: boolean }>;
+  location?: { lat: number; lng: number; address: string | null; time: string; speedMph: number | null; source: string } | null;
+  odometer?: { obdMiles: number | null; gpsMiles: number | null; obdTime: string | null; gpsTime: string | null } | null;
+  lastSignalAt?: string | null;
+  lastSignalAgeHours?: number | null;
+  verdictReason?: string;
 }
 
 const isExt = (r: Req | null | undefined) => String(r?.request_type ?? "new") === "extension";
@@ -133,6 +155,40 @@ const RULE_LABEL: Record<number, string> = {
   6: "not ACTIVE on roster",
   7: "already holds a rental",
   8: "approved",
+};
+
+/** Samsara verdict badge copy + tones. Advisory colors: green only when the
+ *  telematics agree, amber when the device is talking but nothing supports
+ *  the claim, muted when the check simply cannot say anything. */
+const SAMSARA_LABEL: Record<string, string> = {
+  corroborated: "Corroborated",
+  no_supporting_data: "No supporting data",
+  device_offline: "Device offline",
+  not_applicable: "N/A — no device",
+  check_unavailable: "Check unavailable",
+};
+const SAMSARA_TONE: Record<string, [string, string]> = {
+  corroborated: [colors.green, colors.greenLight],
+  no_supporting_data: [colors.amber, colors.amberLight],
+  device_offline: [colors.inkMuted, colors.background],
+  not_applicable: [colors.inkMuted, colors.background],
+  check_unavailable: [colors.inkMuted, colors.background],
+};
+// Sort order: strongest signal first, non-answers last.
+const SAMSARA_ORDER: Record<string, number> = {
+  corroborated: 0, no_supporting_data: 1, device_offline: 2, check_unavailable: 3, not_applicable: 4,
+};
+const isSamsaraCategory = (r: Req | null | undefined) =>
+  !isExt(r) && ["breakdown", "accident"].includes(String(r?.problem_category ?? ""));
+
+/** "5m ago" / "3h ago" / "2d ago" — evidence age at a glance. */
+const ago = (v?: string | null): string => {
+  const t = Date.parse(String(v ?? ""));
+  if (!Number.isFinite(t)) return "";
+  const mins = Math.max(0, (Date.now() - t) / 60000);
+  if (mins < 60) return `${Math.round(mins)}m ago`;
+  if (mins < 48 * 60) return `${Math.round(mins / 60)}h ago`;
+  return `${Math.round(mins / 1440)}d ago`;
 };
 
 const DECISION_TONE: Record<string, [string, string]> = {
@@ -683,6 +739,32 @@ export default function RentalRequests() {
     qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
   };
 
+  // ── Samsara evidence re-check ──────────────────────────────────────────────
+  // Evidence changes between submit and review (a fault clears, a device comes
+  // back online), so the reviewer can refresh the snapshot live. Synchronous:
+  // the button waits for the real outcome.
+  const [samsaraBusy, setSamsaraBusy] = useState(false);
+  const [samsaraErr, setSamsaraErr] = useState("");
+  const recheckSamsara = async (requestNo: number) => {
+    setSamsaraBusy(true); setSamsaraErr("");
+    try {
+      const res = await fetch(`/api/vrm/forms/rental-request/${requestNo}/samsara-check`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: "include", body: "{}",
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j?.message || "re-check failed");
+      setDetail((d) => (d && d.request_no === requestNo
+        ? { ...d, samsara_verdict: j.verdict, samsara_evidence: j.evidence, samsara_checked_at: j.checkedAt }
+        : d));
+      qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
+    } catch (e: any) {
+      setSamsaraErr(e?.message || "re-check failed");
+    } finally {
+      setSamsaraBusy(false);
+    }
+  };
+
   // ── Quick corrective actions on the consolidated status card ──────────────
   // These hit EXACTLY the endpoints the workflow panel already uses — the
   // card adds proximity to the explanation, never a second code path.
@@ -775,6 +857,8 @@ export default function RentalRequests() {
     no: (r) => r.request_no, ldap: (r) => r.ldap, name: (r) => r.tech_name,
     truck: (r) => r.truck_number,
     category: (r) => CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category,
+    // Strongest telematics signal first; unchecked / non-applicable rows sink.
+    samsara: (r) => (isSamsaraCategory(r) && r.samsara_verdict ? SAMSARA_ORDER[r.samsara_verdict] ?? 8 : null),
     decision: (r) => r.auto_decision, rule: (r) => r.auto_rule, status: (r) => r.status,
     // Problems first, then in-flight, then booked, then blank — the triage order.
     booking: (r) => bookingSortKey(deriveBookingStatus(r, intentFor(r.request_no))),
@@ -968,6 +1052,7 @@ export default function RentalRequests() {
               <SortHeader col="name" text="Technician" sort={sort} setSort={setSort} />
               <SortHeader col="truck" text="Truck" sort={sort} setSort={setSort} />
               <SortHeader col="category" text="Reason" sort={sort} setSort={setSort} />
+              <SortHeader col="samsara" text="Samsara" sort={sort} setSort={setSort} />
               <SortHeader col="decision" text="Engine" sort={sort} setSort={setSort} />
               <SortHeader col="net" text="Net/day" sort={sort} setSort={setSort} />
               <SortHeader col="rule" text="Rule" sort={sort} setSort={setSort} />
@@ -1064,6 +1149,21 @@ export default function RentalRequests() {
                     </td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.truck_number || "—"}</td>
                     <td style={tdBase}>{isExt(r) ? "Extension" : (CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "—")}</td>
+                    {/* Whether the truck's own telematics agree with the
+                        breakdown/accident claim. Advisory — hover for the
+                        reason; the drawer holds the full evidence. */}
+                    <td style={tdBase}>
+                      {(() => {
+                        if (!isSamsaraCategory(r)) return "—";
+                        if (!r.samsara_verdict) return <span style={{ color: colors.inkMuted, fontSize: 11.5 }}>unchecked</span>;
+                        const [sfg, sbg] = SAMSARA_TONE[r.samsara_verdict] ?? [colors.inkMuted, colors.background];
+                        return (
+                          <span title={r.samsara_evidence?.verdictReason ?? ""}>
+                            <Pill text={SAMSARA_LABEL[r.samsara_verdict] ?? r.samsara_verdict} fg={sfg} bg={sbg} />
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td style={tdBase}>{r.auto_decision ? <Pill text={r.auto_decision} fg={fg} bg={bg} /> : "—"}</td>
                     {/* The number the decision now turns on, visible without
                         opening the drawer. */}
@@ -1379,6 +1479,134 @@ export default function RentalRequests() {
                 </div>
               ))}
             </Section>
+
+            {/* Samsara telematics check — does the truck's own data agree
+                with the breakdown/accident claim? ADVISORY only: it colors a
+                badge and lays out the evidence; it gates nothing. Absent
+                evidence is labeled honestly — an offline device proves
+                nothing, and only a reporting device earns "no faults". */}
+            {isSamsaraCategory(detail) && (
+              <Section title="Samsara telematics check">
+                {(() => {
+                  const ev = detail.samsara_evidence ?? null;
+                  const verdict = detail.samsara_verdict ?? null;
+                  const [sfg, sbg] = SAMSARA_TONE[verdict ?? ""] ?? [colors.inkMuted, colors.background];
+                  const src = (k: string) => ev?.sources?.[k]?.status ?? "skipped";
+                  const srcErr = (k: string) => ev?.sources?.[k]?.error ?? "";
+                  const mono: React.CSSProperties = { fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.ink };
+                  const dim: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted };
+                  const failed = (k: string, what: string) => (
+                    <div style={dim}>{what} could not be read{srcErr(k) ? ` — ${srcErr(k)}` : ""}.</div>
+                  );
+                  const line = (label: string, body: ReactNode) => (
+                    <div key={label} style={{ padding: "6px 0", borderBottom: `1px solid ${colors.rule}` }}>
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 2 }}>{label}</div>
+                      {body}
+                    </div>
+                  );
+                  const etWhen = (v?: string | null) => {
+                    const t = Date.parse(String(v ?? ""));
+                    return Number.isFinite(t)
+                      ? `${new Date(t).toLocaleString("en-US", { timeZone: "America/New_York" })} ET (${ago(v)})`
+                      : "";
+                  };
+                  return (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        {verdict
+                          ? <Pill text={SAMSARA_LABEL[verdict] ?? verdict} fg={sfg} bg={sbg} />
+                          : <span style={dim}>Not checked yet — the check runs shortly after submit.</span>}
+                        {detail.samsara_checked_at && (
+                          <span style={dim}>checked {ago(detail.samsara_checked_at)}</span>
+                        )}
+                        <button type="button" disabled={samsaraBusy}
+                                onClick={() => recheckSamsara(detail.request_no)}
+                                style={{ ...ctrl, cursor: samsaraBusy ? "default" : "pointer", padding: "4px 10px", fontSize: 12,
+                                         color: colors.accent, borderColor: colors.accent, opacity: samsaraBusy ? 0.6 : 1 }}>
+                          {samsaraBusy ? "Checking…" : "Re-check now"}
+                        </button>
+                      </div>
+                      {ev?.verdictReason && (
+                        <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 6 }}>
+                          {ev.verdictReason}
+                        </div>
+                      )}
+                      {samsaraErr && (
+                        <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, marginTop: 6 }}>{samsaraErr}</div>
+                      )}
+                      {ev?.vehicle && (
+                        <div style={{ marginTop: 8 }}>
+                          {line("Fault codes (live)",
+                            src("faultCodes") === "ok"
+                              ? ((ev.faultCodes?.length ?? 0) > 0
+                                  ? <div style={{ display: "grid", gap: 2 }}>
+                                      {ev.faultCodes!.map((f, i) => (
+                                        <div key={i} style={mono}>
+                                          {f.faultCode} — {f.description || "no description"}
+                                          <span style={{ color: colors.inkMuted }}> ({f.source}{f.status ? ` · ${f.status}` : ""})</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  : <div style={dim}>No active fault codes — the device is reporting and shows none.</div>)
+                              : failed("faultCodes", "Live fault codes"))}
+                          {line("Maintenance DTC history",
+                            src("maintenance") === "ok"
+                              ? ((ev.maintenanceDtcs?.length ?? 0) > 0
+                                  ? <div style={{ display: "grid", gap: 2 }}>
+                                      {ev.maintenanceDtcs!.map((m, i) => (
+                                        <div key={i} style={mono}>
+                                          {m.code || "DTC"} — {m.description || "no description"}
+                                          {m.checkEngine && <span style={{ color: colors.amber }}> · check-engine</span>}
+                                          {m.lastSeen ? <span style={{ color: colors.inkMuted }}> · seen {ago(m.lastSeen)}</span> : null}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  : <div style={dim}>No DTCs in the recent (30-day) maintenance feed for this truck.</div>)
+                              : failed("maintenance", "Maintenance DTC history"))}
+                          {line("Safety events near the reported time",
+                            src("safety") === "ok"
+                              ? ((ev.safetyEvents?.length ?? 0) > 0
+                                  ? <div style={{ display: "grid", gap: 2 }}>
+                                      {ev.safetyEvents!.map((e, i) => (
+                                        <div key={i} style={mono}>
+                                          {etWhen(e.timeUtc) || e.timeUtc} — {e.label || "event"}
+                                          {e.gForce != null ? ` · ${e.gForce}g` : ""}
+                                          {e.nearIncident && <span style={{ color: colors.amber }}> · near reported time</span>}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  : <div style={dim}>No safety events recorded in the window checked.</div>)
+                              : failed("safety", "Safety-event history"))}
+                          {line("Last GPS fix",
+                            src("location") === "ok"
+                              ? (ev.location
+                                  ? <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>
+                                      {ev.location.address || `${ev.location.lat.toFixed(4)}, ${ev.location.lng.toFixed(4)}`}
+                                      <div style={dim}>
+                                        as of {etWhen(ev.location.time)}
+                                        {ev.location.speedMph != null ? ` · ${Math.round(ev.location.speedMph)} mph` : ""}
+                                      </div>
+                                    </div>
+                                  : <div style={dim}>No GPS fix on record for this truck.</div>)
+                              : failed("location", "GPS location"))}
+                          {line("Odometer & device signal",
+                            <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>
+                              {ev.odometer?.obdMiles != null || ev.odometer?.gpsMiles != null
+                                ? `${Math.round(Number(ev.odometer.obdMiles ?? ev.odometer.gpsMiles)).toLocaleString()} mi`
+                                : <span style={dim as any}>odometer unavailable</span>}
+                              <div style={dim}>
+                                {ev.lastSignalAt
+                                  ? `last device signal ${etWhen(ev.lastSignalAt)}`
+                                  : "no device signal on record — offline or never reported"}
+                              </div>
+                            </div>)}
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </Section>
+            )}
 
             {/* Extension context: what the extension is FOR, and the van
                 status update — the repair check-in Fleet reviews before

@@ -58,6 +58,10 @@ import { runBookingExecutor } from "../etd/executor";
 // One list of bookable classes, shared by the picker route and the validator so
 // they cannot drift apart.
 import { REQUEST_CLASS_OPTIONS, ENTERPRISE_CLASS_MENU, resolveRequestClass } from "../etd/vehicle-class";
+// Samsara evidence check for breakdown/accident claims. Advisory only, runs
+// fire-and-forget after the row is written — a telematics outage must never
+// touch the technician-facing submit.
+import { captureRequestSamsaraEvidence } from "./samsara-evidence";
 
 // .b, 2026-08-14: the first five acknowledgements are now attested by ONE
 // checkbox listing them as bullets; the four terms of use stay individual.
@@ -1064,6 +1068,21 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     await db.execute(sql`UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${tokenRow.id}`);
   }
 
+  // Samsara evidence check for breakdown/accident claims (Task #759). Fire and
+  // forget after the row exists: a Samsara/Snowflake outage must never fail a
+  // submission — the row simply stays unchecked until a reviewer re-runs it.
+  // Extensions and other categories are untouched by design; the under-21 rows
+  // are already terminal-denied but still get evidence for the record read.
+  if (!isExtension && requestNo != null && (category === "breakdown" || category === "accident")) {
+    void captureRequestSamsaraEvidence({
+      requestNo: Number(requestNo),
+      truckNumber: truckFinal,
+      category,
+      occurredAt: s(b.occurredAt, 40),
+      isByov: isByov === true,
+    });
+  }
+
   // Fire and forget. A comms outage must never fail a submission.
   void alertFleet({
     requestNo, ldap, techName: ctx.identity.techName, truck: ctx.identity.truckNumber,
@@ -1605,6 +1624,45 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Re-run the Samsara evidence check live during review (Task #759).
+   * Evidence changes between submit and review — a fault can clear, a device
+   * can come back online — so the reviewer can refresh the snapshot on
+   * demand. Synchronous: the button waits for the real outcome. Advisory
+   * only; it never touches status or decisions.
+   */
+  router.post("/forms/rental-request/:requestNo/samsara-check", async (req, res) => {
+    try {
+      const requestNo = Number(req.params.requestNo);
+      if (!Number.isFinite(requestNo)) return res.status(400).json({ message: "bad request number" });
+      const { rows } = await db.execute(sql`
+        SELECT request_no, truck_number, problem_category, occurred_at, is_byov,
+               COALESCE(request_type, 'new') AS request_type
+        FROM vrm_rental_request WHERE request_no = ${requestNo}
+      `);
+      const row = (rows as any[])[0];
+      if (!row) return res.status(404).json({ message: "request not found" });
+      if (row.request_type === "extension") {
+        return res.status(400).json({ message: "Samsara check applies to new requests only, not extensions" });
+      }
+      const category = String(row.problem_category ?? "");
+      if (category !== "breakdown" && category !== "accident") {
+        return res.status(400).json({ message: "Samsara check applies to breakdown/accident requests only" });
+      }
+      const snap = await captureRequestSamsaraEvidence({
+        requestNo,
+        truckNumber: row.truck_number ?? null,
+        category,
+        occurredAt: row.occurred_at ? new Date(row.occurred_at).toISOString() : null,
+        isByov: row.is_byov === true,
+      });
+      if (!snap) return res.status(502).json({ message: "Samsara check failed to run — try again" });
+      res.json({ verdict: snap.verdict, checkedAt: snap.checkedAt, evidence: snap });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "samsara check failed" });
+    }
+  });
+
   /** Refresh the BYOV mirror on demand. Also safe to call from a scheduler. */
   router.post("/forms/rental-request/sync-byov", async (_req, res) => {
     try {
@@ -1653,7 +1711,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          // route UPDATEs these, so a skipped boot ALTER 500s every extension
          // approval in prod while dev stays green.
          "ext_reservation_number", "ext_days", "ext_email_state",
-         "ext_email_to", "ext_email_sent_at", "ext_email_error"]],
+         "ext_email_to", "ext_email_sent_at", "ext_email_error",
+         // Samsara evidence check (Task #759). The list SELECTs r.* and the
+         // capture/re-check UPDATE these; a skipped boot ALTER would 500 the
+         // re-check route in prod while dev stays green.
+         "samsara_verdict", "samsara_evidence", "samsara_checked_at"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
       // Cutover tracking. Without this the survey pool, the ETD reservation and

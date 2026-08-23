@@ -58,6 +58,16 @@ export interface SamsaraTrip {
   FUEL_CONSUMED_GAL: number | null;
 }
 
+/** One distinct recent DTC sighting for a vehicle (see getVehicleDtcHistory). */
+export interface SamsaraVehicleDtc {
+  DTC_ID: number | string | null;
+  DTC_DESCRIPTION: string | null;
+  DTC_SHORT_CODE: string | null;
+  J1939_DTCS: string | null;
+  CHECK_ENGINE: boolean | null;
+  LOAD_TS_UTC: string | null;
+}
+
 export interface SamsaraMaintenance {
   MAINT_ID: string;
   VEHICLE_ID: string;
@@ -361,6 +371,83 @@ export class SamsaraService {
   async getMaintenance(): Promise<SamsaraMaintenance[]> {
     const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE LIMIT 500';
     return await this.fetchFromSnowflake<SamsaraMaintenance>(query);
+  }
+
+  /**
+   * Recent DTC history for ONE vehicle. SAMSARA_MAINTENANCE is a snapshot
+   * table keyed by MAINT_ID (= the Samsara vehicle id — there is NO
+   * VEHICLE_ID column) with one row per DTC per daily load, mostly-null for
+   * healthy trucks. Deduped to the newest sighting of each distinct code
+   * within the window, so a persistent fault reads once, not 30 times.
+   */
+  async getVehicleDtcHistory(vehicleId: string, days = 30): Promise<SamsaraVehicleDtc[]> {
+    const query = `
+      SELECT DTC_ID, DTC_DESCRIPTION, DTC_SHORT_CODE,
+             J1939_DIAGNOSTICTROUBLECODES AS J1939_DTCS,
+             (COALESCE(J1939_CHECKENGINELIGHT_EMISSIONSISON, FALSE)
+              OR COALESCE(J1939_CHECKENGINELIGHT_PROTECTISON, FALSE)
+              OR COALESCE(J1939_CHECKENGINELIGHT_STOPISON, FALSE)
+              OR COALESCE(J1939_CHECKENGINELIGHT_WARNINGISON, FALSE)) AS CHECK_ENGINE,
+             LOAD_TS_UTC
+      FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE
+      WHERE MAINT_ID = TRY_TO_NUMBER(?)
+        AND LOAD_TS_UTC >= DATEADD(day, ?, CURRENT_TIMESTAMP())
+        AND (DTC_ID IS NOT NULL OR DTC_DESCRIPTION IS NOT NULL OR DTC_SHORT_CODE IS NOT NULL
+             OR J1939_DIAGNOSTICTROUBLECODES IS NOT NULL
+             OR COALESCE(J1939_CHECKENGINELIGHT_EMISSIONSISON, FALSE)
+             OR COALESCE(J1939_CHECKENGINELIGHT_PROTECTISON, FALSE)
+             OR COALESCE(J1939_CHECKENGINELIGHT_STOPISON, FALSE)
+             OR COALESCE(J1939_CHECKENGINELIGHT_WARNINGISON, FALSE))
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY COALESCE(DTC_SHORT_CODE, TO_VARCHAR(DTC_ID), DTC_DESCRIPTION, 'cel-only')
+        ORDER BY LOAD_TS_UTC DESC
+      ) = 1
+      ORDER BY LOAD_TS_UTC DESC
+      LIMIT 50
+    `;
+    return await this.fetchFromSnowflake<SamsaraVehicleDtc>(query, [vehicleId, -Math.abs(days)]);
+  }
+
+  /**
+   * Latest odometer read for a truck. SAMSARA_ODOMETER has NO vehicle-id
+   * column — it keys by NAME (the truck number as Samsara knows it) and VIN,
+   * so match canonically on NAME with VIN as a second door. NULLS LAST:
+   * plenty of rows carry a null OBD_TIME and a naive DESC puts them first.
+   */
+  async getOdometerForTruck(truckNumber: string, vin?: string | null): Promise<SamsaraOdometer | null> {
+    const canonical = String(truckNumber ?? '').replace(/\D/g, '').replace(/^0+/, '');
+    if (!canonical && !vin) return null;
+    const query = `
+      SELECT VIN, OBD_MILES, GPS_MILES, OBD_TIME, GPS_TIME
+      FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+      WHERE LTRIM(REGEXP_REPLACE(NAME, '[^0-9]', ''), '0') = ?
+         OR (? IS NOT NULL AND VIN = ?)
+      ORDER BY COALESCE(OBD_TIME, GPS_TIME) DESC NULLS LAST
+      LIMIT 1
+    `;
+    const rows = await this.fetchFromSnowflake<SamsaraOdometer>(query, [canonical, vin ?? null, vin ?? null]);
+    return rows[0] ?? null;
+  }
+
+  /**
+   * Resolve a fleet truck number to its Samsara vehicle row, matching
+   * CANONICALLY on both sides: digits only, leading zeros stripped. TPMS pads
+   * truck numbers and Samsara names sometimes carry prefixes, so an exact
+   * string match silently misses real devices. SAMSARA_VEHICLES holds daily
+   * snapshot duplicates, so take the newest load. Callers must do their own
+   * BYOV (`88` prefix on the RAW number) screening BEFORE canonicalizing.
+   */
+  async findVehicleByTruckNumber(truckNumber: string): Promise<SamsaraVehicle | null> {
+    const canonical = String(truckNumber ?? '').replace(/\D/g, '').replace(/^0+/, '');
+    if (!canonical) return null;
+    const query = `
+      SELECT * FROM bi_analytics.app_samsara.SAMSARA_VEHICLES
+      WHERE LTRIM(REGEXP_REPLACE(TRUCK_NUMBER, '[^0-9]', ''), '0') = ?
+      ORDER BY LOAD_TS_UTC DESC NULLS LAST
+      LIMIT 1
+    `;
+    const rows = await this.fetchFromSnowflake<SamsaraVehicle>(query, [canonical]);
+    return rows[0] ?? null;
   }
 
   async getFuelEnergy(vehicleId?: string, startDate?: string, endDate?: string): Promise<SamsaraFuelEnergy[]> {
