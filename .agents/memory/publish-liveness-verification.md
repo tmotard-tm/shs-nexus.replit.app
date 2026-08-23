@@ -15,3 +15,7 @@ description: How to verify a Replit publish actually took effect in prod — dep
 3. Distinguish "old build serving" (other routes fine, boot markers absent from deployment logs) from "new build promoted but a route group crashed" (see startup-route-registration memory — an awaited init failure between route groups 404s everything after it).
 
 **How to apply:** Any time "is X live in prod?" matters — before reporting deployment state, before debugging "works in dev, missing in prod", after any publish.
+
+## The inverse trap: a stale history file ≠ no publish
+`deploys/history.json` can simply STOP being written (last entry Aug 21 while two real publishes landed Aug 23) — absence of an entry proves nothing in either direction. The reliable publish timeline is `git log --oneline` looking for Replit's "Published your App" commits; everything at or before that commit is in that build. Confirm promotion with the live probes above (a boot-DDL schema marker unique to the new code is the cheapest — wake the autoscale app first, boot DDL is post-listen).
+
