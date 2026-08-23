@@ -53,7 +53,14 @@ import {
   Tag,
   ArrowLeft,
   RefreshCw,
+  MoreHorizontal,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 interface CategoryOpt {
   value: string;
@@ -784,6 +791,18 @@ export default function FleetCommunications() {
     setSendCategory(resolveComposerCategory(category, thread?.lastCategory));
   }, [category, thread?.id, thread?.lastCategory]);
 
+  // Shared by the full-width toolbar buttons and the narrow-screen overflow
+  // menu so both entry points behave identically.
+  const toggleSelectMode = () => {
+    if (selectMode) setSelectedLdaps(new Set());
+    setSelectMode((v) => !v);
+  };
+  const handleArchiveUnmatched = () => {
+    if (window.confirm("Archive ALL current unmatched conversations? They stay fully viewable and recoverable in the Archived tab.")) {
+      archiveUnmatchedMutation.mutate();
+    }
+  };
+
   if (config && !config.enabled && !config.canManage) {
     return (
       <div className="min-h-full bg-slate-50 dark:bg-slate-950 flex items-center justify-center p-8">
@@ -798,9 +817,9 @@ export default function FleetCommunications() {
   }
 
   return (
-    <div className="fleet-comms min-h-full bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-4 md:p-6 space-y-4">
+    <div className="fleet-comms h-full min-h-0 flex flex-col gap-4 overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 p-4 md:p-6">
       {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex-none flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-indigo-500 to-violet-600 flex items-center justify-center shadow-lg shadow-indigo-500/25 ring-1 ring-white/10">
             <MessageSquare className="w-5 h-5 text-white" />
@@ -832,56 +851,100 @@ export default function FleetCommunications() {
               />
             </div>
           )}
-          {config?.canManage && (
-            <Button size="sm" variant="outline" onClick={() => setTemplatesOpen(true)} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-manage-templates">
-              <Settings2 className="w-4 h-4 mr-1.5" /> Templates
-            </Button>
-          )}
-          {config?.canManage && (
+          {/* Full toolbar — only on wide screens (≥2xl). On 13" laptops these
+              seven buttons wrapped to 2-3 rows and pushed the composer below
+              the fold; narrower screens get the "…" overflow menu instead. */}
+          <div className="hidden 2xl:flex items-center gap-2">
+            {config?.canManage && (
+              <Button size="sm" variant="outline" onClick={() => setTemplatesOpen(true)} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-manage-templates">
+                <Settings2 className="w-4 h-4 mr-1.5" /> Templates
+              </Button>
+            )}
+            {config?.canManage && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleArchiveUnmatched}
+                disabled={archiveUnmatchedMutation.isPending}
+                className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
+                data-testid="button-archive-unmatched"
+              >
+                <Archive className="w-4 h-4 mr-1.5" /> Archive unmatched
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
-              onClick={() => {
-                if (window.confirm("Archive ALL current unmatched conversations? They stay fully viewable and recoverable in the Archived tab.")) {
-                  archiveUnmatchedMutation.mutate();
-                }
-              }}
-              disabled={archiveUnmatchedMutation.isPending}
+              onClick={() => syncContactsMut.mutate()}
+              disabled={syncContactsMut.isPending}
+              title="Refresh the contact directory now (roster + TPMS phones). Same sync the daily schedule runs; takes ~30-60s."
               className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
-              data-testid="button-archive-unmatched"
+              data-testid="button-sync-contacts"
             >
-              <Archive className="w-4 h-4 mr-1.5" /> Archive unmatched
+              <RefreshCw className={`w-4 h-4 mr-1.5 ${syncContactsMut.isPending ? "animate-spin" : ""}`} />
+              {syncContactsMut.isPending ? "Syncing…" : "Sync contacts"}
             </Button>
-          )}
+            <Button size="sm" variant="outline" onClick={() => { setPresetLdaps([]); setBulkOpen(true); }} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-bulk-send">
+              <Users className="w-4 h-4 mr-1.5" /> Bulk
+            </Button>
+          </div>
+          {/* Select/Done stays visible whenever select mode is active (even on
+              narrow screens) so users always have a one-click way out. */}
           <Button
             size="sm"
             variant={selectMode ? "default" : "outline"}
-            onClick={() => {
-              if (selectMode) setSelectedLdaps(new Set());
-              setSelectMode((v) => !v);
-            }}
+            onClick={toggleSelectMode}
             className={selectMode
               ? "h-9 bg-indigo-600 hover:bg-indigo-600 text-white border-0 shadow-sm"
-              : "h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"}
+              : "hidden 2xl:inline-flex h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"}
             data-testid="button-select-mode"
           >
             <ListChecks className="w-4 h-4 mr-1.5" /> {selectMode ? "Done" : "Select"}
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => syncContactsMut.mutate()}
-            disabled={syncContactsMut.isPending}
-            title="Refresh the contact directory now (roster + TPMS phones). Same sync the daily schedule runs; takes ~30-60s."
-            className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
-            data-testid="button-sync-contacts"
-          >
-            <RefreshCw className={`w-4 h-4 mr-1.5 ${syncContactsMut.isPending ? "animate-spin" : ""}`} />
-            {syncContactsMut.isPending ? "Syncing…" : "Sync contacts"}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => { setPresetLdaps([]); setBulkOpen(true); }} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-bulk-send">
-            <Users className="w-4 h-4 mr-1.5" /> Bulk
-          </Button>
+          {/* Overflow ("…") menu — narrow screens only */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                size="sm"
+                variant="outline"
+                className="2xl:hidden h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
+                aria-label="More actions"
+                data-testid="button-toolbar-overflow"
+              >
+                <MoreHorizontal className="w-4 h-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {config?.canManage && (
+                <DropdownMenuItem onClick={() => setTemplatesOpen(true)} data-testid="menu-manage-templates">
+                  <Settings2 className="w-4 h-4 mr-2" /> Templates
+                </DropdownMenuItem>
+              )}
+              {config?.canManage && (
+                <DropdownMenuItem
+                  onClick={handleArchiveUnmatched}
+                  disabled={archiveUnmatchedMutation.isPending}
+                  data-testid="menu-archive-unmatched"
+                >
+                  <Archive className="w-4 h-4 mr-2" /> Archive unmatched
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuItem onClick={toggleSelectMode} data-testid="menu-select-mode">
+                <ListChecks className="w-4 h-4 mr-2" /> {selectMode ? "Done selecting" : "Select conversations"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => syncContactsMut.mutate()}
+                disabled={syncContactsMut.isPending}
+                data-testid="menu-sync-contacts"
+              >
+                <RefreshCw className={`w-4 h-4 mr-2 ${syncContactsMut.isPending ? "animate-spin" : ""}`} />
+                {syncContactsMut.isPending ? "Syncing…" : "Sync contacts"}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => { setPresetLdaps([]); setBulkOpen(true); }} data-testid="menu-bulk-send">
+                <Users className="w-4 h-4 mr-2" /> Bulk message
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button size="sm" onClick={() => setComposeOpen(true)} className="h-9 bg-gradient-to-br from-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white border-0 shadow-md shadow-indigo-500/25" data-testid="button-compose">
             <Plus className="w-4 h-4 mr-1.5" /> New
           </Button>
@@ -889,10 +952,12 @@ export default function FleetCommunications() {
       </div>
 
       {/* Category tabs */}
-      <div className="flex gap-1 flex-wrap rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1 shadow-sm w-fit max-w-full">
+      {/* Single row: horizontal scroll instead of wrapping so the tabs never
+          add extra rows that would squeeze the inbox pane. */}
+      <div className="flex-none flex gap-1 overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-1 shadow-sm w-fit max-w-full">
         <button
           onClick={() => setCategory("all")}
-          className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${category === "all" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+          className={`flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${category === "all" ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
           data-testid="tab-all"
         >
           All
@@ -901,7 +966,7 @@ export default function FleetCommunications() {
           <button
             key={c.value}
             onClick={() => setCategory(c.value)}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${category === c.value ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
+            className={`flex-shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${category === c.value ? "bg-indigo-600 text-white shadow-sm" : "text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"}`}
             data-testid={`tab-${c.value}`}
           >
             {c.label}
@@ -909,7 +974,10 @@ export default function FleetCommunications() {
         ))}
       </div>
 
-      <div className="flex h-[calc(100dvh-220px)] min-h-[420px] gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+      {/* flex-1 min-h-0 fill (not viewport math): whatever height the header
+          and tabs take, the pane absorbs the rest, so the composer is always
+          on-screen and only the thread list + conversation scroll. */}
+      <div className="flex flex-1 min-h-0 gap-0 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
         {/* Thread list */}
         <div className={`${selectedId ? "hidden md:flex" : "flex"} w-full md:w-80 md:flex-shrink-0 border-r border-slate-200 dark:border-slate-800 flex-col bg-slate-50/70 dark:bg-slate-950/40`}>
           <div className="p-3 border-b border-slate-200 dark:border-slate-800 space-y-2">

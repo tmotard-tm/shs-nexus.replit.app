@@ -516,7 +516,9 @@ function Router() {
 
       <Route path="/fleet-communications">
         <ProtectedRoute>
-          <MainContent>
+          {/* Fixed viewport height so the inbox fills the screen exactly:
+              composer stays visible, only thread list + conversation scroll. */}
+          <MainContent className="h-[100dvh]">
             <FleetCommunications />
           </MainContent>
         </ProtectedRoute>
