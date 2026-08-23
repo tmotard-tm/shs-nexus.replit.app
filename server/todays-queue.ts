@@ -495,6 +495,14 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     sourceByCase.set(ck, r.case_source != null ? String(r.case_source) : null);
   }
 
+  // ONE place stamps the rental-origin badge. Every row shape the queue emits
+  // (decorated items, no-action extras, unclaimed-truck no-action rows) calls
+  // one of these two helpers so a future row type can't forget the field.
+  const rentalSourceFor = (caseKey: string | null | undefined): string | null =>
+    caseKey ? sourceByCase.get(caseKey) ?? null : null;
+  const rentalSourceForTruck = (truckNumber: string): string | null =>
+    rentalSourceFor(caseKeyByCanon.get(canon(truckNumber)) ?? null);
+
   const phoneByLdap = new Map<string, string>();
   for (const r of ((contactsResult as any).rows ?? []) as any[]) {
     const ldap = String(r.ldap ?? '').trim().toUpperCase();
@@ -1244,7 +1252,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
         fleetScopeStatus: it.fleetScopeStatus,
         holmanStatus: it.holmanStatus,
         caseKey,
-        rentalSource: caseKey ? sourceByCase.get(caseKey) ?? null : null,
+        rentalSource: rentalSourceFor(caseKey),
         reason: assignedDiffers && assignedInRepair
           ? `Sold/declined — tech's replacement ${assignedRaw} is in the shop (LUCA tracking)`
           : 'No queue-actionable classification today',
@@ -1295,7 +1303,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     const topDef = CLASSIFICATION_BY_KEY.get(top.key)!;
     it.key = key;
     it.caseKey = caseKey;
-    it.rentalSource = caseKey ? sourceByCase.get(caseKey) ?? null : null;
+    it.rentalSource = rentalSourceFor(caseKey);
     it.readyVerified = verified ? { by: verified.by, at: verified.at.toISOString() } : null;
     it.research = research ? { by: research.by, at: research.at.toISOString() } : null;
     // Phone-confirmed ready evidence (shop-confirmed bucket): every confirmed-
@@ -1508,7 +1516,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
         fleetScopeStatus: t.mainStatus ?? '',
         holmanStatus: getHolmanStatus(t.truckNumber),
         caseKey: caseKeyByCanon.get(canon(t.truckNumber)) ?? null,
-        rentalSource: sourceByCase.get(caseKeyByCanon.get(canon(t.truckNumber)) ?? '') ?? null,
+        rentalSource: rentalSourceForTruck(t.truckNumber),
       })),
   ];
 
