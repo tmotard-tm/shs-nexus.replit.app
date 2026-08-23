@@ -18,6 +18,7 @@
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { Link } from "wouter";
 import { apiRequest } from "@/lib/queryClient";
 import {
   ArrowUp, ArrowDown, ArrowUpDown, Search, Download, X, Loader2,
@@ -212,6 +213,61 @@ function fmtDay(s: string | null): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "numeric", day: "numeric" });
 }
 
+/**
+ * Task #772: a direct-report rental with NO booked cutover row — the ~20% of
+ * the report that used to live only in the upload toast. Served by
+ * GET /api/vrm/forms/rental-survey/direct-offpage, derived from the durable
+ * rental-ops book so the list survives between uploads.
+ */
+interface OffPageRow {
+  case_key: string;
+  vehicle_number: string | null;
+  renter_name_raw: string | null;
+  ra_number: string | null;
+  rental_start_date: string | null;
+  days_open: number | null;
+  renting_city: string | null;
+  renting_state: string | null;
+  veh_desc: string | null;
+  last_seen_at: string | null;
+  report_file_date: string | null;
+  identity_state: string | null;      // RESOLVED | REVIEW | EXCEPTION | null
+  identity_reason: string | null;
+  identity_overridden: boolean | null;
+  employee_id: string | null;         // null = identity unresolved (blind row)
+  ldap: string | null;
+  tech_name: string | null;
+  district: string | null;
+  /** a cutover row exists but is NOT booked (released/failed/…); null = none at all */
+  cutover_reservation_status: string | null;
+  /** 'open' | 'pended' | '' (not found on old book) | 'unknown' (identity unresolved) */
+  old_book_state: string;
+  old_tickets: string;
+}
+
+interface OffPagePayload {
+  total: number;
+  resolved: number;
+  unresolved: number;
+  on_old_book: number;
+  pended_old_book: number;
+  report: { file_date: string | null; finished_at: string | null };
+  book?: Payload["book"];
+  rows: OffPageRow[];
+}
+
+/**
+ * Old-book tone for the off-page population. These techs ARE on the direct
+ * report by definition, so 'open' here means billed twice — as loud as the
+ * main table's double-billed rows.
+ */
+function offBookTone(state: string): { label: string; fg: string; bg: string; bold: boolean } {
+  if (state === "open") return { label: "STILL ON HOLMAN BOOK — double billed", fg: colors.red, bg: colors.redLight, bold: true };
+  if (state === "pended") return { label: "pended (closing)", fg: colors.inkSoft, bg: colors.accentLight, bold: false };
+  if (state === "unknown") return { label: "unknown — identity unresolved", fg: colors.amber, bg: colors.amberLight, bold: true };
+  return { label: "off the book", fg: colors.greenDeep, bg: colors.greenDeepLight, bold: false };
+}
+
 interface ImportRun {
   id: string;
   status: string;
@@ -240,6 +296,14 @@ export default function CutoverTracking() {
   const { data: runsData } = useQuery<{ runs: ImportRun[] }>({
     queryKey: ["/api/vrm/rental-operations/imports/direct-billing/runs"],
     refetchInterval: 120_000,
+  });
+
+  // Task #772: direct-billed rentals with no booked cutover row — the ~20% of
+  // the report the page's own table cannot show. Its own query so a failure
+  // here never blanks the main scoreboard.
+  const { data: offData, error: offError } = useQuery<OffPagePayload>({
+    queryKey: ["/api/vrm/forms/rental-survey/direct-offpage"],
+    refetchInterval: 60_000,
   });
 
   const [search, setSearch] = useState("");
@@ -903,6 +967,198 @@ export default function CutoverTracking() {
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Task #772: the permanent home for direct-billed rentals with no
+          booked cutover row. ~20% of the direct report used to surface only
+          in the upload toast — visible for seconds, on another page, then
+          gone. This list is derived from the durable rental-ops book, so it
+          survives between uploads. */}
+      <div style={{ marginTop: 30 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 4 }}>
+          <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 800,
+                       color: colors.ink, margin: 0 }}>
+            Direct-billed, not on this page
+          </h2>
+          <span style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted }}>
+            {offData ? `${offData.total} rental${offData.total === 1 ? "" : "s"}` : ""}
+            {offData?.report?.file_date ? ` — report of ${fmtDay(offData.report.file_date)}` : ""}
+          </span>
+        </div>
+        <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft,
+                    margin: "0 0 12px", maxWidth: 860 }}>
+          Rentals on the current Enterprise direct-billing report whose technician has no booked
+          cutover reservation, so they cannot appear in the table above. Each identified technician
+          is checked against the old Holman/Enterprise book with the same open/pended test the
+          double-billing comparison uses. Rows whose renter could not be identified are the blind
+          spot — classify them from the{" "}
+          <Link href="/vehicle-rental-management/rental-operations">
+            <a style={{ color: colors.blue }}>Rental Operations</a>
+          </Link>{" "}
+          case list (identity panel) so the next upload can compare them.
+        </p>
+
+        {offError && (
+          <div style={{ ...card, borderColor: colors.red, marginBottom: 12 }}>
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.red }}>
+              Could not load the off-page direct-billing list:{" "}
+              {String((offError as Error).message || offError)}
+            </span>
+          </div>
+        )}
+
+        {offData && (
+          <>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+              {[
+                { label: "on the direct report, not on this page", value: offData.total, tone: colors.ink },
+                { label: "still on the old Holman book — double billed", value: offData.on_old_book,
+                  tone: offData.on_old_book > 0 ? colors.red : colors.inkMuted },
+                { label: "identity unresolved — not compared", value: offData.unresolved,
+                  tone: offData.unresolved > 0 ? colors.amber : colors.inkMuted },
+              ].map((k) => (
+                <div key={k.label}
+                     style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "7px 13px",
+                              borderRadius: 8, border: `1px solid ${colors.rule}`, background: colors.surface }}>
+                  <span style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 800, color: k.tone }}>
+                    {k.value}
+                  </span>
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                    {k.label}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ ...card, padding: 0, overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1000 }}>
+                <thead>
+                  <tr>
+                    {["Technician", "Truck", "RA number", "Rental start", "Report file date",
+                      "On old Holman book", "Cutover row", "Identity"].map((label) => (
+                      <th key={label} style={{ ...th, cursor: "default" }}>{label}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {offData.rows.map((r) => {
+                    // Blind for this list = no safe employee OR no canonical
+                    // roster LDAP (the booked-cutover exclusion is LDAP-keyed,
+                    // so a roster-less resolution proves nothing here).
+                    const unresolved = r.employee_id == null || r.ldap == null;
+                    const tone = offBookTone(r.old_book_state);
+                    const isDouble = r.old_book_state === "open";
+                    return (
+                      <tr key={r.case_key}
+                          style={isDouble ? { background: colors.redLight } : undefined}>
+                        <td style={td}>
+                          {unresolved ? (
+                            <>
+                              <span style={{ color: colors.inkSoft }}>
+                                {r.tech_name || r.renter_name_raw || "(no renter name)"}
+                              </span>
+                              <div style={{ fontSize: 11, color: colors.amber, fontWeight: 700 }}>
+                                {r.employee_id != null
+                                  ? "resolved, but no roster LDAP"
+                                  : "identity unresolved"}
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              {r.tech_name || r.renter_name_raw}
+                              <div style={{ fontFamily: fonts.jetbrains, fontSize: 11,
+                                            color: colors.inkMuted }}>
+                                {r.ldap || "no LDAP on roster"}
+                                {r.district ? ` · D${r.district}` : ""}
+                              </div>
+                            </>
+                          )}
+                        </td>
+                        <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>
+                          {r.vehicle_number || <span style={{ color: colors.inkMuted }}>—</span>}
+                        </td>
+                        <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 12 }}>
+                          {r.ra_number || <span style={{ color: colors.inkMuted }}>—</span>}
+                          {r.veh_desc && (
+                            <div style={{ fontFamily: fonts.dmSans, fontSize: 11,
+                                          color: colors.inkMuted }}>{r.veh_desc}</div>
+                          )}
+                        </td>
+                        <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}>
+                          {r.rental_start_date
+                            ? fmtDay(r.rental_start_date.slice(0, 10))
+                            : <span style={{ color: colors.inkMuted }}>—</span>}
+                          {r.days_open != null && r.days_open > 0 && (
+                            <div style={{ fontSize: 11, color: colors.inkMuted }}>
+                              {r.days_open} day{r.days_open === 1 ? "" : "s"}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}>
+                          {r.report_file_date
+                            ? fmtDay(r.report_file_date)
+                            : <span style={{ color: colors.inkMuted }}>—</span>}
+                        </td>
+                        <td style={{ ...td, fontSize: 12 }}
+                            title={r.old_tickets ? `old Enterprise ticket(s): ${r.old_tickets}` : undefined}>
+                          <span style={{ color: tone.fg, fontWeight: tone.bold ? 700 : 400 }}>
+                            {tone.label}
+                          </span>
+                          {r.old_tickets && (
+                            <div style={{ fontFamily: fonts.jetbrains, fontSize: 11,
+                                          color: colors.inkMuted }}>{r.old_tickets}</div>
+                          )}
+                        </td>
+                        <td style={{ ...td, fontSize: 12 }}>
+                          {r.cutover_reservation_status
+                            ? <span title="a cutover row exists, but only booked rows appear in the table above">
+                                {r.cutover_reservation_status} (not booked)
+                              </span>
+                            : <span style={{ color: colors.inkMuted }}>none</span>}
+                        </td>
+                        <td style={{ ...td, fontSize: 12 }}>
+                          {unresolved ? (
+                            <>
+                              <span style={{ color: colors.amber, fontWeight: 700 }}>
+                                {r.employee_id != null
+                                  ? "no roster match"
+                                  : (r.identity_state || "no resolution")}
+                              </span>
+                              {r.identity_reason && (
+                                <div style={{ fontSize: 11, color: colors.inkMuted, maxWidth: 240 }}>
+                                  {r.identity_reason}
+                                </div>
+                              )}
+                              <Link href="/vehicle-rental-management/rental-operations">
+                                <a style={{ fontSize: 11, color: colors.blue }}
+                                   title={`Open Rental Operations and find case ${r.case_key} to confirm who this renter is`}>
+                                  review identity (case {r.case_key}) →
+                                </a>
+                              </Link>
+                            </>
+                          ) : (
+                            <span style={{ color: colors.greenDeep }}>
+                              {r.identity_overridden ? "confirmed by staff" : "resolved"}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {offData.rows.length === 0 && (
+                    <tr>
+                      <td colSpan={8} style={{ ...td, textAlign: "center", color: colors.inkMuted,
+                                               padding: 26 }}>
+                        Every rental on the current direct-billing report maps to a booked cutover
+                        row above — nothing is off-page.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

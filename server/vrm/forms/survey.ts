@@ -1797,6 +1797,21 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Task #772: direct-billed rentals with NO booked cutover row — ~20% of the
+   * direct report used to surface only in the upload toast at import time.
+   * This is their permanent home, derived from the durable rental-ops book
+   * (never the toast), so it survives between uploads.
+   */
+  router.get("/forms/rental-survey/direct-offpage", async (_req, res) => {
+    try {
+      res.json(await buildDirectOffPagePayload());
+    } catch (error: any) {
+      console.error("[survey] direct-offpage failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "direct-offpage failed" });
+    }
+  });
+
   // End-to-end cutover workflow intents (task #646): intent-owned booking,
   // block filing, messaging and readbacks. Registered last — the module owns
   // everything under /forms/rental-survey/cutover/* plus the rental-request
@@ -2063,39 +2078,7 @@ export async function buildCutoverStatusPayload(opts?: {
         return out;
       };
 
-      // Task #738: the book state is only as truthful as the Enterprise book
-      // snapshot behind it — the sporadic sync has gapped 3–6 days. Surface
-      // the snapshot's as-of date and flag it stale so "still billing" can be
-      // read as "still billing as of the 19th", not as live truth.
-      const { rows: bookMetaRows } = await db.execute(sql`
-        SELECT max(left(file_date, 10)) AS as_of,
-               max(finished_at) AS landed_at
-        FROM vrm_rental_operations_import_runs
-        WHERE status = 'completed'
-          -- file_date is VARCHAR; only trust rows carrying a real date shape.
-          -- NO ::date cast anywhere: a regex-shaped-but-impossible value
-          -- ('2026-02-31') would make the cast THROW and 500 the endpoint.
-          -- ISO text max() picks the latest day correctly on its own; the
-          -- day-diff is computed in TS where a bad date degrades to null.
-          AND left(COALESCE(file_date, ''), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-          AND run_type IN ('scheduled_sync', 'manual_enterprise_import')
-      `);
-      const bookMeta = (bookMetaRows as any[])[0] ?? {};
-      // Age in days vs ET today. An as_of that is not a REAL calendar day
-      // (unparseable, or one the Date engine would silently normalize, e.g.
-      // '2026-02-31' → Mar 3) yields null, which the payload treats as
-      // "stale/unknown" — never a wrong-but-confident age.
-      let ageDays: number | null = null;
-      if (bookMeta.as_of) {
-        const asOfMs = Date.parse(`${bookMeta.as_of}T00:00:00Z`);
-        const roundTrips = Number.isFinite(asOfMs)
-          && new Date(asOfMs).toISOString().slice(0, 10) === String(bookMeta.as_of);
-        const etToday = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
-        const todayMs = Date.parse(`${etToday}T00:00:00Z`);
-        if (roundTrips && Number.isFinite(todayMs)) {
-          ageDays = Math.round((todayMs - asOfMs) / 86_400_000);
-        }
-      }
+      const book = await loadEnterpriseBookMeta();
 
       return {
         total: rows.length,
@@ -2115,12 +2098,212 @@ export async function buildCutoverStatusPayload(opts?: {
         // is UNKNOWN for this row. Unknown ≠ clean; its own bucket.
         billing_unknown: (rows as any[]).filter((r) => r.direct_billing_effective === true
           && r.holman_book_state === "unanchored").length,
-        book: {
-          as_of: bookMeta.as_of ?? null,
-          landed_at: bookMeta.landed_at ?? null,
-          age_days: ageDays,
-          stale: ageDays == null ? true : ageDays >= 3,
-        },
+        book,
         rows,
       };
+}
+
+/**
+ * Task #738: the book state is only as truthful as the Enterprise book
+ * snapshot behind it — the sporadic sync has gapped 3–6 days. Surface the
+ * snapshot's as-of date and flag it stale so "still billing" can be read as
+ * "still billing as of the 19th", not as live truth. Shared by the cutover
+ * scoreboard and the off-page direct-billing payload (task #772) so both
+ * pages report the same truth ceiling.
+ */
+async function loadEnterpriseBookMeta(): Promise<{
+  as_of: string | null; landed_at: unknown; age_days: number | null; stale: boolean;
+}> {
+  const { rows: bookMetaRows } = await db.execute(sql`
+    SELECT max(left(file_date, 10)) AS as_of,
+           max(finished_at) AS landed_at
+    FROM vrm_rental_operations_import_runs
+    WHERE status = 'completed'
+      -- file_date is VARCHAR; only trust rows carrying a real date shape.
+      -- NO ::date cast anywhere: a regex-shaped-but-impossible value
+      -- ('2026-02-31') would make the cast THROW and 500 the endpoint.
+      -- ISO text max() picks the latest day correctly on its own; the
+      -- day-diff is computed in TS where a bad date degrades to null.
+      AND left(COALESCE(file_date, ''), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+      AND run_type IN ('scheduled_sync', 'manual_enterprise_import')
+  `);
+  const bookMeta = (bookMetaRows as any[])[0] ?? {};
+  // Age in days vs ET today. An as_of that is not a REAL calendar day
+  // (unparseable, or one the Date engine would silently normalize, e.g.
+  // '2026-02-31' → Mar 3) yields null, which the payload treats as
+  // "stale/unknown" — never a wrong-but-confident age.
+  let ageDays: number | null = null;
+  if (bookMeta.as_of) {
+    const asOfMs = Date.parse(`${bookMeta.as_of}T00:00:00Z`);
+    const roundTrips = Number.isFinite(asOfMs)
+      && new Date(asOfMs).toISOString().slice(0, 10) === String(bookMeta.as_of);
+    const etToday = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const todayMs = Date.parse(`${etToday}T00:00:00Z`);
+    if (roundTrips && Number.isFinite(todayMs)) {
+      ageDays = Math.round((todayMs - asOfMs) / 86_400_000);
+    }
+  }
+  return {
+    as_of: bookMeta.as_of ?? null,
+    landed_at: bookMeta.landed_at ?? null,
+    age_days: ageDays,
+    stale: ageDays == null ? true : ageDays >= 3,
+  };
+}
+
+/**
+ * Task #772: the permanent home for direct-billed rentals that are NOT on the
+ * cutover page. ~20% of the direct-billing report (46 of 225 at last count)
+ * maps to no booked cutover row — those techs previously surfaced ONLY in the
+ * upload toast, which vanishes with the page. This payload is derived from
+ * the durable book (vrm_rental_operations_cases source='enterprise_direct' +
+ * identity resolutions), so it survives between uploads.
+ *
+ * Buckets:
+ * - identity RESOLVED (or human override), canonical roster LDAP known —
+ *   listed with the same old-Holman/Enterprise-book OPEN/PENDED test the
+ *   double-billing comparison uses, so a double-bill in this population
+ *   cannot hide. Matching is identity-based (the old case's resolved/override
+ *   employee is THIS employee) — stronger than a truck-number guess, and the
+ *   only match possible here: these rows have no cutover anchor tickets.
+ * - identity unresolved (REVIEW/EXCEPTION, or resolved but racf-less) — the
+ *   blind rows. No comparison is possible; the row says so ('unknown', never
+ *   silently clean) and points staff at the identity-review flow.
+ *
+ * Scope rule: a tech whose canonical LDAP has a BOOKED cutover row is on the
+ * Cutover Tracking table already (and covered by its comparison) — excluded
+ * here. A NON-booked cutover row (released/failed/manual) does not put them
+ * on the page, so they stay HERE, with that status carried for context.
+ *
+ * NOTE: no 'rolled' state in this population — 'rolled' is defined relative
+ * to an ETD pickup day, and these techs have no booked reservation.
+ */
+export async function buildDirectOffPagePayload(): Promise<any> {
+  const { rows } = await db.execute(sql`
+    SELECT c.case_key,
+           c.vehicle_number,
+           c.renter_name_raw,
+           c.ticket_number                          AS ra_number,
+           c.rental_start_date::text                AS rental_start_date,
+           c.days_open,
+           c.renting_city, c.renting_state,
+           c.veh_desc,
+           c.last_seen_at,
+           -- report file date this case was last seen on (per-case, from its
+           -- last import run; VARCHAR — display-shaped in the client, never cast)
+           CASE WHEN left(COALESCE(run.file_date, ''), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                THEN left(run.file_date, 10) END    AS report_file_date,
+           ir.state                                 AS identity_state,
+           ir.reason                                AS identity_reason,
+           (ir.override_employee_id IS NOT NULL)    AS identity_overridden,
+           idr.employee_id,
+           rt.ldap,
+           COALESCE(rt.tech_name, ir.override_tech_name, ir.resolved_tech_name)
+                                                    AS tech_name,
+           rt.district,
+           -- a cutover row exists but is not booked (released/failed/manual):
+           -- carried for context; NULL = no cutover row at all
+           co.reservation_status                    AS cutover_reservation_status,
+           -- Same OPEN/PENDED test the double-billing comparison uses
+           -- (survey.ts ab/fb laterals): present-in-latest source='enterprise'
+           -- ENTERPRISE-vendor cases only. 'unknown' when identity is
+           -- unresolved — unknown ≠ clean, its own bucket. A RESOLVED
+           -- employee with NO canonical roster LDAP is ALSO 'unknown': the
+           -- booked-cutover exclusion is LDAP-keyed, so without one we cannot
+           -- prove the tech is off-page — never issue a verdict we can't stand
+           -- behind.
+           CASE WHEN idr.employee_id IS NULL
+                  OR rt.ldap IS NULL                THEN 'unknown'
+                WHEN COALESCE(ob.open_any, false)   THEN 'open'
+                WHEN COALESCE(ob.pended, false)     THEN 'pended'
+                ELSE '' END                         AS old_book_state,
+           -- no tickets carried on 'unknown' rows: a ticket list next to an
+           -- unverdicted row reads as a verdict
+           CASE WHEN idr.employee_id IS NULL OR rt.ldap IS NULL THEN ''
+                ELSE COALESCE(ob.old_tickets, '') END AS old_tickets
+    FROM vrm_rental_operations_cases c
+    LEFT JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
+    LEFT JOIN vrm_rental_operations_import_runs run ON run.id = c.last_import_run_id
+    -- Safe identity: human override always counts; a machine resolution only
+    -- when RESOLVED (REVIEW guesses never drive a comparison — the importer's
+    -- own "REVIEW evidence never stamps" rule).
+    LEFT JOIN LATERAL (
+      SELECT CASE WHEN ir.override_employee_id IS NOT NULL
+                    OR upper(COALESCE(ir.state, '')) = 'RESOLVED'
+                  THEN COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+             END AS employee_id
+    ) idr ON TRUE
+    -- Canonical roster row ONLY (active first, then latest sync) — the same
+    -- rule as the cutover payload's dbk join: all_techs keeps terminated and
+    -- historical rows per employee, and a bare join would let an OLD or
+    -- reused LDAP claim the wrong cutover row.
+    LEFT JOIN LATERAL (
+      SELECT NULLIF(btrim(a.tech_racfid), '') AS ldap, a.tech_name,
+             NULLIF(btrim(a.district_no::text), '') AS district
+      FROM all_techs a
+      WHERE idr.employee_id IS NOT NULL AND a.employee_id = idr.employee_id
+      ORDER BY (a.employment_status = 'A') DESC, a.synced_at DESC NULLS LAST
+      LIMIT 1
+    ) rt ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT vc.reservation_status
+      FROM vrm_rental_cutover vc
+      WHERE rt.ldap IS NOT NULL AND upper(trim(vc.ldap)) = upper(rt.ldap)
+      LIMIT 1
+    ) co ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT bool_or(upper(COALESCE(c2.ticket_status, '')) = 'OPEN')   AS open_any,
+             bool_or(upper(COALESCE(c2.ticket_status, '')) = 'PENDED') AS pended,
+             string_agg(DISTINCT NULLIF(btrim(c2.ticket_number), ''), ', ') AS old_tickets
+      FROM vrm_rental_operations_cases c2
+      JOIN vrm_rental_identity_resolutions ir2 ON ir2.case_key = c2.case_key
+      WHERE idr.employee_id IS NOT NULL
+        AND COALESCE(ir2.override_employee_id, ir2.resolved_employee_id) = idr.employee_id
+        AND (ir2.override_employee_id IS NOT NULL OR upper(COALESCE(ir2.state, '')) = 'RESOLVED')
+        AND c2.present_in_latest
+        AND c2.source = 'enterprise'
+        AND upper(COALESCE(c2.rental_vendor, '')) LIKE 'ENTERPRISE%'
+    ) ob ON TRUE
+    WHERE c.present_in_latest
+      AND c.source = 'enterprise_direct'
+      -- booked cutover row = on the Cutover Tracking table already
+      AND (co.reservation_status IS NULL OR co.reservation_status <> 'booked')
+    ORDER BY (CASE WHEN idr.employee_id IS NULL OR rt.ldap IS NULL THEN 1 ELSE 0 END),
+             (CASE WHEN COALESCE(ob.open_any, false) THEN 0
+                   WHEN COALESCE(ob.pended, false)   THEN 1
+                   ELSE 2 END),
+             COALESCE(rt.tech_name, c.renter_name_raw, c.case_key)
+  `);
+
+  // Latest completed direct-billing import — the freshness ceiling of this
+  // whole list (rows persist between uploads; say when the last upload was).
+  const { rows: reportRows } = await db.execute(sql`
+    SELECT CASE WHEN left(COALESCE(file_date, ''), 10) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                THEN left(file_date, 10) END AS file_date,
+           finished_at
+    FROM vrm_rental_operations_import_runs
+    WHERE run_type = 'manual_direct_billing_import' AND status = 'completed'
+    ORDER BY finished_at DESC NULLS LAST
+    LIMIT 1
+  `);
+  const report = (reportRows as any[])[0] ?? {};
+
+  // Resolved-for-this-list = safe employee identity AND a canonical roster
+  // LDAP: without the LDAP the booked-cutover exclusion (LDAP-keyed) cannot
+  // run, so the row is blind here even if the identity resolver is confident.
+  const rs = rows as any[];
+  const isUnresolved = (r: any) => r.employee_id == null || r.ldap == null;
+  return {
+    total: rs.length,
+    resolved: rs.filter((r) => !isUnresolved(r)).length,
+    unresolved: rs.filter(isUnresolved).length,
+    on_old_book: rs.filter((r) => r.old_book_state === "open").length,
+    pended_old_book: rs.filter((r) => r.old_book_state === "pended").length,
+    report: {
+      file_date: report.file_date ?? null,
+      finished_at: report.finished_at ?? null,
+    },
+    book: await loadEnterpriseBookMeta(),
+    rows: rs,
+  };
 }
