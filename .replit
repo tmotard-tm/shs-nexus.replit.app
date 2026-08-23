@@ -218,7 +218,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npx tsx --test tests/bucket-queue-classify.test.ts tests/rental-registration-context.test.ts"
+args = "npx tsx --test tests/bucket-queue-classify.test.ts tests/rental-registration-context.test.ts tests/todays-queue-rental-source.test.ts"
 
 [[workflows.workflow]]
 name = "vrm-phone-search-unit"
