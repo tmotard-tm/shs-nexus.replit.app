@@ -511,6 +511,10 @@ export default function RentalOperations() {
   const [catF, setCatF] = useState("");
   const [classF, setClassF] = useState("");
   const [markF, setMarkF] = useState("");
+  // Billing-origin facet — the same rentalOriginOf vocabulary as the row badge.
+  // "" = all. Unknown-origin rows (rentalOriginOf → null) match NEITHER facet:
+  // a row the data can't prove Holman-issued must never be counted as Holman.
+  const [originF, setOriginF] = useState<"" | "holman" | "direct">("");
   const [includePended, setIncludePended] = useState(false);
   const [mismatchOnly, setMismatchOnly] = useState(false);
   // Rental booked on a truck that is not the renter's own (TPMS first).
@@ -536,11 +540,33 @@ export default function RentalOperations() {
 
   const rows = data?.rows ?? [];
 
+  // Billing-origin facet applied UPSTREAM of basePool — the same layering as
+  // include-PENDED — so every KPI card, chip badge, and count line derived from
+  // the pool respects it. rentalOriginOf is the one shared vocabulary: rows it
+  // can't classify (null) are excluded from BOTH facets, never guessed Holman.
+  const originPool = useMemo(
+    () => (originF ? rows.filter((r) => rentalOriginOf(r.source)?.kind === originF) : rows),
+    [rows, originF],
+  );
+  // Facet option counts come off the PRE-origin rows (pended rule applied) so
+  // both numbers stay put when a facet is picked instead of collapsing to the
+  // selected side. holman + direct bill can sum BELOW the headline total — the
+  // gap is the unknown-origin rows neither facet will claim.
+  const originCounts = useMemo(() => {
+    let holman = 0, direct = 0;
+    for (const r of rows) {
+      if (!includePended && r.ticket_status === "PENDED") continue;
+      const k = rentalOriginOf(r.source)?.kind;
+      if (k === "holman") holman++; else if (k === "direct") direct++;
+    }
+    return { holman, direct };
+  }, [rows, includePended]);
+
   // Default matches the Rentals Ops Dashboard (OPEN only). PENDED (turned-in /
   // closing tickets) are ingested but opt-in, so the headline count ties out.
-  const basePool = useMemo(() => rows.filter((r) => includePended || r.ticket_status !== "PENDED"), [rows, includePended]);
+  const basePool = useMemo(() => originPool.filter((r) => includePended || r.ticket_status !== "PENDED"), [originPool, includePended]);
   const wrongTruckCount = useMemo(() => basePool.filter((r) => r.wrong_truck).length, [basePool]);
-  const pendedTotal = useMemo(() => rows.filter((r) => r.ticket_status === "PENDED").length, [rows]);
+  const pendedTotal = useMemo(() => originPool.filter((r) => r.ticket_status === "PENDED").length, [originPool]);
   // counts computed over the current pool so tab badges + KPIs always match the grid
   const stats = useMemo(() => {
     const cohorts: Record<string, number> = { open_repair: 0, no_open_repair: 0, no_history: 0 };
@@ -586,10 +612,10 @@ export default function RentalOperations() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    // The Pended tab reads from the raw row set: basePool excludes PENDED
-    // unless the include-PENDED toggle is on, but this tab should always show
-    // the turned-in list regardless of the toggle.
-    const pool = cohort === "pended" ? rows.filter((r) => r.ticket_status === "PENDED") : basePool;
+    // The Pended tab bypasses the include-PENDED toggle (it should always show
+    // the turned-in list) but NOT the origin facet — it reads from originPool,
+    // so a direct-bill-only view stays direct-bill-only on this tab too.
+    const pool = cohort === "pended" ? originPool.filter((r) => r.ticket_status === "PENDED") : basePool;
     return pool.filter((r) => {
       if (cohort === "ready_for_pickup") { if (r.workbook_status !== "ready_for_pickup") return false; }
       else if (cohort === "luca_queue") { if (!r.callable) return false; }
@@ -622,7 +648,7 @@ export default function RentalOperations() {
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
+  }, [originPool, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -1059,6 +1085,14 @@ export default function RentalOperations() {
           <option value="open">Open</option>
           <option value="closed">Closed</option>
           <option value="pickup">Pick up</option>
+        </select>
+        {/* Billing-origin facet — same vocabulary as the row badge. Applied
+            upstream of every KPI/chip count, not just the grid. */}
+        <select value={originF} onChange={(e) => setOriginF(e.target.value as "" | "holman" | "direct")} style={selStyle}
+                title="Who issued — and therefore who bills — the rental. Same vocabulary as the row badge: holman = issued through the Holman book (ECARS feed), direct bill = Enterprise bills SHS directly. Rows whose origin the data can't prove match neither option, so the two counts can sum below the headline total.">
+          <option value="">all origins</option>
+          <option value="holman">holman ({originCounts.holman})</option>
+          <option value="direct">direct bill ({originCounts.direct})</option>
         </select>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }} title="PENDED = renter turned the vehicle in / ticket closing. Off by default so the count matches the Rentals Ops Dashboard."><input type="checkbox" checked={includePended} onChange={(e) => setIncludePended(e.target.checked)} /> include PENDED{pendedTotal ? ` (${pendedTotal})` : ""}</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={mismatchOnly} onChange={(e) => setMismatchOnly(e.target.checked)} /> mismatch</label>

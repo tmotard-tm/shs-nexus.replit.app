@@ -588,6 +588,10 @@ export default function RegionalCases() {
   const [catF, setCatF] = useState("");
   const [classF, setClassF] = useState("");
   const [markF, setMarkF] = useState("");
+  // Billing-origin facet — the same rentalOriginOf vocabulary as the row badge.
+  // "" = all. Unknown-origin rows (rentalOriginOf → null) match NEITHER facet:
+  // a row the data can't prove Holman-issued must never be counted as Holman.
+  const [originF, setOriginF] = useState<"" | "holman" | "direct">("");
   const [includePended, setIncludePended] = useState(false);
   const [mismatchOnly, setMismatchOnly] = useState(false);
   // Rental booked on a truck that is not the renter's own (TPMS first).
@@ -624,10 +628,32 @@ export default function RegionalCases() {
     () => rows.filter((r) => (r.region ?? "unassigned") === region),
     [rows, region],
   );
-  const basePool = useMemo(() => regionPool.filter((r) =>
+  // Billing-origin facet — the same rentalOriginOf vocabulary as the row badge.
+  // Sits between region (still outermost; the tab badges are server summaries
+  // and stay whole-book) and basePool, so every KPI and count line derived from
+  // the pool respects it. Rows rentalOriginOf can't classify (null) are
+  // excluded from BOTH facets, never guessed Holman.
+  const originPool = useMemo(
+    () => (originF ? regionPool.filter((r) => rentalOriginOf(r.source)?.kind === originF) : regionPool),
+    [regionPool, originF],
+  );
+  const basePool = useMemo(() => originPool.filter((r) =>
     (includePended || r.ticket_status !== "PENDED") &&
     (wbFilter.length === 0 || wbFilter.includes(r.workbook?.status ?? "new"))
-  ), [regionPool, includePended, wbFilter]);
+  ), [originPool, includePended, wbFilter]);
+  // Facet option counts come off the PRE-origin pool (same pended/workbook
+  // rules as basePool) so both numbers stay put when a facet is picked; the gap
+  // to the headline total is the unknown-origin rows neither facet will claim.
+  const originCounts = useMemo(() => {
+    let holman = 0, direct = 0;
+    for (const r of regionPool) {
+      if (!includePended && r.ticket_status === "PENDED") continue;
+      if (wbFilter.length > 0 && !wbFilter.includes(r.workbook?.status ?? "new")) continue;
+      const k = rentalOriginOf(r.source)?.kind;
+      if (k === "holman") holman++; else if (k === "direct") direct++;
+    }
+    return { holman, direct };
+  }, [regionPool, includePended, wbFilter]);
   const wrongTruckCount = useMemo(() => basePool.filter((r) => r.wrong_truck).length, [basePool]);
   // What each toggle would remove, and what it is deliberately keeping. One
   // helper for both buckets so the two can never drift apart.
@@ -686,10 +712,12 @@ export default function RegionalCases() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    // The Pended tab reads from the raw row set: basePool excludes PENDED
-    // unless the include-PENDED toggle is on, but this tab should always show
-    // the turned-in list regardless of the toggle.
-    const pool = cohort === "pended" ? rows.filter((r) => r.ticket_status === "PENDED") : basePool;
+    // The Pended tab bypasses the include-PENDED toggle (it should always show
+    // the turned-in list) but NOT the origin facet — a direct-bill-only view
+    // stays direct-bill-only on this tab too.
+    const pool = cohort === "pended"
+      ? rows.filter((r) => r.ticket_status === "PENDED" && (!originF || rentalOriginOf(r.source)?.kind === originF))
+      : basePool;
     return pool.filter((r) => {
       if (cohort === "luca_queue") { if (!r.callable) return false; }
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
@@ -723,7 +751,7 @@ export default function RegionalCases() {
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, hideDeclines, hideAuctions]);
+  }, [rows, basePool, cohort, originF, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, hideDeclines, hideAuctions]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -943,6 +971,14 @@ export default function RegionalCases() {
                style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer", whiteSpace: "nowrap" }}>
           <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
         </label>
+        {/* Billing-origin facet — same vocabulary as the row badge. Applied
+            upstream of the KPI cards and count line, not just the grid. */}
+        <select value={originF} onChange={(e) => setOriginF(e.target.value as "" | "holman" | "direct")} style={selStyle}
+                title="Who issued — and therefore who bills — the rental. Same vocabulary as the row badge: holman = issued through the Holman book (ECARS feed), direct bill = Enterprise bills SHS directly. Rows whose origin the data can't prove match neither option, so the two counts can sum below the headline total.">
+          <option value="">all origins</option>
+          <option value="holman">holman ({originCounts.holman})</option>
+          <option value="direct">direct bill ({originCounts.direct})</option>
+        </select>
         {/* Say WHICH number this is. "265 cases" and "265 workable" look the
             same but answer different questions, and with dead ends hidden by
             default the honest label is the second one. */}
