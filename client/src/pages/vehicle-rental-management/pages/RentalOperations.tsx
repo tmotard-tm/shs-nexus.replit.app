@@ -12,6 +12,7 @@
  * marks are server-side (durable) and data is live from the VRM data plane.
  */
 import { useState, useMemo, useRef, useEffect } from "react";
+import { useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
@@ -539,6 +540,41 @@ export default function RentalOperations() {
   }, []);
 
   const rows = data?.rows ?? [];
+
+  // Deep link from Cutover Tracking's off-page section: ?case=<case_key> opens
+  // that case's detail panel once the board loads. One-shot (ref-guarded) so a
+  // later refetch never re-opens a panel the operator closed. Only opens when
+  // the case is actually on the board — a vanished case falls back to the
+  // plain list with a toast, never a panel stuck on "Loading…".
+  const searchString = useSearch();
+  const deepLinkDone = useRef(false);
+  useEffect(() => {
+    if (deepLinkDone.current || !data) return;
+    const wanted = new URLSearchParams(searchString).get("case")?.trim();
+    if (!wanted) { deepLinkDone.current = true; return; }
+    // Exact key first (covers db:<RA> direct-billing keys verbatim); canonical
+    // leading-zero-stripped match as a numeric fallback — TPMS pads truck
+    // numbers, Holman doesn't, so a padded param must still find its case.
+    const canon = (s: string) => (/^\d+$/.test(s) ? s.replace(/^0+/, "") || "0" : s);
+    const hit = rows.find((r) => r.case_key === wanted)
+      ?? rows.find((r) => canon(r.case_key) === canon(wanted));
+    if (hit) {
+      deepLinkDone.current = true;
+      setPanelKey(hit.case_key);
+    } else if (!isFetching) {
+      // Settled result and the case is genuinely absent → plain list + toast.
+      // While a mount-time refetch is still in flight the shared queryClient
+      // may be serving a STALE cached board (staleTime 60s) that predates the
+      // case — concluding "absent" from it would strand a valid deep link, so
+      // absence is only final once the query has stopped fetching.
+      deepLinkDone.current = true;
+      toast({
+        title: `Case ${wanted} is not on the board`,
+        description: "It may have closed or dropped off the latest report — showing the full list instead.",
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data, isFetching]);
 
   // Billing-origin facet applied UPSTREAM of basePool — the same layering as
   // include-PENDED — so every KPI card, chip badge, and count line derived from

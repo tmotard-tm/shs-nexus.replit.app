@@ -1129,9 +1129,9 @@ export default function CutoverTracking() {
                                   {r.identity_reason}
                                 </div>
                               )}
-                              <Link href="/vehicle-rental-management/rental-operations">
+                              <Link href={`/vehicle-rental-management/rental-operations?case=${encodeURIComponent(r.case_key)}`}>
                                 <a style={{ fontSize: 11, color: colors.blue }}
-                                   title={`Open Rental Operations and find case ${r.case_key} to confirm who this renter is`}>
+                                   title={`Open Rental Operations with case ${r.case_key}'s detail panel to confirm who this renter is`}>
                                   review identity (case {r.case_key}) →
                                 </a>
                               </Link>
