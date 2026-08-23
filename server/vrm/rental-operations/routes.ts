@@ -1642,18 +1642,72 @@ export function registerRentalOperationsRoutes(router: Router): void {
       if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
         return res.status(400).json({ error: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
       }
-      const { importDirectBillingReport } = await import("./direct-billing-import");
+      const { importDirectBillingReport, DirectImportBlockedError } = await import("./direct-billing-import");
       const fileDate: string | null = (req.body?.fileDate && /^\d{4}-\d{2}-\d{2}$/.test(req.body.fileDate)) ? req.body.fileDate : null;
-      const result = await importDirectBillingReport({
-        buffer: req.file.buffer, fileDate,
-        sourceLabel: req.file.originalname || "manual_direct_billing_xlsx",
-      });
-      return res.json({ ok: true, result });
+      // Premortem #1/#4: blocking preflight warnings (count collapse, report
+      // date regression) refuse the import unless the operator confirmed them
+      // — the confirm dialog sets acceptWarnings after SHOWING the warnings.
+      const acceptWarnings = req.body?.acceptWarnings === "true" || req.body?.acceptWarnings === "1";
+      try {
+        const result = await importDirectBillingReport({
+          buffer: req.file.buffer, fileDate, acceptWarnings,
+          sourceLabel: req.file.originalname || "manual_direct_billing_xlsx",
+        });
+        return res.json({ ok: true, result });
+      } catch (e: any) {
+        if (e instanceof DirectImportBlockedError) {
+          return res.status(409).json({ blocked: true, error: e.message, preflight: e.preflight });
+        }
+        throw e;
+      }
     } catch (e: any) {
       console.error("[VRM/RentalOps] direct-billing import failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "import failed" });
     } finally {
       syncInFlight = false;
+    }
+  });
+
+  // Preflight WITHOUT importing — parses the file, compares it against the
+  // last successful import (row count, report recency) and returns what the
+  // confirm dialog shows. Never persists, never sweeps, never stamps.
+  router.post("/rental-operations/imports/direct-billing/preview", requireImportOperator, upload.single("file"), async (req: any, res) => {
+    try {
+      if (!req.file?.buffer) return res.status(400).json({ error: "upload the direct-billing xlsx as 'file'" });
+      const origName = (req.file.originalname || "").toLowerCase();
+      if (origName.endsWith(".xls") && !origName.endsWith(".xlsx")) {
+        return res.status(400).json({ error: "Legacy .xls files are not supported. Please save the file as .xlsx and re-upload." });
+      }
+      const { previewDirectBillingReport } = await import("./direct-billing-import");
+      const preview = await previewDirectBillingReport({
+        buffer: req.file.buffer,
+        sourceLabel: req.file.originalname || "manual_direct_billing_xlsx",
+      });
+      return res.json({ ok: true, preview });
+    } catch (e: any) {
+      // Parse/layout refusals are the guard WORKING — 400 with the reason.
+      res.status(400).json({ error: e?.message || "preview failed" });
+    }
+  });
+
+  // Durable import-run ledger for the direct-billing report (premortem #6:
+  // a disappearing toast must never be the only record of a failed upload).
+  // Read-only; session-auth like the rest of the VRM read surface.
+  router.get("/rental-operations/imports/direct-billing/runs", async (_req, res) => {
+    try {
+      const r = await db.execute(sql`
+        SELECT id, status, source_label, file_date, parsed_rows, report_max_rental_date,
+               total_cases, resolved_count, review_count, error,
+               stamp_status, comparison_status, conflict_count,
+               started_at::text AS started_at, finished_at::text AS finished_at
+        FROM vrm_rental_operations_import_runs
+        WHERE run_type = 'manual_direct_billing_import'
+        ORDER BY started_at DESC
+        LIMIT 15
+      `);
+      res.json({ runs: r.rows ?? [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "runs lookup failed" });
     }
   });
 }

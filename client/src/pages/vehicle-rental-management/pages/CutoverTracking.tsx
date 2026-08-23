@@ -204,10 +204,34 @@ function fmtDay(s: string | null): string {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "numeric", day: "numeric" });
 }
 
+interface ImportRun {
+  id: string;
+  status: string;
+  source_label: string | null;
+  file_date: string | null;
+  parsed_rows: number | null;
+  report_max_rental_date: string | null;
+  total_cases: number | null;
+  error: string | null;
+  stamp_status: string | null;
+  comparison_status: string | null;
+  conflict_count: number | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export default function CutoverTracking() {
   const { data, isLoading, error, refetch, isFetching } = useQuery<Payload>({
     queryKey: ["/api/vrm/forms/rental-survey/cutover-status"],
     refetchInterval: 60_000,
+  });
+
+  // Durable import ledger (premortem: a failed upload's toast disappears; the
+  // billing-switched column then silently goes stale). Latest run + loud
+  // banner when it failed.
+  const { data: runsData } = useQuery<{ runs: ImportRun[] }>({
+    queryKey: ["/api/vrm/rental-operations/imports/direct-billing/runs"],
+    refetchInterval: 120_000,
   });
 
   const [search, setSearch] = useState("");
@@ -483,6 +507,41 @@ export default function CutoverTracking() {
             : "Enterprise book snapshot date unknown — book states cannot be trusted"}
         </span>
       </div>
+
+      {/* Direct-billing import health. The "billing switched" column is only as
+          fresh as the last successful report upload — and a FAILED upload only
+          ever announced itself in a toast on another page. Latest success
+          quietly; latest failure loudly. */}
+      {(() => {
+        const runs = runsData?.runs ?? [];
+        const latest = runs[0];
+        const latestOk = runs.find((r) => r.status === "completed");
+        if (!latest) return null;
+        const failed = latest.status === "failed";
+        return (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 7, marginBottom: 18,
+                        marginLeft: 10, padding: "6px 12px", borderRadius: 8,
+                        border: `1px solid ${failed ? colors.red : colors.rule}`,
+                        background: failed ? colors.redLight : colors.surface }}>
+            {failed && <AlertTriangle size={14} color={colors.red} />}
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 12.5,
+                           color: failed ? colors.red : colors.inkSoft,
+                           fontWeight: failed ? 700 : 400 }}>
+              {failed
+                ? <>Last direct-billing upload FAILED{latest.started_at ? ` (${fmtDay(latest.started_at.slice(0, 10))})` : ""}
+                    {latest.error ? ` — ${latest.error.slice(0, 160)}` : ""}
+                    {latestOk?.finished_at ? `. Billing-switched data is from ${fmtDay(latestOk.finished_at.slice(0, 10))}.` : ". No successful import on record."}</>
+                : latestOk
+                  ? <>Direct-billing report imported {latestOk.finished_at ? fmtDay(latestOk.finished_at.slice(0, 10)) : ""}
+                      {latestOk.parsed_rows != null && ` — ${latestOk.parsed_rows} rows`}
+                      {latestOk.report_max_rental_date && `, rentals through ${fmtDay(latestOk.report_max_rental_date)}`}
+                      {latestOk.stamp_status === "failed" && " — stamping FAILED (switched counts stale)"}
+                      {latestOk.comparison_status === "failed" && " — old-book comparison FAILED"}</>
+                  : "No direct-billing import on record"}
+            </span>
+          </div>
+        );
+      })()}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(190px,1fr))",
                     gap: 12, marginBottom: 18 }}>

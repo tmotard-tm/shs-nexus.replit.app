@@ -16,7 +16,10 @@ import {
   parseSharedStrings, parseSheetXml, parseXlsxGrid, mapDirectRows,
   coerceReportDate, extractReplacesTicket, resolveDirectRow, buildDirectCases,
   assertPlausibleReport, findOldBillingConflicts, importDirectBillingReport,
+  computeDirectPreflight, rentalDateRangeOf, DirectImportBlockedError,
+  previewDirectBillingReport,
   type DirectBillingRow, type DirectResolveCtx, type RosterLite, type DirectImportDeps,
+  type DirectImportBaseline,
 } from "../server/vrm/rental-operations/direct-billing-import";
 
 // ── fixture builders ─────────────────────────────────────────────────────────
@@ -526,6 +529,12 @@ function importDeps(over: Partial<DirectImportDeps> = {}): Partial<DirectImportD
     buildCutoverPayload: async () => ({ rows: [], book: { as_of: "2026-08-21", age_days: 1, stale: false } }),
     landPoHistory: async () => ({ posLanded: 0, openRepairTrucks: 0 }),
     enrichAms: async () => ({ withStatus: 0 }),
+    // Hermetic ledger/baseline seams: without these the defaults read the REAL
+    // dev DB — a live baseline would trip the count-collapse guard on these
+    // one-row fixtures, and the finalize UPDATE would hit real tables.
+    loadBaseline: async () => null,
+    finalizeRunLedger: async () => {},
+    recordFailedRun: async () => {},
     ...over,
   };
 }
@@ -647,4 +656,278 @@ test("feed carries the resolution audit trail", () => {
   assert.equal(fb.truckSource, "tpms");
   assert.equal(fb.replacesTicket, "7H2K9Q");
   assert.equal(fb.raNumber, "12ABC7");
+});
+
+// ── upload preflight guards (premortem #1/#4) ────────────────────────────────
+// The report is FULL open-ticket state, so a truncated export would read as
+// "every missing rental closed" and sweep real cases. computeDirectPreflight
+// judges a new file against the last completed import; blocking warnings
+// refuse the import unless the operator explicitly accepts them.
+
+function baselineOf(over: Partial<DirectImportBaseline> = {}): DirectImportBaseline {
+  return {
+    runId: "base-run", finishedAt: "2026-08-20T14:00:00Z", fileDate: "2026-08-20",
+    parsedRows: 100, totalCases: 100, reportMaxRentalDate: "2026-08-19", ...over,
+  };
+}
+
+function nRows(n: number, maxDate = "2026-08-20"): DirectBillingRow[] {
+  const out: DirectBillingRow[] = [];
+  for (let i = 0; i < n; i++) out.push(row({ raNumber: `RA${i}`, rentalDate: i === 0 ? maxDate : "2026-08-01" }));
+  return out;
+}
+
+test("preflight: no baseline → no warnings (first import ever, or ledger unreadable)", () => {
+  const p = computeDirectPreflight(nRows(3), 8, 10, null);
+  assert.deepEqual(p.warnings, []);
+  assert.equal(p.parsedRows, 3);
+  assert.equal(p.reportMaxRentalDate, "2026-08-20");
+  assert.equal(p.reportMinRentalDate, "2026-08-01");
+});
+
+test("preflight: row count collapse (<50% of baseline) is a BLOCK", () => {
+  const p = computeDirectPreflight(nRows(40), 8, 10, baselineOf());
+  const w = p.warnings.find((x) => x.code === "count_collapse");
+  assert.ok(w, "expected count_collapse");
+  assert.equal(w!.severity, "block");
+  // collapse supersedes the softer count_drop
+  assert.ok(!p.warnings.some((x) => x.code === "count_drop"));
+});
+
+test("preflight: 20–50% drop is a WARN, not a block", () => {
+  const p = computeDirectPreflight(nRows(70), 8, 10, baselineOf());
+  const w = p.warnings.find((x) => x.code === "count_drop");
+  assert.ok(w, "expected count_drop");
+  assert.equal(w!.severity, "warn");
+  assert.ok(!p.warnings.some((x) => x.severity === "block"));
+});
+
+test("preflight: report max rental date BEHIND the last import is a BLOCK; equal is fine", () => {
+  const old = computeDirectPreflight(nRows(100, "2026-08-15"), 8, 10, baselineOf({ reportMaxRentalDate: "2026-08-19" }));
+  const w = old.warnings.find((x) => x.code === "date_regression");
+  assert.ok(w, "expected date_regression");
+  assert.equal(w!.severity, "block");
+  // equal max date + equal rows = possible duplicate (warn), never a block
+  const same = computeDirectPreflight(nRows(100, "2026-08-19"), 8, 10, baselineOf({ reportMaxRentalDate: "2026-08-19" }));
+  assert.ok(!same.warnings.some((x) => x.severity === "block"));
+  assert.ok(same.warnings.some((x) => x.code === "possible_duplicate" && x.severity === "warn"));
+});
+
+test("preflight: growth and forward dates are clean", () => {
+  const p = computeDirectPreflight(nRows(120, "2026-08-21"), 8, 10, baselineOf());
+  assert.deepEqual(p.warnings, []);
+});
+
+test("preflight: pre-ledger-column baseline falls back to total_cases for the count guard", () => {
+  const p = computeDirectPreflight(nRows(10), 8, 10, baselineOf({ parsedRows: null, totalCases: 100 }));
+  assert.ok(p.warnings.some((x) => x.code === "count_collapse"));
+});
+
+test("rentalDateRangeOf: null-date rows are skipped, empty set is null/null", () => {
+  assert.deepEqual(rentalDateRangeOf([]), { min: null, max: null });
+  const rows = [row({ rentalDate: null as any }), row({ rentalDate: "2026-08-05" }), row({ rentalDate: "2026-08-09" })];
+  assert.deepEqual(rentalDateRangeOf(rows), { min: "2026-08-05", max: "2026-08-09" });
+});
+
+// ── importer gate + failure ledger ──────────────────────────────────────────
+
+test("importer: a blocking preflight REFUSES the import (DirectImportBlockedError), records a failed run, and persists NOTHING", async () => {
+  let persisted = false;
+  let failedRun: any = null;
+  await assert.rejects(
+    importDirectBillingReport(
+      { rows: [row({ reservation: "777" })] }, // 1 row vs baseline 100 → collapse
+      importDeps({
+        loadBaseline: async () => baselineOf(),
+        persist: async () => { persisted = true; throw new Error("must not persist"); },
+        recordFailedRun: async (o) => { failedRun = o; },
+      }),
+    ),
+    (e: any) => {
+      assert.ok(e instanceof DirectImportBlockedError, "expected DirectImportBlockedError");
+      assert.ok(e.preflight.warnings.some((w: any) => w.code === "count_collapse"));
+      return true;
+    },
+  );
+  assert.equal(persisted, false, "blocked import must never reach persist");
+  assert.ok(failedRun, "refusal must land in the run ledger");
+  assert.match(failedRun.error, /refused/);
+  assert.equal(failedRun.parsedRows, 1);
+});
+
+test("importer: acceptWarnings imports THROUGH a blocking warning and the result carries the preflight evidence", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })], acceptWarnings: true },
+    importDeps({ loadBaseline: async () => baselineOf() }),
+  );
+  assert.equal(res.runId, "run-test");
+  assert.ok(res.preflight, "result must carry the preflight it ran under");
+  assert.ok(res.preflight!.warnings.some((w) => w.severity === "block"));
+});
+
+test("importer: a parse/plausibility failure records a failed run BEFORE rethrowing (no run row exists yet at that point)", async () => {
+  let failedRun: any = null;
+  await assert.rejects(
+    importDirectBillingReport(
+      { rows: [] },
+      importDeps({ recordFailedRun: async (o) => { failedRun = o; } }),
+    ),
+    /no rows parsed/,
+  );
+  assert.ok(failedRun, "parse failure must land in the run ledger");
+  assert.match(failedRun.error, /no rows parsed/);
+});
+
+test("importer: a throwing failure-ledger write never masks the real error", async () => {
+  await assert.rejects(
+    importDirectBillingReport(
+      { rows: [] },
+      importDeps({ recordFailedRun: async () => { throw new Error("ledger down"); } }),
+    ),
+    /no rows parsed/, // the ORIGINAL error, not "ledger down"
+  );
+});
+
+test("importer: finalizeRunLedger receives the run's durable facts (rows, recency, step statuses, conflicts)", async () => {
+  let patch: any = null, patchedRunId: string | null = null;
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777", rentalDate: "2026-08-18" })] },
+    importDeps({
+      buildCutoverPayload: async () => ({
+        rows: [{ ldap: "CMORAL1", direct_billing_effective: true, holman_book_state: "open", anchor_tickets: "7H2K9Q" }],
+        book: { as_of: "2026-08-20", age_days: 2, stale: false },
+      }),
+      finalizeRunLedger: async (runId, p) => { patchedRunId = runId; patch = p; },
+    }),
+  );
+  assert.equal(patchedRunId, "run-test");
+  assert.equal(patch.parsedRows, 1);
+  assert.equal(patch.reportMaxRentalDate, "2026-08-18");
+  assert.equal(patch.stampStatus, "ok");
+  assert.equal(patch.comparisonStatus, "ok");
+  assert.equal(patch.conflictCount, 1);
+  assert.equal(res.runId, "run-test");
+});
+
+test("importer: a failed comparison finalizes conflictCount null (unknown), never zero-shaped-clean", async () => {
+  let patch: any = null;
+  await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({
+      buildCutoverPayload: async () => { throw new Error("payload down"); },
+      finalizeRunLedger: async (_id, p) => { patch = p; },
+    }),
+  );
+  assert.equal(patch.comparisonStatus, "failed");
+  assert.equal(patch.conflictCount, null);
+});
+
+test("importer: a throwing finalizeRunLedger is non-fatal — the import still returns its result", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ finalizeRunLedger: async () => { throw new Error("ledger down"); } }),
+  );
+  assert.equal(res.runId, "run-test");
+});
+
+// ── ambiguous RACF: never stamp an identity shared by two people ─────────────
+// Premortem #3: all_techs can hold the SAME racf on two different employee_ids
+// (reused/reassigned LDAP). A cutover stamp keyed by that LDAP could mark the
+// WRONG tech "switched" — so an ambiguous racf never emits a stamping ldap.
+
+test("ambiguous racf: reservation tier degrades to REVIEW — identity itself came from the shared LDAP", () => {
+  const r = roster({});
+  const ctx = ctxOf({
+    intentByConfirmation: new Map([["777", { ldap: "CMORAL1", techName: null, truckNumber: null }]]),
+    rosterByRacf: new Map([["CMORAL1", r]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+    ambiguousRacfs: new Set(["CMORAL1"]),
+  });
+  const res = resolveDirectRow(row({ reservation: "777" }), ctx);
+  assert.equal(res.preset?.state, "REVIEW");
+  assert.equal(res.ldap, null, "ambiguous racf must never stamp");
+  assert.match(res.preset?.reason ?? "", /multiple roster identities/);
+});
+
+test("ambiguous racf: surname tier keeps RESOLVED (identity from surname, not the LDAP) but nulls the stamping ldap", () => {
+  const r = roster({});
+  const ctx = ctxOf({
+    rosterBySurname: new Map([["MORALES", [r]]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+    techTruckByLdap: new Map([["CMORAL1", "23132"]]),
+    ambiguousRacfs: new Set(["CMORAL1"]),
+  });
+  const res = resolveDirectRow(row({}), ctx);
+  assert.equal(res.preset?.state, "RESOLVED");
+  assert.equal(res.method, "direct:surname_unique");
+  assert.equal(res.ldap, null, "resolved identity still must not stamp through a shared racf");
+});
+
+test("ambiguous racf: the nulled ldap counts the row BLIND in the switchover stats (visible coverage gap)", () => {
+  const r = roster({});
+  const ctx = ctxOf({
+    rosterBySurname: new Map([["MORALES", [r]]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+    techTruckByLdap: new Map([["CMORAL1", "23132"]]),
+    ambiguousRacfs: new Set(["CMORAL1"]),
+  });
+  const { stats, switchovers } = buildDirectCases([row({})], ctx, Date.now());
+  assert.equal(switchovers.size, 0, "no sighting may be stamped");
+  assert.equal(stats.switchoverBlindRows, 1, "the gap must be COUNTED, not silent");
+});
+
+test("unambiguous racf: absent ambiguousRacfs set changes nothing (legacy ctx shape)", () => {
+  const r = roster({});
+  const ctx = ctxOf({
+    intentByConfirmation: new Map([["777", { ldap: "CMORAL1", techName: null, truckNumber: null }]]),
+    rosterByRacf: new Map([["CMORAL1", r]]),
+    rosterByEmployeeId: new Map([["E1", r]]),
+  });
+  const res = resolveDirectRow(row({ reservation: "777" }), ctx);
+  assert.equal(res.preset?.state, "RESOLVED");
+  assert.equal(res.ldap, "CMORAL1");
+});
+
+// ── preview path failure ledger ──────────────────────────────────────────────
+// The UI ALWAYS previews before importing, so a malformed file dies at
+// previewDirectBillingReport and never reaches the import path's failure
+// ledger. The preview must therefore record the rejection itself — otherwise
+// a bad upload is once again visible only in a disappearing toast.
+
+test("preview: a parse/plausibility rejection records a failed run and rethrows the ORIGINAL error", async () => {
+  let failedRun: any = null;
+  // an xlsx whose grid parses but contains no mappable report rows
+  const buf = await buildXlsx([{ 0: "nothing", 1: "recognizable" }]);
+  await assert.rejects(
+    previewDirectBillingReport(
+      { buffer: buf, sourceLabel: "wrong-file.xlsx" },
+      { recordFailedRun: async (o) => { failedRun = o; } },
+    ),
+  );
+  assert.ok(failedRun, "preview rejection must land in the run ledger");
+  assert.equal(failedRun.sourceLabel, "wrong-file.xlsx");
+});
+
+test("preview: a throwing ledger write never masks the parse error", async () => {
+  const buf = await buildXlsx([{ 0: "junk" }]);
+  await assert.rejects(
+    previewDirectBillingReport(
+      { buffer: buf },
+      { recordFailedRun: async () => { throw new Error("ledger down"); } },
+    ),
+    (e: any) => !/ledger down/.test(String(e?.message)),
+  );
+});
+
+test("preview: a good file records NOTHING and returns the preflight", async () => {
+  const dataRow: Record<number, string | number> = { [C.ra]: "12ABC7", [C.lastName]: "MORALES", [C.rentalDate]: 46243, [C.reservation]: "777", [C.station]: "BOSTON LOGAN", [C.city]: "BOSTON", [C.state]: "MA" };
+  const buf = await buildXlsx([null, headerRow(), dataRow]);
+  let recorded = false;
+  const p = await previewDirectBillingReport(
+    { buffer: buf },
+    { recordFailedRun: async () => { recorded = true; }, loadBaseline: async () => null },
+  );
+  assert.equal(recorded, false, "a successful preview must not write a failed run");
+  assert.equal(p.parsedRows, 1);
+  assert.deepEqual(p.warnings, []);
 });

@@ -37,3 +37,12 @@ Tyler's control question: "who is still billed by Holman, especially if also on 
 
 ## Destructive imports need role gates
 Full-state report imports are admin/developer-gated (`requireImportOperator`, before multer) — the `/api/vrm` session check only proves login (same lesson as fs-router-auth-gap).
+
+## Upload preflight vs the last-import baseline (block vs warn)
+A new report is judged against the last COMPLETED import run: row count collapsing below 50% or the report's max rentalDate going BACKWARDS is a **block** (an old/truncated file would mass-sweep real cases); 20–50% drop and same-rows+same-max-date (probable re-upload) are warn-only. **Why:** the report is full open-ticket state, so both signals are near-monotonic in practice. Blocks refuse the import (structured 409) unless the operator explicitly accepts after SEEING the warnings (preview→confirm dialog sets `acceptWarnings`). Baseline lookup failure degrades the guard to no-baseline, never blocks — a guard input, not a data dependency.
+
+## Import failures must reach the run ledger — from EVERY door
+Parse/plausibility failures throw BEFORE persist creates its run row, and the UI always calls the *preview* endpoint first — so both the import path AND the preview path must best-effort record a failed run, or a bad upload exists only in a disappearing toast (architect caught the preview gap). Ledger writes never mask the real error. Completed runs get parsed_rows/report recency/stamp+comparison statuses stamped post-run; Cutover Tracking shows the latest run (failure loudly). A failed comparison finalizes conflict_count NULL — unknown, never zero-shaped-clean.
+
+## Ambiguous RACF never stamps
+`all_techs` can hold ONE racf on multiple distinct employee_ids (reused/reassigned LDAP); a stamp keyed by it could mark the WRONG tech switched. Rule: reservation-tier resolution (identity DERIVED from the LDAP) degrades to REVIEW; other tiers (identity from prior ticket / truck / unique surname) stay RESOLVED but null the stamping ldap so the row counts as a VISIBLE blind spot (`switchoverBlindRows`), never a silent skip. Only distinct employee_ids make a racf ambiguous — term+active rows of the same person share one employee_id.

@@ -35,6 +35,18 @@ export async function initRentalOperationsSchema(): Promise<void> {
       created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  // Direct-billing import ledger (premortem 2026-08-22): parsed row count and
+  // report recency power the count-collapse / date-regression upload guards,
+  // and the stamp/comparison outcomes make each run's double-billing verdict
+  // durable — a disappearing toast must never be the only record.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_operations_import_runs
+      ADD COLUMN IF NOT EXISTS parsed_rows            INTEGER,
+      ADD COLUMN IF NOT EXISTS report_max_rental_date VARCHAR(20),
+      ADD COLUMN IF NOT EXISTS stamp_status           VARCHAR(10),
+      ADD COLUMN IF NOT EXISTS comparison_status      VARCHAR(10),
+      ADD COLUMN IF NOT EXISTS conflict_count         INTEGER;
+  `);
 
   // ── raw_rentals: immutable per-run snapshot of every ingested feed row ─────
   await db.execute(sql`

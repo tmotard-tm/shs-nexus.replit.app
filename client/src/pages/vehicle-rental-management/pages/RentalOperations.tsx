@@ -682,11 +682,31 @@ export default function RentalOperations() {
   // in until a real data feed exists. The toast surfaces the tech-match split
   // because the report has no truck numbers — rows the ladder couldn't match
   // land in the identity-review lane and deserve immediate operator eyes.
+  // Preview/confirm flow (premortem 2026-08-22): the file is parsed and
+  // compared against the last import FIRST (row count, report recency), the
+  // operator confirms what the file claims, and only then does the import —
+  // which can sweep/close cases — actually run. acceptWarnings is set on the
+  // confirm because the dialog SHOWED the warnings.
+  const [directConfirm, setDirectConfirm] = useState<{ file: File; preview: any } | null>(null);
+  const previewDirectMut = useMutation({
+    mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return apiRequest("POST", "/api/vrm/rental-operations/imports/direct-billing/preview", fd); },
+    onSuccess: async (res: any, file: File) => {
+      const j = await res.json().catch(() => ({}));
+      if (j?.preview) setDirectConfirm({ file, preview: j.preview });
+      else toast({ title: "Preview failed", description: "No preview returned — file not imported.", variant: "destructive" });
+    },
+    onError: (e: any) => toast({ title: "File rejected", description: String(e?.message || e), variant: "destructive" }),
+  });
   const importDirectMut = useMutation({
-    mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return apiRequest("POST", "/api/vrm/rental-operations/imports/direct-billing", fd); },
+    mutationFn: (v: { file: File; acceptWarnings?: boolean }) => { const fd = new FormData(); fd.append("file", v.file); if (v.acceptWarnings) fd.append("acceptWarnings", "true"); return apiRequest("POST", "/api/vrm/rental-operations/imports/direct-billing", fd); },
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
       await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k })));
+      // The import stamps the cutover scoreboard and writes the run ledger —
+      // refresh both or Cutover Tracking shows pre-import numbers until its
+      // own poll fires.
+      qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-survey/cutover-status"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/imports/direct-billing/runs"] });
       const r = j?.result ?? {};
       const s = r.stats;
       // The old-billing comparison (Tyler 2026-08-22): switched techs still
@@ -754,7 +774,13 @@ export default function RentalOperations() {
         });
       }
     },
-    onError: (e: any) => toast({ title: "Direct-billing import failed", description: String(e?.message || e), variant: "destructive" }),
+    onError: (e: any) => {
+      // A 409 here is the server-side guard refusing a suspicious file (count
+      // collapse / older report) on a direct call without acceptWarnings —
+      // possible if two operators race. The dialog flow normally prevents it.
+      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/imports/direct-billing/runs"] });
+      toast({ title: "Direct-billing import failed", description: String(e?.message || e), variant: "destructive" });
+    },
   });
   const scrapeMissingMut = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/scrape-missing"),
@@ -914,10 +940,10 @@ export default function RentalOperations() {
             <Upload size={13} /> {importMut.isPending ? "Importing…" : "Import report"}
           </button>
           <input ref={fileRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importMut.mutate(f); e.target.value = ""; }} />
-          <button type="button" onClick={() => fileDirectRef.current?.click()} disabled={importDirectMut.isPending} title="Enterprise 'Rental Agreement Detail Open Ticket Report' for the SHS direct-billing account" style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <Upload size={13} /> {importDirectMut.isPending ? "Importing…" : "Import direct billing"}
+          <button type="button" onClick={() => fileDirectRef.current?.click()} disabled={importDirectMut.isPending || previewDirectMut.isPending} title="Enterprise 'Rental Agreement Detail Open Ticket Report' for the SHS direct-billing account" style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <Upload size={13} /> {importDirectMut.isPending ? "Importing…" : previewDirectMut.isPending ? "Checking file…" : "Import direct billing"}
           </button>
-          <input ref={fileDirectRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importDirectMut.mutate(f); e.target.value = ""; }} />
+          <input ref={fileDirectRef} type="file" accept=".xlsx" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) previewDirectMut.mutate(f); e.target.value = ""; }} />
           {sweep && (
             <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={sweepBusy} title={sweep.title}
               style={{ ...selStyle, cursor: sweepBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, opacity: sweepBusy ? 0.7 : 1,
@@ -1274,6 +1300,61 @@ export default function RentalOperations() {
       {phoneEdit && <ShopPhoneEditModal target={phoneEdit} onClose={() => setPhoneEdit(null)}
         onSaved={() => { qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }); if (panelKey) qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${panelKey}`] }); }} />}
       {pickupFor && <TechTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
+      {directConfirm && (() => {
+        const p = directConfirm.preview ?? {};
+        const warnings: Array<{ code: string; severity: string; message: string }> = p.warnings ?? [];
+        const hasBlock = warnings.some((w) => w.severity === "block");
+        const base = p.baseline;
+        const baseRows = base ? (base.parsedRows ?? base.totalCases) : null;
+        const line = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "0 0 6px" } as const;
+        return (
+          <div onClick={() => setDirectConfirm(null)}
+            style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(15,20,30,0.45)",
+                     display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div onClick={(e) => e.stopPropagation()}
+              style={{ background: colors.surface, borderRadius: 14, border: `1px solid ${hasBlock ? colors.red : colors.rule}`,
+                       width: "min(560px, 92vw)", padding: "22px 24px", boxShadow: "0 18px 50px rgba(0,0,0,0.25)" }}>
+              <div style={{ fontFamily: fonts.syne, fontSize: 17, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>
+                {hasBlock ? "This file looks wrong — import anyway?" : "Confirm direct-billing import"}
+              </div>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkMuted, marginBottom: 14 }}>
+                {directConfirm.file.name} — nothing has been imported yet.
+              </div>
+              <p style={line}><b>{p.parsedRows ?? "?"}</b> open rentals on this report{baseRows != null && <> · last import had <b>{baseRows}</b></>}</p>
+              <p style={line}>Rental dates {p.reportMinRentalDate ?? "?"} → <b>{p.reportMaxRentalDate ?? "?"}</b>{base?.reportMaxRentalDate && <> · last import saw through <b>{base.reportMaxRentalDate}</b></>}</p>
+              {base?.finishedAt && <p style={{ ...line, color: colors.inkMuted }}>Previous import: {new Date(base.finishedAt).toLocaleString()}</p>}
+              {warnings.length > 0 && (
+                <div style={{ margin: "12px 0", padding: "10px 12px", borderRadius: 10,
+                              border: `1px solid ${hasBlock ? colors.red : colors.amber}`,
+                              background: hasBlock ? colors.redLight : colors.amberLight }}>
+                  {warnings.map((w) => (
+                    <div key={w.code} style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 6 }}>
+                      <AlertTriangle size={14} color={w.severity === "block" ? colors.red : colors.amber} style={{ flexShrink: 0, marginTop: 2 }} />
+                      <span style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: w.severity === "block" ? colors.red : colors.ink }}>{w.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <p style={{ ...line, color: colors.inkMuted, fontSize: 12 }}>
+                Importing closes open direct-billing cases missing from this report, stamps cutover switchovers, and runs the double-billing check.
+              </p>
+              <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 16 }}>
+                <button type="button" onClick={() => setDirectConfirm(null)}
+                  style={{ fontFamily: fonts.dmSans, fontSize: 13, padding: "8px 16px", borderRadius: 9, cursor: "pointer",
+                           border: `1px solid ${colors.rule}`, background: colors.surface, color: colors.inkSoft }}>
+                  Cancel
+                </button>
+                <button type="button" disabled={importDirectMut.isPending}
+                  onClick={() => { const f = directConfirm.file; setDirectConfirm(null); importDirectMut.mutate({ file: f, acceptWarnings: warnings.length > 0 }); }}
+                  style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 600, padding: "8px 16px", borderRadius: 9, cursor: "pointer",
+                           border: "none", background: hasBlock ? colors.red : colors.accent, color: "#fff" }}>
+                  {hasBlock ? "Import anyway" : "Import"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );

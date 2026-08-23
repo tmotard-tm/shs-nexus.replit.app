@@ -320,6 +320,14 @@ export interface DirectResolveCtx {
   intentByConfirmation: Map<string, IntentLite>;
   /** UPPER(old Enterprise ticket) -> the identity already resolved on that case */
   priorCaseByTicket: Map<string, PriorTicketLite>;
+  /**
+   * Premortem #3 (2026-08-22): RACFs that map to MORE THAN ONE distinct
+   * employee_id on the roster (reused/reassigned LDAPs). A cutover stamp keyed
+   * by such an LDAP could mark the WRONG tech "switched", so an ambiguous racf
+   * never stamps — the row counts blind instead. Optional so synthetic test
+   * contexts stay valid; absent reads as "none ambiguous".
+   */
+  ambiguousRacfs?: Set<string>;
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -392,10 +400,31 @@ function truckOf(roster: RosterLite | null, ldap: string | null, ctx: DirectReso
  * philosophy as identity-resolver.ts: never render a guess as fact).
  */
 export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): DirectResolution {
+  // Premortem #3: a racf that maps to multiple roster identities must never
+  // key the cutover stamp — the sighting goes blind instead of possibly
+  // marking the WRONG tech "switched".
+  const stampSafe = (racf: string | null | undefined): string | null => {
+    const r = (racf ?? "").toUpperCase();
+    return r && !ctx.ambiguousRacfs?.has(r) ? r : null;
+  };
+
   // 1) reservation confirmation -> the booking intent that created this rental
   if (row.reservation) {
     const intent = ctx.intentByConfirmation.get(String(row.reservation).trim());
     if (intent) {
+      // Identity here is DERIVED FROM the booked LDAP — if that LDAP is shared
+      // by multiple roster identities, the whole tier is a guess. REVIEW, not
+      // a resolved identity that happened to pick one of them.
+      if (ctx.ambiguousRacfs?.has(intent.ldap.toUpperCase())) {
+        return {
+          preset: {
+            state: "REVIEW",
+            reason: `reservation ${row.reservation} booked for LDAP ${intent.ldap}, which matches multiple roster identities — pick the right tech manually`,
+            method: "direct:reservation", confidence: "low",
+          },
+          truck: null, method: "direct:reservation", truckSource: null, ldap: null,
+        };
+      }
       const roster = ctx.rosterByRacf.get(intent.ldap.toUpperCase()) ?? null;
       if (roster && surnameAgrees(row.lastName, roster.tech_name)) {
         // Truck comes from LIVE TPMS only. The intent's truck_number is what
@@ -406,7 +435,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
         return {
           preset: resolvedFromRoster(roster, "direct:reservation", "high"),
           truck: t.truck, method: "direct:reservation", truckSource: t.truckSource,
-          ldap: (roster.racf ?? intent.ldap).toUpperCase(),
+          ldap: stampSafe(roster.racf ?? intent.ldap),
         };
       }
       if (roster) {
@@ -441,7 +470,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
       if (surnameAgrees(row.lastName, name)) {
         if (roster) {
           const t = truckOf(roster, null, ctx);
-          return { preset: resolvedFromRoster(roster, "direct:prior_ticket", "high"), truck: t.truck, method: "direct:prior_ticket", truckSource: t.truckSource, ldap: roster.racf?.toUpperCase() ?? null };
+          return { preset: resolvedFromRoster(roster, "direct:prior_ticket", "high"), truck: t.truck, method: "direct:prior_ticket", truckSource: t.truckSource, ldap: stampSafe(roster.racf) };
         }
         return {
           preset: {
@@ -477,7 +506,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
         const roster = tt.employee_id ? ctx.rosterByEmployeeId.get(tt.employee_id) ?? null : null;
         const live = truckOf(roster, null, ctx); // roster racf -> live TPMS truck
         if (roster) {
-          return { preset: resolvedFromRoster(roster, "direct:truck_ref", "high"), truck: live.truck, method: "direct:truck_ref", truckSource: live.truckSource, ldap: roster.racf?.toUpperCase() ?? null };
+          return { preset: resolvedFromRoster(roster, "direct:truck_ref", "high"), truck: live.truck, method: "direct:truck_ref", truckSource: live.truckSource, ldap: stampSafe(roster.racf) };
         }
         return {
           preset: {
@@ -504,7 +533,7 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
     }
     if (cands.length === 1) {
       const t = truckOf(cands[0], null, ctx);
-      return { preset: resolvedFromRoster(cands[0], "direct:surname_unique", "medium"), truck: t.truck, method: "direct:surname_unique", truckSource: t.truckSource, ldap: cands[0].racf?.toUpperCase() ?? null };
+      return { preset: resolvedFromRoster(cands[0], "direct:surname_unique", "medium"), truck: t.truck, method: "direct:surname_unique", truckSource: t.truckSource, ldap: stampSafe(cands[0].racf) };
     }
   }
 
@@ -703,6 +732,10 @@ export async function loadDirectResolveCtx(): Promise<DirectResolveCtx> {
   const rosterByRacf = new Map<string, RosterLite>();
   const rosterByEmployeeId = new Map<string, RosterLite>();
   const rosterBySurname = new Map<string, RosterLite[]>();
+  // racf -> distinct employee_ids seen. all_techs carries term+active rows for
+  // the SAME person (same employee_id) — only different employees sharing one
+  // racf make it ambiguous (reused/reassigned LDAP, premortem #3).
+  const racfOwners = new Map<string, Set<string>>();
   const roster = await db.execute(sql`
     SELECT employee_id, tech_name, upper(trim(tech_racfid)) AS racf, employment_status,
            effective_date::text AS effective_date, last_day_worked::text AS last_day_worked, district_no
@@ -719,6 +752,10 @@ export async function loadDirectResolveCtx(): Promise<DirectResolveCtx> {
     };
     if (!rosterByEmployeeId.has(lite.employee_id)) rosterByEmployeeId.set(lite.employee_id, lite);
     if (lite.racf && !rosterByRacf.has(lite.racf)) rosterByRacf.set(lite.racf, lite);
+    if (lite.racf) {
+      if (!racfOwners.has(lite.racf)) racfOwners.set(lite.racf, new Set());
+      racfOwners.get(lite.racf)!.add(lite.employee_id);
+    }
     const sn = normName(lite.tech_name.split(",")[0]);
     if (sn) {
       if (!rosterBySurname.has(sn)) rosterBySurname.set(sn, []);
@@ -771,7 +808,15 @@ export async function loadDirectResolveCtx(): Promise<DirectResolveCtx> {
     }
   }
 
-  return { truckTechs, techTruckByLdap, rosterByRacf, rosterByEmployeeId, rosterBySurname, intentByConfirmation, priorCaseByTicket };
+  const ambiguousRacfs = new Set<string>();
+  for (const [racf, owners] of Array.from(racfOwners.entries())) {
+    if (owners.size > 1) ambiguousRacfs.add(racf);
+  }
+  if (ambiguousRacfs.size) {
+    console.warn(`[VRM/RentalOps] direct import: ${ambiguousRacfs.size} RACF(s) shared by multiple roster identities — sightings on them will count blind, never stamp: ${Array.from(ambiguousRacfs).slice(0, 10).join(", ")}${ambiguousRacfs.size > 10 ? " …" : ""}`);
+  }
+
+  return { truckTechs, techTruckByLdap, rosterByRacf, rosterByEmployeeId, rosterBySurname, intentByConfirmation, priorCaseByTicket, ambiguousRacfs };
 }
 
 // ── cutover billing-switchover stamp ─────────────────────────────────────────
@@ -866,6 +911,217 @@ export function findOldBillingConflicts(rows: Array<Record<string, unknown>>): O
     }));
 }
 
+// ── upload preflight (premortem #1/#4: wrong/stale/collapsed file guards) ────
+
+/** Last completed direct-billing import — the yardstick a new upload is judged against. */
+export interface DirectImportBaseline {
+  runId: string;
+  finishedAt: string | null;
+  fileDate: string | null;
+  /** parsed report rows of that run (null on runs predating the column — fall back to totalCases) */
+  parsedRows: number | null;
+  totalCases: number | null;
+  reportMaxRentalDate: string | null;
+}
+
+export interface PreflightWarning {
+  code: "count_collapse" | "date_regression" | "count_drop" | "possible_duplicate";
+  /** 'block' refuses the import unless the operator explicitly accepts */
+  severity: "block" | "warn";
+  message: string;
+}
+
+export interface DirectImportPreflight {
+  parsedRows: number;
+  headerRow: number;
+  matchedCols: number;
+  reportMinRentalDate: string | null;
+  reportMaxRentalDate: string | null;
+  baseline: DirectImportBaseline | null;
+  warnings: PreflightWarning[];
+}
+
+export function rentalDateRangeOf(rows: DirectBillingRow[]): { min: string | null; max: string | null } {
+  let min: string | null = null, max: string | null = null;
+  for (const r of rows) {
+    if (!r.rentalDate) continue;
+    if (!min || r.rentalDate < min) min = r.rentalDate;
+    if (!max || r.rentalDate > max) max = r.rentalDate;
+  }
+  return { min, max };
+}
+
+/**
+ * Pure comparison of a parsed upload against the previous successful import.
+ * The report is FULL open-ticket state, so both signals are monotonic-ish in
+ * practice: the newest rental date never goes backwards (a regression means an
+ * OLD file), and the open-ticket count moves gradually (a collapse means a
+ * truncated/partial export — which would mass-sweep real cases).
+ */
+export function computeDirectPreflight(
+  rows: DirectBillingRow[],
+  headerRow: number,
+  matchedCols: number,
+  baseline: DirectImportBaseline | null,
+): DirectImportPreflight {
+  const { min, max } = rentalDateRangeOf(rows);
+  const warnings: PreflightWarning[] = [];
+  const baseRows = baseline ? (baseline.parsedRows ?? baseline.totalCases) : null;
+  if (baseline && baseRows != null && baseRows > 0) {
+    if (rows.length * 2 < baseRows) {
+      warnings.push({
+        code: "count_collapse", severity: "block",
+        message: `row count collapsed: ${rows.length} rows vs ${baseRows} on the last import — a truncated/partial export would close every missing rental. Import only if the fleet really returned that many rentals.`,
+      });
+    } else if (rows.length < baseRows * 0.8) {
+      warnings.push({
+        code: "count_drop", severity: "warn",
+        message: `row count dropped ${baseRows - rows.length} (${rows.length} vs ${baseRows} last import) — plausible if rentals were returned, worth a look.`,
+      });
+    }
+  }
+  if (baseline?.reportMaxRentalDate && max && max < baseline.reportMaxRentalDate) {
+    warnings.push({
+      code: "date_regression", severity: "block",
+      message: `newest rental in this file is ${max}, but the last import already saw ${baseline.reportMaxRentalDate} — this looks like an OLDER report file.`,
+    });
+  }
+  if (baseline && baseRows != null && rows.length === baseRows
+    && baseline.reportMaxRentalDate && max === baseline.reportMaxRentalDate) {
+    warnings.push({
+      code: "possible_duplicate", severity: "warn",
+      message: `same row count (${rows.length}) and newest rental date (${max}) as the last import — this may be the same file again (harmless: re-import is idempotent).`,
+    });
+  }
+  return { parsedRows: rows.length, headerRow, matchedCols, reportMinRentalDate: min, reportMaxRentalDate: max, baseline, warnings };
+}
+
+/** Import refused by a blocking preflight warning — carries the evidence for the 409 payload. */
+export class DirectImportBlockedError extends Error {
+  readonly preflight: DirectImportPreflight;
+  constructor(preflight: DirectImportPreflight) {
+    const blocks = preflight.warnings.filter((w) => w.severity === "block");
+    super(`upload refused: ${blocks.map((w) => w.message).join(" | ")}`);
+    this.name = "DirectImportBlockedError";
+    this.preflight = preflight;
+  }
+}
+
+export async function loadDirectImportBaseline(): Promise<DirectImportBaseline | null> {
+  try {
+    const r = await db.execute(sql`
+      SELECT id, finished_at::text AS finished_at, file_date, parsed_rows, total_cases, report_max_rental_date
+      FROM vrm_rental_operations_import_runs
+      WHERE run_type = 'manual_direct_billing_import' AND status = 'completed'
+      ORDER BY finished_at DESC NULLS LAST
+      LIMIT 1
+    `);
+    const row = (r.rows ?? [])[0] as any;
+    if (!row) return null;
+    return {
+      runId: String(row.id),
+      finishedAt: row.finished_at ?? null,
+      fileDate: row.file_date ?? null,
+      parsedRows: row.parsed_rows == null ? null : Number(row.parsed_rows),
+      totalCases: row.total_cases == null ? null : Number(row.total_cases),
+      reportMaxRentalDate: row.report_max_rental_date ?? null,
+    };
+  } catch (e: any) {
+    // Baseline is a GUARD input, not a data dependency: if it can't load, the
+    // import proceeds unguarded (a DB that can't read this table would fail
+    // the persist anyway) — but never silently pretends a baseline existed.
+    console.warn("[VRM/RentalOps] direct import: baseline lookup failed (guards degraded):", e?.message || e);
+    return null;
+  }
+}
+
+/**
+ * Parse + guard WITHOUT importing — powers the operator confirm step
+ * (premortem #4: the operator must SEE what the file claims before it can
+ * sweep anything). Throws the same layout/plausibility errors as the import.
+ *
+ * The UI ALWAYS previews first, so a malformed file dies HERE and never
+ * reaches the import path's failure ledger — parse/plausibility rejections
+ * must therefore be recorded here too (best-effort, never masking the real
+ * error), or a bad upload is once again visible only in a disappearing toast.
+ */
+export async function previewDirectBillingReport(input: {
+  buffer: Buffer;
+  fileDate?: string | null;
+  sourceLabel?: string;
+}, deps: {
+  loadBaseline?: typeof loadDirectImportBaseline;
+  recordFailedRun?: typeof recordFailedDirectRun;
+} = {}): Promise<DirectImportPreflight> {
+  let rows: DirectBillingRow[] = [];
+  let headerRow = -1, matchedCols = 0;
+  try {
+    const aoa = await parseXlsxGrid(input.buffer);
+    const mapped = mapDirectRows(aoa);
+    rows = mapped.rows; headerRow = mapped.headerRow; matchedCols = mapped.matchedCols;
+    if (!rows.length) {
+      throw new Error("no rows parsed — check this is the Enterprise 'Rental Agreement Detail Open Ticket Report' xlsx");
+    }
+    assertPlausibleReport(rows);
+  } catch (e: any) {
+    try {
+      await (deps.recordFailedRun ?? recordFailedDirectRun)({
+        error: String(e?.message || e),
+        sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
+        fileDate: input.fileDate ?? null,
+        parsedRows: rows.length || null,
+        reportMaxRentalDate: rentalDateRangeOf(rows).max,
+      });
+    } catch (ledgerErr: any) {
+      console.warn("[VRM/RentalOps] direct preview: failed-run ledger write failed (non-fatal):", ledgerErr?.message || ledgerErr);
+    }
+    throw e;
+  }
+  const baseline = await (deps.loadBaseline ?? loadDirectImportBaseline)();
+  return computeDirectPreflight(rows, headerRow, matchedCols, baseline);
+}
+
+// ── durable run ledger (premortem #6: a toast is not a record) ───────────────
+
+/** Stamp import-run facts the generic persist path doesn't know about. Best-effort. */
+export async function finalizeDirectRunLedger(runId: string, patch: {
+  parsedRows: number;
+  reportMaxRentalDate: string | null;
+  stampStatus: "ok" | "failed";
+  comparisonStatus: "ok" | "failed";
+  conflictCount: number | null;
+}): Promise<void> {
+  await db.execute(sql`
+    UPDATE vrm_rental_operations_import_runs
+    SET parsed_rows = ${patch.parsedRows},
+        report_max_rental_date = ${patch.reportMaxRentalDate},
+        stamp_status = ${patch.stampStatus},
+        comparison_status = ${patch.comparisonStatus},
+        conflict_count = ${patch.conflictCount}
+    WHERE id = ${runId}
+  `);
+}
+
+/**
+ * A parse/guard failure happens BEFORE persistRentalCases creates its run row,
+ * so without this the ledger shows nothing at all — the exact "failure visible
+ * only in a toast" gap. Best-effort insert of a failed run.
+ */
+export async function recordFailedDirectRun(o: {
+  error: string;
+  sourceLabel: string;
+  fileDate: string | null;
+  parsedRows: number | null;
+  reportMaxRentalDate: string | null;
+}): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO vrm_rental_operations_import_runs
+      (run_type, source_label, status, file_date, parsed_rows, report_max_rental_date, error, finished_at)
+    VALUES ('manual_direct_billing_import', ${o.sourceLabel}, 'failed', ${o.fileDate},
+            ${o.parsedRows}, ${o.reportMaxRentalDate}, ${o.error}, NOW())
+  `);
+}
+
 // ── importer ─────────────────────────────────────────────────────────────────
 
 export interface DirectImportResult extends IngestResult {
@@ -902,6 +1158,8 @@ export interface DirectImportResult extends IngestResult {
    * stays honest.
    */
   comparisonNonBookedStamped?: number;
+  /** upload guard verdict this import ran under (row counts, report recency, warnings) */
+  preflight?: DirectImportPreflight;
 }
 
 /**
@@ -917,6 +1175,11 @@ export interface DirectImportDeps {
   buildCutoverPayload: () => Promise<any>;
   landPoHistory: (trucks: string[]) => Promise<{ posLanded: number; openRepairTrucks: number }>;
   enrichAms: () => Promise<{ withStatus: number }>;
+  /** last successful import — yardstick for the count/date upload guards */
+  loadBaseline: typeof loadDirectImportBaseline;
+  /** durable ledger writes — best-effort, never fail the import themselves */
+  finalizeRunLedger: typeof finalizeDirectRunLedger;
+  recordFailedRun: typeof recordFailedDirectRun;
 }
 
 export async function importDirectBillingReport(input: {
@@ -924,26 +1187,60 @@ export async function importDirectBillingReport(input: {
   rows?: DirectBillingRow[];       // pre-parsed (tests / JSON path)
   fileDate?: string | null;
   sourceLabel?: string;
+  /**
+   * Premortem #1/#4: blocking preflight warnings (row-count collapse, report
+   * date regression) refuse the import unless the operator explicitly accepts
+   * them — set by the confirm dialog after the warnings were SHOWN.
+   */
+  acceptWarnings?: boolean;
 }, deps: Partial<DirectImportDeps> = {}): Promise<DirectImportResult> {
+  const sourceLabel = input.sourceLabel ?? "manual_direct_billing_xlsx";
+  // Ledger writes are best-effort: the record must not be able to fail the
+  // work it records (unit tests run this body with no DB — same contract).
+  const recordFailure = async (error: string, parsedRows: number | null, maxDate: string | null) => {
+    try {
+      await (deps.recordFailedRun ?? recordFailedDirectRun)({
+        error, sourceLabel, fileDate: input.fileDate ?? null, parsedRows, reportMaxRentalDate: maxDate,
+      });
+    } catch (e: any) {
+      console.warn("[VRM/RentalOps] direct import: failed-run ledger write failed (non-fatal):", e?.message || e);
+    }
+  };
+
   const now = Date.now();
   let rows = input.rows ?? [];
   let headerRow = -1, matchedCols = 0;
-  if (input.buffer) {
-    const aoa = await parseXlsxGrid(input.buffer);
-    const mapped = mapDirectRows(aoa);
-    rows = mapped.rows; headerRow = mapped.headerRow; matchedCols = mapped.matchedCols;
+  try {
+    if (input.buffer) {
+      const aoa = await parseXlsxGrid(input.buffer);
+      const mapped = mapDirectRows(aoa);
+      rows = mapped.rows; headerRow = mapped.headerRow; matchedCols = mapped.matchedCols;
+    }
+    if (!rows.length) {
+      throw new Error("no rows parsed — check this is the Enterprise 'Rental Agreement Detail Open Ticket Report' xlsx");
+    }
+    assertPlausibleReport(rows);
+  } catch (e: any) {
+    // Parse/layout failures happen BEFORE persist creates a run row — record
+    // them here or the ledger (and Cutover Tracking) never sees the failure.
+    await recordFailure(String(e?.message || e), rows.length || null, rentalDateRangeOf(rows).max);
+    throw e;
   }
-  if (!rows.length) {
-    throw new Error("no rows parsed — check this is the Enterprise 'Rental Agreement Detail Open Ticket Report' xlsx");
+
+  const baseline = await (deps.loadBaseline ?? loadDirectImportBaseline)();
+  const preflight = computeDirectPreflight(rows, headerRow, matchedCols, baseline);
+  if (!input.acceptWarnings && preflight.warnings.some((w) => w.severity === "block")) {
+    const err = new DirectImportBlockedError(preflight);
+    await recordFailure(`refused: ${err.message}`, preflight.parsedRows, preflight.reportMaxRentalDate);
+    throw err;
   }
-  assertPlausibleReport(rows);
 
   const ctx = await (deps.loadCtx ?? loadDirectResolveCtx)();
   const { cases, presets, stats, switchovers } = buildDirectCases(rows, ctx, now);
 
   const p = await (deps.persist ?? persistRentalCases)({
     runType: "manual_direct_billing_import",
-    sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
+    sourceLabel,
     fileDate: input.fileDate ?? null,
     cases,
     sweepSources: ["enterprise_direct"], // only this report's own scope
@@ -961,7 +1258,7 @@ export async function importDirectBillingReport(input: {
   try {
     const st = await (deps.stampSwitchover ?? stampCutoverBillingSwitchover)(switchovers, {
       fileDate: input.fileDate ?? null,
-      sourceLabel: input.sourceLabel ?? "manual_direct_billing_xlsx",
+      sourceLabel,
     });
     switchoverTechs = st.techs; switchoverStamped = st.stamped;
     switchoverUnmatchedLdaps = st.unmatched;
@@ -1038,6 +1335,21 @@ export async function importDirectBillingReport(input: {
     console.warn("[VRM/RentalOps] direct import AMS enrich failed (non-fatal):", e?.message || e);
   }
 
+  // Durable ledger stamp (premortem #6): the run row must carry what the toast
+  // says — row count, report recency, and whether the stamp/comparison steps
+  // actually ran — so Cutover Tracking can show it after the toast is gone.
+  try {
+    await (deps.finalizeRunLedger ?? finalizeDirectRunLedger)(p.runId, {
+      parsedRows: preflight.parsedRows,
+      reportMaxRentalDate: preflight.reportMaxRentalDate,
+      stampStatus: switchoverStampStatus,
+      comparisonStatus: oldBillingComparisonStatus,
+      conflictCount: oldBillingComparisonStatus === "ok" ? (oldBillingConflicts?.length ?? 0) : null,
+    });
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] direct import: run-ledger finalize failed (non-fatal):", e?.message || e);
+  }
+
   return {
     runId: p.runId, fileDate: input.fileDate ?? null,
     enterpriseCount: p.enterpriseCount, holmanCount: p.holmanCount, pendedCount: p.pendedCount,
@@ -1046,6 +1358,6 @@ export async function importDirectBillingReport(input: {
     headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
     switchoverStampStatus, oldBillingComparisonStatus, switchoverUnmatchedLdaps,
     oldBillingConflicts, oldBookAsOf, oldBookAgeDays, oldBookStale,
-    comparisonNonBookedStamped,
+    comparisonNonBookedStamped, preflight,
   };
 }
