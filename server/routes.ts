@@ -13807,7 +13807,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get("/api/samsara/odometer", requireAuth, async (req, res) => {
     try {
       const samsaraService = getSamsaraService();
-      const data = await samsaraService.getOdometer(req.query.vehicleId as string);
+      // SAMSARA_ODOMETER has no VEHICLE_ID column — the filter is a truck
+      // number (matched on NAME) or a VIN. vehicleId kept as a legacy alias.
+      const filter = (req.query.truckNumber || req.query.vin || req.query.vehicleId) as string | undefined;
+      const data = await samsaraService.getOdometer(filter);
       res.json(data);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -13873,11 +13876,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       const [locationResult, odometerResult, maintenanceResult, fuelResult, streamResult, criticalityResult] = await Promise.allSettled([
         samsaraService.getVehicleLocation(resolvedTruckNumber, 9999),
-        // SAMSARA_ODOMETER is keyed by VIN
-        vehicleVin ? snowflake.executeQuery(
-          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_ODOMETER WHERE VIN = ? ORDER BY OBD_TIME DESC LIMIT 1`,
-          [vehicleVin]
-        ) : Promise.resolve([]),
+        // SAMSARA_ODOMETER keys by NAME/VIN (no vehicle-id column); the
+        // service method matches both doors and orders NULLS LAST so a null
+        // OBD_TIME row can't shadow the real latest read.
+        samsaraService.getOdometerForTruck(resolvedTruckNumber, vehicleVin),
         // SAMSARA_MAINTENANCE is keyed by MAINT_ID = Samsara Vehicle ID.
         // Fetch all DTC rows from the most recent daily load for this vehicle.
         vehicleId ? snowflake.executeQuery(
@@ -13938,7 +13940,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         vehicleId,
         resolvedTruckNumber,
         location: locationResult.status === 'fulfilled' ? locationResult.value : null,
-        odometer: odometerResult.status === 'fulfilled' ? (odometerResult.value as any[])[0] || null : null,
+        odometer: odometerResult.status === 'fulfilled' ? odometerResult.value ?? null : null,
         maintenance,
         fuel: fuelResult.status === 'fulfilled' ? fuelResult.value : [],
         stream: streamResult.status === 'fulfilled' && (streamResult.value as any[]).length > 0

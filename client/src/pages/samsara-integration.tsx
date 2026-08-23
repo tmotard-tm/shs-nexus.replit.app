@@ -26,7 +26,7 @@ const API_ROUTES = [
   { method: "GET",   source: "Snowflake", path: "/api/samsara/drivers/:driverId",    desc: "Single driver by Samsara driver ID" },
   { method: "GET",   source: "Snowflake", path: "/api/samsara/assignments",          desc: "Daily assignments — ?date (default today), ?vehicleId, ?driverId" },
   { method: "GET",   source: "Snowflake", path: "/api/samsara/safety-scores",        desc: "Driver safety scores — ?driverId, ?startDate, ?endDate" },
-  { method: "GET",   source: "Snowflake", path: "/api/samsara/odometer",             desc: "Latest odometer per vehicle — ?vehicleId" },
+  { method: "GET",   source: "Snowflake", path: "/api/samsara/odometer",             desc: "Latest odometer per vehicle — ?truckNumber or ?vin" },
   { method: "GET",   source: "Snowflake", path: "/api/samsara/trips",                desc: "Trip history — ?vehicleId, ?driverId, ?startDate, ?endDate" },
   { method: "GET",   source: "Snowflake", path: "/api/samsara/maintenance",          desc: "DTC / maintenance alerts" },
   { method: "GET",   source: "Snowflake", path: "/api/samsara/fuel",                 desc: "Fuel & energy daily — ?vehicleId, ?startDate, ?endDate" },

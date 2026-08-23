@@ -40,7 +40,14 @@ export interface SamsaraSafetyScore {
   CRASH_COUNT: number | null;
 }
 
+/**
+ * SAMSARA_ODOMETER has NO vehicle-id column. Real keys (verified live):
+ * NAME (truck number as Samsara knows it), SERIAL, VIN. Full table also
+ * carries OBD_ID/OBD_METERS/GPS_METERS/LOAD_TS_UTC not projected here.
+ */
 export interface SamsaraOdometer {
+  NAME: string | null;
+  SERIAL: string | null;
   VIN: string | null;
   OBD_MILES: number | null;
   GPS_MILES: number | null;
@@ -68,12 +75,24 @@ export interface SamsaraVehicleDtc {
   LOAD_TS_UTC: string | null;
 }
 
+/**
+ * SAMSARA_MAINTENANCE real columns (verified live). MAINT_ID IS the Samsara
+ * vehicle id (joins to SAMSARA_VEHICLES.VEHICLE_ID) — there is no VEHICLE_ID
+ * or J1939_STATUS column. Snapshot table: one row per DTC per daily load.
+ */
 export interface SamsaraMaintenance {
   MAINT_ID: string;
-  VEHICLE_ID: string;
+  J1939: string | null;
+  J1939_CHECKENGINELIGHT_EMISSIONSISON: boolean | null;
+  J1939_CHECKENGINELIGHT_PROTECTISON: boolean | null;
+  J1939_CHECKENGINELIGHT_STOPISON: boolean | null;
+  J1939_CHECKENGINELIGHT_WARNINGISON: boolean | null;
+  J1939_DIAGNOSTICTROUBLECODES: string | null;
+  PASSENGER: string | null;
   DTC_DESCRIPTION: string | null;
   DTC_ID: string | null;
-  J1939_STATUS: string | null;
+  DTC_SHORT_CODE: string | null;
+  LOAD_TS_UTC: string | null;
 }
 
 export interface SamsaraFuelEnergy {
@@ -318,27 +337,43 @@ export class SamsaraService {
     return await this.fetchFromSnowflake<SamsaraSafetyScore>(query, binds);
   }
 
-  async getOdometer(vehicleId?: string): Promise<SamsaraOdometer[]> {
-    let query = `
-      SELECT * FROM (
-        SELECT *, ROW_NUMBER() OVER (PARTITION BY VEHICLE_ID ORDER BY OBD_TIME DESC) as rn
-        FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
-      ) WHERE rn = 1
+  /**
+   * Latest odometer read per unit. SAMSARA_ODOMETER has NO VEHICLE_ID column
+   * (it keys by NAME / SERIAL / VIN), so the optional filter is a truck
+   * number (matched canonically against NAME) or a VIN — NOT a Samsara
+   * vehicle id. NULLS LAST is required: many rows carry a null OBD_TIME and
+   * a naive DESC returns them first.
+   */
+  async getOdometer(truckNumberOrVin?: string): Promise<SamsaraOdometer[]> {
+    const projection = 'NAME, SERIAL, VIN, OBD_MILES, GPS_MILES, OBD_TIME, GPS_TIME';
+    const latestPerUnit = `
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY COALESCE(NAME, VIN, SERIAL)
+        ORDER BY COALESCE(OBD_TIME, GPS_TIME) DESC NULLS LAST
+      ) = 1
     `;
-    const binds: any[] = [];
 
-    if (vehicleId) {
-      query = `
-        SELECT * FROM (
-          SELECT *, ROW_NUMBER() OVER (PARTITION BY VEHICLE_ID ORDER BY OBD_TIME DESC) as rn
-          FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
-          WHERE VEHICLE_ID = ?
-        ) WHERE rn = 1
+    if (truckNumberOrVin) {
+      const raw = String(truckNumberOrVin).trim();
+      const canonical = raw.replace(/\D/g, '').replace(/^0+/, '');
+      const query = `
+        SELECT ${projection}
+        FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+        WHERE (? != '' AND LTRIM(REGEXP_REPLACE(NAME, '[^0-9]', ''), '0') = ?)
+           OR VIN = ?
+        ${latestPerUnit}
+        LIMIT 100
       `;
-      binds.push(vehicleId);
+      return await this.fetchFromSnowflake<SamsaraOdometer>(query, [canonical, canonical, raw]);
     }
 
-    return await this.fetchFromSnowflake<SamsaraOdometer>(query, binds);
+    const query = `
+      SELECT ${projection}
+      FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
+      ${latestPerUnit}
+      LIMIT 5000
+    `;
+    return await this.fetchFromSnowflake<SamsaraOdometer>(query);
   }
 
   async getTrips(vehicleId?: string, driverId?: string, startDate?: string, endDate?: string): Promise<SamsaraTrip[]> {
@@ -369,7 +404,9 @@ export class SamsaraService {
   }
 
   async getMaintenance(): Promise<SamsaraMaintenance[]> {
-    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE LIMIT 500';
+    // Snapshot table (~1.7M rows, one row per DTC per daily load) — without
+    // recency ordering LIMIT 500 returns arbitrary years-old rows.
+    const query = 'SELECT * FROM bi_analytics.app_samsara.SAMSARA_MAINTENANCE ORDER BY LOAD_TS_UTC DESC LIMIT 500';
     return await this.fetchFromSnowflake<SamsaraMaintenance>(query);
   }
 
@@ -418,7 +455,7 @@ export class SamsaraService {
     const canonical = String(truckNumber ?? '').replace(/\D/g, '').replace(/^0+/, '');
     if (!canonical && !vin) return null;
     const query = `
-      SELECT VIN, OBD_MILES, GPS_MILES, OBD_TIME, GPS_TIME
+      SELECT NAME, SERIAL, VIN, OBD_MILES, GPS_MILES, OBD_TIME, GPS_TIME
       FROM bi_analytics.app_samsara.SAMSARA_ODOMETER
       WHERE LTRIM(REGEXP_REPLACE(NAME, '[^0-9]', ''), '0') = ?
          OR (? IS NOT NULL AND VIN = ?)
