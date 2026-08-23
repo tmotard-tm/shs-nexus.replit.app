@@ -619,7 +619,7 @@ export class SamsaraService {
         let samsaraVehicleId: string | null = null;
         if (this.isSnowflakeAvailable()) {
           const idLookup = await this.fetchFromSnowflake<{ VEHICLE_ID: string }>(
-            `SELECT VEHICLE_ID FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER = ? LIMIT 1`,
+            `SELECT VEHICLE_ID FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER = ? ORDER BY LOAD_TS_UTC DESC NULLS LAST LIMIT 1`,
             [vehicleName]
           );
           if (idLookup.length > 0) samsaraVehicleId = idLookup[0].VEHICLE_ID;

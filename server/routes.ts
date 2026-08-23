@@ -13859,7 +13859,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const placeholders = candidates.map(() => '?').join(', ');
       const [vehicleRows] = await Promise.allSettled([
         snowflake.executeQuery(
-          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER IN (${placeholders}) LIMIT 1`,
+          `SELECT * FROM bi_analytics.app_samsara.SAMSARA_VEHICLES WHERE TRUCK_NUMBER IN (${placeholders}) ORDER BY LOAD_TS_UTC DESC NULLS LAST LIMIT 1`,
           candidates
         )
       ]);
