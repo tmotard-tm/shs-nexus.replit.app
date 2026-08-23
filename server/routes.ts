@@ -19,6 +19,7 @@ import {
   registerRentalRequestPublicRoutes,
   registerRentalRequestAdminRoutes,
 } from "./vrm/forms/rental-request";
+import { registerTechScheduleRoutes } from "./vrm/tech-schedule-routes";
 import { initVrmSchema } from "./vrm/init-schema";
 import { initLogicalEntitiesSchema, seedLogicalEntities } from "./logical-entities-init";
 import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
@@ -827,6 +828,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // split as the survey — technicians have no session, Fleet does.
     registerRentalRequestAdminRoutes(vrmRouter);
     registerRentalRequestPublicRoutes(app);
+    // Technician schedule reads (Marino's tech-shifts feed). Session-gated:
+    // until now the only schedule endpoint in the app was the internal-cron
+    // /forms/rental-survey/cutover/schedule-check, which no page could call.
+    registerTechScheduleRoutes(vrmRouter);
     // Dispatcher: the consolidated read-only mirror endpoint
     // /api/vrm/repair-tracker/full also accepts a Bearer token via the
     // VRM_REPAIR_TRACKER_API_KEY secret for server-to-server consumers.
