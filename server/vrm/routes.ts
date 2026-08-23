@@ -2980,16 +2980,44 @@ export function registerVrmRoutes(): Router {
     try {
       const { id } = req.params;
       const techLdap = String(req.body?.techLdap ?? "").trim().toUpperCase();
-      const techName = String(req.body?.techName ?? "").trim();
       if (!techLdap) return res.status(400).json({ ok: false, error: "techLdap required" });
       const row = await getHolmanPoRow(id);
       if (!row) return res.status(404).json({ ok: false, error: "PO not found" });
       if (!["pending", "blocked", "approve_failed", "deny_failed"].includes(row.status)) {
         return res.status(400).json({ ok: false, error: `Already ${row.status}` });
       }
-      await overrideHolmanPoTechMatch(id, techLdap, techName || techLdap);
+      // Validate the LDAP against the SAME two identity sources as
+      // /api/vrm/tech-search (TPMS profiles first, then active roster) and
+      // derive the display name server-side. Previously any string bound as a
+      // match and the client's techName was literally the LDAP, so a typo'd
+      // LDAP became a "matched" PO with no real technician behind it. Unknown
+      // LDAP fails closed — every assign-like entry point must validate its
+      // target server-side.
+      const identRes = await db.execute(sql`
+        SELECT ldap, first_name, last_name, source FROM (
+          SELECT UPPER(tp.enterprise_id) AS ldap, tp.first_name, tp.last_name,
+                 'tpms'::text AS source, 0 AS source_rank
+          FROM tpms_tech_profiles tp
+          WHERE UPPER(tp.enterprise_id) = ${techLdap}
+          UNION ALL
+          SELECT UPPER(at.tech_racfid) AS ldap, at.first_name, at.last_name,
+                 'roster'::text AS source, 1 AS source_rank
+          FROM all_techs at
+          WHERE UPPER(at.tech_racfid) = ${techLdap} AND at.employment_status = 'A'
+        ) merged ORDER BY source_rank ASC LIMIT 1
+      `);
+      const ident: any = identRes.rows?.[0];
+      if (!ident) {
+        return res.status(422).json({
+          ok: false,
+          error: `${techLdap} is not a known technician (not in TPMS or the active roster) — use the tech search to pick a valid LDAP`,
+        });
+      }
+      const techName =
+        [ident.first_name, ident.last_name].filter(Boolean).join(" ").trim() || techLdap;
+      await overrideHolmanPoTechMatch(id, techLdap, techName);
       // Recommendation for the tech we just bound, through the shared path.
-      const evalRow: any = { tech_ldap: techLdap, tech_name: techName || techLdap };
+      const evalRow: any = { tech_ldap: techLdap, tech_name: techName };
       try {
         const snap = await db.execute(sql`
           SELECT tech_ldap, tech_name, recommendation, scorecard_score

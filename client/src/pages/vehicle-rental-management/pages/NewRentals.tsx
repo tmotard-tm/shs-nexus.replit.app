@@ -1208,7 +1208,9 @@ export default function NewRentals() {
       const r = await fetch(`/api/vrm/holman-po-queue/${id}/tech-match`, {
         method: "POST", credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ techLdap, techName: techLdap }),
+        // techName is derived server-side from TPMS/roster identity sources;
+        // an LDAP that matches neither is refused (422).
+        body: JSON.stringify({ techLdap }),
       });
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
       return r.json();

@@ -149,4 +149,5 @@
 - [Off-page direct-billing list scope](direct-offpage-scope.md) — only a BOOKED cutover row excludes; old-book test is identity-based (no anchors exist, no 'rolled'); unresolved = 'unknown' bucket, never clean.
 - [Cutover Holman-book anchoring](cutover-book-anchoring.md) — enterprise_direct rows share vendor 'Enterprise Rent-A-Car' with the ECARS book (filter source='enterprise'); case rows overwrite per truck → book state rides booking-time ticket anchors, never force-overwrite non-empty ones.
 - [Renter assigned-truck single source](renter-assigned-truck-source.md) — TPMS-first shared fragment only; roster-only truck_lu copies go stale and fed LUCA wrong trucks + starved redirect PO/scrape coverage.
+- [VRM page parity audit map](vrm-page-parity-audit.md) — surfaces composing master-board derivations are aligned; drift re-enters via independent copies (repair tracker, Holman PO queue, legacy /rental-operations FS-mirror page).
 - [Tech shifts schedule feed](tech-shifts-feed.md) — secret name is plural TECHS_SHIFTS_API_KEY (client takes both); fetchShiftRows caches by query only (env-blind — test trap); VRM page + Fleet Scope wrapper + request drawer.
