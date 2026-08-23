@@ -318,3 +318,157 @@ describe("route guards", () => {
     assert.equal(r.status, 404);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Live-book evidence (Tyler 2026-08-23): the page must know direct-billed from
+// the rental-ops book ITSELF, not only via the import-time stamp — prod ran
+// two direct imports on pre-stamp code and read zero switched while 200+
+// enterprise_direct cases sat live on the book.
+
+describe("live rental-ops book evidence (no report stamp)", () => {
+  const CASE_PREFIX = "ZZDB9";
+  const EMP_PREFIX = "ZZDBEMP";
+
+  async function bookCleanup() {
+    await db.execute(sql`DELETE FROM vrm_rental_identity_resolutions WHERE case_key LIKE ${CASE_PREFIX + "%"}`);
+    await db.execute(sql`DELETE FROM vrm_rental_operations_cases WHERE case_key LIKE ${CASE_PREFIX + "%"}`);
+    await db.execute(sql`DELETE FROM all_techs WHERE employee_id LIKE ${EMP_PREFIX + "%"}`);
+  }
+
+  /** Cutover row + roster tech + identity-resolved enterprise_direct case. */
+  async function insertBookFixture(n: number, over: {
+    presentInLatest?: boolean;
+    irState?: string;
+    source?: string;
+  } = {}): Promise<string> {
+    const ldap = `${LDAP_PREFIX}BK${n}`;
+    const caseKey = `${CASE_PREFIX}${n}`;
+    const empId = `${EMP_PREFIX}${n}`;
+    await insertCutover(ldap, { confirmedAt: false, lastSeenAt: false }); // NO stamp
+    await db.execute(sql`
+      INSERT INTO all_techs (employee_id, tech_racfid, tech_name, employment_status)
+      VALUES (${empId}, ${ldap}, 'ZZ BOOK FIXTURE', 'A')`);
+    await db.execute(sql`
+      INSERT INTO vrm_rental_operations_cases
+        (case_key, vehicle_number, vehicle_number_padded, source, rental_vendor,
+         ticket_status, present_in_latest)
+      VALUES (${caseKey}, ${caseKey}, ${caseKey}, ${over.source ?? "enterprise_direct"},
+              'Enterprise Rent-A-Car', 'OPEN', ${over.presentInLatest ?? true})`);
+    await db.execute(sql`
+      INSERT INTO vrm_rental_identity_resolutions (case_key, state, resolved_employee_id)
+      VALUES (${caseKey}, ${over.irState ?? "RESOLVED"}, ${empId})`);
+    return ldap;
+  }
+
+  before(bookCleanup);
+  after(async () => { await bookCleanup().catch(() => {}); });
+
+  test("an unstamped tech whose resolved rental rides the live book as enterprise_direct IS effective", async () => {
+    const ldap = await insertBookFixture(1);
+    const row = await payloadRow(ldap);
+    assert.ok(row, "fixture row must appear in the payload");
+    assert.equal(row.direct_billing_book_live, true);
+    assert.equal(row.direct_billing_effective, true,
+      "live book evidence must count as billing-switched without a stamp");
+    assert.equal(row.direct_billing_confirmed_at, null, "no stamp was ever written");
+  });
+
+  test("a human void beats live-book evidence — book presence never overrides voided_at", async () => {
+    const ldap = await insertBookFixture(2);
+    await db.execute(sql`
+      UPDATE vrm_rental_cutover
+      SET direct_billing_voided_at = now(), direct_billing_voided_by = ${ACTOR},
+          direct_billing_void_reason = 'fixture: human says not direct-billed'
+      WHERE upper(trim(ldap)) = ${ldap}`);
+    const row = await payloadRow(ldap);
+    assert.equal(row.direct_billing_book_live, true, "the book fact itself is still reported");
+    assert.equal(row.direct_billing_effective, false,
+      "voided row must NOT flip back on book evidence alone");
+  });
+
+  test("a case dropped from the latest feed does not count", async () => {
+    const ldap = await insertBookFixture(3, { presentInLatest: false });
+    const row = await payloadRow(ldap);
+    assert.equal(row.direct_billing_book_live, false);
+    assert.equal(row.direct_billing_effective, false);
+  });
+
+  test("REVIEW-state identity never counts — mirrors 'REVIEW evidence never stamps'", async () => {
+    const ldap = await insertBookFixture(4, { irState: "REVIEW" });
+    const row = await payloadRow(ldap);
+    assert.equal(row.direct_billing_book_live, false);
+    assert.equal(row.direct_billing_effective, false);
+  });
+
+  test("an old-book enterprise case (not enterprise_direct) is not direct-billing evidence", async () => {
+    const ldap = await insertBookFixture(5, { source: "enterprise" });
+    const row = await payloadRow(ldap);
+    assert.equal(row.direct_billing_book_live, false);
+    assert.equal(row.direct_billing_effective, false);
+  });
+
+  test("an employee's OLD LDAP row never lights up — only the current roster racfid counts", async () => {
+    // all_techs is UNIQUE on employee_id (one roster row per employee), so
+    // the real-world hazard is a cutover row filed under an ldap the roster
+    // no longer carries for that employee: it must never light up off the
+    // employee's current direct rental.
+    const empId = `${EMP_PREFIX}6`;
+    const newLdap = `${LDAP_PREFIX}BK6`;
+    const oldLdap = `${LDAP_PREFIX}BK6X`;
+    const caseKey = `${CASE_PREFIX}6`;
+    await insertCutover(newLdap, { confirmedAt: false, lastSeenAt: false });
+    await insertCutover(oldLdap, { confirmedAt: false, lastSeenAt: false });
+    await db.execute(sql`
+      INSERT INTO all_techs (employee_id, tech_racfid, tech_name, employment_status)
+      VALUES (${empId}, ${newLdap}, 'ZZ MULTI FIXTURE', 'A')`);
+    await db.execute(sql`
+      INSERT INTO vrm_rental_operations_cases
+        (case_key, vehicle_number, vehicle_number_padded, source, rental_vendor, ticket_status, present_in_latest)
+      VALUES (${caseKey}, ${caseKey}, ${caseKey}, 'enterprise_direct', 'Enterprise Rent-A-Car', 'OPEN', true)`);
+    await db.execute(sql`
+      INSERT INTO vrm_rental_identity_resolutions (case_key, state, resolved_employee_id)
+      VALUES (${caseKey}, 'RESOLVED', ${empId})`);
+    const newRow = await payloadRow(newLdap);
+    const oldRow = await payloadRow(oldLdap);
+    assert.equal(newRow.direct_billing_book_live, true, "current roster ldap must count");
+    assert.equal(oldRow.direct_billing_book_live, false, "an ldap the roster no longer carries must NOT count");
+    assert.equal(oldRow.direct_billing_effective, false);
+  });
+
+  test("a human OVERRIDE identity counts even when the resolver state is REVIEW", async () => {
+    const ldap = await insertBookFixture(7, { irState: "REVIEW" });
+    // No effect yet (REVIEW never counts) — now a human overrides to this employee.
+    await db.execute(sql`
+      UPDATE vrm_rental_identity_resolutions
+      SET override_employee_id = ${`${EMP_PREFIX}7`}, override_by = ${ACTOR}, override_at = now()
+      WHERE case_key = ${`${CASE_PREFIX}7`}`);
+    const row = await payloadRow(ldap);
+    assert.equal(row.direct_billing_book_live, true);
+    assert.equal(row.direct_billing_effective, true);
+  });
+
+  test("includeAllStamped admits a NON-booked, book-live-only row into the conflict scan", async () => {
+    const ldap = await insertBookFixture(8);
+    await db.execute(sql`
+      UPDATE vrm_rental_cutover SET reservation_status = 'released'
+      WHERE upper(trim(ldap)) = ${ldap}`);
+    const pageRow = await payloadRow(ldap);
+    assert.equal(pageRow, undefined, "page scope stays booked-only");
+    const widened = await buildCutoverStatusPayload({ includeAllStamped: true });
+    const scanRow = (widened.rows as any[])
+      .find((r) => String(r.ldap ?? "").toUpperCase() === ldap);
+    assert.ok(scanRow, "double-billing scan must see the book-live released row");
+    assert.equal(scanRow.direct_billing_effective, true);
+  });
+
+  test("billing_switched payload count includes book-live rows", async () => {
+    const payload = await buildCutoverStatusPayload();
+    const bookLdaps = new Set([`${LDAP_PREFIX}BK1`]);
+    const counted = (payload.rows as any[])
+      .filter((r) => bookLdaps.has(String(r.ldap ?? "").toUpperCase())
+        && r.direct_billing_effective === true).length;
+    assert.equal(counted, 1);
+    assert.ok(payload.billing_switched >= 1,
+      "billing_switched must reflect book-live rows, not just stamps");
+  });
+});

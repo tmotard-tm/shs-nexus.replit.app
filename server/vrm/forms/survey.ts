@@ -1832,6 +1832,17 @@ export async function buildCutoverStatusPayload(opts?: {
                  AND (c.direct_billing_voided_at IS NULL
                       OR (c.direct_billing_last_seen_at IS NOT NULL
                           AND c.direct_billing_last_seen_at > c.direct_billing_voided_at)))`;
+  // Tyler 2026-08-23: the page must know direct-billed from the rental-ops
+  // book ITSELF, not only via the import-time stamp — prod ran two direct
+  // imports on pre-stamp code and the page read zero switched while 200+
+  // enterprise_direct cases sat on the live book. A cutover tech whose
+  // identity-resolved rental rides the CURRENT book as enterprise_direct is
+  // direct-billed, stamp or no stamp (dbk join below). A human void still
+  // wins: book evidence never overrides voided_at — the stamp's
+  // later-sighting rule stays the ONLY supersede path.
+  const liveBookSql = sql`(COALESCE(dbk.direct_live, 0) > 0
+                 AND c.direct_billing_voided_at IS NULL)`;
+  const effectiveSql = sql`(${effectiveStampSql} OR ${liveBookSql})`;
   const { rows } = await db.execute(sql`
         SELECT c.ldap, c.tech_name, c.truck_number, c.van_status,
                s.rental_branch_city, s.rental_branch_state, s.surveyed_at,
@@ -1880,12 +1891,16 @@ export async function buildCutoverStatusPayload(opts?: {
                c.direct_billing_evidence->>'fileDate' AS direct_billing_file_date,
                c.direct_billing_voided_at, c.direct_billing_voided_by,
                c.direct_billing_void_reason,
-               -- Premortem #4: the effective-stamp predicate (defined once in
+               -- Premortem #4: the effective predicate (defined once in
                -- TS above, interpolated here and in the WHERE) so the page
                -- buckets, the payload counts and the import's conflict scan
-               -- can never disagree.
-               ${effectiveStampSql}
+               -- can never disagree. Effective = report stamp in force OR the
+               -- tech's identity-resolved rental rides the CURRENT rental-ops
+               -- book as enterprise_direct (and no human void).
+               ${effectiveSql}
                  AS direct_billing_effective,
+               (COALESCE(dbk.direct_live, 0) > 0)
+                 AS direct_billing_book_live,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
         -- Pickup day, parsed once, kept as TEXT on purpose: reservation_start
@@ -2000,6 +2015,31 @@ export async function buildCutoverStatusPayload(opts?: {
               ELSE 'unanchored'
             END AS book_state
         ) hb ON TRUE
+        -- Live direct-billing book evidence (Tyler 2026-08-23): does THIS
+        -- tech's identity-resolved rental sit on the current rental-ops book
+        -- as an enterprise_direct case? Identity-verified only (override or
+        -- RESOLVED) — REVIEW-state matches never count, mirroring the
+        -- importer's own "REVIEW evidence never stamps" rule.
+        LEFT JOIN LATERAL (
+          SELECT count(*) AS direct_live
+          FROM vrm_rental_operations_cases c2
+          JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c2.case_key
+          -- Canonical roster row ONLY (active first, then latest sync):
+          -- all_techs keeps terminated/historical rows per employee, and a
+          -- bare employee_id+racfid join would let an employee's OLD or
+          -- reused LDAP light up the wrong cutover row as switched. The
+          -- employee's one canonical racfid must BE this row's ldap.
+          JOIN LATERAL (
+            SELECT a.tech_racfid
+            FROM all_techs a
+            WHERE a.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+            ORDER BY (a.employment_status = 'A') DESC, a.synced_at DESC NULLS LAST
+            LIMIT 1
+          ) a4 ON upper(a4.tech_racfid) = upper(c.ldap)
+          WHERE c2.present_in_latest
+            AND c2.source = 'enterprise_direct'
+            AND (ir.override_employee_id IS NOT NULL OR upper(COALESCE(ir.state, '')) = 'RESOLVED')
+        ) dbk ON TRUE
         -- Widened 2026-08-20: previously this required a filed, live route block,
         -- so a booked reservation with no block was absent from the page rather
         -- than shown as a problem. That is how 8 technicians ended up holding a
@@ -2010,7 +2050,7 @@ export async function buildCutoverStatusPayload(opts?: {
         -- tech is confirmed on the direct account can still be double-billed.
         -- The page route calls with no options, so its scope is unchanged.
         WHERE (c.reservation_status = 'booked'
-               ${opts?.includeAllStamped ? sql`OR ${effectiveStampSql}` : sql``})
+               ${opts?.includeAllStamped ? sql`OR ${effectiveSql}` : sql``})
         ORDER BY c.ldap
       `);
 

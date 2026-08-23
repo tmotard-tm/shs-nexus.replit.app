@@ -86,6 +86,12 @@ interface Row {
    * surface on this page keys on this, never on confirmed_at directly.
    */
   direct_billing_effective?: boolean | null;
+  /**
+   * Live rental-ops book evidence: this tech's identity-resolved rental is on
+   * the CURRENT book as an enterprise_direct case. Counts toward effective
+   * even when the import-time stamp is absent (a void still wins).
+   */
+  direct_billing_book_live?: boolean | null;
 }
 
 interface Payload {
@@ -163,8 +169,10 @@ function bookTone(state: string | null | undefined): { label: string; fg: string
  */
 function stampEffective(r: Row): boolean {
   if (typeof r.direct_billing_effective === "boolean") return r.direct_billing_effective;
-  // Exact mirror of the SQL: confirmed AND (no void OR a LATER sighting
-  // supersedes it). An unparseable date reads as not-superseded (voided).
+  // Exact mirror of the SQL: (stamp confirmed AND (no void OR a LATER
+  // sighting supersedes it)) OR (on the live direct book AND no void). An
+  // unparseable date reads as not-superseded (voided).
+  if (r.direct_billing_book_live === true && r.direct_billing_voided_at == null) return true;
   if (r.direct_billing_confirmed_at == null) return false;
   if (r.direct_billing_voided_at == null) return true;
   const seen = Date.parse(r.direct_billing_last_seen_at ?? "");
@@ -814,7 +822,9 @@ export default function CutoverTracking() {
                   <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}
                       title={r.direct_billing_ra
                         ? `RA ${r.direct_billing_ra}${r.direct_billing_file_date ? ` · report ${r.direct_billing_file_date}` : ""}`
-                        : undefined}>
+                        : r.direct_billing_book_live
+                          ? "on the current direct-billing book (rental ops) — no report stamp yet"
+                          : undefined}>
                     {(() => {
                       const voidBtn = (action: "void" | "unvoid", label: string) => (
                         <button onClick={() => promptVoid(r.ldap, action)}
