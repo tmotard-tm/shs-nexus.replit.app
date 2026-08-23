@@ -17,6 +17,7 @@ import LucaActivity from "./pages/LucaActivity";
 import RentalSurvey from "./pages/RentalSurvey";
 import CutoverTracking from "./pages/CutoverTracking";
 import RentalRequests from "./pages/RentalRequests";
+import TechSchedules from "./pages/TechSchedules";
 import Settings from "./pages/Settings";
 
 function getPageTitle(path: string): string {
@@ -84,6 +85,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management/inbound-calls" component={InboundCalls} />
             <Route path="/vehicle-rental-management/luca-activity" component={LucaActivity} />
             <Route path="/vehicle-rental-management/rental-requests" component={RentalRequests} />
+            <Route path="/vehicle-rental-management/tech-schedules" component={TechSchedules} />
             <Route path="/vehicle-rental-management/rental-survey" component={RentalSurvey} />
             <Route path="/vehicle-rental-management/cutover-tracking" component={CutoverTracking} />
             <Route path="/vehicle-rental-management/settings" component={Settings} />

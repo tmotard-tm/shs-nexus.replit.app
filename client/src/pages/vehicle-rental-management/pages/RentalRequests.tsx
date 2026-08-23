@@ -12,9 +12,13 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X } from "lucide-react";
+import { ArrowUp, ArrowDown, ArrowUpDown, CalendarDays, ChevronRight, Search, Download, X } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
 import CutoverIntentPanel from "../components/CutoverIntentPanel";
+import {
+  TechSchedulePickupCheck,
+  TechScheduleDialog,
+} from "@/components/tech-schedule/TechScheduleView";
 import {
   deriveBookingStatus,
   bookingBadge,
@@ -444,6 +448,11 @@ export default function RentalRequests() {
   // Staff view splits new requests from extensions: they read differently
   // (booking pipeline vs. Enterprise email), so they queue differently.
   const [tab, setTab] = useState<"new" | "extension">("new");
+  // The drawer header can always reach the full two-week schedule, even on a
+  // request with no pickup date yet (denied, returned, still pending).
+  // Keyed by request number rather than a boolean: a boolean stays true when
+  // the drawer closes, so the dialog would spring open on the next row clicked.
+  const [scheduleFor, setScheduleFor] = useState<number | null>(null);
   // Enterprise files extensions by reservation / RA number — which the row
   // does not reliably hold — so the approver supplies it. Days default 7.
   const [extResNo, setExtResNo] = useState("");
@@ -1222,11 +1231,29 @@ export default function RentalRequests() {
               <div style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink }}>
                 #{detail.request_no} · {detail.tech_name || detail.ldap}
               </div>
-              <button type="button" onClick={() => { suggestedFor.current = null; setDetail(null); }}
-                      style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted }}>
-                <X size={18} />
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <button type="button" onClick={() => setScheduleFor(detail.request_no)}
+                        title="Technician's shift schedule"
+                        style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: fonts.dmSans,
+                                 fontSize: 11, fontWeight: 600, padding: "4px 9px", borderRadius: 6,
+                                 border: `1px solid ${colors.rule}`, background: colors.surface,
+                                 color: colors.inkSoft, cursor: "pointer" }}>
+                  <CalendarDays size={12} /> Schedule
+                </button>
+                <button type="button" onClick={() => { suggestedFor.current = null; setDetail(null); }}
+                        style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted }}>
+                  <X size={18} />
+                </button>
+              </div>
             </div>
+            <TechScheduleDialog
+              open={scheduleFor === detail.request_no}
+              onClose={() => setScheduleFor(null)}
+              ldap={detail.ldap}
+              name={detail.tech_name}
+              highlightDate={pickupDate || null}
+              weeks={2}
+            />
             {/* Scrollable body between the fixed header and the pinned action bar. */}
             <div style={{ flex: 1, overflowY: "auto", padding: "12px 20px 20px" }}>
 
@@ -1811,6 +1838,16 @@ export default function RentalRequests() {
                   Friday request: {pendingReason}
                 </div>
               ) : null}
+              {/* Does this technician actually work the date in the field above?
+                  Until now the only schedule signal on this drawer was the
+                  Friday/Saturday sentence, which answers one weekday out of
+                  seven. This answers every day, from the live shift feed, and
+                  names the next working day when the answer is no. */}
+              <TechSchedulePickupCheck
+                ldap={detail.ldap}
+                pickupDate={pickupDate}
+                name={detail.tech_name}
+              />
               {/* The return date IS the number of days. Leave it blank and the
                   booking falls back to 7 days, which is what every reservation
                   silently got before this existed. */}

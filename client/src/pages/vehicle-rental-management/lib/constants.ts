@@ -12,6 +12,7 @@ import {
   Settings2,
   BarChart3,
   Activity,
+  CalendarDays,
   type LucideIcon,
 } from "lucide-react";
 
@@ -125,6 +126,7 @@ export const navItems: NavItem[] = [
   { label: "Inbound Calls", path: "/vehicle-rental-management/inbound-calls", icon: PhoneIncoming },
   { label: "LUCA Activity", path: "/vehicle-rental-management/luca-activity", icon: Activity },
   { label: "Rental Requests", path: "/vehicle-rental-management/rental-requests", icon: FileQuestion },
+  { label: "Tech Schedules", path: "/vehicle-rental-management/tech-schedules", icon: CalendarDays },
   { label: "Rental Survey", path: "/vehicle-rental-management/rental-survey", icon: ClipboardCheck },
   { label: "Cutover Tracking", path: "/vehicle-rental-management/cutover-tracking", icon: ClipboardCheck },
   { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
