@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SOP — Rental Request &amp; Extension Forms</title>
+<style>
+  @page { size: Letter; margin: 0.7in 0.65in; }
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, Helvetica, sans-serif; color: #1a2433; font-size: 10.5pt; line-height: 1.45; margin: 0; }
+  h1, h2, h3 { color: #00529B; font-weight: 700; }
+  h1 { font-size: 20pt; margin: 0 0 2pt; }
+  h2 { font-size: 14pt; border-bottom: 2.5pt solid #00529B; padding-bottom: 3pt; margin: 22pt 0 8pt; page-break-after: avoid; }
+  h3 { font-size: 11.5pt; margin: 14pt 0 5pt; page-break-after: avoid; }
+  .cover { background: linear-gradient(135deg, #00529B, #003A70); color: #fff; border-radius: 10px; padding: 26pt 24pt; margin-bottom: 14pt; }
+  .cover h1 { color: #fff; }
+  .cover .sub { font-size: 11pt; opacity: .92; margin-top: 4pt; }
+  .cover .meta { font-size: 9pt; opacity: .8; margin-top: 14pt; }
+  .toc { border: 1pt solid #D8E2EE; border-radius: 8px; padding: 10pt 14pt; background: #F4F8FC; }
+  .toc ol { margin: 4pt 0 4pt 16pt; padding: 0; }
+  .toc li { margin: 3pt 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8pt 0; page-break-inside: auto; }
+  th { background: #00529B; color: #fff; text-align: left; font-size: 9.5pt; padding: 5pt 7pt; }
+  td { border: 0.75pt solid #C9D6E4; padding: 5pt 7pt; font-size: 9.5pt; vertical-align: top; }
+  tr:nth-child(even) td { background: #F7FAFD; }
+  tr { page-break-inside: avoid; }
+  .step { display: flex; gap: 8pt; margin: 10pt 0; page-break-inside: avoid; }
+  .stepnum { flex: 0 0 auto; width: 18pt; height: 18pt; border-radius: 50%; background: #00529B; color: #fff; font-weight: 700; font-size: 10pt; text-align: center; line-height: 18pt; }
+  .stepbody { flex: 1; }
+  .stepbody b.t { color: #003A70; }
+  .callout { border-left: 4pt solid #00529B; background: #EDF4FB; padding: 7pt 10pt; border-radius: 0 6px 6px 0; margin: 8pt 0; page-break-inside: avoid; }
+  .callout.warn { border-color: #B45309; background: #FEF6E7; }
+  .callout.stop { border-color: #B91C1C; background: #FCECEC; }
+  .callout.ok { border-color: #15803D; background: #ECF7EF; }
+  .callout .lbl { font-weight: 700; font-size: 9pt; text-transform: uppercase; letter-spacing: .06em; }
+  .shot { text-align: center; margin: 10pt auto; page-break-inside: avoid; }
+  .shot img { max-width: 62%; border: 1pt solid #C9D6E4; border-radius: 8px; box-shadow: 0 2pt 6pt rgba(0,40,80,.12); }
+  .shot img.wide { max-width: 100%; }
+  .shot img.tall { max-width: 46%; }
+  .shot .cap { font-size: 8.5pt; color: #5B6B7E; margin-top: 4pt; font-style: italic; }
+  .twocol { display: flex; gap: 10pt; align-items: flex-start; }
+  .twocol .shot { flex: 1; margin: 0; }
+  .twocol .shot img { max-width: 100%; }
+  code, .msg { font-family: Consolas, Menlo, monospace; font-size: 8.8pt; background: #F1F5F9; border: 0.5pt solid #D8E2EE; border-radius: 3px; padding: 0.5pt 3pt; }
+  .msg { display: block; padding: 4pt 7pt; margin: 3pt 0; white-space: normal; }
+  .pagebreak { page-break-before: always; }
+  ul { margin: 4pt 0 8pt 16pt; padding: 0; }
+  li { margin: 2.5pt 0; }
+  .pill { display: inline-block; border-radius: 10px; padding: 0.5pt 7pt; font-size: 8.5pt; font-weight: 700; }
+  .pill.g { background: #ECF7EF; color: #15803D; border: 0.75pt solid #15803D; }
+  .pill.r { background: #FCECEC; color: #B91C1C; border: 0.75pt solid #B91C1C; }
+  .pill.y { background: #FEF6E7; color: #B45309; border: 0.75pt solid #B45309; }
+  .pill.b { background: #EDF4FB; color: #00529B; border: 0.75pt solid #00529B; }
+  .footer-note { color: #5B6B7E; font-size: 8.5pt; margin-top: 18pt; border-top: 0.75pt solid #D8E2EE; padding-top: 6pt; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Rental Request &amp; Extension Forms</h1>
+  <div class="sub">Standard Operating Procedure — Technician Self-Serve Intake &amp; Fleet Review</div>
+  <div class="meta">Sears Home Services · Fleet Operations &nbsp;|&nbsp; Version 1.0 &nbsp;|&nbsp; August 23, 2026 &nbsp;|&nbsp; Screenshots use sample data</div>
+</div>
+
+<div class="toc">
+  <b>Contents</b>
+  <ol>
+    <li>Overview — what the form is and how technicians reach it</li>
+    <li>Technician walkthrough — requesting a NEW rental</li>
+    <li>Technician walkthrough — requesting an EXTENSION</li>
+    <li>Messages the technician may see (and what they mean)</li>
+    <li>Fleet staff — reviewing and answering requests</li>
+    <li>Status vocabulary reference</li>
+  </ol>
+</div>
+
+<h2>1. Overview</h2>
+<p>The rental request form is a single mobile-friendly page where a technician asks Fleet for a rental vehicle — either a <b>new rental</b> (van is down, or a new hire has no van yet) or an <b>extension</b> (more time on a rental they already hold). It replaces calling Holman.</p>
+<ul>
+  <li><b>One permanent link:</b> <code>https://SHS-Nexus.replit.app/rental-request</code> — no login, no app. It works from a phone standing next to a dead van. The technician proves who they are by entering their LDAP; the form checks it against the technician roster.</li>
+  <li><b>How technicians get the link:</b> it can be posted/shared anywhere (it is permanent), the weekly extension-reminder text includes it, and every Fleet decision text (approval, send-back, denial) includes it where relevant.</li>
+  <li><b>One request at a time:</b> the form refuses a second request while one is already open, and allows one filed request per day. This is deliberate — it keeps Fleet working a single ticket per technician.</li>
+  <li><b>Nothing is booked by the form itself.</b> Submitting creates a request for Fleet to review. The technician is told the decision by text.</li>
+</ul>
+
+<div class="pagebreak"></div>
+<h2>2. Technician walkthrough — requesting a NEW rental</h2>
+
+<div class="step"><div class="stepnum">1</div><div class="stepbody">
+  <b class="t">Open the link and enter your LDAP.</b> Type your LDAP (e.g. JSMITH1) and press <b>Start</b>. If the LDAP is not on the roster the form says so — check spelling, or contact Fleet if you just started.
+</div></div>
+<div class="shot"><img class="tall" src="{{IMG:01-landing}}" alt="Landing"><div class="cap">Fig. 1 — The landing screen. LDAP only; no password.</div></div>
+
+<div class="step"><div class="stepnum">2</div><div class="stepbody">
+  <b class="t">Confirm your identity.</b> The form shows what Fleet has on record — name, truck, district, state, mobile. If it is right, tap <b>Correct</b>. If anything is wrong, tap <b>Something's wrong</b> and fix the truck number or mobile number (10 digits), or explain in the box. <b>The mobile number matters most</b> — every decision arrives by text at this number.
+</div></div>
+<div class="twocol">
+  <div class="shot"><img src="{{IMG:02-identity}}" alt="Identity"><div class="cap">Fig. 2 — Identity check + request type choice.</div></div>
+  <div class="shot"><img src="{{IMG:03-identity-fix}}" alt="Fix"><div class="cap">Fig. 3 — "Something's wrong": edit truck / mobile, or explain.</div></div>
+</div>
+
+<div class="step"><div class="stepnum">3</div><div class="stepbody">
+  <b class="t">Pick what you need.</b> The form pre-selects based on Fleet's records (if records show you already hold a rental, it defaults to Extension). You can override it — records can lag — but the form will ask for one line explaining why.
+</div></div>
+
+<div class="step"><div class="stepnum">4</div><div class="stepbody">
+  <b class="t">Answer the questions.</b> The table below lists every question and what a good answer looks like. Fig. 4 shows a fully completed example.
+</div></div>
+
+<table>
+  <tr><th style="width:34%">Question</th><th>What is expected</th></tr>
+  <tr><td><b>Are you 21 years of age or older?</b></td><td>Enterprise will not rent to drivers under 21. Answering <b>No</b> stops the form — contact Holman (ARI) instead; they can book through Avis or Hertz.</td></tr>
+  <tr><td><b>What issues are you having with your work van?</b></td><td>Pick the closest match: <i>New hire</i> (no van yet) · <i>Breakdown</i> (won't run/drive, or decommissioned) · <i>Accident or collision</i> · <i>Scheduled maintenance</i>. Accident adds an "Are you okay?" question — <b>if you are hurt, call 911 first. This form can wait.</b></td></tr>
+  <tr><td><b>Is your van being towed?</b></td><td>Yes / No. Skipped for new hires.</td></tr>
+  <tr><td><b>Describe the issue</b></td><td>Your own words, as much detail as possible: what happened, when, any warning lights, what you already tried. This is what Fleet reads first.</td></tr>
+  <tr><td><b>Repair shop — name, street, city, state, phone</b></td><td><b>This one needs to be right.</b> Fleet calls the shop to check on your van. Use the shop's real business phone (10 digits).</td></tr>
+  <tr><td><b>Date your van goes into the shop</b></td><td><b>Your rental starts on this date</b> — not before.</td></tr>
+  <tr><td><b>Which Enterprise location?</b></td><td>The branch where the reservation is made and where you pick the rental up. Google "Enterprise Rent-A-Car near me" and copy the name + street. <b>No airport branches</b> if avoidable. <i>New hires answer this plus their first day on the road instead of the shop questions.</i></td></tr>
+  <tr><td><b>Acknowledgements</b></td><td>One combined checkbox for the request statements (not scheduled maintenance; van cannot be driven safely; return within 1 working day of van completion; information accurate) plus four individual terms: working-hours use only, return before 3+ days off, request an extension every 7 days, discipline up to termination for misuse. <b>All boxes are required and recorded with the request.</b></td></tr>
+</table>
+
+<div class="shot"><img class="tall" src="{{IMG:05-new-rental-full}}" alt="New rental filled"><div class="cap">Fig. 4 — A completed new-rental request (breakdown at a shop), ready to submit.</div></div>
+
+<div class="callout ok"><span class="lbl">After submit</span><br>
+The technician sees <b>"Request received — Fleet has your request and will review it. You will get a text as soon as it is decided."</b> No confirmation number yet: booking only happens after Fleet approves.</div>
+
+<div class="pagebreak"></div>
+<h2>3. Technician walkthrough — requesting an EXTENSION</h2>
+<p>An extension is <b>more time on the rental you already have</b> — never a different vehicle. Policy requires an extension request <b>every 7 days</b> while you hold a rental; the automated Fleet reminder text also links here. Steps 1–2 (LDAP + identity) are identical; the form then shows the rental Fleet believes you hold and asks five questions about the repair.</p>
+
+<table>
+  <tr><th style="width:34%">Question</th><th>What is expected</th></tr>
+  <tr><td><b>Your current rental</b> (shown, not asked)</td><td>Vehicle, vendor, start date, days so far, extensions so far, location — from Fleet's records. If this is not the rental you hold, say so in the first answer box.</td></tr>
+  <tr><td><b>What is the current status of your van's repair?</b></td><td>Where the van is and what state it is in — e.g. "Still at the shop, waiting on a transmission part."</td></tr>
+  <tr><td><b>When did you last speak with the shop?</b></td><td>A date. Fleet expects technicians to be checking on their own van — "last week" answers get called.</td></tr>
+  <tr><td><b>What did the shop say?</b></td><td>Their actual words — e.g. "waiting on a transmission part, due Thursday."</td></tr>
+  <tr><td><b>When does the shop expect the van to be done?</b> (optional)</td><td>Date, if the shop gave one.</td></tr>
+  <tr><td><b>Roughly how much longer do you need the rental?</b></td><td>Plain estimate — "about one more week."</td></tr>
+  <tr><td><b>Acknowledgements</b></td><td>The full set again. Extensions re-sign every term, every week — that is deliberate.</td></tr>
+</table>
+
+<div class="shot"><img class="tall" src="{{IMG:06-extension-full}}" alt="Extension filled"><div class="cap">Fig. 5 — A completed extension request, showing the current-rental card and repair-status answers.</div></div>
+
+<div class="callout ok"><span class="lbl">After submit</span><br>
+"Request received" plus <b>"Keep the rental until you hear from us."</b> The technician keeps driving the rental — an extension request is never a reason to return it.</div>
+
+<h2>4. Messages the technician may see</h2>
+<table>
+  <tr><th style="width:30%">Situation</th><th>Message and what to do</th></tr>
+  <tr><td>LDAP not on roster</td><td><span class="msg">We could not find that LDAP on the technician roster. Check the spelling, or contact Fleet if you have just started.</span></td></tr>
+  <tr><td>Already filed today (daily cap)</td><td><span class="msg">You have already filed a rental request today and Fleet is working it. Contact Fleet directly if something has changed.</span> Do not try to file again — call/text Fleet.</td></tr>
+  <tr><td>A request is already open</td><td><span class="msg">You already have rental request #&lt;no&gt; with us (&lt;status&gt;). Fleet is working it. Contact Fleet rather than starting a second one.</span></td></tr>
+  <tr><td>Under 21</td><td><span class="msg">Enterprise does not rent to drivers under 21… Contact Holman (ARI) instead. They are the only ones who can put you in a rental, through Avis or Hertz.</span> The request is recorded, closed, and Fleet is notified.</td></tr>
+  <tr><td>Texted link invalid</td><td><span class="msg">This link is invalid or has expired.</span> Use the permanent link instead: <code>…/rental-request</code>.</td></tr>
+  <tr><td>Fleet needs more info (send-back text)</td><td><span class="msg">Sears Fleet: we cannot approve rental request #… yet because we still need &lt;items&gt;. Finish it here: &lt;link&gt; Your earlier answers are saved.</span> Reopen the link — earlier answers are pre-filled; only the missing items are asked.</td></tr>
+</table>
+
+<div class="pagebreak"></div>
+<h2>5. Fleet staff — reviewing and answering requests</h2>
+
+<div class="step"><div class="stepnum">1</div><div class="stepbody">
+  <b class="t">Work from the Rental Requests board</b> (Rental Reduction → Rental Requests). The funnel at the top shows form traffic; the tabs split <b>New requests</b> from <b>Extensions</b>. Each row carries the engine's recommendation (<span class="pill g">APPROVE</span> <span class="pill r">DENY</span> <span class="pill y">DEFER</span> <span class="pill b">REVIEW</span>), the net-$/day economics, and the rule that fired. Extensions always arrive as REVIEW — a person decides every extension.
+</div></div>
+<div class="shot"><img class="wide" src="{{IMG:07-staff-list}}" alt="Staff board"><div class="cap">Fig. 6 — The Rental Requests board: funnel, KPI cards, and the request list with engine recommendations.</div></div>
+
+<div class="step"><div class="stepnum">2</div><div class="stepbody">
+  <b class="t">Open the request drawer.</b> Clicking a row shows everything the technician answered, the profitability factors behind the recommendation, and the decision buttons. The engine recommends; <b>you decide</b>.
+</div></div>
+<div class="shot"><img class="wide" src="{{IMG:08-staff-drawer}}" alt="Decision drawer"><div class="cap">Fig. 7 — The decision drawer: request details, profitability factors, and APPROVE / DENY / DEFER.</div></div>
+
+<h3>Approving a NEW rental</h3>
+<ul>
+  <li><b>Pickup date</b> defaults intelligently: a request approved on <b>Friday defaults to Monday pickup</b> (no weekend rental days we pay for while the tech is off). Override it if the tech works Saturday.</li>
+  <li><b>The approval text is editable.</b> The standard text reads: <span class="msg">Sears Fleet: your rental request is approved. We are booking the reservation for pickup {{pickup_day}} {{pickup_date}} and will text you the confirmation number and branch.</span> The Monday variant adds the Uber-home offer. What is in the box is exactly what sends — edit it when the situation needs it.</li>
+  <li><b>Booking is automatic after approval.</b> The system quotes and reserves with Enterprise (20–30 seconds); the technician then gets a second text with the confirmation number, the actual branch address/phone, and instructions (bring driver's license, billing is direct to Sears, decline insurance and upgrades).</li>
+  <li>If booking fails, the drawer shows the failure — retry from there; do not book manually unless the drawer says to.</li>
+</ul>
+
+<h3>Approving an EXTENSION</h3>
+<ul>
+  <li>The drawer asks for the <b>reservation / RA number</b> (required) and <b>extra days</b> (1–30, defaults to 7). That is the whole action — <b>approving an extension never books a new vehicle</b>.</li>
+  <li>The technician gets a fixed text: <span class="msg">Sears Fleet: your rental extension is approved. We are arranging the extra time with Enterprise — keep the rental, no action needed unless we text you.</span></li>
+  <li>On first approval the system emails Enterprise (North Central Account Support) with the renter, RA number and additional days — <b>Howard Anderson and Tyler Morgan are always CC'd</b>. Re-approving does not duplicate the email; use the Resend button if Enterprise asks again.</li>
+</ul>
+
+<h3>Other decisions</h3>
+<table>
+  <tr><th style="width:22%">Decision</th><th>What happens</th></tr>
+  <tr><td><b>DENY</b></td><td>Tech is texted: <span class="msg">Sears Fleet: your request was not approved… Reply to this message if your situation has changed.</span> Denials are recorded with the reason — they are the number that justifies this program.</td></tr>
+  <tr><td><b>DEFER</b></td><td>Same-day / wait-on-it cases. The request stays open, waiting on a person.</td></tr>
+  <tr><td><b>SEND BACK (RETURN)</b></td><td>Use when the request is missing something (wrong shop phone, no Enterprise branch…). The tech is texted exactly what is missing plus the link; their earlier answers are saved and only the gaps are asked.</td></tr>
+</table>
+
+<div class="callout warn"><span class="lbl">Timing</span><br>
+Every decision text goes to the mobile number the technician confirmed at the top of the form. Decide during working hours when possible — the tech may need to act (pick up the rental, call the shop) on what you send.</div>
+
+<h2>6. Status vocabulary reference</h2>
+<table>
+  <tr><th style="width:22%">Status</th><th>Meaning</th></tr>
+  <tr><td><b>pending</b></td><td>Waiting on Fleet — nobody has decided yet.</td></tr>
+  <tr><td><b>approved</b></td><td>Decision made; a new rental may still be booking with Enterprise.</td></tr>
+  <tr><td><b>booked</b></td><td>Enterprise reservation confirmed — terminal for the request; the decide buttons refuse it.</td></tr>
+  <tr><td><b>denied</b></td><td>Refused, with reason; tech notified by text.</td></tr>
+  <tr><td><b>deferred</b></td><td>Parked for a person to revisit.</td></tr>
+  <tr><td><b>returned</b></td><td>Sent back to the technician for missing information.</td></tr>
+  <tr><td><b>Booking: in&nbsp;progress / failed / attention</b></td><td>The automatic Enterprise booking after approval — failures surface in the drawer for retry.</td></tr>
+</table>
+
+<div class="footer-note">
+Sears Home Services · Fleet Operations — Rental Request &amp; Extension SOP v1.0 (Aug 23, 2026). Screenshots were captured on the live form with identifying details replaced by sample data (JOHN SAMPLE / JSMITH1 / (555)&nbsp;555-0123). The form link is permanent; this document does not expire with it.
+</div>
+
+</body>
+</html>

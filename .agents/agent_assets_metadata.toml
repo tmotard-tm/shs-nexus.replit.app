@@ -165,3 +165,10 @@ uri = "file://screenshots/create-vehicle-clean-tab.png"
 type = "image"
 title = "New createVehicle tab (plain as-built flow)"
 description = "The in-app flowcharts page showing the new createVehicle tab: the full Create Vehicle workflow drawn plain, in the same style as the other twelve pages - no gap markers. The annotated, retry and proposed pages follow it as separate tabs."
+
+[[outputs]]
+id = "OfWQSLwMfnb61qmaW-dpR"
+uri = "file://docs/training/rental-request-sop/Rental-Request-and-Extension-SOP.pdf"
+type = "pdf"
+title = "Rental Request & Extension SOP (v1.0)"
+description = "15-page training document with live screenshots: technician walkthroughs for the new-rental and extension forms (every question and what a good answer looks like), the messages techs can see, and the Fleet staff review/approval procedure."
