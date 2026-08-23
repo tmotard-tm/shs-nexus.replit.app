@@ -140,6 +140,14 @@ export interface SamsaraGateway {
   CONNECTIONSTATUS_LASTCONNECTED: string | null;
 }
 
+/**
+ * Normalized location shape. SAMSARA_STREAM's real columns (verified live)
+ * are VEHICLE_ID, VEHICLE_NAME, LATITUDE, LONGITUDE, HEADING, SPEED_MPH,
+ * TIME, REVERSE_GEO_FULL, STREET, CITY, STATE, POSTAL, RECEIVED_AT — there
+ * are NO LAT/LNG columns, so getVehicleLocation() must map LATITUDE→LAT and
+ * LONGITUDE→LNG explicitly. A raw row spread silently yields undefined
+ * coordinates to every consumer.
+ */
 export interface SamsaraLocation {
   VEHICLE_NAME: string;
   LAT: number;
@@ -593,6 +601,18 @@ export class SamsaraService {
     return await this.fetchFromSnowflake<SamsaraGateway>(query);
   }
 
+  // SAMSARA_STREAM rows carry LATITUDE/LONGITUDE, not LAT/LNG. Keep the raw
+  // fields for any consumer that reads them, but always populate the
+  // normalized LAT/LNG keys the SamsaraLocation contract promises.
+  private normalizeStreamRow(row: any): SamsaraLocation {
+    return {
+      ...row,
+      LAT: row.LAT ?? row.LATITUDE ?? null,
+      LNG: row.LNG ?? row.LONGITUDE ?? null,
+      source: 'snowflake',
+    };
+  }
+
   async getVehicleLocation(vehicleName: string, stalenessHours: number = 4): Promise<SamsaraLocation | null> {
     const query = `
       SELECT * FROM bi_analytics.app_samsara.SAMSARA_STREAM
@@ -609,7 +629,7 @@ export class SamsaraService {
       const ageHours = (now - recordTime) / (1000 * 60 * 60);
 
       if (ageHours <= stalenessHours) {
-        return { ...latest, source: 'snowflake' };
+        return this.normalizeStreamRow(latest);
       }
     }
 
@@ -655,7 +675,7 @@ export class SamsaraService {
       }
     }
 
-    return results.length > 0 ? { ...results[0], source: 'snowflake' } : null;
+    return results.length > 0 ? this.normalizeStreamRow(results[0]) : null;
   }
 
   async getVehicleLocationsBatch(vehicleNames: string[]): Promise<SamsaraLocation[]> {

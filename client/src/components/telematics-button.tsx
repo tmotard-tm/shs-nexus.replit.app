@@ -49,9 +49,10 @@ interface TelematicsData {
     ENGINE_IDLETIME_MIN: number | null;
     EFFICIENCY_MPGE: number | null;
   }>;
+  // Raw SAMSARA_STREAM row — real columns are LATITUDE/LONGITUDE (not LAT/LNG)
   stream: {
-    LAT: number | null;
-    LNG: number | null;
+    LATITUDE: number | null;
+    LONGITUDE: number | null;
     SPEED_MPH: number | null;
     HEADING: number | null;
     TIME: string | null;
