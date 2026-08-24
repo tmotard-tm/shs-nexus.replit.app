@@ -1071,16 +1071,23 @@ export function registerVrmRoutes(): Router {
       } else if (String(decision).toLowerCase() === "approved") {
         // Send the tech-facing approval SMS (fixed copy provided by Fleet).
         // Idempotent via UNIQUE(decision_id, channel); same dispatcher loop.
-        enqueueApprovalSmsForTech({
-          decisionId: row.id,
-          techLdap: String(techLdap).toUpperCase(),
-          techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
-          techName: typeof techName === "string" ? techName : null,
-        })
-          .then(() => triggerImmediateDispatch(`approval decision ${row.id}`))
-          .catch((err: any) =>
-            console.error("[VRM] approval SMS enqueue failed:", err?.message ?? err),
-          );
+        //
+        // AWAITED (same as the denial tech SMS above) so the response's
+        // quiet-hours preview can read the PERSISTED 'sms' row: only a
+        // 'queued' row with a real recipient may claim "text will send at
+        // 7 AM" — a no-phone tech gets a 'skipped' row instead. An enqueue
+        // failure never fails the decision logging itself.
+        try {
+          await enqueueApprovalSmsForTech({
+            decisionId: row.id,
+            techLdap: String(techLdap).toUpperCase(),
+            techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
+            techName: typeof techName === "string" ? techName : null,
+          });
+          triggerImmediateDispatch(`approval decision ${row.id}`);
+        } catch (err: any) {
+          console.error("[VRM] approval SMS enqueue failed:", err?.message ?? err);
+        }
       }
 
       // ── Auto-populate the New Rental Full Log ───────────────────────────
@@ -1106,16 +1113,22 @@ export function registerVrmRoutes(): Router {
         fullLogSync = { ok: false, rowId: null, error: logErr?.message ?? "auto-populate failed" };
       }
 
-      // Quiet-hours schedule (denials only): tell the approver the tech's text
-      // is HELD and when it will send, so a 11 PM deny doesn't read as "the
-      // tech got nothing". Derived from the persisted sms_tech_deny row —
-      // returns null unless a queued row with a real recipient exists (a
-      // skipped no-phone row or a failed enqueue must never claim a send).
+      // Quiet-hours schedule: tell the approver the tech's text is HELD and
+      // when it will send, so a 11 PM decision doesn't read as "the tech got
+      // nothing". Both decisions ride the same dispatcher gate — denials on
+      // the sms_tech_deny channel, approvals on the 'sms' channel. Derived
+      // from the persisted row — returns null unless a queued row with a
+      // real recipient exists (a skipped no-phone row or a failed enqueue
+      // must never claim a send).
       let smsScheduledFor: string | null = null;
       let smsScheduledTechLocal: string | null = null;
-      if (String(decision).toLowerCase() === "denied") {
+      const decisionLower = String(decision).toLowerCase();
+      if (decisionLower === "denied" || decisionLower === "approved") {
         try {
-          const scheduled = await getScheduledSmsInfoForDecision(row.id);
+          const scheduled = await getScheduledSmsInfoForDecision(
+            row.id,
+            decisionLower === "approved" ? "sms" : "sms_tech_deny",
+          );
           if (scheduled) {
             smsScheduledFor = scheduled.sendAt.toISOString();
             smsScheduledTechLocal = scheduled.techLocalLabel;
@@ -2764,9 +2777,18 @@ export function registerVrmRoutes(): Router {
       enqueueDcaMakeUnavailableForDecision(decisionRow.id).catch((err: any) =>
         console.error("[VRM/HolmanPO] DCA make_unavailable failed:", err?.message ?? err));
     } else {
-      enqueueApprovalSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null })
-        .then(() => triggerImmediateDispatch(`holman approval ${decisionRow.id}`))
-        .catch((err: any) => console.error("[VRM/HolmanPO] approval SMS failed:", err?.message ?? err));
+      // AWAITED (like the deny redirect SMS above) so the approve response
+      // can read the PERSISTED 'sms' row and only claim "text scheduled for
+      // 7 AM" when a queued row with a real recipient actually exists — a
+      // no-phone tech gets a 'skipped' row and must NOT produce that claim.
+      // An enqueue failure still never fails the approval (Holman already
+      // confirmed it by this point).
+      try {
+        await enqueueApprovalSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null });
+        triggerImmediateDispatch(`holman approval ${decisionRow.id}`);
+      } catch (err: any) {
+        console.error("[VRM/HolmanPO] approval SMS failed:", err?.message ?? err);
+      }
     }
 
     if (!veh) {
@@ -3184,7 +3206,26 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] holman approve decision-log failed:", e?.message);
           return null;
         });
-        return res.json({ ok: true, status: "approved", decisionId, holmanResult, row: updated });
+        // Quiet-hours schedule: when the approve lands between 9 PM and 7 AM
+        // tech-local, the approval text is HELD by the dispatcher — same gate
+        // as the deny redirect. Derived from the persisted 'sms' row
+        // (recordHolmanDecision awaits that enqueue) — null unless a queued
+        // row with a real recipient exists, so a no-phone/skipped tech never
+        // yields a false "will send".
+        let smsScheduledFor: string | null = null;
+        let smsScheduledTechLocal: string | null = null;
+        if (decisionId) {
+          try {
+            const scheduled = await getScheduledSmsInfoForDecision(decisionId, "sms");
+            if (scheduled) {
+              smsScheduledFor = scheduled.sendAt.toISOString();
+              smsScheduledTechLocal = scheduled.techLocalLabel;
+            }
+          } catch (previewErr: any) {
+            console.warn("[VRM/HolmanPO] quiet-hours schedule lookup failed:", previewErr?.message ?? previewErr);
+          }
+        }
+        return res.json({ ok: true, status: "approved", decisionId, smsScheduledFor, smsScheduledTechLocal, holmanResult, row: updated });
       }
 
       // Real submit but NOT confirmed on re-read → FAILED. Loud, visible, retryable.

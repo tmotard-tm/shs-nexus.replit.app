@@ -1277,7 +1277,17 @@ export default function NewRentals() {
       } else if (st === "dry_run") {
         toast({ title: "DRY RUN — nothing sent to Holman", description: "Would approve. Set HOLMAN_DECISION_DRY_RUN=false to submit for real." });
       } else if (st === "approved") {
-        toast({ title: "✓ Approved and confirmed in Holman" });
+        // Quiet-hours hold: the approve landed between 9 PM and 7 AM
+        // tech-local, so the approval text is scheduled rather than already
+        // sent. Say so — otherwise a 11 PM approve reads like the tech
+        // should have a text now (same gate as the deny redirect).
+        const scheduled = data.smsScheduledFor && new Date(data.smsScheduledFor).getTime() > Date.now();
+        toast({
+          title: "✓ Approved and confirmed in Holman",
+          description: scheduled
+            ? `Quiet hours — the tech's text will send at ${data.smsScheduledTechLocal ?? "7:00 AM"} tech-local (${new Date(data.smsScheduledFor).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} your time).`
+            : undefined,
+        });
       } else {
         toast({ title: "Approval result unclear — verify in Holman", description: data.error ?? JSON.stringify(data), variant: "destructive" });
       }
@@ -1409,13 +1419,13 @@ export default function NewRentals() {
       const res = await apiRequest("POST", "/api/vrm/profitability/log", body);
       return res.json() as Promise<{
         fullLogSync?: { ok: boolean; rowId: string | null; error: string | null };
-        // Quiet-hours preview (denials only) — set when the tech's text is
-        // held until the 7 AM tech-local window opens.
+        // Quiet-hours preview (denials AND approvals) — set when the tech's
+        // text is held until the 7 AM tech-local window opens.
         smsScheduledFor?: string | null;
         smsScheduledTechLocal?: string | null;
       }>;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setFormRow(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
@@ -1434,12 +1444,14 @@ export default function NewRentals() {
         });
       }
 
-      // Quiet-hours hold: the denial text is scheduled, not already sent —
-      // tell staff when it goes out so a night-time deny isn't mistaken for
-      // a text that never fired.
+      // Quiet-hours hold: the tech's text is scheduled, not already sent —
+      // tell staff when it goes out so a night-time decision isn't mistaken
+      // for a text that never fired. Applies to denials AND approvals (both
+      // ride the same dispatcher quiet-hours gate).
       if (data?.smsScheduledFor && new Date(data.smsScheduledFor).getTime() > Date.now()) {
+        const approved = String((variables as Record<string, unknown>)?.decision ?? "").toLowerCase() === "approved";
         toast({
-          title: "Denial text scheduled — quiet hours",
+          title: approved ? "Approval text scheduled — quiet hours" : "Denial text scheduled — quiet hours",
           description: `The tech's text will send at ${data.smsScheduledTechLocal ?? "7:00 AM"} tech-local (${new Date(data.smsScheduledFor).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} your time).`,
         });
       }
