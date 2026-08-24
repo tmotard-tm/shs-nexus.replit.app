@@ -62,6 +62,13 @@ import { REQUEST_CLASS_OPTIONS, ENTERPRISE_CLASS_MENU, resolveRequestClass } fro
 // fire-and-forget after the row is written — a telematics outage must never
 // touch the technician-facing submit.
 import { captureRequestSamsaraEvidence } from "./samsara-evidence";
+// Which BOOK the extended rental rides on (direct-billed vs Holman/ECARS).
+// Shares the Holman-queue standing predicate so the two surfaces can never
+// disagree; never throws (a failed lookup reads 'unknown' + checkFailed).
+import {
+  getExtensionBillingStanding,
+  type ExtensionBillingCheck,
+} from "./extension-billing";
 
 // .b, 2026-08-14: the first five acknowledgements are now attested by ONE
 // checkbox listing them as bullets; the four terms of use stay individual.
@@ -374,6 +381,11 @@ function phoneFor(f: any): string | null {
 async function openRentalsFor(ldap: string): Promise<any[]> {
   const { rows } = await db.execute(sql`
     SELECT c.case_key,
+           -- Which BOOK the case rides on: 'enterprise' = the ECARS/Holman
+           -- book, 'enterprise_direct' = the direct-billing book. Both share
+           -- the vendor string 'Enterprise Rent-A-Car', so the snapshot must
+           -- carry the source or the reviewer cannot tell the books apart.
+           c.source,
            c.vehicle_number,
            c.veh_desc,
            c.rental_class,
@@ -904,6 +916,17 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     }
   }
 
+  // Which BOOK that rental rides on — pinned here as AUDIT evidence only. The
+  // reviewer surfaces re-compute the verdict live (a direct-billing import
+  // landing between submit and review must self-heal the answer), so nothing
+  // downstream trusts this snapshot. Never throws; a failed lookup pins
+  // 'unknown' with checkFailed set for the record. Extensions only — new
+  // requests carry NULLs in these columns by design.
+  let extBilling: ExtensionBillingCheck | null = null;
+  if (isExtension) {
+    extBilling = await getExtensionBillingStanding(ldap);
+  }
+
   // Acknowledgements are required, but never as false attestations: the shop
   // appointment acknowledgement is skipped on a path that never asked for a
   // shop, the van attestations are skipped for someone with no van, and a
@@ -1030,6 +1053,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ext_expected_completion, ext_time_needed,
       detected_open_rentals, type_mismatch, type_mismatch_explanation,
       current_rental, ack_snapshot,
+      ext_billing_verdict, ext_billing_evidence, ext_billing_checked_at,
       status, auto_decision, auto_reason, auto_rule, source
     ) VALUES (
       ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
@@ -1055,6 +1079,9 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
       ${detectedOpenRentals}, ${typeMismatch}, ${typeMismatchExplanation},
       ${currentRental ? JSON.stringify(currentRental) : null}::jsonb,
       ${JSON.stringify(ackSnapshot)}::jsonb,
+      ${extBilling?.verdict ?? null},
+      ${extBilling ? JSON.stringify(extBilling) : null}::jsonb,
+      ${extBilling?.checkedAt ?? null}::timestamptz,
       ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
     )
     RETURNING request_no
@@ -1995,7 +2022,27 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         ) pf ON true
         ORDER BY r.created_at DESC
       `);
-      res.json({ requests: rows });
+      // Billing standing for extensions still awaiting a decision is computed
+      // LIVE here, never read from the submit-time pin: a direct-billing
+      // import landing after submit must self-heal the badge, and historical
+      // pending extensions (submitted before the check existed) get it the
+      // same way. The stored ext_billing_* columns stay on the row as audit
+      // evidence. getExtensionBillingStanding never throws — a lookup failure
+      // rides along as verdict 'unknown' with checkFailed set, so a standing
+      // outage cannot take the whole list down.
+      const reqRows = rows as any[];
+      const liveRows = reqRows.filter((r) =>
+        String(r.request_type ?? "new") === "extension"
+        && ["pending", "deferred", "returned"].includes(String(r.status)));
+      if (liveRows.length) {
+        const uniq = Array.from(new Set(liveRows.map((r) => String(r.ldap ?? "").trim().toUpperCase())));
+        const checks = new Map(await Promise.all(uniq.map(async (l) =>
+          [l, await getExtensionBillingStanding(l)] as const)));
+        for (const r of liveRows) {
+          r.ext_billing_live = checks.get(String(r.ldap ?? "").trim().toUpperCase()) ?? null;
+        }
+      }
+      res.json({ requests: reqRows });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to load requests." });
     }
@@ -2681,6 +2728,32 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         });
       }
 
+      // EXTENSION approve gate: is the rental being extended actually
+      // DIRECT-BILLED? Computed FRESH here — the submit-time pin is audit
+      // evidence and is never trusted for the gate — through the same shared
+      // standing predicate as the Holman queue's badge/denial SMS. A
+      // holman_only approval without an explicit staff acknowledgement is
+      // refused (server-enforced, so API callers cannot route around the
+      // checkbox). A FAILED lookup degrades OPEN with a logged warning:
+      // feed lag or a standing outage must never strand a real extension.
+      const billingAck = req.body?.holmanOnlyAcknowledged === true;
+      let extBillingDecide: ExtensionBillingCheck | null = null;
+      if (decision === "APPROVE" && isExtensionRow) {
+        extBillingDecide = await getExtensionBillingStanding(String(cur.ldap ?? ""));
+        if (extBillingDecide.checkFailed) {
+          console.warn(`[rental-request] decide #${req.params.requestNo}: billing-standing check `
+            + `failed (${extBillingDecide.error || "unknown error"}) — approval proceeds unblocked`);
+        } else if (extBillingDecide.verdict === "holman_only" && !billingAck) {
+          return res.status(409).json({
+            message: "This rental is on the Holman (ECARS) book only — it was never switched to "
+                   + "direct billing, so Enterprise bills Holman for it, not us. Tick the "
+                   + "acknowledgement to approve anyway, or run the cutover first.",
+            billingVerdict: "holman_only",
+            requiresBillingAcknowledgement: true,
+          });
+        }
+      }
+
       // Never overwrite a booked row. Denying one would leave a live ETD
       // reservation attached to a request the record says was refused, and
       // nothing downstream would ever go cancel it.
@@ -2730,6 +2803,13 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
               ? sql`${extReservation}` : sql`ext_reservation_number`},
             ext_days = ${decision === "APPROVE" && isExtensionRow
               ? sql`${extDays}` : sql`ext_days`},
+            -- The approve-time gate's own fresh verdict, plus whether staff
+            -- explicitly acknowledged a Holman-book-only approval. Audit
+            -- trail beside the untouched submit-time pin.
+            ext_billing_decide_verdict = ${extBillingDecide
+              ? sql`${extBillingDecide.verdict}` : sql`ext_billing_decide_verdict`},
+            ext_billing_ack = ${extBillingDecide
+              ? sql`${billingAck && extBillingDecide.verdict === "holman_only"}` : sql`ext_billing_ack`},
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             missing_fields = ${decision === "RETURN"
               // string_to_array, not a bound JS array. Interpolating an array into

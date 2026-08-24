@@ -106,6 +106,18 @@ interface Req {
   samsara_verdict?: string | null;
   samsara_evidence?: SamsaraEvidence | null;
   samsara_checked_at?: string | null;
+  // Direct-billing standing of the rental being EXTENDED (extensions only).
+  // The submit-time pin is audit evidence; ext_billing_live is the server's
+  // fresh check attached to undecided rows on every list load (self-healing
+  // as direct-billing imports land); decide_verdict is what the approve-time
+  // gate itself saw, with ext_billing_ack recording the staff acknowledgement
+  // of a Holman-book-only approval.
+  ext_billing_verdict?: string | null;
+  ext_billing_evidence?: ExtBillingCheck | null;
+  ext_billing_checked_at?: string | null;
+  ext_billing_decide_verdict?: string | null;
+  ext_billing_ack?: boolean | null;
+  ext_billing_live?: ExtBillingCheck | null;
 }
 
 /** The evidence snapshot the server stamps on breakdown/accident requests. */
@@ -184,6 +196,63 @@ const SAMSARA_ORDER: Record<string, number> = {
 };
 const isSamsaraCategory = (r: Req | null | undefined) =>
   !isExt(r) && ["breakdown", "accident"].includes(String(r?.problem_category ?? ""));
+
+/** Which BOOK the extended rental rides on. Both books share the vendor
+ *  string 'Enterprise Rent-A-Car'; only the case source separates the
+ *  direct-billing book from the Holman/ECARS book, and the server does that
+ *  classification — this is purely its display shape. */
+interface ExtBillingCase {
+  caseKey?: string; source?: string; ticketNumber?: string | null;
+  poNumber?: string | null; vehicleNumber?: string | null; rentalStartDate?: string | null;
+}
+interface ExtBillingCheck {
+  verdict: "direct_billed" | "holman_only" | "unknown" | string;
+  door?: string;
+  standing?: string;
+  etdReference?: string | null;
+  directCases?: ExtBillingCase[];
+  ecarsCases?: ExtBillingCase[];
+  otherCases?: ExtBillingCase[];
+  checkedAt?: string;
+  checkFailed?: boolean;
+  error?: string;
+}
+const BILLING_LABEL: Record<string, string> = {
+  direct_billed: "Direct-billed",
+  holman_only: "HOLMAN BOOK ONLY",
+  unknown: "Billing unknown",
+};
+const BILLING_TONE: Record<string, [string, string]> = {
+  direct_billed: [colors.green, colors.greenLight],
+  holman_only: [colors.red, colors.redLight],
+  unknown: [colors.amber, colors.amberLight],
+};
+// Sort order: the problem first, the unknowns next, clean rows last.
+const BILLING_ORDER: Record<string, number> = { holman_only: 0, unknown: 1, direct_billed: 2 };
+/**
+ * The row's best-known billing check, freshest source first: the live check
+ * the list attaches to undecided rows, then the decide-time verdict (detail
+ * borrowed from the submit evidence), then the submit-time pin. `when` labels
+ * the freshness caption so a stale pin is never dressed up as a live answer.
+ */
+function extBilling(r: Req | null | undefined):
+  { check: ExtBillingCheck; when: "live" | "decided" | "submit" | "none" } | null {
+  if (!r || !isExt(r)) return null;
+  if (r.ext_billing_live) return { check: r.ext_billing_live, when: "live" };
+  if (r.ext_billing_decide_verdict) {
+    return {
+      check: { ...(r.ext_billing_evidence ?? {}), verdict: r.ext_billing_decide_verdict },
+      when: "decided",
+    };
+  }
+  if (r.ext_billing_evidence || r.ext_billing_verdict) {
+    return {
+      check: r.ext_billing_evidence ?? { verdict: r.ext_billing_verdict ?? "unknown" },
+      when: "submit",
+    };
+  }
+  return { check: { verdict: "unknown" }, when: "none" };
+}
 
 /** "5m ago" / "3h ago" / "2d ago" — evidence age at a glance. */
 const ago = (v?: string | null): string => {
@@ -457,6 +526,13 @@ export default function RentalRequests() {
   // does not reliably hold — so the approver supplies it. Days default 7.
   const [extResNo, setExtResNo] = useState("");
   const [extDays, setExtDays] = useState("7");
+  // Approving a Holman-book-only extension requires this explicit
+  // acknowledgement — the server enforces the same gate, this is the checkbox
+  // that satisfies it. needsBillingAck force-shows the checkbox after the
+  // server refuses (the client's row snapshot can be staler than the server's
+  // own fresh check).
+  const [holmanAck, setHolmanAck] = useState(false);
+  const [needsBillingAck, setNeedsBillingAck] = useState(false);
   const [quickMsg, setQuickMsg] = useState<{ text: string; bad: boolean } | null>(null);
   const classBoxRef = useRef<HTMLDivElement>(null);
   const pickupInputRef = useRef<HTMLInputElement>(null);
@@ -668,18 +744,23 @@ export default function RentalRequests() {
   });
 
   const decide = useMutation({
-    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null; approvalSms?: string | null; reservationNumber?: string | null; extensionDays?: number | null }) => {
+    mutationFn: async (v: { requestNo: number; decision: string; note: string; missing?: string[]; pickupAt?: string | null; returnAt?: string | null; approvedBranch?: string | null; approvalSms?: string | null; reservationNumber?: string | null; extensionDays?: number | null; holmanOnlyAcknowledged?: boolean }) => {
       const res = await fetch(`/api/vrm/forms/rental-request/${v.requestNo}/decide`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null, approvalSms: v.approvalSms ?? null, reservationNumber: v.reservationNumber ?? null, extensionDays: v.extensionDays ?? null }),
+        body: JSON.stringify({ decision: v.decision, note: v.note, missing: v.missing ?? [], pickupAt: v.pickupAt ?? null, returnAt: v.returnAt ?? null, approvedBranch: v.approvedBranch ?? null, approvalSms: v.approvalSms ?? null, reservationNumber: v.reservationNumber ?? null, extensionDays: v.extensionDays ?? null, holmanOnlyAcknowledged: v.holmanOnlyAcknowledged === true }),
       });
       const j = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(j?.message || "decision failed");
+      if (!res.ok) {
+        const err: any = new Error(j?.message || "decision failed");
+        err.body = j;
+        throw err;
+      }
       return j;
     },
     onSuccess: (_j, v) => {
       setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00");
       setSmsBody(""); setSmsEdited(false); setDateEdited(false); setPendingReason(""); suggestedFor.current = null;
+      setHolmanAck(false); setNeedsBillingAck(false);
       // APPROVE kicks off the booking — keep the drawer OPEN so the staffer
       // watches the confirmation (or the failure reason) land, instead of
       // closing on a request that still says nothing. Other verdicts are
@@ -689,7 +770,13 @@ export default function RentalRequests() {
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/stats"] });
       refreshIntents();
     },
-    onError: (e: any) => setActionErr(e.message),
+    onError: (e: any) => {
+      setActionErr(e.message);
+      // The server's own fresh check said holman_only — surface the
+      // acknowledgement checkbox even when the row the client holds is
+      // staler and reads clean.
+      if (e?.body?.requiresBillingAcknowledgement) setNeedsBillingAck(true);
+    },
   });
 
   // Adjust the class the booking will reserve. The server refuses once the
@@ -871,6 +958,8 @@ export default function RentalRequests() {
     decision: (r) => r.auto_decision, rule: (r) => r.auto_rule, status: (r) => r.status,
     // Problems first, then in-flight, then booked, then blank — the triage order.
     booking: (r) => bookingSortKey(deriveBookingStatus(r, intentFor(r.request_no))),
+    // Extensions tab only: Holman-book-only rows first, unknowns next.
+    billing: (r) => (isExt(r) ? BILLING_ORDER[extBilling(r)?.check.verdict ?? "unknown"] ?? 1 : null),
     net: (r) => ((r as any).prof_net_with == null ? null : Number((r as any).prof_net_with)),
     shop: (r) => r.shop_name, appt: (r) => r.appointment_at, days: (r) => r.shop_estimated_days,
     created: (r) => r.created_at,
@@ -900,6 +989,7 @@ export default function RentalRequests() {
         return b ? b.label.replace(/^✓ /, "") : "";
       }],
       ["booking_reference", (r) => r.etd_reference ?? r.ext_reservation_number ?? ""],
+      ["billing_standing", (r) => (isExt(r) ? extBilling(r)?.check.verdict ?? "" : "")],
       ["booking_branch", (r) => r.booked_facts?.branchName ?? r.nearest_branch_name ?? ""],
       ["booking_note", (r) => {
         const b = bookingBadge(deriveBookingStatus(r, intentFor(r.request_no)), r);
@@ -1061,6 +1151,10 @@ export default function RentalRequests() {
               <SortHeader col="name" text="Technician" sort={sort} setSort={setSort} />
               <SortHeader col="truck" text="Truck" sort={sort} setSort={setSort} />
               <SortHeader col="category" text="Reason" sort={sort} setSort={setSort} />
+              {/* Which BOOK the rental being extended rides on — extensions
+                  tab only; the verdict is the server's live check on
+                  undecided rows. */}
+              {tab === "extension" && <SortHeader col="billing" text="Billing" sort={sort} setSort={setSort} />}
               <SortHeader col="samsara" text="Samsara" sort={sort} setSort={setSort} />
               <SortHeader col="decision" text="Engine" sort={sort} setSort={setSort} />
               <SortHeader col="net" text="Net/day" sort={sort} setSort={setSort} />
@@ -1136,6 +1230,10 @@ export default function RentalRequests() {
                         setClassDraft(normCls(r.approved_vehicle_class) || "sedan");
                         setActionErr("");
                         setQuickMsg(null);
+                        // The Holman-book acknowledgement never survives a row
+                        // change — it attests to THIS rental's standing.
+                        setHolmanAck(false);
+                        setNeedsBillingAck(false);
                       }}
                       style={{ cursor: "pointer" }}>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.request_no}</td>
@@ -1158,6 +1256,24 @@ export default function RentalRequests() {
                     </td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.truck_number || "—"}</td>
                     <td style={tdBase}>{isExt(r) ? "Extension" : (CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "—")}</td>
+                    {/* Direct-billing standing of the rental being extended.
+                        Loud red = the rental rides on the Holman (ECARS) book
+                        only and was never cutover to direct billing. */}
+                    {tab === "extension" && (
+                      <td style={tdBase}>
+                        {(() => {
+                          const eb = extBilling(r);
+                          if (!eb) return "—";
+                          const v = eb.check.verdict;
+                          const [bfg, bbg] = BILLING_TONE[v] ?? [colors.inkMuted, colors.background];
+                          return (
+                            <span title={eb.check.checkFailed ? `standing check failed: ${eb.check.error ?? ""}` : ""}>
+                              <Pill text={BILLING_LABEL[v] ?? v} fg={bfg} bg={bbg} />
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    )}
                     {/* Whether the truck's own telematics agree with the
                         breakdown/accident claim. Advisory — hover for the
                         reason; the drawer holds the full evidence. */}
@@ -1680,6 +1796,86 @@ export default function RentalRequests() {
               </div>
             )}
 
+            {/* Direct-billing standing of the rental being extended. Both
+                Enterprise books carry the same vendor string; only the case
+                source tells "our direct-billing book" from "the Holman/ECARS
+                book", and approving a Holman-book-only extension emails
+                Enterprise about a rental that was never switched to direct
+                billing — hence the loud panel and the acknowledgement gate
+                down at the decision buttons. */}
+            {isExt(detail) && (() => {
+              const eb = extBilling(detail);
+              if (!eb) return null;
+              const check = eb.check;
+              const v = check.verdict;
+              const [bfg, bbg] = BILLING_TONE[v] ?? [colors.inkMuted, colors.background];
+              const freshness =
+                eb.when === "live" ? `checked live${check.checkedAt ? ` · ${ago(check.checkedAt)}` : ""}`
+                : eb.when === "decided" ? "as of the decision"
+                : eb.when === "submit" ? `pinned at submit${check.checkedAt ? ` · ${ago(check.checkedAt)}` : ""} — may be stale`
+                : "no check recorded";
+              const caseLine = (c: ExtBillingCase) =>
+                [c.ticketNumber ? `ticket ${c.ticketNumber}` : c.caseKey ? `case ${c.caseKey}` : "case",
+                 c.poNumber ? `PO ${c.poNumber}` : "",
+                 c.vehicleNumber ? `veh ${c.vehicleNumber}` : "",
+                 c.rentalStartDate ? `since ${c.rentalStartDate}` : ""].filter(Boolean).join(" · ");
+              return (
+                <div style={{ marginTop: 16, background: colors.surface, borderRadius: 10, padding: 12,
+                              border: `1px solid ${v === "holman_only" ? colors.red : colors.rule}` }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                      Direct billing standing
+                    </div>
+                    <Pill text={BILLING_LABEL[v] ?? v} fg={bfg} bg={bbg} />
+                    <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>{freshness}</span>
+                  </div>
+                  {v === "direct_billed" && (
+                    <p style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, margin: "0 0 6px" }}>
+                      {check.door === "standing_booked"
+                        ? <>Cutover standing is <b>booked</b>{check.etdReference ? <> (reservation {check.etdReference})</> : null} — the switch to direct billing happened even if the direct-billing report has not caught up yet.</>
+                        : <>The open rental rides on <b>our direct-billing book</b> — Enterprise bills Sears directly, and the extension email references a rental on our own account.</>}
+                    </p>
+                  )}
+                  {v === "holman_only" && (
+                    <p style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.red, margin: "0 0 6px", fontWeight: 600 }}>
+                      This rental is on the Holman (ECARS) book ONLY — it was never switched to
+                      direct billing. Enterprise bills Holman for it, so the extension email would
+                      ask about a rental that is not on the Sears direct account. Run the cutover
+                      process for this technician first, or acknowledge at the decision buttons to
+                      approve anyway.
+                    </p>
+                  )}
+                  {v === "unknown" && (
+                    <p style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, margin: "0 0 6px" }}>
+                      {check.checkFailed
+                        ? <>The standing lookup itself failed{check.error ? <> ({check.error})</> : null} — unknown is NOT clean; approving proceeds but is logged.</>
+                        : <>No open identity-resolved rental found on either Enterprise book for this technician — unknown is NOT clean. Verify the rental by hand before approving.</>}
+                    </p>
+                  )}
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkSoft, display: "grid", gap: 2 }}>
+                    {(check.directCases ?? []).map((c, i) => (
+                      <div key={`d${i}`}>Direct book: {caseLine(c)}</div>
+                    ))}
+                    {(check.ecarsCases ?? []).map((c, i) => (
+                      <div key={`e${i}`} style={{ color: v === "holman_only" ? colors.red : undefined }}>
+                        Holman/ECARS book: {caseLine(c)}
+                      </div>
+                    ))}
+                    {(check.otherCases ?? []).map((c, i) => (
+                      <div key={`o${i}`}>Other vendor: {caseLine(c)}</div>
+                    ))}
+                    {check.standing != null && (
+                      <div>
+                        Cutover / direct-billing standing: <b>{check.standing}</b>
+                        {check.etdReference ? ` · reservation ${check.etdReference}` : ""}
+                        {check.door ? ` · door: ${check.door}` : ""}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* The class the booking will reserve. The engine wrote sedan
                 (cargo van for the HVAC carve-out) at submit; this is Fleet's
                 when-necessary override. The bookers match this text against
@@ -1787,6 +1983,28 @@ export default function RentalRequests() {
                     Approving emails Enterprise Account Support ({detail.ext_email_to || "NorthCentralAccountSupport@em.com"})
                     with the renter's name, this number, and the extra days — Howard Anderson and Tyler Morgan are always CC'd.
                   </p>
+                  {/* The Holman-book-only soft gate. The server refuses an
+                      extension approve without this acknowledgement when its
+                      own fresh check says holman_only, so the checkbox is the
+                      only way through — deliberately explicit, never default. */}
+                  {(extBilling(detail)?.check.verdict === "holman_only" || needsBillingAck) && (
+                    <div style={{ marginTop: 8, padding: 10, borderRadius: 8,
+                                  border: `1px solid ${colors.red}`, background: colors.redLight }}>
+                      <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, margin: "0 0 6px", fontWeight: 600 }}>
+                        NOT DIRECT-BILLED — this rental rides on the Holman (ECARS) book only. It
+                        was never cutover to direct billing, so Enterprise bills Holman for it.
+                      </p>
+                      <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, cursor: "pointer" }}>
+                        <input type="checkbox" checked={holmanAck}
+                               onChange={(e) => setHolmanAck(e.target.checked)}
+                               style={{ marginTop: 2 }} data-testid="holman-ack-checkbox" />
+                        <span>
+                          I understand this rental is <b>not direct-billed</b> and I am approving
+                          the extension anyway.
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </div>
               )}
               {/* Pickup/return/branch are new-booking concepts. An extension
@@ -2051,13 +2269,24 @@ export default function RentalRequests() {
                                 setActionErr("Enter the Enterprise reservation / RA number first — approving emails Enterprise and they file by that number.");
                                 return;
                               }
+                              // Holman-book-only extensions need the explicit
+                              // acknowledgement. Client-side mirror of the
+                              // server gate — the server re-checks fresh and
+                              // refuses regardless of what this row says.
+                              if (d === "APPROVE" && isExt(detail)
+                                  && (extBilling(detail)?.check.verdict === "holman_only" || needsBillingAck)
+                                  && !holmanAck) {
+                                setActionErr("This rental is on the Holman (ECARS) book only — tick the acknowledgement above to approve anyway, or run the cutover first.");
+                                return;
+                              }
                               decide.mutate({ requestNo: detail.request_no, decision: d, note,
                                 pickupAt: d === "APPROVE" && !isExt(detail) && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
                                 returnAt: d === "APPROVE" && !isExt(detail) && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
                                 approvedBranch: d === "APPROVE" && !isExt(detail) && approvedBranch.trim() ? approvedBranch.trim() : null,
                                 approvalSms: d === "APPROVE" && !isExt(detail) ? smsBody : null,
                                 reservationNumber: d === "APPROVE" && isExt(detail) ? extResNo.trim() : null,
-                                extensionDays: d === "APPROVE" && isExt(detail) ? Math.max(1, Math.min(30, Math.round(Number(extDays) || 7))) : null });
+                                extensionDays: d === "APPROVE" && isExt(detail) ? Math.max(1, Math.min(30, Math.round(Number(extDays) || 7))) : null,
+                                holmanOnlyAcknowledged: d === "APPROVE" && isExt(detail) ? holmanAck : false });
                             }}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
                       {d === "APPROVE" && isExt(detail) ? "APPROVE EXTENSION" : d}

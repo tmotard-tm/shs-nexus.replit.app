@@ -34,6 +34,15 @@ the live guard on purpose (Fleet-issued override), extensions never do.
 required explanation (enforced server-side too — the endpoint is public), never
 a hard block, because the feed lags.
 
+**Extension billing standing (settled semantics):** verdict = direct case →
+direct_billed; else shared cutover standing 'booked' → direct_billed (a
+lingering ECARS ticket after cutover is import lag, NEVER holman_only); else
+open ECARS case → holman_only; else unknown — and unknown is never clean but
+never gates. Only holman_only gates the APPROVE (server 409 without explicit
+ack), and a standing-lookup failure degrades OPEN (approve proceeds, verdict
+stamped 'unknown') — feed lag must not strand a real extension. Submit-time
+pin is audit-only; the staff list re-computes live for undecided rows.
+
 **Ack snapshots:** every submit (new AND extension) persists a server-built
 `ack_snapshot` (canonical `ACK_TEXTS`, required keys only, signer + policy
 version + timestamp). Legacy rows render from booleans with a

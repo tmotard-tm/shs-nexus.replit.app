@@ -328,6 +328,22 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_request (request_type);
   `);
 
+  // Direct-billing standing of the rental being EXTENDED. The verdict +
+  // evidence pinned at SUBMIT time are audit-only (the reviewer surfaces
+  // re-compute the answer live, so a direct-billing import landing later
+  // self-heals it); decide_verdict is what the approve-time gate itself saw,
+  // and ext_billing_ack records that staff explicitly acknowledged approving
+  // a Holman-book-only extension. Historical pending rows need no backfill —
+  // the live re-compute covers them by construction.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS ext_billing_verdict        text,
+      ADD COLUMN IF NOT EXISTS ext_billing_evidence       jsonb,
+      ADD COLUMN IF NOT EXISTS ext_billing_checked_at     timestamptz,
+      ADD COLUMN IF NOT EXISTS ext_billing_decide_verdict text,
+      ADD COLUMN IF NOT EXISTS ext_billing_ack            boolean NOT NULL DEFAULT false;
+  `);
+
   // One live request per technician on the OPEN front door.
   //
   // The index above is partial on `token_id IS NOT NULL`, so it does not cover
