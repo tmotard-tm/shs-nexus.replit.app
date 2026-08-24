@@ -321,6 +321,78 @@ def choose(make: str | None, model: str | None, offered: list,
             "note": "branch offered no sedan at or below full-size. REVIEW"}
 
 
+
+# ---------------------------------------------------------------------------
+# ETD's OWN class descriptions, which are the authoritative mapping
+# ---------------------------------------------------------------------------
+#
+# Every quote hands back the branch's real class list with an exemplar vehicle
+# on each one:
+#
+#     ICAR | TOYOTA COROLLA OR SIMILAR
+#     IFAR | NISSAN ROGUE OR SIMILAR
+#     MVAR | CHRYSLER PACIFICA OR SIMILAR
+#
+# So ETD itself is telling us that a Corolla is an ICAR *at this branch, right
+# now*. MODEL_MAP below is a second, hand-maintained source of truth for the same
+# question, and a hand-maintained table silently rots: on 2026-08-19 it hard-stopped
+# 30 of 37 cutover bookings with "no class mapping for unknown vehicle" while the
+# technician had plainly written "Toyota Corolla".
+#
+# Read ETD first. Only accept an UNAMBIGUOUS single match, and only on a MODEL
+# token - a make alone ("Nissan" sells the Versa, Altima, Rogue and Pathfinder,
+# four different classes) or a body word ("sedan", "van") is never enough and must
+# still go to a human. "Jeep Wagoneer" correctly refuses, because this branch lists
+# both a Wagoneer (FFAR) and a Wagoneer L (PFAR) and they are different vehicles.
+
+_ETD_STOP = {"OR", "SIMILAR", "AND", "SERIES", "GRAN", "COUPE", "AWD", "4WD", "WAGON"}
+_ETD_MAKES = {
+    "MITSUBISHI", "MITS", "NISSAN", "NISN", "TOYOTA", "TOYO", "VOLKSWAGEN", "VOLK",
+    "CHRYSLER", "CHRY", "HYUNDAI", "HYUN", "CHEVROLET", "CHEV", "CHEVY", "MAZDA", "MAZD",
+    "FORD", "JEEP", "DODGE", "DODG", "AUDI", "GENESIS", "BMW", "KIA", "HONDA", "HOND",
+    "MERCEDES", "MERB", "MINI", "BUICK", "BUIC", "RAM", "GMC", "SUBARU", "LEXUS",
+    "CADILLAC", "LINCOLN", "ACURA", "INFINITI", "VOLVO", "TESLA",
+}
+
+
+def _etd_tokens(text) -> list:
+    """Distinctive tokens: not a make, not filler, not a model year."""
+    out = []
+    for w in re.sub(r"[^A-Z0-9 ]+", " ", str(text or "").upper()).split():
+        if w in _ETD_STOP or w in _ETD_MAKES:
+            continue
+        if w.isdigit() and len(w) == 4:
+            continue
+        if len(w) < 2:
+            continue
+        out.append(w)
+    return out
+
+
+def etd_class_for(vehicle_text, offered: list) -> tuple:
+    """(code, why) read straight off ETD's class list. '' when it needs a human."""
+    want = _etd_tokens(vehicle_text)
+    if not want:
+        return "", f"nothing identifiable in {vehicle_text!r}"
+    hits: dict = {}
+    for c in offered or []:
+        code = str(c.get("code") or "").upper()
+        if not code:
+            continue
+        # One description can name several exemplars, comma separated.
+        for part in str(c.get("description") or "").split(","):
+            for tok in _etd_tokens(part):
+                if tok in want:
+                    hits.setdefault(code, set()).add(tok)
+    if not hits:
+        return "", f"no ETD class at this branch names {vehicle_text!r}"
+    if len(hits) > 1:
+        detail = ", ".join(f"{k}({'/'.join(sorted(v))})" for k, v in sorted(hits.items()))
+        return "", f"{vehicle_text!r} matches more than one ETD class ({detail}); needs a human"
+    code = next(iter(hits))
+    return code, f"ETD lists {'/'.join(sorted(hits[code]))} as {code} at this branch"
+
+
 def choose_same_vehicle(make: str | None, model: str | None, offered: list,
                         tech_desc: str | None = None) -> dict:
     """Reserve the SAME vehicle they already have. No right-sizing, ever.
@@ -345,16 +417,45 @@ def choose_same_vehicle(make: str | None, model: str | None, offered: list,
         return {"pick": None, "code": "", "match": "NONE", "changes_vehicle": None,
                 "note": "branch offered nothing"}
 
-    # The FEED is the only witness that may pick a class (repair spec §9).
-    # The tech's free-text description is EVIDENCE for the reviewing human,
-    # never a booking input — a vague "sedan" must not size a real
-    # reservation. Unmapped feed = hard stop.
+    # ------------------------------------------------------------------ ETD first
+    # Repair spec §9 said the FEED is the only witness that may pick a class, because
+    # a vague "sedan" must not size a real reservation. That reasoning is right and is
+    # preserved below - but it treated the hand-built MODEL_MAP as the only way to
+    # read a vehicle, and that table not knowing a Corolla hard-stopped 30 of 37
+    # bookings on 2026-08-19.
+    #
+    # ETD's own class list is a stronger witness than either: it is the branch's live
+    # answer to exactly this question, and it cannot drift from what can be booked.
+    # A single unambiguous MODEL match is accepted from the feed vehicle or, failing
+    # that, from the technician's own words. Vague input still matches nothing and
+    # still goes to a human, so §9's actual guarantee holds.
+    feed_desc = describe(make, model)
+    etd_code, etd_why = etd_class_for(feed_desc, offered)
+    etd_src = "feed"
+    if not etd_code and (tech_desc or "").strip():
+        etd_code, etd_why = etd_class_for(tech_desc, offered)
+        etd_src = "technician"
+
     candidates = preferred_codes(make, model)
+
+    # Where both witnesses speak and disagree, ETD wins - it is the one that decides
+    # what actually gets booked - and the disagreement is reported so the table can be
+    # corrected rather than quietly rotting.
+    if etd_code and candidates and candidates[0] != etd_code and etd_code in by_code:
+        return {"pick": by_code[etd_code], "code": etd_code, "match": "etd_description_over_table",
+                "changes_vehicle": False,
+                "note": f"{etd_why}; the local table said {candidates[0]} - TABLE DRIFT, "
+                        f"review MODEL_MAP for {feed_desc or 'this vehicle'}"}
+
     if not candidates:
+        if etd_code and etd_code in by_code:
+            return {"pick": by_code[etd_code], "code": etd_code, "match": "etd_description",
+                    "changes_vehicle": False,
+                    "note": f"{etd_why} (read from the {etd_src}, no local mapping needed)"}
         return {"pick": None, "code": "", "match": "UNMAPPED", "changes_vehicle": None,
                 "note": f"no class mapping for {describe(make, model) or 'unknown vehicle'}"
-                        f"{f' / tech says {tech_desc.strip()!r}' if (tech_desc or '').strip() else ''};"
-                        " same-vehicle booking needs a human"}
+                        f"{f' / tech says {tech_desc.strip()!r}' if (tech_desc or '').strip() else ''}"
+                        f"; {etd_why}; same-vehicle booking needs a human"}
 
     # Exact PRIMARY class only — mapping alternates are not tried, because
     # some are smaller and "no vehicle change" must never quietly shrink

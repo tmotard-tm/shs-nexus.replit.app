@@ -24,6 +24,7 @@ import { requireCronOrStaff, requireStaffSession } from "./cutover-intents-route
 import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 import { buildCutoverBlockArgs } from "./cutover-block-args";
 import { anchorCutoverRow } from "./cutover-anchor";
+import { runMsg1ConfirmationBackfill } from "./msg1-confirmation-backfill";
 
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
@@ -1812,6 +1813,44 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Msg1 confirmation backfill: text every booked + block-filed tech still on
+   * the Holman book who never got a confirmation-shaped text (body carrying
+   * their CURRENT etd_reference, or the Msg1/Msg2 wording). Evidence-based and
+   * re-runnable; sends ride the Fleet Comms lane (quiet hours, opt-outs, 24h
+   * dedupe). Dry-run by DEFAULT; a live run requires BOTH dryRun:false and
+   * confirm:true (quiet-hours memory: force/run-now routes must default
+   * dry-run + explicit confirm), plus the armed master flag inside the runner.
+   */
+  router.post("/forms/rental-survey/cutover/msg1-backfill", requireCronOrStaff, async (req, res) => {
+    try {
+      const dryRun = req.body?.dryRun !== false;
+      if (!dryRun && req.body?.confirm !== true) {
+        return res.status(400).json({
+          message: "live run requires { dryRun: false, confirm: true } — run the dry run first and review it",
+        });
+      }
+      const onlyLdaps: string[] = Array.isArray(req.body?.ldaps)
+        ? req.body.ldaps.map((x: any) => String(x).trim().toUpperCase()).filter(Boolean)
+        : [];
+      const out = await runMsg1ConfirmationBackfill({
+        dryRun,
+        limit: Number(req.body?.limit) || undefined,
+        onlyLdaps,
+        requestedBy: (req as any).session?.user?.username ?? undefined,
+      });
+      res.json({
+        ...out,
+        note: dryRun
+          ? "Dry run. No texts were sent or queued; bodies included for review."
+          : "LIVE. Sends went through the Fleet Comms lane (quiet-hours deferrals show as queued).",
+      });
+    } catch (error: any) {
+      console.error("[survey] msg1-backfill failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "msg1-backfill failed" });
+    }
+  });
+
   // End-to-end cutover workflow intents (task #646): intent-owned booking,
   // block filing, messaging and readbacks. Registered last — the module owns
   // everything under /forms/rental-survey/cutover/* plus the rental-request
@@ -1864,7 +1903,7 @@ export async function buildCutoverStatusPayload(opts?: {
                s.shop_name, s.shop_city, s.shop_state, s.shop_phone,
                s.promised_ready_date, s.rental_company, s.rental_vehicle_desc,
                c.reservation_status,
-               c.etd_reference, c.branch_name, c.branch_pinned, c.vehicle_class,
+               c.etd_reference, c.branch_name, c.branch_address, c.branch_pinned, c.vehicle_class,
                c.reserved_at, c.reservation_error,
                c.route_block_status,
                c.route_block_project_name, c.route_block_date, c.route_block_live,
