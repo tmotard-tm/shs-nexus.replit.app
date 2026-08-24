@@ -430,30 +430,15 @@
     min-height: 3.5rem;
   }
 
-  /* ── Dialogs (Task #822) ─────────────────────────────────────────────────
-     The New / Bulk / Templates dialogs render in a Radix portal OUTSIDE the
-     .fleet-comms scope, so they carry their own fc-dialog hook class. Two
-     moves, both compact-only:
-     1. Pin the header + footer and confine scrolling to the fc-dialog-body,
-        so the primary action button (Send / Preview / Create) stays on
-        screen no matter how tall the recipient picker or audience list grows.
-     2. Density: tighter padding/gaps, shorter textareas and inner lists.
-     At >=1280 wide and >650 tall none of this applies — the dialogs keep
-     their stock grid + whole-dialog scroll. */
+  /* ── Dialogs, compact DENSITY only (Task #822) ───────────────────────────
+     The pinned header/footer LAYOUT for the fc-dialog dialogs lives outside
+     this media query (all sizes — see the block below, Task #824). In here:
+     tighter padding/gaps, shorter textareas and inner lists. */
   .fc-dialog.fc-dialog {
-    display: flex;
-    flex-direction: column;
     padding: 0.75rem;
     gap: 0.5rem;
-    overflow-y: hidden; /* scrolling moves into fc-dialog-body */
-  }
-  .fc-dialog > :not(.fc-dialog-body) {
-    flex-shrink: 0; /* header/footer never collapse in favor of the body */
   }
   .fc-dialog .fc-dialog-body {
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow-y: auto;
     gap: 0.5rem; /* Templates two-column grid: gap-4 → 8px */
   }
   /* space-y-3 stacks inside the dialog body → 8px (mirror Tailwind's
@@ -604,6 +589,30 @@
     font-size: 1.125rem;
     line-height: 1.5rem;
   }
+}
+
+/* ── Fleet Communications dialogs: pinned header + footer (Task #822 → #824) ─
+   The New / Bulk / Templates dialogs render in a Radix portal OUTSIDE the
+   .fleet-comms scope, so they carry their own fc-dialog hook class. At ALL
+   viewport sizes, pin the dialog header + footer and confine scrolling to the
+   fc-dialog-body, so the primary action button (Send / Preview / Create)
+   stays on screen no matter how tall the recipient picker or audience list
+   grows. Task #822 shipped this compact-only; Task #824 deliberately extended
+   it to desktop, replacing the stock whole-dialog scroll. Compact density
+   tweaks stay in the media query above. The doubled class beats the
+   DialogContent base utilities (grid); stock p-6/gap-4 still apply here. */
+.fc-dialog.fc-dialog {
+  display: flex;
+  flex-direction: column;
+  overflow-y: hidden; /* scrolling moves into fc-dialog-body */
+}
+.fc-dialog > :not(.fc-dialog-body) {
+  flex-shrink: 0; /* header/footer never collapse in favor of the body */
+}
+.fc-dialog .fc-dialog-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 /* Development Banner */

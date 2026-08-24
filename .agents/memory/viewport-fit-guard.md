@@ -50,3 +50,23 @@ primary-action-in-viewport (which checks x too).
 args, so nested functions inside `page.evaluate(() => ...)` throw
 `ReferenceError: __name is not defined` in the browser — pass the evaluate
 body as a plain string instead.
+
+# Lessons from pinning dialog footers (Fleet Comms dialogs)
+
+**A pinned-footer CSS contract only protects direct siblings of the scroll
+body.** The `.fc-dialog > :not(.fc-dialog-body)` pin cannot reach an action
+button nested INSIDE the scrollable body — the Templates dialog's Create
+button sat in the body's grid and silently escaped the contract while Compose/
+Bulk (real `DialogFooter` siblings) were fine. When adding a dialog to the
+pinned layout, verify the primary action is a sibling of the body, not a
+descendant.
+
+**Kill vacuous passes with an overflow stress.** A "primary action stays on
+screen" assertion passes trivially whenever the live content happens to be
+short (empty roster, few templates). Fix: `page.evaluate` injects a tall
+(2000px, `flexShrink:0`) spacer into the scroll body, assert the BODY became
+the scroll container (`scrollHeight > clientHeight` and `scrollTop > 0` after
+scrolling to bottom — false means the pinned layout CSS is gone), then
+re-assert the primary action's bounding box in-viewport, then remove the
+spacer. This makes the guard independent of fixture data height at every
+viewport.

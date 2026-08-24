@@ -2021,10 +2021,10 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
-      {/* fc-dialog/fc-dialog-body: compact-density hooks (Task #822) — on small
-          laptops the media block in index.css pins header+footer and scrolls
-          only the body so Send never leaves the screen. Desktop unchanged. */}
-      <DialogContent className="fc-dialog max-w-lg max-h-[90dvh] overflow-y-auto">
+      {/* fc-dialog/fc-dialog-body hooks (Task #822/#824) — index.css pins the
+          dialog header+footer and scrolls only the body at ALL sizes, so Send
+          never leaves the screen; compact sizes also get density tweaks. */}
+      <DialogContent className="fc-dialog max-w-lg max-h-[90dvh]">
         <DialogHeader><DialogTitle>New message</DialogTitle></DialogHeader>
         <div className="fc-dialog-body space-y-3">
           {/* Recipient: pick from the technician roster, or text an arbitrary number */}
@@ -2334,7 +2334,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
       {/* The audience lists can make this dialog taller than the viewport —
           without its own scroll the template chips / message box / send button
           get clipped off-screen (looked like they were "removed"). */}
-      <DialogContent className="fc-dialog max-w-xl max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="fc-dialog max-w-xl max-h-[90dvh]">
         <DialogHeader><DialogTitle>Bulk message</DialogTitle></DialogHeader>
         <div className="fc-dialog-body space-y-3">
           <Select value={cat} onValueChange={setCat}>
@@ -2627,7 +2627,7 @@ function TemplateAdminDialog({ open, onOpenChange, categories, tokens }: {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) resetForm(); }}>
-      <DialogContent className="fc-dialog max-w-2xl max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="fc-dialog max-w-2xl max-h-[90dvh]">
         <DialogHeader><DialogTitle>Manage templates</DialogTitle></DialogHeader>
         <div className="fc-dialog-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
@@ -2689,20 +2689,22 @@ function TemplateAdminDialog({ open, onOpenChange, categories, tokens }: {
                 <span>Unknown token(s): {unknownTokens.map((t) => `{${t}}`).join(", ")}</span>
               </div>
             )}
-            <div className="flex gap-2 pt-1">
-              <Button
-                onClick={() => saveMut.mutate()}
-                disabled={!name.trim() || !body.trim() || unknownTokens.length > 0 || saveMut.isPending}
-                data-testid="button-save-template"
-              >
-                {saveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : editing ? "Update" : "Create"}
-              </Button>
-              {editing && (
-                <Button variant="outline" onClick={resetForm} data-testid="button-cancel-edit-template">Cancel</Button>
-              )}
-            </div>
           </div>
         </div>
+        {/* Footer sits OUTSIDE fc-dialog-body so the primary action stays
+            pinned while the template list / form scroll (Task #824). */}
+        <DialogFooter>
+          {editing && (
+            <Button variant="outline" onClick={resetForm} data-testid="button-cancel-edit-template">Cancel</Button>
+          )}
+          <Button
+            onClick={() => saveMut.mutate()}
+            disabled={!name.trim() || !body.trim() || unknownTokens.length > 0 || saveMut.isPending}
+            data-testid="button-save-template"
+          >
+            {saveMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : editing ? "Update" : "Create"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

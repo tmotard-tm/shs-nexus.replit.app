@@ -28,13 +28,21 @@
  *
  * Task #822 extends the same run to the three dialogs (New, Bulk, Templates):
  * at each viewport it opens each dialog and asserts the page still doesn't
- * scroll; at the compact sizes (matching the index.css media query: <1280px
- * wide or <=650px tall) it additionally asserts the dialog's primary action
- * button (Send / Preview / Create) is fully inside the viewport — the
- * fc-dialog rules pin the dialog header+footer and confine scrolling to the
- * body, so the action button must never leave the screen. At 1280x720 the
- * dialogs keep their stock whole-dialog scroll (desktop unchanged), so the
- * button-visible assertion is compact-only by design.
+ * scroll AND that the dialog's primary action button (Send / Preview /
+ * Create) is fully inside the viewport — the fc-dialog rules in
+ * client/src/index.css pin the dialog header+footer and confine scrolling to
+ * the body, so the action button must never leave the screen. Task #822
+ * shipped that layout compact-only; Task #824 moved it outside the media
+ * query so it holds at ALL sizes, and this guard asserts it at every
+ * viewport (including 1280x720).
+ *
+ * To keep the dialog assertions from passing vacuously when the live content
+ * happens to be short (empty roster, few templates), each dialog also gets an
+ * overflow stress: a tall spacer is injected into fc-dialog-body, the guard
+ * asserts the BODY became the scroll container (not the whole dialog or the
+ * page), scrolls it to the bottom, and re-asserts the primary action is still
+ * fully on screen — proving the pinned-footer contract under a genuinely
+ * overflowing body at every viewport.
  *
  * Session mint/revoke, Chromium launch, and the viewport loop live in
  * scripts/lib/viewport-guard.ts (shared with the other screen-fit guards).
@@ -76,7 +84,8 @@ runViewportGuard({
     "If only 1024x500 fails, the compact density block in client/src/index.css (Task #820) may have been " +
     "removed or its fc-* hook classes stripped from the page. " +
     "If a dialog-* check fails, the fc-dialog/fc-dialog-body hook classes on the New/Bulk/Templates " +
-    "DialogContent (Task #822) or their compact media rules in client/src/index.css were likely removed.",
+    "DialogContent (Task #822) or their all-sizes pinned header/footer rules in client/src/index.css " +
+    "(Task #824 — the block OUTSIDE the media query) were likely removed.",
   viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
@@ -171,14 +180,12 @@ runViewportGuard({
     await assertElementInViewport(rec, page, '[data-testid="button-send"]', viewport, `send-button-in-viewport@${label}`);
     await assertNoPageScroll(rec, page, `no-page-scroll:thread@${label}`);
 
-    // ── Dialogs (Task #822): New / Bulk / Templates ──────────────────────────
-    // The compact fc-dialog rules apply below 1280px wide or at <=650px tall
-    // (same condition as the index.css media query). Only there do we demand
-    // the primary action button on screen — at desktop sizes the dialogs keep
-    // their stock whole-dialog scroll and the button may sit below the fold of
-    // a long recipient list (existing, intentional behavior).
-    const compact = viewport.width < 1280 || viewport.height <= 650;
-    console.log(`[dialog state @ ${label}${compact ? ", compact" : ""}]`);
+    // ── Dialogs (Task #822/#824): New / Bulk / Templates ─────────────────────
+    // The fc-dialog pinned header/footer layout applies at ALL sizes (Task
+    // #824 moved it out of the compact media query), so the primary action
+    // button must be on screen at every viewport, however tall the recipient
+    // picker or audience list grows.
+    console.log(`[dialog state @ ${label}]`);
 
     const dialogs: Array<{
       name: string;
@@ -231,10 +238,39 @@ runViewportGuard({
       // Let queries/animations finish before measuring.
       await page.waitForTimeout(500);
 
-      if (compact) {
-        await assertElementInViewport(rec, page, d.primary, viewport, `dialog-${d.name}-primary-in-viewport@${label}`);
-      }
+      await assertElementInViewport(rec, page, d.primary, viewport, `dialog-${d.name}-primary-in-viewport@${label}`);
       await assertNoPageScroll(rec, page, `no-page-scroll:dialog-${d.name}@${label}`);
+
+      // Overflow stress: force the body taller than the dialog can be, so the
+      // check never passes vacuously on short live content. The body (not the
+      // dialog, not the page) must become the scroll container, and the
+      // primary action must stay on screen even with the body scrolled to the
+      // bottom.
+      const stress = await page.evaluate(() => {
+        const body = document.querySelector(".fc-dialog-body") as HTMLElement | null;
+        if (!body) return null;
+        const spacer = document.createElement("div");
+        spacer.id = "__vg-dialog-spacer";
+        spacer.style.height = "2000px";
+        spacer.style.flexShrink = "0";
+        body.appendChild(spacer);
+        const bodyScrolls = body.scrollHeight > body.clientHeight + 4;
+        body.scrollTop = body.scrollHeight;
+        return { bodyScrolls, scrollTop: Math.round(body.scrollTop) };
+      });
+      if (!stress) {
+        rec.assert(false, `dialog-${d.name}-body-scrolls@${label}`, "fc-dialog-body not found in the open dialog");
+      } else {
+        rec.assert(
+          stress.bodyScrolls && stress.scrollTop > 0,
+          `dialog-${d.name}-body-scrolls@${label}`,
+          `with a 2000px spacer the body scrolls=${stress.bodyScrolls}, scrollTop=${stress.scrollTop}px ` +
+            "(false means fc-dialog-body is no longer the scroll container — the pinned layout in index.css is gone)",
+        );
+      }
+      await assertElementInViewport(rec, page, d.primary, viewport, `dialog-${d.name}-primary-pinned-overflow@${label}`);
+      await assertNoPageScroll(rec, page, `no-page-scroll:dialog-${d.name}-overflow@${label}`);
+      await page.evaluate(() => document.getElementById("__vg-dialog-spacer")?.remove());
 
       await page.keyboard.press("Escape");
       await primaryEl.waitFor({ state: "hidden", timeout: SELECTOR_TIMEOUT_MS });
