@@ -1031,6 +1031,54 @@ function parseDecisionLines(html: string, decision: "Approve" | "Decline"): Deci
   return lines;
 }
 
+// ─── Decision confirmation judge (pure — unit-tested) ────────────────────────
+// `mine` = the target PO's radio lines for the decision being made, from a
+// post-submit re-read. `actedValues` = the `value` keys of the line(s) that were
+// actionable at POST time (the ones we actually selected). Prior authorization
+// rounds render as locked lines with their ORIGINAL decision, so only the
+// acted-on lines may be judged — see CRITICAL #2 at the call site.
+export type ConfirmState = { kind: "confirmed" | "actionable" | "indeterminate"; detail: string };
+
+export function judgeConfirmState(
+  mine: DecisionLine[],
+  actedValues: Set<string>,
+  decision: "Approve" | "Decline",
+): ConfirmState {
+  if (mine.length === 0) {
+    return { kind: "indeterminate", detail: "page had no decision lines for this PO" };
+  }
+  const acted = mine.filter((l) => actedValues.has(l.value));
+  if (acted.length === 0) {
+    // The acted-on line no longer renders. For a Decline this is USUALLY the
+    // decision applying — declined resubmit asks drop off the render while
+    // approved lines persist forever as locked+checked history (observed live
+    // 2026-08-24: the declined round-3 line of PO 120059545 vanished while both
+    // approved rounds stayed). But there is no completeness marker on the page:
+    // a partial render that merely omits the acted-on line reads identically,
+    // and `confirmed` here marks the row denied AND releases the redirect SMS.
+    // Absence from a page we cannot prove complete is never confirmation —
+    // report indeterminate and let the operator / the resolved_holman grid
+    // sweep settle it from grid truth.
+    return {
+      kind: "indeterminate",
+      detail:
+        decision === "Decline"
+          ? "acted-on line no longer rendered — declined asks drop off the page, so the decline LIKELY applied, but a partial render reads the same; verify via the awaiting grid (Refresh from Holman)"
+          : "acted-on line vanished from the page — cannot confirm the approval",
+    };
+  }
+  if (acted.some((l) => !l.disabled)) {
+    return { kind: "actionable", detail: "line still actionable (decision not applied)" };
+  }
+  // Locked. A committed line disables BOTH radios but checks only the chosen one —
+  // require OUR decision's radio to be the checked one on the acted-on line(s), so
+  // a mid-race opposite decision (someone approving while we decline) can never
+  // read as confirmed.
+  return acted.every((l) => l.checked)
+    ? { kind: "confirmed", detail: "line locked with our decision checked" }
+    : { kind: "actionable", detail: "line locked but NOT with our decision — opposite decision appears applied; verify in Holman" };
+}
+
 // Collect the ~23 empty Telerik *_ClientState fields + grid plumbing fields verbatim
 // from the GET so the postback round-trips them (server expects them present/blank).
 function collectClientStateFields(html: string): Array<[string, string]> {
@@ -1101,10 +1149,21 @@ async function submitDecision(
   );
 
   if (candidates.length === 0) {
+    // NOTE: deliberately NO idempotent "already declined" success here. A locked
+    // checked Decline radio proves only that SOME historical round was declined —
+    // it cannot be tied to the current ask, and a partial render omitting an
+    // actionable round would read identically. Claiming success would mark the
+    // row denied and release the redirect SMS on ambiguous evidence. A PO whose
+    // decision already applied leaves the awaiting grid, and the resolved_holman
+    // sweep retires its row on the next refresh — that is the reconcile path.
     return {
       success: false,
       confirmed: false,
-      error: `No actionable ${decision} radio found for PO ${poNumber} (lines may already be applied/locked)`,
+      error:
+        `No actionable ${decision} radio found for PO ${poNumber} (lines may already be applied/locked)` +
+        (decision === "Decline"
+          ? " — if this PO has left the awaiting list, the earlier decision applied; Refresh from Holman to reconcile this row"
+          : ""),
     };
   }
 
@@ -1198,24 +1257,22 @@ async function submitDecision(
   //    falsely marked approve_failed. So: only a VALID page (our PO's lines visible)
   //    with the line still ENABLED counts as "not applied"; an unreadable page forces
   //    a fresh login and a retry.
-  type ConfirmState = { kind: "confirmed" | "actionable" | "indeterminate"; detail: string };
+  //
+  //    CRITICAL #2 (learned live 2026-08-24, PO 120059545): confirmation must be
+  //    scoped to the exact line(s) we acted on. A Resubmit PO renders one radio row
+  //    per authorization round, and PRIOR rounds stay locked with their own decision
+  //    forever — an earlier APPROVED round's Decline radio is locked-unchecked for
+  //    life. Judging every rendered line made a correct deny read as "opposite
+  //    decision applied" on any PO with a previously-approved round (i.e. every
+  //    rental extension), which marked the deny failed and suppressed the redirect
+  //    SMS even though the decline HAD applied.
+  const actedValues = new Set(candidates.map((l) => l.value));
   const readState = (html: string, finalUrl: string): ConfirmState => {
     if (/LoginForm\.aspx/i.test(finalUrl)) {
       return { kind: "indeterminate", detail: "read bounced to LoginForm" };
     }
     const mine = parseDecisionLines(html, decision).filter((l) => l.poNumber === String(poNumber));
-    if (mine.length === 0) {
-      return { kind: "indeterminate", detail: "page had no decision lines for this PO" };
-    }
-    if (mine.some((l) => !l.disabled)) {
-      return { kind: "actionable", detail: "line still actionable (decision not applied)" };
-    }
-    // Locked. A committed line disables BOTH radios but checks only the chosen one —
-    // require OUR decision's radio to be the checked one, so a mid-race opposite
-    // decision (someone declining while we approve) can never read as confirmed.
-    return mine.every((l) => l.checked)
-      ? { kind: "confirmed", detail: "line locked with our decision checked" }
-      : { kind: "actionable", detail: "line locked but NOT with our decision — opposite decision appears applied; verify in Holman" };
+    return judgeConfirmState(mine, actedValues, decision);
   };
 
   let state = readState(postHtml, postUrl);
