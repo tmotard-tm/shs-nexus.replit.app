@@ -32,3 +32,8 @@ All confirmed by direct code reading + architect review; **none fixed yet**. Che
 - `ams_declined_repair_check` has **never run in prod**; `separation_enrichment` dead in prod ~6 months; `tpms_snowflake` prod completes with 0 records (dev processed 1582); `truck_inventory` stale 7+ months both envs.
 - LUCA writeback items for trucks absent from fs_trucks (e.g. 24118, 36198) retry every 15 min forever — no park/dead-letter state.
 - Offboarding: ~890 employees × exactly 5 open duplicate queue items (historical dup event); sync skips 3270/run, nothing prunes; no unique index to prevent recurrence.
+
+
+## CONFIRMED in prod (2026-08-24): orphaned intent holds the live-lock
+The resubmit flow DELETEs a deferred/returned request row for the same ldap+type, but never cancels the deleted request's workflow intent. The orphaned nonterminal intent (preview_required after e.g. a zero-classes quote) keeps holding vrm_workflow_intents_live_nonterminal_uq — one live intent per LDAP — so the NEW request's auto-book dies with "another live nonterminal intent already exists". The AROTTER fix exempted orphans in the ELIGIBILITY query only; the DB unique index has no such exemption, and with the source request gone there is no drawer to cancel from.
+**How to apply:** symptom = etd_error "auto-book: another live nonterminal intent already exists for this LDAP" while the tech's older request no longer exists. Repair = CAS-cancel the orphan (status='cancelled', guard on old status+ldap, backup row first) via PROD_DATABASE_URL script, then staff re-books from the drawer. Real fix = resubmit deletion (and any request-delete path) must cancel live intents whose source row it removes.
