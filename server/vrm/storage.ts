@@ -1245,6 +1245,10 @@ export async function listRentalDecisions(limit = 50, sinceDays?: number) {
             uiDisplayedPhone: vrmNotifications.uiDisplayedPhone,
             trustedPhone: vrmNotifications.trustedPhone,
             overrideOverridden: vrmNotifications.overrideOverridden,
+            // Quiet-hours deferral stamp — a queued row with a future
+            // not_before is HELD (scheduled), not stuck; the UI renders it
+            // as "Scheduled" instead of a plain "Queued".
+            notBefore: vrmNotifications.notBefore,
           })
           .from(vrmNotifications)
           .where(
@@ -1286,11 +1290,13 @@ export async function listRentalDecisions(limit = 50, sinceDays?: number) {
         supervisorSmsSentAt: supSms?.sentAt ?? null,
         supervisorSmsError: supSms?.error ?? null,
         supervisorSmsTwilioErrorCode: supSms?.twilioErrorCode ?? null,
+        supervisorSmsNotBefore: supSms?.notBefore ?? null,
         techSmsRecipient: techSms?.recipient ?? null,
         techSmsStatus: techSms?.status ?? null,
         techSmsSentAt: techSms?.sentAt ?? null,
         techSmsError: techSms?.error ?? null,
         techSmsTwilioErrorCode: techSms?.twilioErrorCode ?? null,
+        techSmsNotBefore: techSms?.notBefore ?? null,
         techSmsUiDisplayedPhone: techSms?.uiDisplayedPhone ?? null,
         techSmsTrustedPhone: techSms?.trustedPhone ?? null,
         techSmsOverrideOverridden: techSms?.overrideOverridden ?? false,

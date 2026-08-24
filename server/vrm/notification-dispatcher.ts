@@ -17,6 +17,7 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import {
+  vrmNotifications,
   vrmProfitabilitySnapshot,
   vrmRentalDecisions,
   vrmRepairTracker,
@@ -32,7 +33,7 @@ import {
   deferNotificationUntil,
   getNotificationTemplates,
 } from "./storage";
-import { sendTwilioMessage, getNextAllowedSendTime } from "../fleet-scope-reg-messaging";
+import { sendTwilioMessage, getNextAllowedSendTime, stateTimeZone } from "../fleet-scope-reg-messaging";
 import { sendEmail } from "../email-service";
 
 /**
@@ -720,25 +721,88 @@ function buildDefaultEmailBody(ctx: DenyContext, supName: string, techLabel: str
 // the supervisor row rides the same tech-local window (same region in
 // practice), and a missing state falls back to Eastern inside
 // getNextAllowedSendTime, matching the rest of the stack.
-async function smsQuietHoursDeferral(n: Pick<VrmNotification, "decisionId">): Promise<Date | null> {
-  let state = "";
+async function lookupDecisionTechState(decisionId: string): Promise<string> {
   try {
     const res = await db.execute(sql`
       SELECT c.primary_state AS state
       FROM vrm_rental_decisions d
       LEFT JOIN fs_comms_contacts c ON c.ldap = UPPER(TRIM(d.tech_ldap))
-      WHERE d.id = ${n.decisionId}
+      WHERE d.id = ${decisionId}
       LIMIT 1
     `);
-    state = String((res.rows?.[0] as any)?.state ?? "");
+    return String((res.rows?.[0] as any)?.state ?? "");
   } catch (err: any) {
     // Lookup failure must not block the queue forever nor skip the floor:
     // fall back to the Eastern-window default, same as an unknown state.
     console.warn(
-      `[VRM Notif] quiet-hours state lookup failed (decision ${n.decisionId}): ${err?.message ?? err} — using default window`
+      `[VRM Notif] quiet-hours state lookup failed (decision ${decisionId}): ${err?.message ?? err} — using default window`
     );
+    return "";
   }
-  return getNextAllowedSendTime(state);
+}
+
+async function smsQuietHoursDeferral(n: Pick<VrmNotification, "decisionId">): Promise<Date | null> {
+  return getNextAllowedSendTime(await lookupDecisionTechState(n.decisionId));
+}
+
+// ─── Staff-facing "text is scheduled" derivation ────────────────────────────
+// Tells the deny routes whether the tech's text is genuinely HELD for quiet
+// hours, so the confirmation toast can say "will send at 7:00 AM tech-local".
+//
+// Derived from the PERSISTED notification row, never from the clock alone: a
+// tech with no phone on file gets a 'skipped' row (no text will ever send),
+// and an enqueue failure leaves no row at all — in both cases claiming "the
+// text will send at 7 AM" would be a lie. Only a 'queued' row with a real
+// recipient can be scheduled.
+//
+// The dispatcher stamps not_before asynchronously; when the row is queued but
+// unstamped yet, we compute the SAME window the dispatcher will apply
+// (getNextAllowedSendTime on the same state), so the answer doesn't depend on
+// winning a race with the drain tick.
+export function deriveScheduledSmsInfo(
+  notif: Pick<VrmNotification, "status" | "recipient" | "notBefore"> | null | undefined,
+  state: string,
+  // Injectable for tests — defaults to the dispatcher's real quiet-hours gate.
+  fallbackSendTime: () => Date | null = () => getNextAllowedSendTime(state),
+  now: Date = new Date(),
+): { sendAt: Date; techLocalLabel: string } | null {
+  if (!notif || notif.status !== "queued") return null;
+  if (!notif.recipient || notif.recipient === "(missing)") return null;
+  let sendAt: Date | null = null;
+  if (notif.notBefore) {
+    // Already stamped by the dispatcher. A past stamp means the window has
+    // opened and the text sends on the next drain tick — not "scheduled".
+    sendAt = notif.notBefore.getTime() > now.getTime() ? notif.notBefore : null;
+  } else {
+    sendAt = fallbackSendTime();
+  }
+  if (!sendAt || sendAt.getTime() <= now.getTime()) return null;
+  // Format the send instant in the TECH's timezone (e.g. "7:00 AM") — that is
+  // the number staff quote to the tech, regardless of where staff sit.
+  const techLocalLabel = sendAt.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: stateTimeZone(state),
+  });
+  return { sendAt, techLocalLabel };
+}
+
+export async function getScheduledSmsInfoForDecision(
+  decisionId: string,
+  channel: "sms" | "sms_tech_deny" = "sms_tech_deny",
+): Promise<{ sendAt: Date; techLocalLabel: string } | null> {
+  const [notif] = await db
+    .select({
+      status: vrmNotifications.status,
+      recipient: vrmNotifications.recipient,
+      notBefore: vrmNotifications.notBefore,
+    })
+    .from(vrmNotifications)
+    .where(and(eq(vrmNotifications.decisionId, decisionId), eq(vrmNotifications.channel, channel)))
+    .limit(1);
+  if (!notif) return null;
+  const state = await lookupDecisionTechState(decisionId);
+  return deriveScheduledSmsInfo(notif, state);
 }
 
 // ─── Worker ────────────────────────────────────────────────────────────────

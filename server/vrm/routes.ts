@@ -89,7 +89,7 @@ import {
 } from "./holman-rental-po-storage";
 import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
   resolveRentersForVehicles } from "../holman-portal-service";
-import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, enqueueHolmanRedirectDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
+import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, enqueueHolmanRedirectDenialSmsForTech, triggerImmediateDispatch, getScheduledSmsInfoForDecision } from "./notification-dispatcher";
 import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
@@ -1046,16 +1046,22 @@ export function registerVrmRoutes(): Router {
         // Tech-facing denial SMS (fixed copy w/ first-name + BYOV link). Sent
         // on the dedicated sms_tech_deny channel so it coexists with the
         // supervisor SMS row (UNIQUE(decision_id, channel)).
-        enqueueDenialSmsForTech({
-          decisionId: row.id,
-          techLdap: String(techLdap).toUpperCase(),
-          techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
-          techName: typeof techName === "string" ? techName : null,
-        })
-          .then(() => triggerImmediateDispatch(`denial decision ${row.id}`))
-          .catch((err: any) =>
-            console.error("[VRM] denial tech SMS enqueue failed:", err?.message ?? err),
-          );
+        //
+        // AWAITED so the response's quiet-hours preview can read the PERSISTED
+        // row: only a 'queued' row with a real recipient may claim "text will
+        // send at 7 AM" — a no-phone tech gets a 'skipped' row instead. An
+        // enqueue failure never fails the decision logging itself.
+        try {
+          await enqueueDenialSmsForTech({
+            decisionId: row.id,
+            techLdap: String(techLdap).toUpperCase(),
+            techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
+            techName: typeof techName === "string" ? techName : null,
+          });
+          triggerImmediateDispatch(`denial decision ${row.id}`);
+        } catch (err: any) {
+          console.error("[VRM] denial tech SMS enqueue failed:", err?.message ?? err);
+        }
         // File a "Make Unavailable" event with the DCA Task API so the
         // tech's district DCA is notified and the tech is taken off route.
         // Worker drains every 30s — see startDcaEventDispatcher().
@@ -1100,7 +1106,26 @@ export function registerVrmRoutes(): Router {
         fullLogSync = { ok: false, rowId: null, error: logErr?.message ?? "auto-populate failed" };
       }
 
-      res.json({ ...row, trackerSync, fullLogSync });
+      // Quiet-hours schedule (denials only): tell the approver the tech's text
+      // is HELD and when it will send, so a 11 PM deny doesn't read as "the
+      // tech got nothing". Derived from the persisted sms_tech_deny row —
+      // returns null unless a queued row with a real recipient exists (a
+      // skipped no-phone row or a failed enqueue must never claim a send).
+      let smsScheduledFor: string | null = null;
+      let smsScheduledTechLocal: string | null = null;
+      if (String(decision).toLowerCase() === "denied") {
+        try {
+          const scheduled = await getScheduledSmsInfoForDecision(row.id);
+          if (scheduled) {
+            smsScheduledFor = scheduled.sendAt.toISOString();
+            smsScheduledTechLocal = scheduled.techLocalLabel;
+          }
+        } catch (previewErr: any) {
+          console.warn("[VRM] quiet-hours schedule lookup failed:", previewErr?.message ?? previewErr);
+        }
+      }
+
+      res.json({ ...row, trackerSync, fullLogSync, smsScheduledFor, smsScheduledTechLocal });
     } catch (e: any) {
       console.error("[VRM] profitability/log error:", e.message);
       res.status(500).json({ error: e.message });
@@ -2720,12 +2745,22 @@ export function registerVrmRoutes(): Router {
       // BYOV-pitch denial SMS is retired for this queue — a caller that could
       // not resolve standing degrades to the plain redirect message, never
       // the old template.
-      enqueueHolmanRedirectDenialSmsForTech({
-        decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null,
-        standing: denyRedirect?.standing ?? "none", etdReference: denyRedirect?.etdReference ?? null,
-      })
-        .then(() => triggerImmediateDispatch(`holman deny tech ${decisionRow.id}`))
-        .catch((err: any) => console.error("[VRM/HolmanPO] deny tech SMS failed:", err?.message ?? err));
+      //
+      // AWAITED (unlike the supervisor/DCA enqueues) so the deny response can
+      // read the PERSISTED sms_tech_deny row and only claim "text scheduled
+      // for 7 AM" when a queued row with a real recipient actually exists —
+      // a no-phone tech gets a 'skipped' row and must NOT produce that claim.
+      // An enqueue failure still never fails the deny (Holman already
+      // confirmed the Decline by this point).
+      try {
+        await enqueueHolmanRedirectDenialSmsForTech({
+          decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null,
+          standing: denyRedirect?.standing ?? "none", etdReference: denyRedirect?.etdReference ?? null,
+        });
+        triggerImmediateDispatch(`holman deny tech ${decisionRow.id}`);
+      } catch (err: any) {
+        console.error("[VRM/HolmanPO] deny tech SMS failed:", err?.message ?? err);
+      }
       enqueueDcaMakeUnavailableForDecision(decisionRow.id).catch((err: any) =>
         console.error("[VRM/HolmanPO] DCA make_unavailable failed:", err?.message ?? err));
     } else {
@@ -3239,7 +3274,25 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] holman deny decision-log failed:", e?.message);
           return null;
         });
-        return res.json({ ok: true, status: "denied", decisionId, holmanResult, row: updated });
+        // Quiet-hours schedule: when the deny lands between 9 PM and 7 AM
+        // tech-local, the redirect text is HELD by the dispatcher. Derived
+        // from the persisted sms_tech_deny row (recordHolmanDecision awaits
+        // that enqueue) — null unless a queued row with a real recipient
+        // exists, so a no-phone/skipped tech never yields a false "will send".
+        let smsScheduledFor: string | null = null;
+        let smsScheduledTechLocal: string | null = null;
+        if (decisionId) {
+          try {
+            const scheduled = await getScheduledSmsInfoForDecision(decisionId);
+            if (scheduled) {
+              smsScheduledFor = scheduled.sendAt.toISOString();
+              smsScheduledTechLocal = scheduled.techLocalLabel;
+            }
+          } catch (previewErr: any) {
+            console.warn("[VRM/HolmanPO] quiet-hours schedule lookup failed:", previewErr?.message ?? previewErr);
+          }
+        }
+        return res.json({ ok: true, status: "denied", decisionId, smsScheduledFor, smsScheduledTechLocal, holmanResult, row: updated });
       }
 
       // Real submit but NOT confirmed on re-read → FAILED. Loud, visible, retryable.

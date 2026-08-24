@@ -318,6 +318,9 @@ interface DecisionRow {
   supervisorSmsSentAt: string | null;
   supervisorSmsError: string | null;
   supervisorSmsTwilioErrorCode: string | null;
+  // Quiet-hours deferral stamp — a queued SMS with a future not_before is
+  // HELD (scheduled to send when the tech-local 7 AM window opens), not stuck.
+  supervisorSmsNotBefore: string | null;
   // Tech-facing SMS — channel='sms' for approved decisions (approval SMS),
   // channel='sms_tech_deny' for denied decisions (BYOV-pitch denial SMS).
   techSmsRecipient: string | null;
@@ -325,6 +328,7 @@ interface DecisionRow {
   techSmsSentAt: string | null;
   techSmsError: string | null;
   techSmsTwilioErrorCode: string | null;
+  techSmsNotBefore: string | null;
   // Fix #4 — Override-Overridden Visibility. When the UI passed a
   // techPhoneOverride that failed the trusted-number digit check, the
   // dispatcher silently swapped in the trusted number. These fields surface
@@ -389,7 +393,20 @@ const fmtInt = (v: number | null | undefined) =>
 //   sent                 → amber   (Twilio accepted; awaiting carrier callback)
 //   undelivered/failed   → red     (carrier dropped — Twilio error code shown)
 //   queued               → amber   (dispatcher hasn't sent the API call yet)
+//   scheduled            → blue    (queued + future not_before: held for
+//                                   quiet hours, sends when the window opens)
 //   skipped              → muted   (never sent, e.g. no phone on file)
+
+// A queued row stamped with a future not_before is a quiet-hours hold — the
+// dispatcher deliberately deferred it until 7 AM tech-local. Render it as
+// "Scheduled" so staff know the text WILL send, rather than a plain "Queued"
+// that reads like it should have gone out already.
+function scheduledSendTime(status: string, notBefore: string | null): Date | null {
+  if (status !== "queued" || !notBefore) return null;
+  const t = new Date(notBefore);
+  return Number.isFinite(t.getTime()) && t.getTime() > Date.now() ? t : null;
+}
+
 function smsBadgeConfig(
   status: string,
   sentAt: string | null,
@@ -430,6 +447,7 @@ function SmsStatusPill({
   sentAt,
   error,
   errorCode,
+  notBefore = null,
   overrideOverridden = false,
   uiDisplayedPhone = null,
   trustedPhone = null,
@@ -439,13 +457,26 @@ function SmsStatusPill({
   sentAt: string | null;
   error: string | null;
   errorCode: string | null;
+  notBefore?: string | null;
   overrideOverridden?: boolean;
   uiDisplayedPhone?: string | null;
   trustedPhone?: string | null;
 }) {
-  const cfg = smsBadgeConfig(status, sentAt);
+  // Quiet-hours hold: queued + future not_before → "Scheduled" (blue), so a
+  // night-time deny doesn't read as a text that silently never went out.
+  const scheduledAt = scheduledSendTime(status, notBefore);
+  const cfg = scheduledAt
+    ? {
+        fg: colors.blue,
+        bg: colors.blueLight,
+        label: `Scheduled ${scheduledAt.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`,
+      }
+    : smsBadgeConfig(status, sentAt);
   const tooltip = [
     recipient ? `To: ${recipient}` : null,
+    scheduledAt
+      ? `Held for quiet hours (9 PM–7 AM tech-local) — sends after ${scheduledAt.toLocaleString()}`
+      : null,
     sentAt ? `Sent: ${new Date(sentAt).toLocaleString()}` : null,
     errorCode ? `Twilio error code: ${errorCode}` : null,
     error ? `Error: ${error}` : null,
@@ -541,6 +572,7 @@ function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
       sentAt={decision.supervisorSmsSentAt}
       error={decision.supervisorSmsError}
       errorCode={decision.supervisorSmsTwilioErrorCode}
+      notBefore={decision.supervisorSmsNotBefore}
     />
   );
 }
@@ -560,6 +592,7 @@ function TechSmsCell({ decision }: { decision: DecisionRow }) {
       sentAt={decision.techSmsSentAt}
       error={decision.techSmsError}
       errorCode={decision.techSmsTwilioErrorCode}
+      notBefore={decision.techSmsNotBefore}
       overrideOverridden={decision.techSmsOverrideOverridden}
       uiDisplayedPhone={decision.techSmsUiDisplayedPhone}
       trustedPhone={decision.techSmsTrustedPhone}
@@ -1276,7 +1309,16 @@ export default function NewRentals() {
       } else if (st === "dry_run") {
         toast({ title: "DRY RUN — nothing sent to Holman", description: "Would click Decline. Set HOLMAN_DECISION_DRY_RUN=false to submit for real." });
       } else if (st === "denied") {
-        toast({ title: "✓ Declined and confirmed in Holman" });
+        // Quiet-hours hold: the deny landed between 9 PM and 7 AM tech-local,
+        // so the redirect text is scheduled rather than already sent. Say so —
+        // otherwise a 11 PM deny reads like the tech should have a text now.
+        const scheduled = data.smsScheduledFor && new Date(data.smsScheduledFor).getTime() > Date.now();
+        toast({
+          title: "✓ Declined and confirmed in Holman",
+          description: scheduled
+            ? `Quiet hours — the tech's text will send at ${data.smsScheduledTechLocal ?? "7:00 AM"} tech-local (${new Date(data.smsScheduledFor).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} your time).`
+            : undefined,
+        });
       } else {
         toast({ title: "Deny result unclear — verify in Holman", description: data.error ?? JSON.stringify(data), variant: "destructive" });
       }
@@ -1367,6 +1409,10 @@ export default function NewRentals() {
       const res = await apiRequest("POST", "/api/vrm/profitability/log", body);
       return res.json() as Promise<{
         fullLogSync?: { ok: boolean; rowId: string | null; error: string | null };
+        // Quiet-hours preview (denials only) — set when the tech's text is
+        // held until the 7 AM tech-local window opens.
+        smsScheduledFor?: string | null;
+        smsScheduledTechLocal?: string | null;
       }>;
     },
     onSuccess: (data) => {
@@ -1385,6 +1431,16 @@ export default function NewRentals() {
           variant: "destructive",
           title: "Decision logged, but Full Log auto-populate failed",
           description: sync.error ?? "Please add the Full Log entry manually.",
+        });
+      }
+
+      // Quiet-hours hold: the denial text is scheduled, not already sent —
+      // tell staff when it goes out so a night-time deny isn't mistaken for
+      // a text that never fired.
+      if (data?.smsScheduledFor && new Date(data.smsScheduledFor).getTime() > Date.now()) {
+        toast({
+          title: "Denial text scheduled — quiet hours",
+          description: `The tech's text will send at ${data.smsScheduledTechLocal ?? "7:00 AM"} tech-local (${new Date(data.smsScheduledFor).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })} your time).`,
         });
       }
     },
@@ -2652,7 +2708,7 @@ export default function NewRentals() {
                   <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <SortableTh col="truck"          label="Truck"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <th style={thStyle} title="Tech-facing SMS: approval text on Approve, BYOV-pitch denial text on Deny. Delivery state is reported by Twilio's status callback (delivered/undelivered/failed).">Tech SMS</th>
+                  <th style={thStyle} title="Tech-facing SMS: approval text on Approve, BYOV-pitch denial text on Deny. Delivery state is reported by Twilio's status callback (delivered/undelivered/failed). 'Scheduled' means the text is held for quiet hours (9 PM–7 AM tech-local) and sends when the window opens.">Tech SMS</th>
                   <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="scorecard"      label="Scorecard"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
