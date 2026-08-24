@@ -692,7 +692,7 @@ export default function RentalOperations() {
       hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, cls: (r) => r.rental_class,
       cost: (r) => r.daily_cost, ams: (r) => r.ams_status, shop: (r) => r.shop_name,
       days: (r) => r.days_open, ext: (r) => r.number_of_extensions, days_open: (r) => r.days_open,
-      tpms: (r) => r.tpms_tech, lastrental: (r) => r.last_rental_date, npos: (r) => r.po_count,
+      tpms: (r) => r.assigned_truck, lastrental: (r) => r.last_rental_date, npos: (r) => r.po_count,
     };
     const cmp = sort.col ? makeSortComparator(acc[sort.col] ?? ((r) => (r as any)[sort.col!]), sort.dir) : null;
     return cmp ? [...filtered].sort(cmp) : filtered;
@@ -942,7 +942,7 @@ export default function RentalOperations() {
 
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_assigned", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
+    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_tech_name", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
       "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po"];
     const body = sorted.map((r) => [
       r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
@@ -1303,8 +1303,13 @@ export default function RentalOperations() {
                     ) : <span style={{ color: colors.inkMuted }}>—</span>}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {r.tpms_tech ? <span style={{ color: r.wrong_truck ? colors.red : colors.inkSoft, fontWeight: r.wrong_truck ? 600 : 400 }}>{r.tpms_tech}</span> : <span style={{ color: colors.inkMuted }}>none</span>}
-                    {r.wrong_truck && r.renter_own_truck && <div style={{ fontSize: 10, color: colors.red }}>renter drives {r.renter_own_truck}</div>}
+                    {/* The renter's ACTUAL assigned truck number (shared TPMS-first
+                        derivation — assigned_truck/own_pad). Red = it differs from
+                        the rental case truck (wrong_truck). The Holman-cache TPMS
+                        tech name (sparsely populated) is secondary detail only. */}
+                    {r.assigned_truck ? <span style={{ color: r.wrong_truck ? colors.red : colors.inkSoft, fontWeight: r.wrong_truck ? 600 : 400 }}>{r.assigned_truck}</span> : <span style={{ color: colors.inkMuted }}>none</span>}
+                    {r.wrong_truck && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
+                    {r.tpms_tech && <div style={{ fontSize: 10, color: colors.inkMuted }}>{r.tpms_tech}</div>}
                   </td>
                   <td style={tdStyle}>
                     {r.veh_desc || <span style={{ color: colors.red }}>-</span>}
