@@ -813,6 +813,223 @@
   }
 }
 
+/* ── Small-laptop density: remaining VRM sidebar pages (Task #833) ──────────
+   Same contract as the #826 block above: 13" Windows laptops at 125–150%
+   scaling report ~1024×(500–650) CSS pixels. Density ONLY — padding, gaps,
+   control/font sizes, page-internal scroller caps. All four pages are
+   inline-styled, so every override of an inline property carries !important.
+   Hook classes are style-free and live in:
+     client/src/pages/vehicle-rental-management/pages/RightsizeTracker.tsx (rt-*)
+     client/src/pages/vehicle-rental-management/pages/InboundCalls.tsx     (ic-*)
+     client/src/pages/vehicle-rental-management/pages/LucaActivity.tsx     (la-*)
+     client/src/pages/vehicle-rental-management/pages/NewRentalFullLog.tsx (fl-*)
+   TechSchedules and ExecutiveSummary were audited and left alone: the former
+   already fits at 1024×500; the latter is an intentionally scrolling dashboard
+   with its own responsive grid CSS. */
+@media (max-width: 1279.98px), (max-height: 650px) {
+  main[data-testid="vrm-main"]:has(.rightsize-tracker),
+  main[data-testid="vrm-main"]:has(.inbound-calls),
+  main[data-testid="vrm-main"]:has(.luca-activity),
+  main[data-testid="vrm-main"]:has(.full-log) {
+    padding: 12px !important;
+  }
+
+  /* ── Rightsize Tracker ── */
+  .rightsize-tracker .rt-header {
+    gap: 8px !important;
+  }
+  .rightsize-tracker .rt-header h1 {
+    font-size: 17px !important;
+  }
+  .rightsize-tracker .rt-header button {
+    padding: 3px 9px !important;
+    font-size: 11px !important;
+  }
+  .rightsize-tracker .rt-thought {
+    margin-top: 6px !important;
+    font-size: 13px !important;
+  }
+  .rightsize-tracker .rt-thought > div {
+    font-size: 11px !important;
+  }
+  .rightsize-tracker .rt-ledger {
+    margin-top: 6px !important;
+    font-size: 11.5px !important;
+  }
+  .rightsize-tracker .rt-kpis {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)) !important;
+    gap: 8px !important;
+    margin-top: 8px !important;
+  }
+  .rightsize-tracker .rt-kpi {
+    padding: 6px 10px !important;
+  }
+  .rightsize-tracker .rt-kpi-value {
+    font-size: 18px !important;
+  }
+  .rightsize-tracker .rt-bar {
+    margin-top: 8px !important;
+  }
+  .rightsize-tracker .rt-bar > div:first-child {
+    height: 18px !important;
+  }
+  .rightsize-tracker .rt-buckets {
+    margin-top: 8px !important;
+  }
+  .rightsize-tracker .rt-buckets th,
+  .rightsize-tracker .rt-buckets td {
+    padding: 5px 8px !important;
+  }
+  .rightsize-tracker .rt-awaiting {
+    margin-top: 8px !important;
+  }
+  .rightsize-tracker .rt-awaiting-grid {
+    max-height: 200px !important;
+  }
+  .rightsize-tracker .rt-toolbar {
+    gap: 6px !important;
+    margin-top: 6px !important;
+  }
+  .rightsize-tracker .rt-toolbar input,
+  .rightsize-tracker .rt-toolbar button {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+    font-size: 11px !important;
+  }
+  /* Page-internal roster scroller: the inline max(560px, …) floor forces a
+     560px-tall pane that cannot fit a 500px viewport; at compact the floor
+     drops so the pane always ends inside the window once the user scrolls
+     the roster into view (the page itself scrolls by design — exec layer
+     above, roster below). */
+  .rightsize-tracker .rt-table-wrap {
+    max-height: max(300px, calc(100vh - 150px)) !important;
+  }
+  .rightsize-tracker .rt-table-wrap th,
+  .rightsize-tracker .rt-table-wrap td {
+    padding: 4px 8px !important;
+  }
+
+  /* ── Inbound Calls ── */
+  .inbound-calls .ic-cards {
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+  }
+  .inbound-calls .ic-card {
+    padding: 6px 10px !important;
+    min-width: 140px !important;
+  }
+  .inbound-calls .ic-card > div:first-child {
+    font-size: 10px !important;
+    letter-spacing: 0 !important;
+  }
+  .inbound-calls .ic-card-value {
+    font-size: 18px !important;
+    margin-top: 2px !important;
+  }
+  .inbound-calls .ic-filters {
+    gap: 6px !important;
+    margin-bottom: 6px !important;
+  }
+  .inbound-calls .ic-filters > input,
+  .inbound-calls .ic-filters > label,
+  .inbound-calls .ic-filters > button,
+  .inbound-calls .ic-filters > div > button {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+    font-size: 11px !important;
+  }
+  .inbound-calls .ic-filters > input {
+    min-width: 200px !important;
+  }
+  /* Scroller cap rides the compacted chrome above it: the wrap's top edge is
+     at 256px viewport-y at 1024 wide (guard-measured: topbar + reclaimed main
+     padding + compact KPI row + compact filter row), so 268px keeps the pane
+     bottom inside the window with a little slack. */
+  .inbound-calls .ic-table-wrap {
+    max-height: max(140px, calc(100vh - 268px)) !important;
+  }
+  .inbound-calls .ic-table-wrap th,
+  .inbound-calls .ic-table-wrap td {
+    padding: 5px 8px !important;
+  }
+  .inbound-calls .ic-modal {
+    padding: 14px !important;
+  }
+
+  /* ── LUCA Activity ── */
+  .luca-activity .la-cards {
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+  }
+  /* The cards' flex-basis is content-sized (long hint strings), so 4 cards
+     wrap to two rows at 1024 wide; pin the basis so they share one row and
+     keep each hint to a single ellipsized line. */
+  .luca-activity .la-card {
+    padding: 6px 10px !important;
+    flex: 1 1 150px !important;
+    min-width: 150px !important;
+  }
+  .luca-activity .la-card > div:first-child {
+    font-size: 10px !important;
+    letter-spacing: 0 !important;
+  }
+  .luca-activity .la-card-value {
+    font-size: 16px !important;
+    margin-top: 2px !important;
+  }
+  .luca-activity .la-card > div:last-child:not(.la-card-value) {
+    font-size: 9.5px !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .luca-activity .la-chips {
+    gap: 4px !important;
+    margin-bottom: 8px !important;
+  }
+  .luca-activity .la-filters {
+    gap: 6px !important;
+    margin-bottom: 6px !important;
+  }
+  .luca-activity .la-filters > input,
+  .luca-activity .la-filters > select,
+  .luca-activity .la-filters > label,
+  .luca-activity .la-filters > button {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+    font-size: 11px !important;
+  }
+  /* Scroller cap rides the compacted chrome above it: the wrap's top edge is
+     at 300px viewport-y at 1024 wide (guard-measured: topbar + reclaimed main
+     padding + compact single-row cards + chips + filter rows), so 312px keeps
+     the pane bottom inside the window with a little slack. */
+  .luca-activity .la-table-wrap {
+    max-height: max(140px, calc(100vh - 312px)) !important;
+  }
+  .luca-activity .la-table-wrap th,
+  .luca-activity .la-table-wrap td {
+    padding: 5px 8px !important;
+  }
+
+  /* ── New Rental – Full Log ── */
+  .full-log .fl-header {
+    margin-bottom: 10px !important;
+  }
+  .full-log .fl-header input,
+  .full-log .fl-header button {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+    font-size: 12px !important;
+  }
+  .full-log .fl-table-wrap th,
+  .full-log .fl-table-wrap td {
+    padding: 5px 8px !important;
+  }
+  .full-log .fl-pager {
+    padding: 8px 12px !important;
+  }
+}
+
 /* Development Banner */
 .dev-banner {
   background: linear-gradient(90deg, hsl(208, 100%, 47%), hsl(200, 85%, 55%));

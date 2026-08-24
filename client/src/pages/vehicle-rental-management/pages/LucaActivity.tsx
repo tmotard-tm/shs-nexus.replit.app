@@ -161,10 +161,12 @@ export default function LucaActivity() {
     );
   };
 
+  // la-card / la-card-value are style-free hooks for the compact-density
+  // media block in client/src/index.css (small-laptop fit, Task #833).
   const Card = ({ label, value, hint, fg }: { label: string; value: string; hint?: string; fg?: string }) => (
-    <div style={{ flex: 1, minWidth: 170, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
+    <div className="la-card" style={{ flex: 1, minWidth: 170, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
       <div style={{ fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      <div style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, color: fg || colors.ink, marginTop: 4 }}>{value}</div>
+      <div className="la-card-value" style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, color: fg || colors.ink, marginTop: 4 }}>{value}</div>
       {hint && <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>{hint}</div>}
     </div>
   );
@@ -193,9 +195,11 @@ export default function LucaActivity() {
   const runPaint = lastRun ? (STATUS_PAINT[lastRun.status] ?? STATUS_PAINT.ok) : null;
 
   return (
-    <div>
+    // luca-activity + the la-* classes are style-free hooks for the compact
+    // density media block in client/src/index.css (small-laptop fit, #833).
+    <div className="luca-activity">
       {/* health cards */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="la-cards" style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
         <Card
           label="Last Write-back Run"
           value={lastRun ? ago(lastRun.at) : "never"}
@@ -213,7 +217,7 @@ export default function LucaActivity() {
       </div>
 
       {/* config chips */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
+      <div className="la-chips" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 14 }}>
         {runPaint && lastRun && <span style={pill(runPaint.fg, runPaint.bg)}>run: {runPaint.label}</span>}
         {chips.map((c) => {
           const fg = c.on ? colors.green : (c.offBad ? colors.red : colors.inkSoft);
@@ -224,7 +228,7 @@ export default function LucaActivity() {
       </div>
 
       {/* filter row */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+      <div className="la-filters" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search truck, case, summary, actor…" style={{ ...selStyle, minWidth: 260 }} />
         <select value={fDir} onChange={(e) => setFDir(e.target.value)} style={selStyle}>
           <option value="">All directions</option>
@@ -256,7 +260,7 @@ export default function LucaActivity() {
 
       {/* table */}
       <div style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflow: "auto", maxHeight: "min(72vh, 900px)" }}>
+        <div className="la-table-wrap" style={{ overflow: "auto", maxHeight: "min(72vh, 900px)" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>

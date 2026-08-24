@@ -1295,9 +1295,11 @@ export default function NewRentalFullLog() {
   ];
 
   return (
-    <div style={{ width: "100%" }}>
+    // full-log + the fl-* classes are style-free hooks for the compact
+    // density media block in client/src/index.css (small-laptop fit, #833).
+    <div className="full-log" style={{ width: "100%" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div className="fl-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <p
             style={{
@@ -1413,6 +1415,7 @@ export default function NewRentalFullLog() {
 
       {/* Table */}
       <div
+        className="fl-table-wrap"
         style={{
           backgroundColor: colors.background,
           border: `1px solid ${colors.rule}`,
@@ -1490,6 +1493,7 @@ export default function NewRentalFullLog() {
         {/* Pagination footer */}
         {!isLoading && sorted.length > PAGE_SIZE && (
           <div
+            className="fl-pager"
             style={{
               display: "flex",
               alignItems: "center",

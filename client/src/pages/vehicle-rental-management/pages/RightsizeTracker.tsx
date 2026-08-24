@@ -455,9 +455,11 @@ export default function RightsizeTracker() {
   const td: React.CSSProperties = { padding: "6px 10px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
   return (
-    <div style={{ fontFamily: fonts.dmSans, color: colors.ink, width: "100%" }}>
+    // rightsize-tracker + the rt-* classes are style-free hooks for the compact
+    // density media block in client/src/index.css (small-laptop fit, #833).
+    <div className="rightsize-tracker" style={{ fontFamily: fonts.dmSans, color: colors.ink, width: "100%" }}>
       {/* header + freshness clocks */}
-      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+      <div className="rt-header" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <h1 style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, margin: 0 }}>Rental Right-Size Tracker</h1>
         <span style={{ fontSize: 11.5, color: colors.inkMuted, fontFamily: fonts.jetbrains }}>
           <Clock size={11} style={{ verticalAlign: "-1px", marginRight: 4 }} />
@@ -477,7 +479,7 @@ export default function RightsizeTracker() {
 
       {/* governing thought — VEHICLE TRUTH leads, SMS is context */}
       {ck && (
-        <div style={{ marginTop: 10, fontSize: 15 }}>
+        <div className="rt-thought" style={{ marginTop: 10, fontSize: 15 }}>
           <b>{ck.compliant}</b> of <b>{ck.totalOpen}</b> open rentals are right-sized (<b>{ck.compliantPct}%</b>).
           {" "}<b>{ck.notCompliant}</b> are not — <b>{money0(ck.monthlyOverSedan)}</b>/mo above the sedan floor
           {" "}({money0(ck.notCompliantDaily)}/day gross rental spend).
@@ -504,7 +506,7 @@ export default function RightsizeTracker() {
           frozen 7/9 outreach roster, so it must never be read against the
           compliance numbers above. Kept because Tyler uses secured%. */}
       {k && (
-        <div style={{ marginTop: 10, fontSize: 13, color: colors.inkSoft }}>
+        <div className="rt-ledger" style={{ marginTop: 10, fontSize: 13, color: colors.inkSoft }}>
           <span style={{ fontWeight: 700, color: colors.ink }}>SMS campaign ledger</span>
           <span style={{ fontSize: 11, color: colors.inkMuted }}> — separate scale: denominator is the {k.universe}-tech outreach
           roster (not the {ck?.totalOpen ?? "—"}-rental open book) and it credits returned rentals at full rate, which compliance above never does</span>
@@ -516,15 +518,15 @@ export default function RightsizeTracker() {
 
       {/* 3 KPI cards — right-sized, not-right-sized, share of the open book */}
       {ck && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 14 }}>
+        <div className="rt-kpis" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 14 }}>
           {[
             { t: "Right-sized", v: `${ck.compliant}`, s: "sedan rate, sedan model, or tech-confirmed · $0/mo leaking", fg: colors.green, bg: colors.greenLight },
             { t: "Not right-sized", v: `${ck.notCompliant}`, s: `${money0(ck.monthlyOverSedan)}/mo over the sedan floor · ${money0(ck.notCompliantDaily)}/day gross`, fg: colors.red, bg: colors.redLight },
             { t: "Share of open book right-sized", v: `${ck.compliantPct}%`, s: `${ck.compliant} of ${ck.totalOpen} open Enterprise rentals`, fg: colors.blue, bg: colors.blueLight },
           ].map((c) => (
-            <div key={c.t} style={{ background: c.bg, border: `1px solid ${c.fg}`, borderRadius: 12, padding: "12px 16px" }}>
+            <div key={c.t} className="rt-kpi" style={{ background: c.bg, border: `1px solid ${c.fg}`, borderRadius: 12, padding: "12px 16px" }}>
               <div style={{ ...label, color: c.fg }}>{c.t}</div>
-              <div style={{ fontFamily: fonts.syne, fontSize: 24, fontWeight: 700, color: c.fg }}>{c.v}</div>
+              <div className="rt-kpi-value" style={{ fontFamily: fonts.syne, fontSize: 24, fontWeight: 700, color: c.fg }}>{c.v}</div>
               <div style={{ fontSize: 11.5, color: colors.inkSoft }}>{c.s}</div>
             </div>
           ))}
@@ -536,7 +538,7 @@ export default function RightsizeTracker() {
           header. Right-sized carries $0 by definition, so it is absent from the
           bar on purpose: the bar is the leak, not the win. */}
       {bucketDollarTotal > 0 && (
-        <div style={{ marginTop: 14 }}>
+        <div className="rt-bar" style={{ marginTop: 14 }}>
           <div style={{ display: "flex", height: 26, borderRadius: 8, overflow: "hidden", border: `1px solid ${colors.rule}` }}>
             {buckets.map((b) => {
               if (b.monthly <= 0) return null;
@@ -564,7 +566,7 @@ export default function RightsizeTracker() {
 
       {/* MECE bucket table w/ next actions — unit: RENTALS, certainty order, sortable */}
       {bucketRows.length > 0 && (
-        <div style={{ marginTop: 16, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "hidden" }}>
+        <div className="rt-buckets" style={{ marginTop: 16, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
             <thead>
               <tr>
@@ -610,14 +612,14 @@ export default function RightsizeTracker() {
           no longer the number of record, so there is nothing to "confirm" into
           secured. Compliance comes from the Enterprise vehicle column in the
           header above. */}
-      <div style={{ marginTop: 16 }}>
+      <div className="rt-awaiting" style={{ marginTop: 16 }}>
         <section style={{ border: `1px solid ${colors.purple}`, borderRadius: 10, padding: 12 }}>
           <div style={{ ...label, color: colors.purple }}>Awaiting our reply ({awaiting.length}) — nobody gets ignored</div>
           <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>
             oldest first · {awaitingStale} over 24h · Reply opens the thread in Fleet Communications ·
             technicians already right-sized are removed from this queue automatically
           </div>
-          <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(430px, 1fr))", gap: 6, maxHeight: 360, overflowY: "auto" }}>
+          <div className="rt-awaiting-grid" style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(430px, 1fr))", gap: 6, maxHeight: 360, overflowY: "auto" }}>
             {awaiting.length === 0 && <div style={{ fontSize: 12, color: colors.inkMuted }}>Every inbound has a later outbound. Clean.</div>}
             {awaiting.map((t) => (
               <div key={t.ldap} style={{ display: "flex", gap: 8, alignItems: "center", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "6px 10px" }}>
@@ -642,7 +644,7 @@ export default function RightsizeTracker() {
       <div style={{ ...label, marginTop: 18 }}>
         Outreach roster — one row per campaign technician (techs, not rentals) · drives the SMS chase, never the compliance math
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
+      <div className="rt-toolbar" style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
         <div style={{ position: "relative" }}>
           <Search size={13} style={{ position: "absolute", left: 9, top: 8, color: colors.inkMuted }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ldap, name, TL, district, vehicle"
@@ -667,7 +669,7 @@ export default function RightsizeTracker() {
           {sort.col && <> · sorted by <b>{sort.col}</b> {sort.dir}</>}
         </span>
       </div>
-      <div style={{ marginTop: 8, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "auto", maxHeight: "max(560px, calc(100vh - 320px))" }}>
+      <div className="rt-table-wrap" style={{ marginTop: 8, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "auto", maxHeight: "max(560px, calc(100vh - 320px))" }}>
         <table style={{ width: "100%", minWidth: 1150, borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
           <thead>
             <tr>

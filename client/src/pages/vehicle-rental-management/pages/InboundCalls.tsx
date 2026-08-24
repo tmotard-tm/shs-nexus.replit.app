@@ -336,10 +336,12 @@ export default function InboundCalls() {
   };
 
   const k = summary?.kpis ?? {};
+  // ic-card / ic-card-value are style-free hooks for the compact-density
+  // media block in client/src/index.css (small-laptop fit, Task #833).
   const Card = ({ label, value, hint, fg }: { label: string; value: string; hint?: string; fg?: string }) => (
-    <div style={{ flex: 1, minWidth: 170, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
+    <div className="ic-card" style={{ flex: 1, minWidth: 170, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
       <div style={{ fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
-      <div style={{ fontFamily: fonts.syne, fontSize: 26, fontWeight: 700, color: fg || colors.ink, marginTop: 4 }}>{value}</div>
+      <div className="ic-card-value" style={{ fontFamily: fonts.syne, fontSize: 26, fontWeight: 700, color: fg || colors.ink, marginTop: 4 }}>{value}</div>
       {hint && <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>{hint}</div>}
     </div>
   );
@@ -355,15 +357,17 @@ export default function InboundCalls() {
   const sel = selected ? calls.find((c) => c.conversation_id === selected) ?? null : null;
 
   return (
-    <div>
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
+    // inbound-calls + the ic-* classes are style-free hooks for the compact
+    // density media block in client/src/index.css (small-laptop fit, #833).
+    <div className="inbound-calls">
+      <div className="ic-cards" style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
         <Card label="Total Inbound" value={String(k.real_calls ?? 0)} hint={`${k.total ?? 0} incl. junk`} />
         <Card label="Ready for Pickup" value={String(k.ready_open ?? 0)} hint="open" fg={colors.green} />
         <Card label="Awaiting Authorization" value={String(k.auth_open ?? 0)} hint={k.auth_open_dollars ? money(k.auth_open_dollars) : "open"} fg={colors.amber} />
         <Card label="Unmatched to a Truck" value={String(k.unmatched ?? 0)} hint={`${k.matched ?? 0} matched`} fg={colors.inkSoft} />
       </div>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
+      <div className="ic-filters" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search shop, caller, plate, VIN, truck, unit…"
           style={{ ...selStyle, minWidth: 300 }} />
         <MultiSelect label="types" options={typeCounts} values={fType} onChange={setFType} style={selStyle} />
@@ -388,7 +392,7 @@ export default function InboundCalls() {
       </div>
 
       <div style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, overflow: "hidden" }}>
-        <div style={{ overflow: "auto", maxHeight: "min(72vh, 900px)" }}>
+        <div className="ic-table-wrap" style={{ overflow: "auto", maxHeight: "min(72vh, 900px)" }}>
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
@@ -500,7 +504,7 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)", padding: 24 }} onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()}
+      <div onClick={(e) => e.stopPropagation()} className="ic-modal"
         style={{ width: "min(760px, 100%)", maxHeight: "88vh", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 14, boxShadow: "0 24px 64px rgba(0,0,0,0.55)", overflowY: "auto", padding: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <PhoneIncoming size={16} color={colors.accent} />
