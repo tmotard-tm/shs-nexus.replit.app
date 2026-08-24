@@ -26,6 +26,7 @@ import {
   BASE_URL,
   NAV_TIMEOUT_MS,
   SELECTOR_TIMEOUT_MS,
+  SMALL_LAPTOP_VIEWPORTS,
   runViewportGuard,
   failIfOnLoginPage,
   assertNoPageScroll,
@@ -36,6 +37,11 @@ import {
 } from "./lib/viewport-guard";
 
 const PAGE_PATH = "/fleet-scope";
+// The two shared mandatory sizes plus the scaled-small-laptop reality
+// (Task #823, pattern from #820): 13" Windows machines at 125-150% display
+// scaling end up around a 1024x500 effective viewport — the size the compact
+// density media block in client/src/index.css targets (av-* hooks).
+const VIEWPORTS = [...SMALL_LAPTOP_VIEWPORTS, { width: 1024, height: 500 }];
 const MAIN_FILL_SLACK_PX = 4;
 // /api/fs/all-vehicles serves from the daily PG mirror; give a cold first
 // load a little extra room beyond the default selector timeout.
@@ -47,7 +53,10 @@ runViewportGuard({
     "All Vehicles no longer fits a small-laptop viewport. Likely causes: FleetScopeLayout lost its h-screen " +
     "root, the min-h-0/overflow-auto on the shell main, or the min-w-0 on SidebarInset (the 2000px fleet " +
     "table then pushes the document wider than the screen and the toolbar buttons fall off the right edge), " +
-    "or a hardcoded height was added to the shell or page (client/src/pages/fleet-scope/AllVehicles.tsx).",
+    "or a hardcoded height was added to the shell or page (client/src/pages/fleet-scope/AllVehicles.tsx). " +
+    "If only 1024x500 fails, the compact density block in client/src/index.css (Task #823) may have been " +
+    "removed or its av-* hook classes stripped from the page.",
+  viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
     console.log(`\n[All Vehicles @ ${label}]`);

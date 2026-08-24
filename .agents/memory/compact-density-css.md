@@ -23,12 +23,24 @@ classes (`fc-*`) placed on the page. Rules to reuse:
   heights on the flex-fill pane chain; after adding density, still run the page's
   viewport guard AND both sabotage modes (hardcoded pinned height + removed
   height wrapper) per viewport-fit-guard.md.
+- **Pinned-height sabotage needs `flexShrink: 0`.** A bare `height: 900` on a
+  flex-item pane is silently shrunk back to fit by the default `flex-shrink: 1`
+  (overflow-auto zeroes the automatic min-size), so the guard stays green and the
+  sabotage proves nothing. Seen live on both shell mains 2026-08-24.
+- **Inline-styled pages** (e.g. VRM Ops Queue) need `!important` on every
+  override of an inline property; hidden elements (`display:none`) don't. A
+  shell's inline padding can be reclaimed page-scoped via
+  `main[data-testid=...]:has(.page-root) { padding: Npx !important; }`.
+- **"Desktop unchanged" proof on live-data boards:** before/after screenshot
+  compare drifts (clocks, counts, cache warm-up). Prove it with
+  `matchMedia(query).matches === false` at 1280×720 plus computed-style probes
+  on the hooked elements; use an identical-code double-capture to bound
+  data noise if screenshots are still wanted.
 
 **How to apply:** any "page too big on 13-inch laptops" request → hook classes +
 scoped media block, extend that page's guard with the smaller viewport
 (~1024×500 simulates 125–150% Windows scaling), sabotage-test, screenshot both
 sizes.
-
 ## Dialogs (Radix portals) need their own hook scope
 
 Dialogs portal to `<body>`, so `.page-scope .hook` selectors never match them —

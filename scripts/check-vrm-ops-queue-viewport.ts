@@ -22,6 +22,7 @@ import {
   BASE_URL,
   NAV_TIMEOUT_MS,
   SELECTOR_TIMEOUT_MS,
+  SMALL_LAPTOP_VIEWPORTS,
   runViewportGuard,
   failIfOnLoginPage,
   assertNoPageScroll,
@@ -32,6 +33,11 @@ import {
 } from "./lib/viewport-guard";
 
 const PAGE_PATH = "/vehicle-rental-management/ops-queue";
+// The two shared mandatory sizes plus the scaled-small-laptop reality
+// (Task #823, pattern from #820): 13" Windows machines at 125-150% display
+// scaling end up around a 1024x500 effective viewport — the size the compact
+// density media block in client/src/index.css targets (oq-* hooks).
+const VIEWPORTS = [...SMALL_LAPTOP_VIEWPORTS, { width: 1024, height: 500 }];
 const MAIN_FILL_SLACK_PX = 4;
 
 runViewportGuard({
@@ -40,7 +46,10 @@ runViewportGuard({
     "The VRM Ops Queue no longer fits a small-laptop viewport. Likely causes: RouteReadyLayout lost its " +
     "h-screen root or the min-h-0/overflow-auto on <main> (the document scrolls again), a hardcoded height " +
     "was added to the shell or page (client/src/pages/vehicle-rental-management/pages/OpsQueue.tsx), or the " +
-    "header/view-toggle stack grew until the work-bucket strip fell below the fold.",
+    "header/view-toggle stack grew until the work-bucket strip fell below the fold. " +
+    "If only 1024x500 fails, the compact density block in client/src/index.css (Task #823) may have been " +
+    "removed or its oq-* hook classes stripped from the page.",
+  viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
     console.log(`\n[VRM Ops Queue @ ${label}]`);

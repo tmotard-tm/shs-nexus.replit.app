@@ -711,13 +711,15 @@ export default function AllVehicles() {
   }, [data?.vehicles]);
 
   return (
-    <div className="bg-background">
+    // all-vehicles / av-* are style-free hooks for the small-laptop compact
+    // density block in client/src/index.css (Task #823; pattern from #820).
+    <div className="all-vehicles bg-background">
       <main className="p-4">
         <div className="max-w-7xl mx-auto">
-          <div className="mb-4 flex items-center justify-between">
+          <div className="av-header mb-4 flex items-center justify-between">
             <div>
               <h1 className="text-xl font-semibold" data-testid="text-page-title">All Vehicles</h1>
-              <p className="text-sm text-muted-foreground">
+              <p className="av-subtitle text-sm text-muted-foreground">
                 Vehicle assignment status from REPLIT_ALL_VEHICLES
               </p>
             </div>
@@ -770,7 +772,7 @@ export default function AllVehicles() {
               <Skeleton className="h-24" />
             </div>
           ) : data ? (
-            <div className="space-y-4">
+            <div className="av-stack space-y-4">
               {categoryFilter && (
                 <div className="flex items-center gap-2" data-testid="category-filter-indicator">
                   <span className="text-sm text-muted-foreground">Filtering table by:</span>
@@ -811,7 +813,7 @@ export default function AllVehicles() {
               </div>
 
               {scorecardViewMode === 'ams' ? (
-                <div className="flex gap-3" data-testid="ams-scorecards">
+                <div className="av-cards flex gap-3" data-testid="ams-scorecards">
                   <Card
                     className="cursor-pointer hover-elevate border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800 flex-1 min-w-0"
                     onClick={() => setCategoryFilter(null)}
@@ -884,7 +886,7 @@ export default function AllVehicles() {
                   })}
                 </div>
               ) : (
-              <div className="grid gap-3 grid-cols-2 lg:grid-cols-6">
+              <div className="av-cards grid gap-3 grid-cols-2 lg:grid-cols-6">
                 {/* Card A - Total Fleet */}
                 <Card data-testid="card-total-fleet">
                   <CardContent className="p-4">

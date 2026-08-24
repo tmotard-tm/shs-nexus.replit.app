@@ -473,6 +473,139 @@
   }
 }
 
+/* ── Dense-board compact density: Today's Queue, VRM Ops Queue, All Vehicles
+   (Task #823 — same pattern and thresholds as the Fleet Communications block
+   above; see .agents/memory/compact-density-css.md).
+
+   Density ONLY — padding, gaps, control/font sizes, hidden subtitles. Never
+   heights on the flex-fill pane chain (h-screen shells / min-h-0 mains stay
+   untouched); the per-page viewport guards protect that contract. The tq-*,
+   oq-*, and av-* hook classes are style-free and live in:
+     client/src/pages/fleet-scope/TodaysQueue.tsx
+     client/src/pages/vehicle-rental-management/pages/OpsQueue.tsx
+     client/src/pages/fleet-scope/AllVehicles.tsx
+   At exactly 1280×720 and larger (unless ≤650px tall), nothing below applies
+   and the pages are unchanged. */
+@media (max-width: 1279.98px), (max-height: 650px) {
+  /* ── Today's Queue (Tailwind page) ── */
+  .todays-queue .tq-header {
+    padding: 0.375rem 0.625rem;
+  }
+  /* Mirror Tailwind's space-y-2 selector so the override wins on specificity */
+  .todays-queue .tq-header > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.25rem;
+  }
+  .todays-queue .tq-header h1 {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  .todays-queue .tq-subtitle {
+    display: none;
+  }
+  .todays-queue .tq-bucket-bar {
+    gap: 0.375rem;
+    padding: 0.375rem 0.625rem;
+  }
+  .todays-queue .tq-bucket-bar > button {
+    padding: 0.25rem 0.5rem;
+  }
+  .todays-queue .tq-worktype-strip {
+    padding: 0.25rem 0.625rem;
+  }
+  .todays-queue .tq-view-toggle {
+    padding-left: 0.625rem;
+    padding-bottom: 0.25rem;
+  }
+  .todays-queue .tq-banner {
+    margin: 0.375rem 0.625rem 0;
+    padding: 0.375rem 0.625rem;
+  }
+  /* Vertical only — step headers keep their pl-7 indent */
+  .todays-queue .tq-section-header {
+    padding-top: 0.375rem;
+    padding-bottom: 0.375rem;
+  }
+  .todays-queue .tq-row {
+    padding: 0.375rem 0.625rem;
+    column-gap: 0.875rem;
+  }
+
+  /* ── VRM Ops Queue (inline-styled page → overrides need !important) ── */
+  /* The VRM shell main carries inline padding:32; reclaim it only when the
+     Ops Queue is the mounted page so other VRM pages keep their spacing. */
+  main[data-testid="vrm-main"]:has(.ops-queue) {
+    padding: 12px !important;
+  }
+  .ops-queue .oq-header {
+    margin-bottom: 4px !important;
+  }
+  .ops-queue .oq-header h2 {
+    font-size: 18px !important;
+  }
+  .ops-queue .oq-subtitle {
+    display: none;
+  }
+  .ops-queue .oq-controls {
+    margin: 6px 0 !important;
+  }
+  .ops-queue .oq-strip {
+    margin-bottom: 6px !important;
+  }
+  .ops-queue .oq-banner {
+    margin-bottom: 8px !important;
+    padding: 6px 10px !important;
+  }
+  .ops-queue .oq-region-bar {
+    margin-bottom: 8px !important;
+  }
+  /* Vertical only — step headers keep their 28px left indent */
+  .ops-queue .oq-section-header {
+    padding-top: 6px !important;
+    padding-bottom: 6px !important;
+  }
+  .ops-queue .oq-row {
+    padding: 7px 10px !important;
+    column-gap: 14px !important;
+  }
+  .ops-queue .oq-people-grid {
+    gap: 6px !important;
+    padding: 8px !important;
+  }
+  .ops-queue .oq-card {
+    gap: 5px !important;
+    padding: 8px 10px !important;
+  }
+
+  /* ── All Vehicles (Tailwind page) ── */
+  .all-vehicles main {
+    padding: 0.625rem;
+  }
+  .all-vehicles .av-header {
+    margin-bottom: 0.5rem;
+  }
+  .all-vehicles .av-header h1 {
+    font-size: 1rem;
+    line-height: 1.5rem;
+  }
+  .all-vehicles .av-subtitle {
+    display: none;
+  }
+  /* Mirror Tailwind's space-y-4 selector so the override wins on specificity */
+  .all-vehicles .av-stack > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0.5rem;
+  }
+  .all-vehicles .av-cards {
+    gap: 0.5rem;
+  }
+  .all-vehicles .av-cards .p-4 {
+    padding: 0.5rem;
+  }
+  .all-vehicles .av-cards .text-2xl {
+    font-size: 1.125rem;
+    line-height: 1.5rem;
+  }
+}
+
 /* Development Banner */
 .dev-banner {
   background: linear-gradient(90deg, hsl(208, 100%, 47%), hsl(200, 85%, 55%));

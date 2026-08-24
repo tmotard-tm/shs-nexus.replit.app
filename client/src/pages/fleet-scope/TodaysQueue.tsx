@@ -372,7 +372,7 @@ function BucketBar({ buckets, active, onPick }: {
   onPick: (owner: string | null) => void;
 }) {
   return (
-    <div className="grid gap-2 px-4 py-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+    <div className="tq-bucket-bar grid gap-2 px-4 py-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
       <button
         data-testid="bucket-everyone"
         onClick={() => onPick(null)}
@@ -447,7 +447,7 @@ function WorkTypeStrip({
   const visible = buckets.filter(b => b.featured || b.open + b.dismissed > 0);
   if (visible.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5 flex-wrap px-4 py-2.5" data-testid="workbucket-strip">
+    <div className="tq-worktype-strip flex items-center gap-1.5 flex-wrap px-4 py-2.5" data-testid="workbucket-strip">
       <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground mr-0.5">
         Work type
       </span>
@@ -688,7 +688,7 @@ function QueueRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[26px_200px_minmax(260px,1fr)_220px_auto] gap-x-5 items-start px-4 py-3.5",
+        "tq-row grid grid-cols-[26px_200px_minmax(260px,1fr)_220px_auto] gap-x-5 items-start px-4 py-3.5",
         "transition-all duration-200 cursor-pointer",
         "border-b border-border last:border-0",
         "hover:bg-muted/30",
@@ -782,7 +782,7 @@ function BucketRow({
   return (
     <div
       className={cn(
-        "grid grid-cols-[200px_minmax(260px,1fr)_250px] gap-x-5 items-start px-4 py-3.5",
+        "tq-row grid grid-cols-[200px_minmax(260px,1fr)_250px] gap-x-5 items-start px-4 py-3.5",
         "transition-all duration-200 cursor-pointer",
         "border-b border-border last:border-0",
         "hover:bg-muted/30",
@@ -1016,8 +1016,10 @@ export default function TodaysQueue() {
     // is ~600px tall, so clamping to the viewport would crush the queue list
     // to a keyhole. The page flows inside the shell's scrollable <main>
     // (FleetScopeLayout binds the height chain); the header stays sticky.
-    <div className="flex flex-col">
-      <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-3 space-y-2">
+    // todays-queue / tq-* are style-free hooks for the small-laptop compact
+    // density block in client/src/index.css (Task #823; pattern from #820).
+    <div className="todays-queue flex flex-col">
+      <div className="tq-header sticky top-0 z-10 bg-background border-b border-border px-4 py-3 space-y-2">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <h1 className="text-xl font-semibold">Today's Queue</h1>
@@ -1053,7 +1055,7 @@ export default function TodaysQueue() {
           </div>
         </div>
 
-        <div className="text-sm text-muted-foreground">
+        <div className="tq-subtitle text-sm text-muted-foreground">
           Read-only mirror — owner assignments, dismissals, and status changes are made on VRM Rental Operations.
         </div>
 
@@ -1099,7 +1101,7 @@ export default function TodaysQueue() {
         <div className="border-b border-border bg-background">
           <WorkTypeStrip buckets={workTypeBuckets} active={activeWorkBucket} onPick={onPickWorkBucket} />
           {activeBucket === null && (
-            <div className="flex items-center gap-1.5 px-4 pb-2">
+            <div className="tq-view-toggle flex items-center gap-1.5 px-4 pb-2">
               {(["buckets", "steps"] as const).map(v => (
                 <button
                   key={v}
@@ -1129,7 +1131,7 @@ export default function TodaysQueue() {
           <div
             data-testid={`workbucket-banner-${wb.key}`}
             className={cn(
-              "mx-4 mt-3 px-3.5 py-2.5 rounded-lg border",
+              "tq-banner mx-4 mt-3 px-3.5 py-2.5 rounded-lg border",
               ready
                 ? "border-green-500 bg-green-50 dark:bg-green-900/20"
                 : "border-blue-500 bg-blue-50 dark:bg-blue-900/20",
@@ -1148,7 +1150,7 @@ export default function TodaysQueue() {
       })()}
 
       {activeBucket === null && needsRoutingItems.length > 0 && (
-        <div className="mx-4 mt-3 px-3.5 py-2.5 rounded-lg border border-red-500 bg-red-50 dark:bg-red-900/20">
+        <div className="tq-banner mx-4 mt-3 px-3.5 py-2.5 rounded-lg border border-red-500 bg-red-50 dark:bg-red-900/20">
           <div className="text-sm font-bold text-red-700 dark:text-red-400 mb-1 flex items-center gap-1.5">
             <AlertTriangle className="h-3.5 w-3.5" />
             Needs routing — no Annex A region matched; parked with {needsRoutingItems[0]?.owner ?? "Rob Anderson"}
@@ -1203,7 +1205,7 @@ export default function TodaysQueue() {
                 const group = priorityGroups[p];
                 return (
                   <div key={p} className="bg-background">
-                    <div className={cn("w-full flex items-center gap-2.5 px-4 py-2.5", meta.header, "bg-muted/20")}>
+                    <div className={cn("tq-section-header w-full flex items-center gap-2.5 px-4 py-2.5", meta.header, "bg-muted/20")}>
                       <span className="text-base font-semibold tracking-wide uppercase text-foreground/80">
                         {meta.label}
                       </span>
@@ -1217,7 +1219,7 @@ export default function TodaysQueue() {
               })}
               {bucketDismissed.length > 0 && (
                 <div className="bg-muted/20">
-                  <div className="w-full flex items-center gap-2.5 px-4 py-2.5 border-l-4 border-l-muted-foreground/20">
+                  <div className="tq-section-header w-full flex items-center gap-2.5 px-4 py-2.5 border-l-4 border-l-muted-foreground/20">
                     <span className="text-base font-semibold tracking-wide uppercase text-muted-foreground">
                       Dismissed today
                     </span>
@@ -1267,7 +1269,7 @@ export default function TodaysQueue() {
               return (
                 <div key={wb.key} className="bg-background">
                   <button
-                    className={cn("w-full flex items-center justify-between gap-3 px-4 text-left hover:brightness-[0.98] transition-all", wb.featured ? "py-3" : "py-2.5", headerCls)}
+                    className={cn("tq-section-header w-full flex items-center justify-between gap-3 px-4 text-left hover:brightness-[0.98] transition-all", wb.featured ? "py-3" : "py-2.5", headerCls)}
                     onClick={() => toggleWorkSection(wb.key)}
                     data-testid={`workbucket-section-${wb.key}`}
                     aria-expanded={!collapsed}
@@ -1325,7 +1327,7 @@ export default function TodaysQueue() {
                 <div key={lane} className="bg-background">
                   <button
                     className={cn(
-                      "w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:brightness-[0.98] transition-all",
+                      "tq-section-header w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:brightness-[0.98] transition-all",
                       meta.header
                     )}
                     onClick={() => toggleLane(lane)}
@@ -1357,7 +1359,7 @@ export default function TodaysQueue() {
                       <div key={step} className={cn("bg-background", allDismissed && "opacity-60")}>
                         <button
                           className={cn(
-                            "w-full flex items-center justify-between pl-7 pr-4 py-2.5 text-left hover:bg-muted/40 transition-colors",
+                            "tq-section-header w-full flex items-center justify-between pl-7 pr-4 py-2.5 text-left hover:bg-muted/40 transition-colors",
                             STEP_HEADER_COLORS[step]
                           )}
                           onClick={() => toggleStep(step)}
@@ -1397,7 +1399,7 @@ export default function TodaysQueue() {
             {noAction.length > 0 && (
               <div className="bg-muted/20">
                 <button
-                  className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-muted/40 transition-colors border-l-4 border-l-muted-foreground/20"
+                  className="tq-section-header w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-muted/40 transition-colors border-l-4 border-l-muted-foreground/20"
                   onClick={() => setNoActionExpanded(v => !v)}
                 >
                   <div className="flex items-center gap-2.5">
@@ -1414,7 +1416,7 @@ export default function TodaysQueue() {
                     {noAction.map(item => (
                       <div
                         key={item.truckId}
-                        className="flex items-center gap-3 px-4 py-2 border-b border-border last:border-0 opacity-60 cursor-pointer hover:bg-muted/30 transition-colors"
+                        className="tq-row flex items-center gap-3 px-4 py-2 border-b border-border last:border-0 opacity-60 cursor-pointer hover:bg-muted/30 transition-colors"
                         onClick={() => handleRowClick(item.truckId)}
                       >
                         <span className="font-mono text-base">{item.truckNumber}</span>

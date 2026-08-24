@@ -453,12 +453,13 @@ function PeopleCards({ summaries, onPick }: { summaries: OwnerSummary[]; onPick:
     padding: "1px 8px", borderRadius: 999,
   });
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10, padding: 14 }}>
+    <div className="oq-people-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10, padding: 14 }}>
       {summaries.map((s) => (
         <button
           key={s.owner}
           data-testid={`person-${s.owner.replace(/\W+/g, "-").toLowerCase()}`}
           onClick={() => onPick(s.owner)}
+          className="oq-card"
           style={{ ...bucketCardStyle, display: "flex", flexDirection: "column", gap: 8, padding: "14px 16px" }}
         >
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
@@ -1088,7 +1089,7 @@ function WorkTypeStrip({
   const visible = buckets.filter((b) => b.featured || b.open + b.dismissed > 0);
   if (visible.length === 0) return null;
   return (
-    <div data-testid="workbucket-strip" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+    <div className="oq-strip" data-testid="workbucket-strip" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
       <span style={{ fontSize: 12, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 2 }}>
         Work type
       </span>
@@ -1284,6 +1285,7 @@ function QueueRow({
     <div
       onClick={clickable ? () => onOpenCase!(item.caseKey!) : undefined}
       title={clickable ? "Open the case file — POs, comments, call log" : undefined}
+      className="oq-row"
       data-testid={`queue-row-${item.truckNumber}`}
       style={{
         display: "grid", gridTemplateColumns: "26px 210px minmax(260px, 1fr) 220px auto",
@@ -1432,6 +1434,7 @@ function BucketRow({
     <div
       onClick={clickable ? () => onOpenCase!(item.caseKey!) : undefined}
       title={clickable ? "Open the case file — POs, comments, call log" : undefined}
+      className="oq-row"
       data-testid={`bucket-row-${item.truckNumber}`}
       style={{
         display: "grid", gridTemplateColumns: "210px minmax(260px, 1fr) 250px auto",
@@ -1920,9 +1923,12 @@ export default function OpsQueue() {
   const generatedAt = data?.generatedAt ? new Date(data.generatedAt) : null;
 
   return (
-    <div style={{ fontFamily: fonts.dmSans, maxWidth: 1720, margin: "0 auto" }}>
+    // ops-queue / oq-* are style-free hooks for the small-laptop compact
+    // density block in client/src/index.css (Task #823; pattern from #820).
+    // This page styles inline, so those overrides carry !important.
+    <div className="ops-queue" style={{ fontFamily: fonts.dmSans, maxWidth: 1720, margin: "0 auto" }}>
       {/* Header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 6 }}>
+      <div className="oq-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
           <h2 style={{ fontFamily: fonts.syne, fontSize: 24, fontWeight: 700, color: colors.ink, margin: 0 }}>
             Ops Queue
@@ -1958,7 +1964,7 @@ export default function OpsQueue() {
         </div>
       </div>
 
-      <div style={{ fontSize: 14, color: colors.inkMuted, marginBottom: 8 }}>
+      <div className="oq-subtitle" style={{ fontSize: 14, color: colors.inkMuted, marginBottom: 8 }}>
         Status changes made here are recorded on the rental case and mirrored to Fleet Scope.
         Fleet Scope itself is read-only for rental status. Dismissals are shared with the whole team and reset at midnight ET.
       </div>
@@ -1966,7 +1972,7 @@ export default function OpsQueue() {
       {/* View controls: back bar inside a person's queue, People/Board toggle outside */}
       {!isLoading && (
         activeBucket !== null ? (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0" }}>
+          <div className="oq-controls" style={{ display: "flex", alignItems: "center", gap: 10, margin: "12px 0" }}>
             <button
               onClick={() => setActiveBucket(null)}
               data-testid="button-back-to-people"
@@ -1985,7 +1991,7 @@ export default function OpsQueue() {
             </span>
           </div>
         ) : (
-          <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "12px 0" }}>
+          <div className="oq-controls" style={{ display: "flex", alignItems: "center", gap: 6, margin: "12px 0" }}>
             {([["buckets", "Bucket board"], ["people", "By person"], ["board", "Step board"]] as const).map(([v, label]) => (
               <button
                 key={v}
@@ -2020,6 +2026,7 @@ export default function OpsQueue() {
         const bg = wb.key === "vehicle_ready_schedule" ? colors.greenLight : colors.blueLight;
         return (
           <div
+            className="oq-banner"
             data-testid={`workbucket-banner-${wb.key}`}
             style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 8, border: `1px solid ${fg}`, backgroundColor: bg }}
           >
@@ -2034,7 +2041,7 @@ export default function OpsQueue() {
 
       {/* Region filter — bucket + step boards */}
       {activeBucket === null && (view === "board" || view === "buckets") && (
-        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
+        <div className="oq-region-bar" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
           {REGION_CODES.map((region) => {
             const active = selectedRegions.has(region);
             return (
@@ -2069,7 +2076,7 @@ export default function OpsQueue() {
 
       {/* Needs-routing strip — landing + step board */}
       {activeBucket === null && needsRoutingItems.length > 0 && (
-        <div style={{
+        <div className="oq-banner" style={{
           marginBottom: 14, padding: "10px 14px", borderRadius: 8,
           border: "1px solid #b3261e", backgroundColor: colors.redLight,
         }}>
@@ -2129,7 +2136,7 @@ export default function OpsQueue() {
                 const group = priorityGroups[p];
                 return (
                   <div key={p}>
-                    <div style={{
+                    <div className="oq-section-header" style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "10px 16px",
                       backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}`,
                       borderLeft: `4px solid ${meta.fg}`,
@@ -2158,7 +2165,7 @@ export default function OpsQueue() {
               })}
               {bucketDismissed.length > 0 && (
                 <div>
-                  <div style={{
+                  <div className="oq-section-header" style={{
                     display: "flex", alignItems: "center", gap: 10, padding: "10px 16px",
                     backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}`,
                     borderLeft: `4px solid ${colors.rule}`,
@@ -2225,6 +2232,7 @@ export default function OpsQueue() {
                     onClick={() => toggleWorkBucket(wb.key)}
                     data-testid={`workbucket-section-${wb.key}`}
                     aria-expanded={!collapsed}
+                    className="oq-section-header"
                     style={{
                       width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
                       gap: 12, padding: featured ? "14px 16px" : "11px 16px", cursor: "pointer", textAlign: "left",
@@ -2296,6 +2304,7 @@ export default function OpsQueue() {
                     onClick={() => toggleLane(lane)}
                     data-testid={`lane-${lane}`}
                     aria-expanded={!laneCollapsed}
+                    className="oq-section-header"
                     style={{
                       width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
                       gap: 12, padding: "14px 16px", cursor: "pointer", textAlign: "left",
@@ -2329,6 +2338,7 @@ export default function OpsQueue() {
                       <div key={step} style={{ opacity: allDismissed ? 0.6 : 1 }}>
                         <button
                           onClick={() => toggleStep(step)}
+                          className="oq-section-header"
                           style={{
                             width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
                             padding: "10px 16px 10px 28px", cursor: "pointer", textAlign: "left",
@@ -2370,6 +2380,7 @@ export default function OpsQueue() {
               <div>
                 <button
                   onClick={() => setNoActionExpanded((v) => !v)}
+                  className="oq-section-header"
                   style={{
                     width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
                     padding: "10px 16px", cursor: "pointer", textAlign: "left",
@@ -2394,6 +2405,7 @@ export default function OpsQueue() {
                     onClick={item.caseKey ? () => setPanelKey(item.caseKey) : undefined}
                     title={item.caseKey ? "Open the case file — POs, comments, call log" : undefined}
                     data-testid={`no-action-row-${item.truckNumber}`}
+                    className="oq-row"
                     style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "8px 16px",
                       borderBottom: `1px solid ${colors.rule}`, opacity: 0.65,

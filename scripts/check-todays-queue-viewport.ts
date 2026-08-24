@@ -26,6 +26,7 @@ import {
   BASE_URL,
   NAV_TIMEOUT_MS,
   SELECTOR_TIMEOUT_MS,
+  SMALL_LAPTOP_VIEWPORTS,
   runViewportGuard,
   failIfOnLoginPage,
   assertNoPageScroll,
@@ -36,6 +37,11 @@ import {
 } from "./lib/viewport-guard";
 
 const PAGE_PATH = "/fleet-scope/queue";
+// The two shared mandatory sizes plus the scaled-small-laptop reality
+// (Task #823, pattern from #820): 13" Windows machines at 125-150% display
+// scaling end up around a 1024x500 effective viewport — the size the compact
+// density media block in client/src/index.css targets (tq-* hooks).
+const VIEWPORTS = [...SMALL_LAPTOP_VIEWPORTS, { width: 1024, height: 500 }];
 // The shell main is flex-1 in an h-screen column: its bottom edge must sit
 // exactly on the viewport bottom (small slack for rounding only).
 const MAIN_FILL_SLACK_PX = 4;
@@ -46,7 +52,10 @@ runViewportGuard({
     "Today's Queue no longer fits a small-laptop viewport. Likely causes: FleetScopeLayout lost its " +
     "h-screen root or the min-h-0/overflow-auto on the shell main (the document scrolls again), the " +
     "SidebarInset lost min-w-0 (wide tables push the page sideways), a hardcoded height was added to " +
-    "the shell or page (client/src/pages/fleet-scope/TodaysQueue.tsx), or the header toolbar grew past the fold.",
+    "the shell or page (client/src/pages/fleet-scope/TodaysQueue.tsx), or the header toolbar grew past the fold. " +
+    "If only 1024x500 fails, the compact density block in client/src/index.css (Task #823) may have been " +
+    "removed or its tq-* hook classes stripped from the page.",
+  viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
     console.log(`\n[Today's Queue @ ${label}]`);
