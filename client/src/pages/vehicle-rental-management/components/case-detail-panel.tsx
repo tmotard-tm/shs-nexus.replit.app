@@ -927,7 +927,17 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
               <div><div style={label}>Rental class</div><div style={val}>{c.rental_class || "—"}</div></div>
               <div><div style={label}>Daily cost</div><div style={val}>{money2(c.rate_authorized)}</div></div>
               <div><div style={label}>Renting location</div><div style={val}>{[c.renting_city, c.renting_state].filter(Boolean).join(", ") || "—"}</div></div>
-              <div><div style={label}>TPMS assigned</div><div style={{ ...val, color: row?.wrong_truck ? colors.red : colors.ink }}>{row?.tpms_tech || "none"}{row?.wrong_truck && row?.renter_own_truck ? ` · renter drives ${row.renter_own_truck}` : ""}</div></div>
+              <div><div style={label}>TPMS assigned</div>
+                {/* The renter's ACTUAL assigned truck number (shared TPMS-first
+                    derivation — assigned_truck), same as the boards' TPMS
+                    Assigned column. Red = it differs from the rental case truck
+                    (wrong_truck). The Holman-cache TPMS tech name (sparsely
+                    populated) is secondary detail only. */}
+                <div style={{ ...val, color: row?.assigned_truck ? (row?.wrong_truck ? colors.red : colors.ink) : colors.inkMuted, fontWeight: row?.wrong_truck && row?.assigned_truck ? 600 : undefined }}>
+                  {row?.assigned_truck || "none"}{row?.wrong_truck && row?.assigned_truck ? " · ≠ rental truck" : ""}
+                </div>
+                {row?.tpms_tech && <div style={{ fontSize: 10.5, color: colors.inkMuted }}>{row.tpms_tech}</div>}
+              </div>
               <div><div style={label}>Odometer</div><div style={val}>{row?.odometer ? `${row.odometer.toLocaleString()} mi` : "—"}{row?.odometer_date ? ` (${fmtDate(row.odometer_date)})` : ""}</div></div>
               <div><div style={label}>Last rental PO</div><div style={val}>{row?.last_rental_date ? fmtDate(row.last_rental_date) : "—"}{row && !row.has_rental_auth ? " · no approved rental auth" : ""}</div></div>
             </section>

@@ -759,7 +759,7 @@ export default function RegionalCases() {
       hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, cls: (r) => r.rental_class,
       cost: (r) => r.daily_cost, ams: (r) => r.ams_status, shop: (r) => r.shop_name,
       days: (r) => r.days_open, ext: (r) => r.number_of_extensions, days_open: (r) => r.days_open,
-      tpms: (r) => r.tpms_tech, lastrental: (r) => r.last_rental_date, npos: (r) => r.po_count,
+      tpms: (r) => r.assigned_truck, lastrental: (r) => r.last_rental_date, npos: (r) => r.po_count,
     };
     const cmp = sort.col ? makeSortComparator(acc[sort.col] ?? ((r) => (r as any)[sort.col!]), sort.dir) : null;
     const base = cmp ? [...filtered].sort(cmp) : [...filtered];
@@ -872,7 +872,7 @@ export default function RegionalCases() {
 
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_assigned", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
+    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_tech_name", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
       "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po", "why_still_here"];
     const body = sorted.map((r) => [
       r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",

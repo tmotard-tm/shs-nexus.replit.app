@@ -159,6 +159,11 @@ export type QueueItem = {
   techLdap?: string | null;
   /** Tech's CURRENT TPMS-assigned truck when it DIFFERS from this case truck. */
   assignedTruck?: string | null;
+  /** The renter's assigned truck (case assigned_truck), REGARDLESS of whether
+   *  it matches this case truck — null only when the renter has no assigned
+   *  truck at all. The case-file panel shows this as the primary TPMS value;
+   *  `assignedTruck` above stays mismatch-only for the replacement-gap pill. */
+  renterAssignedTruck?: string | null;
   /** Declined/auction case truck + tech already on a different truck — the
    *  "replacement" work is done; what's left is closing out the rental. */
   replacementAssigned?: boolean;
@@ -1326,6 +1331,10 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     it.techLdap = ldap;
     it.techPhone = (ldap ? phoneByLdap.get(ldap) ?? null : null) ?? t.techPhone ?? null;
     it.assignedTruck = assignedDiffers ? assignedRaw : null;
+    // Same '0'-sentinel rule as assignedDiffers above: a canonical truck of
+    // '0' (or empty) is TPMS's "unassigned" placeholder, never a real truck —
+    // the panel must show its muted "none", not a literal 0.
+    it.renterAssignedTruck = assignedCanon && assignedCanon !== '0' ? assignedRaw : null;
     // AMS terminal counts the same as a declined/auction fleet status here:
     // either way the van is gone and the tech being on a different truck
     // means the replacement leg is already done.

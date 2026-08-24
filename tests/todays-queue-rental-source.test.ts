@@ -138,10 +138,19 @@ const caseRow = (
   assigned_truck: assignedTruck,
 });
 
+// The actionable items' assigned trucks also exercise the renter-assigned-truck
+// contract (see the dedicated describe below):
+//   C1 — assigned truck EQUALS the case truck (renter is on this van) →
+//        renterAssignedTruck carries it, mismatch-only assignedTruck stays null;
+//   C2 — assigned truck DIFFERS (88888, no PO so classification is untouched) →
+//        both fields carry it;
+//   C3 — TPMS's '0' unassigned sentinel → BOTH null (a literal 0 must never
+//        reach the case panel as a "truck");
+//   30003 — no case at all → both null.
 const caseRows = [
-  caseRow("C1", "11111", "enterprise", null, "LDAP1"),
-  caseRow("C2", "22222", "enterprise_direct", null, "LDAP2"),
-  caseRow("C3", "33333", null),
+  caseRow("C1", "11111", "enterprise", "11111", "LDAP1"),
+  caseRow("C2", "22222", "enterprise_direct", "88888", "LDAP2"),
+  caseRow("C3", "33333", null, "0"),
   // The declined trucks' techs are all already driving truck 77777 (whose own
   // PO is open per poRows below) — the classify() [] dead-end combination.
   caseRow("C4", "44441", "enterprise", "77777"),
@@ -391,6 +400,82 @@ describe("todays-queue builder stamps tech contact fields on actionable items", 
     for (const it of q.items) {
       hasOwnContact(it, "techLdap");
       hasOwnContact(it, "techPhone");
+    }
+  });
+});
+
+// ── renter assigned-truck contract (case panel's "TPMS assigned" field) ─────
+// The Ops Queue's case panel shows the renter's assigned truck as the primary
+// TPMS value. The queue payload carries TWO fields for that:
+//   assignedTruck        — MISMATCH-ONLY (null when the renter is on the case
+//                          truck); feeds the "Tech now on X" pill and doubles
+//                          as the panel's wrong_truck flag;
+//   renterAssignedTruck  — the raw case assigned_truck whenever the renter has
+//                          a real one, INCLUDING when it equals the case truck;
+//                          null only for the '0' unassigned sentinel or no
+//                          assignment. This is the panel's primary value — if
+//                          a refactor drops it or forgets the sentinel rule,
+//                          the panel shows "none" for most cases (the original
+//                          bug) or a literal 0 (the reviewer-caught bug).
+
+describe("todays-queue builder stamps renter assigned-truck fields on actionable items", () => {
+  let q: TodaysQueue;
+  let byTruck: Map<string, any>;
+  before(async () => {
+    q = await buildTodaysQueue();
+    byTruck = new Map(q.items.map((i) => [i.truckNumber, i]));
+  });
+
+  const hasOwn = (row: any, field: string) =>
+    assert.ok(
+      Object.hasOwn(row, field),
+      `queue item for truck ${row.truckNumber} must carry an own '${field}' property — ` +
+        "a builder refactor dropped an assigned-truck field (decoration post-pass in server/todays-queue.ts); " +
+        "the case panel's TPMS assigned value would silently blank",
+    );
+
+  test("renter on the case truck: renterAssignedTruck carries it, mismatch-only assignedTruck stays null", () => {
+    const it = byTruck.get("11111");
+    assert.ok(it, "expected an actionable item for truck 11111");
+    hasOwn(it, "renterAssignedTruck");
+    hasOwn(it, "assignedTruck");
+    assert.equal(it.renterAssignedTruck, "11111",
+      "matching assignment must still reach the panel (nulling it here is exactly what made the panel show 'none' for most cases)");
+    assert.equal(it.assignedTruck, null,
+      "assignedTruck must STAY mismatch-only — the 'Tech now on X' pill renders whenever it is set");
+  });
+
+  test("renter on a different truck: both fields carry it", () => {
+    const it = byTruck.get("22222");
+    assert.ok(it, "expected an actionable item for truck 22222");
+    assert.equal(it.renterAssignedTruck, "88888");
+    assert.equal(it.assignedTruck, "88888",
+      "a real mismatch must keep feeding the pill / panel wrong_truck flag");
+  });
+
+  test("TPMS '0' unassigned sentinel: both fields null — never a literal 0", () => {
+    const it = byTruck.get("33333");
+    assert.ok(it, "expected an actionable item for truck 33333");
+    hasOwn(it, "renterAssignedTruck");
+    assert.equal(it.renterAssignedTruck, null,
+      "'0' is TPMS's unassigned placeholder; passing it through renders a bogus truck 0 in the panel");
+    assert.equal(it.assignedTruck, null);
+  });
+
+  test("no case at all: both fields explicit null, never absent", () => {
+    const it = byTruck.get("30003");
+    assert.ok(it, "expected an actionable item for truck 30003");
+    hasOwn(it, "renterAssignedTruck");
+    hasOwn(it, "assignedTruck");
+    assert.equal(it.renterAssignedTruck, null);
+    assert.equal(it.assignedTruck, null);
+  });
+
+  test("sweep: EVERY actionable item carries both fields as own properties", () => {
+    assert.ok(q.items.length > 0, "sweep needs items");
+    for (const it of q.items) {
+      hasOwn(it, "renterAssignedTruck");
+      hasOwn(it, "assignedTruck");
     }
   });
 });

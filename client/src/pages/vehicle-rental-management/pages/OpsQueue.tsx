@@ -131,6 +131,9 @@ interface QueueItem {
   techLdap?: string | null;
   /** Tech's CURRENT TPMS truck when it differs from this case truck. */
   assignedTruck?: string | null;
+  /** The renter's assigned truck regardless of mismatch — null only when the
+   *  renter has no assigned truck. Primary TPMS value for the case panel. */
+  renterAssignedTruck?: string | null;
   /** Declined/auction case + tech already on a different truck. */
   replacementAssigned?: boolean;
   /** …and that assigned truck itself has an open repair PO. */
@@ -2426,7 +2429,16 @@ export default function OpsQueue() {
         return (
           <DetailPanel
             caseKey={panelKey}
-            row={it ? { assigned_truck: it.assignedTruck ?? null, tpms_tech: it.techName ?? null } : undefined}
+            row={it ? {
+              // renterAssignedTruck is the raw case assigned_truck (matches the
+              // boards' MasterRow field); assignedTruck is its mismatch-only
+              // sibling, kept as a fallback for older cached payloads. The
+              // mismatch-only field doubling as wrong_truck matches the boards'
+              // red "≠ rental truck" emphasis (truck shown differs from case).
+              assigned_truck: it.renterAssignedTruck ?? it.assignedTruck ?? null,
+              wrong_truck: !!it.assignedTruck,
+              tpms_tech: it.techName ?? null,
+            } : undefined}
             onClose={() => setPanelKey(null)}
             onMark={doMark}
           />
