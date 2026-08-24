@@ -20,3 +20,15 @@ set diff, don't hunt for a data bug or leftover rows (the DB will be clean by th
 you look) — the churn came from the reviewer re-running fixture suites. Fix the strict
 suite's tolerance, not the fixtures. ZZ* is the reserved synthetic-key prefix
 (ZZANC*, ZZPROBE*); new DB fixtures should keep using it so the scrub keeps working.
+
+## Restart-all suite flakes (same family)
+
+Restarting the app workflow re-fires every test workflow simultaneously.
+Suites that run shared boot DDL (e.g. the cutover pair via initFormsSchema)
+can deadlock each other (40P01), and live-surface comparison suites can catch
+a board built in degraded mode (best-effort attachments like the reconciled
+shop catch→null and SKIP their field under load). Strict alignment suites
+must fold every degrade-by-design signal into their coherence-rebuild gate,
+not assert against a degraded payload. A red suite right after a restart wave
+or inside a validation run is suspect — rerun it alone before treating it as
+a code bug.

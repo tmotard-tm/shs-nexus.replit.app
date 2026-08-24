@@ -1188,6 +1188,9 @@ export async function listRentalDecisions(limit = 50, sinceDays?: number) {
       dcaEventSentAt: vrmRentalDecisions.dcaEventSentAt,
       dcaEventError: vrmRentalDecisions.dcaEventError,
       dcaEventAttempts: vrmRentalDecisions.dcaEventAttempts,
+      // 'holman_queue' rows never file a Make Unavailable — the UI hides the
+      // Retry affordance and renders the 'not_filed' status for them.
+      decisionSource: vrmRentalDecisions.decisionSource,
       // Supervisor: prefer the value frozen on the decision row (set at the
       // moment the decision was logged); fall back to the current snapshot
       // join for legacy rows where the decision-row column is NULL.

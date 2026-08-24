@@ -213,9 +213,17 @@ function surfaces() {
     // this shared dev database — lands between two reads, the sets diverge by
     // rows that exist in one snapshot and not the other. That is clock noise,
     // not surface drift, so rebuild before letting strict comparisons run.
+    // The shop attach is degrade-by-design: when loadQueuePoContext() fails
+    // under load (its call sites catch → null), attachReconciledShops skips
+    // the reconciledShop field entirely so the CLIENT can fall back. A board
+    // built in that degraded mode is not a comparable surface — treat it as
+    // incoherent and rebuild instead of asserting against it.
+    const attached = (p: AnyRow) =>
+      (p.rows as AnyRow[]).every((r) => "reconciledShop" in r);
     const coherent = (s: { master: AnyRow; region: AnyRow; exec: AnyRow }) =>
       keysOf(s.master) === keysOf(s.region)
-      && s.exec.headline?.openTotal === (s.master.rows as AnyRow[]).length;
+      && s.exec.headline?.openTotal === (s.master.rows as AnyRow[]).length
+      && attached(s.master) && attached(s.region);
     let s = await build();
     for (let i = 0; i < 4 && !coherent(s); i++) {
       // A concurrent DB-fixture suite (e.g. a completion review re-running the

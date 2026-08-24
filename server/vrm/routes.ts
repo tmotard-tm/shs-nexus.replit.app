@@ -90,7 +90,7 @@ import {
 import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
   resolveRentersForVehicles } from "../holman-portal-service";
 import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, enqueueHolmanRedirectDenialSmsForTech, triggerImmediateDispatch, getScheduledSmsInfoForDecision } from "./notification-dispatcher";
-import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
+import { enqueueDcaMakeUnavailableForDecision, retryDcaEventForOperator, ensureDecisionSourceColumn } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
@@ -1208,16 +1208,11 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/profitability/log/:id/dca-event/retry", async (req, res) => {
     try {
-      const existing = await getRentalDecision(req.params.id);
-      if (!existing) return res.status(404).json({ error: "Decision not found" });
-      if (String(existing.decision).toLowerCase() !== "denied") {
-        return res.status(400).json({ error: "DCA event only applies to denied decisions" });
-      }
-      const ok = await requestDcaEventRetry(req.params.id);
-      if (!ok) {
-        return res.status(409).json({ error: "Already sent — cannot retry" });
-      }
-      res.json({ ok: true, status: "pending" });
+      // Full flow (schema self-heal BEFORE the schema-dependent decision
+      // read, Holman-redirect 409, legacy re-pending) lives in
+      // retryDcaEventForOperator so the ordering is regression-tested.
+      const r = await retryDcaEventForOperator(req.params.id, getRentalDecision);
+      res.status(r.http).json(r.body);
     } catch (e: any) {
       console.error("[VRM] dca-event retry error:", e.message);
       res.status(500).json({ error: e.message });
@@ -2711,6 +2706,16 @@ export function registerVrmRoutes(): Router {
     }
     const s = (v: any) => (v != null ? String(v) : null);
 
+    // The insert below writes decision_source, which the detached background
+    // initVrmSchema() may not have ALTERed in yet on the first boot after a
+    // deploy against an old-schema DB. The Holman Decline has ALREADY applied
+    // upstream by this point, so a failed insert here would silently drop the
+    // decision log AND the redirect SMS — heal the column first. If this
+    // throws the DB itself is unreachable and the insert would fail anyway;
+    // log loudly rather than abort early.
+    await ensureDecisionSourceColumn().catch((e: any) =>
+      console.error(`[VRM/HolmanPO] decision_source ensure failed (insert may fail):`, e?.message ?? e));
+
     const decisionRow = await addRentalDecision({
       techLdap: ldap,
       techName: po.techName ?? snap?.techName ?? null,
@@ -2735,6 +2740,14 @@ export function registerVrmRoutes(): Router {
         + (decision === "denied" && denyRedirect
           ? ` — new-process redirect (direct billing: ${denyRedirect.standing === "booked" ? `booked${denyRedirect.etdReference ? ` ${denyRedirect.etdReference}` : ""} — process not followed` : "none"})`
           : ""),
+      // Durable origin discriminator — every DCA enqueue/retry surface fences
+      // on this column so a Holman redirect denial can never file a Make
+      // Unavailable (see dca-event-dispatcher.ts).
+      decisionSource: "holman_queue",
+      // Denials record 'not_filed' AT INSERT (intentionally not filed —
+      // distinct from failed/skipped) so the Decision Log shows why no DCA
+      // event exists and no later state transition can enqueue it.
+      dcaEventStatus: decision === "denied" ? "not_filed" : null,
     });
 
     if (decision === "denied") {
@@ -2774,8 +2787,13 @@ export function registerVrmRoutes(): Router {
       } catch (err: any) {
         console.error("[VRM/HolmanPO] deny tech SMS failed:", err?.message ?? err);
       }
-      enqueueDcaMakeUnavailableForDecision(decisionRow.id).catch((err: any) =>
-        console.error("[VRM/HolmanPO] DCA make_unavailable failed:", err?.message ?? err));
+      // NO DCA Make Unavailable here — deliberately. Under the direct-billing
+      // process (2026-08-23) every Holman-queue denial is a billing redirect:
+      // the tech keeps working and books a direct-billed rental. Filing a
+      // Make Unavailable would wrongly pull them off route on the scheduler
+      // (it did, for all four denials on 2026-08-24). The row is born with
+      // dca_event_status='not_filed' above; the Make Unavailable stays a
+      // legacy-VRM-deny behavior only (see POST /profitability/log).
     } else {
       // AWAITED (like the deny redirect SMS above) so the approve response
       // can read the PERSISTED 'sms' row and only claim "text scheduled for

@@ -44,3 +44,24 @@ external-op-authorization-fence / CAS-recovery lessons.
 pass the standing through to the notification branch; any new "skip if field
 missing" check in decision pipelines must be placed BEFORE the external
 side effect or made non-aborting after it.
+
+## DCA Make Unavailable is legacy-VRM-only
+
+Holman-queue denials are billing redirects — the tech keeps working — so they
+must NEVER remove the tech from route via a DCA "Make Unavailable" (that
+scheduler removal exists only for legacy VRM profitability denies). Denial
+origin is a durable stored discriminator, never notes text; a Holman denial
+is born in an intentional "not filed" terminal state, distinct from
+failed/skipped and never retryable.
+
+**Why:** background schema init runs detached while routes and dispatchers
+are live immediately — code that depends on a freshly migrated column or
+backfill must self-heal at its own choke points (cheap existence check +
+targeted DDL), or the first boot after a deploy loses decision rows AFTER the
+external decline already applied.
+
+**How to apply:** every surface that can drive a DCA send (enqueue, worker
+claim, operator retry) shares one fence and heals its schema dependency
+before use; decision writers stamp origin + not-filed atomically at insert,
+never enqueue-then-cancel; fences over nullable columns must handle SQL NULL
+explicitly or legitimate rows get silently fenced out.

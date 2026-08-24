@@ -4,6 +4,7 @@
  * Uses raw SQL so no interactive drizzle-kit prompts are needed.
  */
 import { db } from "../db";
+import { healHolmanDcaRows } from "./dca-event-dispatcher";
 import { sql } from "drizzle-orm";
 import { initRentalOperationsSchema } from "./rental-operations/schema";
 import { initPepBoysDirectory } from "./rental-operations/pepboys-directory";
@@ -259,6 +260,7 @@ export async function initVrmSchema(): Promise<void> {
       byov_enrolled           BOOLEAN NOT NULL DEFAULT FALSE,
       returned_rental         BOOLEAN NOT NULL DEFAULT FALSE,
       rental_return_date      DATE,
+      decision_source         VARCHAR(30),
       created_at              TIMESTAMP DEFAULT NOW() NOT NULL
     );
   `);
@@ -310,6 +312,15 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_sent_at TIMESTAMP;`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_error TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_attempts INTEGER NOT NULL DEFAULT 0;`);
+
+  // Decision origin discriminator. NULL = legacy VRM rental queue;
+  // 'holman_queue' = Holman PO queue (direct-billing redirect denials —
+  // these must NEVER file a DCA Make Unavailable). See dca-event-dispatcher.
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS decision_source VARCHAR(30);`);
+  // Backfill legacy Holman rows (notes-fingerprint → decision_source) and
+  // self-heal any Holman denial out of a retryable DCA state → 'not_filed'.
+  // Idempotent; runs every boot as defense in depth.
+  await healHolmanDcaRows();
 
   // Indexes
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_ldap_idx ON vrm_rental_checks(tech_ldap);`);

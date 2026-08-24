@@ -307,6 +307,13 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   dcaEventSentAt: timestamp("dca_event_sent_at"),
   dcaEventError: text("dca_event_error"),
   dcaEventAttempts: integer("dca_event_attempts").notNull().default(0),
+  // Where the decision originated. NULL = legacy VRM rental-queue
+  // profitability decision (denies DO file a DCA Make Unavailable).
+  // 'holman_queue' = Holman PO queue under the direct-billing redirect
+  // process (2026-08-23): the tech keeps working, so these denials must
+  // NEVER file a Make Unavailable. This column is the durable discriminator
+  // every enqueue/retry surface fences on — never the notes text.
+  decisionSource: varchar("decision_source", { length: 30 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   ldapIdx: index("vrm_rental_decisions_ldap_idx").on(table.techLdap),

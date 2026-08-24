@@ -338,11 +338,16 @@ interface DecisionRow {
   techSmsOverrideOverridden: boolean;
   // DCA Make-Unavailable event (filed to Standard Activities Request
   // Generator API when a rental is denied). Approve rows leave these null.
-  dcaEventStatus: string | null; // pending | sent | failed | skipped
+  // 'not_filed' = intentionally not filed (Holman direct-billing redirect —
+  // the tech keeps working), distinct from failed/skipped.
+  dcaEventStatus: string | null; // pending | sent | failed | skipped | not_filed
   dcaEventProjectId: string | null;
   dcaEventSentAt: string | null;
   dcaEventError: string | null;
   dcaEventAttempts: number | null;
+  // 'holman_queue' = Holman PO queue redirect decision; null = legacy VRM
+  // rental queue. Holman rows never show a DCA Retry button.
+  decisionSource: string | null;
 }
 
 interface DecisionAction {
@@ -646,19 +651,32 @@ function DcaEventCell({ decision }: { decision: DecisionRow }) {
         return { fg: colors.red, bg: colors.redLight, label: `Failed${attempts ? ` (${attempts}×)` : ""}` };
       case "skipped":
         return { fg: colors.inkMuted, bg: colors.surface, label: "Skipped" };
+      case "not_filed":
+        // Intentional non-action, NOT an error: Holman direct-billing
+        // redirect denials keep the tech on route, so no Make Unavailable
+        // is filed and no Retry is offered.
+        return { fg: colors.inkMuted, bg: colors.surface, label: "Not filed" };
       default:
         return { fg: colors.inkMuted, bg: colors.surface, label: status };
     }
   })();
 
   const tooltip = [
+    status === "not_filed"
+      ? "Intentionally not filed — Holman direct-billing redirect denial. The tech keeps working; no scheduler change."
+      : null,
     projectId ? `Project: ${projectId}` : null,
     sentAt ? `Sent: ${new Date(sentAt).toLocaleString()}` : null,
     error ? `Error: ${error}` : null,
-    `Attempts: ${attempts}`,
+    status === "not_filed" ? null : `Attempts: ${attempts}`,
   ].filter(Boolean).join("\n");
 
-  const canRetry = status === "failed" || status === "skipped";
+  // Holman redirect denials can never be retried into a Make Unavailable —
+  // the server fences on decision_source too; hiding the button here just
+  // avoids a guaranteed 409.
+  const canRetry =
+    (status === "failed" || status === "skipped") &&
+    decision.decisionSource !== "holman_queue";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }} title={tooltip}>
