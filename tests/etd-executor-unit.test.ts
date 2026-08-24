@@ -54,7 +54,7 @@ import {
   quoteWithReportedFallback,
   redactedShape,
 } from "../server/vrm/etd/executor";
-import { safeErrorText, rejectionMessage, rejectionReasons } from "../server/vrm/etd/client";
+import { safeErrorText, rejectionMessage, rejectionReasons, EtdClient as EtdClientImpl } from "../server/vrm/etd/client";
 import { useAccountAdditionalInfo, assertAdditionalInfoComplete } from "../server/vrm/etd/surgery";
 import type { EtdClient, CarClass } from "../server/vrm/etd/client";
 
@@ -100,6 +100,8 @@ type FakeOpts = {
   user?: Record<string, unknown> | null;
   addInfoFields?: unknown[];
   addInfoThrows?: boolean;
+  /** Simulate the client's nearbyOnEmpty walk having moved off an empty branch. */
+  fallbackFrom?: { code: string; name: string };
 };
 
 /** Records what was called so a test can assert the commit was never reached. */
@@ -132,6 +134,13 @@ function fakeEtd(opts: FakeOpts = {}) {
         branch_address: "100 EXAMPLE WAY,TESTVILLE,OH,44100",
         site: {},
         classes: opts.classes ?? CLASSES,
+        ...(opts.fallbackFrom
+          ? {
+              branch_fallback_from_code: opts.fallbackFrom.code,
+              branch_fallback_from_name: opts.fallbackFrom.name,
+              branch_fallback_tried: 1,
+            }
+          : {}),
       };
     },
     async findUserByUsername(u: string) {
@@ -477,6 +486,124 @@ describe("intent addressing", () => {
     assert.equal(got.address, "Enterprise, 4501 Main St, Testville, OH");
     assert.equal(got.code, "", "a new rental is still not tied to an existing agreement");
   });
+
+  test("Fleet's approved branch beats the shop AND the technician's answer, state guard off", () => {
+    // VPRAK #110 (2026-08-24): a BYOV breakdown with no shop and no reported branch,
+    // where the operator typed the branch on the approval and this lane quoted from
+    // nothing anyway — the decision endpoint documented the override but nothing
+    // downstream read it. Mirrors book_one in etd-runner/scripts/book_request.py.
+    const got = intentAddress(item({
+      facts: { requestSeed: {
+        approvedBranch: "7440 W Cactus Rd Ste A7, Peoria, AZ 85381",
+        shopAddress: "100 Example Way", shopCity: "Testville", shopState: "OH",
+        reportedBranch: "Enterprise, 4501 Main St, Testville, OH",
+      } },
+    }));
+    assert.equal(got.address, "7440 W Cactus Rd Ste A7, Peoria, AZ 85381");
+    assert.equal(got.code, "", "Fleet's branch is an address, never a contract pin");
+    assert.equal(got.wantState, "", "a human checked this address; the state guard must not overrule them");
+  });
+
+  test("an approved branch also rescues the no-shop request that would otherwise refuse", () => {
+    const got = intentAddress(item({
+      facts: { requestSeed: { approvedBranch: "7440 W Cactus Rd, Peoria, AZ" } },
+    }));
+    assert.equal(got.address, "7440 W Cactus Rd, Peoria, AZ");
+  });
+});
+
+describe("nearbyOnEmpty branch walk (real client, faked transport)", () => {
+  const BR = (code: string, dist: number | null) => ({
+    branchCode: code,
+    customerFacingBranchName: `Branch ${code}`,
+    fullAddress: `${code} MAIN ST,TESTVILLE,OH,44100`,
+    latitude: "41.1",
+    longitude: "-81.5",
+    peoplesoftBranchId: `PS${code}`,
+    stationId: `ST${code}`,
+    calculatedDistance: dist,
+    telephone: "(+1)5555550100",
+  });
+
+  /** Real EtdClient.quote() with every HTTP-touching step substituted. */
+  function nearbyClient(branches: unknown[], classesByStation: Record<string, CarClass[]>) {
+    const priced: string[] = [];
+    const c = new EtdClientImpl() as any;
+    c.resolvePlace = async () => ({
+      latitude: "41.1", longitude: "-81.5", location: "Testville", postcode: "44100", townOrCity: "Testville",
+    });
+    c.createJourney = async () => ({ id: "j-1" });
+    c.wizard = async () => ({ data: { journeyDetails: { referenceNumber: "R-1" } } });
+    c.closestBranches = async () => branches;
+    c.carClasses = async (_j: string, site: any) => {
+      const station = String(site?.StationIds?.ET ?? "");
+      priced.push(station);
+      return classesByStation[station] ?? [];
+    };
+    return { client: c as EtdClientImpl, priced };
+  }
+
+  const START = "2026-08-25T09:00:00";
+  const END = "2026-08-29T09:00:00";
+
+  test("zero classes at the nearest branch walks to the next one that prices cars", async () => {
+    // The SWICKLA #95 shape: a National desk, then an airport counter, both empty,
+    // then the real branch 0.29 mi further with cars on the lot.
+    const { client, priced } = nearbyClient(
+      [BR("1001", 9.1), BR("1002", 9.3), BR("1003", 9.6)],
+      { ST1003: CLASSES },
+    );
+    const q = await client.quote({ address: "x", start: START, end: END, nearbyOnEmpty: true });
+    assert.deepEqual(priced, ["ST1001", "ST1002", "ST1003"], "candidates priced nearest-first, no skipping");
+    assert.equal(q.branch_code, "1003");
+    assert.ok((q.classes || []).length, "the adopted branch's classes are the quote's classes");
+    assert.equal(q.branch_fallback_from_code, "1001", "the branch moved off is named");
+    assert.equal(q.branch_fallback_tried, 2);
+  });
+
+  test("a pinned branch never moves, even when it prices nothing", async () => {
+    const { client, priced } = nearbyClient(
+      [BR("1001", 1.0), BR("1002", 2.0)],
+      { ST1002: CLASSES },
+    );
+    const q = await client.quote({
+      address: "x", start: START, end: END, preferBranchCode: "1001", nearbyOnEmpty: true,
+    });
+    assert.deepEqual(priced, ["ST1001"], "a cutover's contract branch is priced once and left alone");
+    assert.equal(q.branch_code, "1001");
+    assert.equal(q.classes.length, 0, "empty stays empty rather than silently moving the contract branch");
+    assert.equal(q.branch_fallback_from_code, undefined);
+  });
+
+  test("the walk stops at the distance cap instead of adopting a far branch", async () => {
+    const { client, priced } = nearbyClient(
+      [BR("1001", 5.0), BR("1002", 100.0), BR("1003", 101.0)],
+      { ST1002: CLASSES, ST1003: CLASSES },
+    );
+    const q = await client.quote({ address: "x", start: START, end: END, nearbyOnEmpty: true });
+    assert.deepEqual(priced, ["ST1001"], "a candidate beyond the cap ends the walk (nearest-first list)");
+    assert.equal(q.branch_code, "1001");
+    assert.equal(q.classes.length, 0);
+  });
+
+  test("an unknown distance is too far, not free", async () => {
+    const { client, priced } = nearbyClient(
+      [BR("1001", 5.0), BR("1002", null)],
+      { ST1002: CLASSES },
+    );
+    await client.quote({ address: "x", start: START, end: END, nearbyOnEmpty: true });
+    assert.deepEqual(priced, ["ST1001"], "the airport-satellite shape (no distance) is excluded");
+  });
+
+  test("without the opt-in the quote behaves exactly as before", async () => {
+    const { client, priced } = nearbyClient(
+      [BR("1001", 1.0), BR("1002", 2.0)],
+      { ST1002: CLASSES },
+    );
+    const q = await client.quote({ address: "x", start: START, end: END });
+    assert.deepEqual(priced, ["ST1001"]);
+    assert.equal(q.classes.length, 0);
+  });
 });
 
 describe("class choice per workflow", () => {
@@ -634,6 +761,26 @@ describe("preview lane", () => {
     const sched = (row.preview as any)?.schedule ?? {};
     assert.equal(sched.scheduleGated, false, "and the preview records that no schedule gate ran");
     assert.equal(sched.requestedDateWorking, null, "so it must not claim a working-day check passed");
+  });
+
+  test("a preview that moved off an empty branch says so in the persisted facts", async () => {
+    const ldap = `${LDAP_PREFIX}NRBY`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client } = fakeEtd({ fallbackFrom: { code: "1001", name: "Empty Corner" } });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+
+    assert.equal(run.results[0].action, "PREV");
+    assert.equal(run.results[0].status, "preview_ready", "a rescued quote is still a clean quote");
+    const row = await loadIntentRow(intentId);
+    const resv = (row.preview as any)?.reservation ?? {};
+    assert.equal(resv.quotedFromNearbyBranch, true, "the move is recorded, not silent");
+    assert.ok(
+      (resv.quote?.warnings ?? []).some(
+        (w: string) => w.includes("Empty Corner") && w.includes("priced no classes"),
+      ),
+      `the branch moved off is named in the preview (warnings: ${JSON.stringify(resv.quote?.warnings)})`,
+    );
   });
 
   test("a same-day request ignores the schedule entirely, stale watermark included", async () => {

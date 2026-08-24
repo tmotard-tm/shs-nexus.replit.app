@@ -222,7 +222,8 @@ def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str,
     duration produced no classes and a shorter one did, which is a fact Fleet
     has to know: the reservation will need extending.
     """
-    q = _guarded_quote(etd, address, "", want_state, start, end)
+    q = _guarded_quote(etd, address, "", want_state, start, end,
+                       nearby_on_empty=True)
     if q.get("classes"):
         return q, end, False
 
@@ -231,7 +232,8 @@ def quote_with_fallback(etd: EtdClient, address: str, start: str, end: str,
         short_end = (start_dt + timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
         if short_end >= end:
             continue
-        q2 = _guarded_quote(etd, address, "", want_state, start, short_end)
+        q2 = _guarded_quote(etd, address, "", want_state, start, short_end,
+                            nearby_on_empty=True)
         if q2.get("classes"):
             return q2, short_end, True
     # Genuinely nothing, at any duration. Now the empty list is about

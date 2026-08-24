@@ -26,6 +26,15 @@ export const ACCOUNT_UID = "8792e92a-841f-44bc-ac1c-dfffe981db2c";
 /** Brands the account may book. Sent to reservation/locations and the branch lookup. */
 export const BRANDS = "ET,ZL";
 
+/**
+ * Bounds for the `nearbyOnEmpty` quote fallback: at most this many additional
+ * branches are priced after the nearest came up empty, and only while candidates
+ * stay within this `calculatedDistance` (the feed documents it as km). The list is
+ * nearest-first, so crossing the distance cap ends the walk rather than skipping.
+ */
+export const NEARBY_FALLBACK_MAX_CANDIDATES = 5;
+export const NEARBY_FALLBACK_MAX_DISTANCE = 40;
+
 /** ETD silently caps PageSize at 100 — asking for more returns 100 rows with no warning. */
 export const MAX_PAGE_SIZE = 100;
 
@@ -271,6 +280,14 @@ export type QuoteResult = {
   branch_phone: string | null;
   site: Json;
   classes: CarClass[];
+  /**
+   * Set only when `nearbyOnEmpty` moved the quote off the nearest branch because it
+   * priced ZERO classes: the branch that came up empty, and how many candidates were
+   * priced before one had cars. Absent (undefined) on every direct quote.
+   */
+  branch_fallback_from_code?: string;
+  branch_fallback_from_name?: string;
+  branch_fallback_tried?: number;
 };
 
 export type EtdCallLog = { method: string; path: string; status: number; ms: number };
@@ -658,6 +675,17 @@ export class EtdClient {
     end: string;
     accountUid?: string;
     preferBranchCode?: string;
+    /**
+     * When the chosen branch prices ZERO classes, walk the rest of the nearest-first
+     * branch list and adopt the first one that has cars. Request #95 (SWICKLA,
+     * 2026-08-24): the closest counter to the Eau Claire shop was a National-brand
+     * desk that returns an EMPTY class list on this account, the next an airport
+     * counter with nothing either, and the real branch sat 0.29 mi further with 17
+     * classes including the exact approved one — the request read like a mapping bug
+     * for hours while a car was available. Ignored whenever `preferBranchCode` is
+     * set: a pinned branch (a cutover's contract branch) must never silently move.
+     */
+    nearbyOnEmpty?: boolean;
   }): Promise<QuoteResult> {
     const place = await this.resolvePlace(opts.address);
     const journey = await this.createJourney({
@@ -690,9 +718,59 @@ export class EtdClient {
         }
       }
     }
-    const site = EtdClient.branchSite(branch);
+    let site = EtdClient.branchSite(branch);
     site.Latitude = place.latitude;
     site.Longitude = place.longitude;
+
+    let classes = await this.carClasses(
+      journeyId,
+      site,
+      opts.start,
+      opts.end,
+      opts.accountUid ?? ACCOUNT_UID,
+    );
+
+    // The chosen branch priced nothing. When the caller opted in and no branch is
+    // pinned, price the next-nearest candidates in order and adopt the first with
+    // cars. The list arrives nearest-first, so the distance cap doubles as the stop
+    // condition; the attempt cap bounds the extra ETD calls. A branch adopted here is
+    // reported via `branch_fallback_from_*` so the preview facts, the drawer and the
+    // technician's confirmation all name the branch that was ACTUALLY priced — and the
+    // commit lane pins `branchCode` from the confirmed preview, so this move can never
+    // book a different place than the one an operator approved.
+    let fallbackFrom: Json | null = null;
+    let fallbackTried = 0;
+    if (!classes.length && opts.nearbyOnEmpty && !opts.preferBranchCode) {
+      for (const b of branches) {
+        if (b === branch) continue;
+        if (fallbackTried >= NEARBY_FALLBACK_MAX_CANDIDATES) break;
+        // `calculatedDistance` is documented as km on the feed; an absent value is
+        // treated as too far rather than free (Number(null) is 0, which would rank
+        // "unknown distance" CLOSER than every real branch), because unknown is
+        // exactly the airport-satellite shape the cap exists to exclude.
+        const raw = b?.calculatedDistance;
+        const dist = raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
+        if (!Number.isFinite(dist) || dist > NEARBY_FALLBACK_MAX_DISTANCE) break;
+        fallbackTried += 1;
+        const s2 = EtdClient.branchSite(b);
+        s2.Latitude = place.latitude;
+        s2.Longitude = place.longitude;
+        const c2 = await this.carClasses(
+          journeyId,
+          s2,
+          opts.start,
+          opts.end,
+          opts.accountUid ?? ACCOUNT_UID,
+        );
+        if (c2.length) {
+          fallbackFrom = branch;
+          branch = b;
+          site = s2;
+          classes = c2;
+          break;
+        }
+      }
+    }
 
     return {
       journey_id: journeyId,
@@ -705,13 +783,14 @@ export class EtdClient {
       branch_address: branch?.fullAddress ?? "",
       branch_phone: EtdClient.usPhone(branch?.telephone),
       site,
-      classes: await this.carClasses(
-        journeyId,
-        site,
-        opts.start,
-        opts.end,
-        opts.accountUid ?? ACCOUNT_UID,
-      ),
+      classes,
+      ...(fallbackFrom
+        ? {
+            branch_fallback_from_code: String(fallbackFrom?.branchCode ?? ""),
+            branch_fallback_from_name: String(fallbackFrom?.customerFacingBranchName ?? ""),
+            branch_fallback_tried: fallbackTried,
+          }
+        : {}),
     };
   }
 

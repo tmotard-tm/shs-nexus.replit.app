@@ -11,6 +11,7 @@ unless the caller explicitly opts out.
 """
 from __future__ import annotations
 
+import math
 import re
 import time
 from dataclasses import dataclass, field
@@ -38,6 +39,14 @@ ACCOUNT_NAME = "TransformCo Billing"
 
 # Brands the account may book. Sent to reservation/locations and the branch lookup.
 BRANDS = "ET,ZL"
+
+# Bounds for the ``nearby_on_empty`` quote fallback: at most this many additional
+# branches are priced after the nearest came up empty, and only while candidates stay
+# within this ``calculatedDistance`` (the feed documents it as km). The list is
+# nearest-first, so crossing the distance cap ends the walk rather than skipping.
+# Mirrors server/vrm/etd/client.ts — change both or neither.
+NEARBY_FALLBACK_MAX_CANDIDATES = 5
+NEARBY_FALLBACK_MAX_DISTANCE = 40
 
 
 class EtdError(RuntimeError):
@@ -752,7 +761,8 @@ class EtdClient:
     # ------------------------------------------------------------------- booking
 
     def quote(self, *, address: str, start: str, end: str,
-              account_uid: str = ACCOUNT_UID, prefer_branch_code: str = "") -> dict:
+              account_uid: str = ACCOUNT_UID, prefer_branch_code: str = "",
+              nearby_on_empty: bool = False) -> dict:
         """CONFIRMED end to end. Everything up to, but not including, the commit.
 
         Runs: resolve address -> create journey -> advance wizard -> find branch ->
@@ -796,7 +806,43 @@ class EtdClient:
         site["Latitude"] = place["latitude"]
         site["Longitude"] = place["longitude"]
 
-        return {
+        classes = self.car_classes(journey_id, site, start, end,
+                                   account_uid=account_uid)
+
+        # The chosen branch priced nothing. With ``nearby_on_empty`` and no pinned
+        # branch, price the next-nearest candidates in order and adopt the first with
+        # cars (request #95: a National desk then an airport counter priced empty
+        # while the real branch sat 0.29 mi further with 17 classes). Mirrors
+        # ``quote`` in server/vrm/etd/client.ts — change both or neither. Never moves
+        # a pinned branch: a cutover must stay at the contract branch.
+        fallback_from = None
+        tried = 0
+        if not classes and nearby_on_empty and not prefer_branch_code:
+            for b in branches:
+                if b is branch:
+                    continue
+                if tried >= NEARBY_FALLBACK_MAX_CANDIDATES:
+                    break
+                try:
+                    dist = float(b.get("calculatedDistance"))
+                except (TypeError, ValueError):
+                    break
+                # float('nan') parses but compares false against the cap — an
+                # unknown distance must stop the walk, not sail past it (TS parity:
+                # Number.isFinite gate in server/vrm/etd/client.ts).
+                if not math.isfinite(dist) or dist > NEARBY_FALLBACK_MAX_DISTANCE:
+                    break
+                tried += 1
+                s2 = self.branch_site(b)
+                s2["Latitude"] = place["latitude"]
+                s2["Longitude"] = place["longitude"]
+                c2 = self.car_classes(journey_id, s2, start, end,
+                                      account_uid=account_uid)
+                if c2:
+                    fallback_from, branch, site, classes = branch, b, s2, c2
+                    break
+
+        out = {
             "journey_id": journey_id,
             "reference": reference,
             "place": place,
@@ -806,9 +852,14 @@ class EtdClient:
             "branch_name": branch.get("customerFacingBranchName", ""),
             "branch_address": branch.get("fullAddress", ""),
             "site": site,
-            "classes": self.car_classes(journey_id, site, start, end,
-                                        account_uid=account_uid),
+            "classes": classes,
         }
+        if fallback_from is not None:
+            out["branch_fallback_from_code"] = str(fallback_from.get("branchCode", ""))
+            out["branch_fallback_from_name"] = fallback_from.get(
+                "customerFacingBranchName", "")
+            out["branch_fallback_tried"] = tried
+        return out
 
     def confirm_reservation(self, model: dict, *, dry_run: bool | None = None) -> Any:
         """OBSERVED, not yet replayed from Python. The commit.

@@ -1272,10 +1272,17 @@ def _intent_address(item: dict):
 
 
 def _guarded_quote(etd: EtdClient, address: str, code: str, want_state: str,
-                   start: str, end: str) -> dict:
-    """Quote with the same wrong-state guard the legacy pool lane uses."""
+                   start: str, end: str, nearby_on_empty: bool = False) -> dict:
+    """Quote with the same wrong-state guard the legacy pool lane uses.
+
+    ``nearby_on_empty`` is the request lane's opt-in (book_request passes it): when
+    the chosen branch prices zero classes the client walks the next-nearest branches.
+    The cutover lane never opts in — its quote pins the contract branch, and the
+    client refuses to move a pinned branch regardless.
+    """
     q = etd.quote(address=address, start=start, end=end,
-                  prefer_branch_code=code or None)
+                  prefer_branch_code=code or None,
+                  nearby_on_empty=nearby_on_empty)
 
     def branch_state(qq):
         m = re.search(r",\s*([A-Z]{2})?\s*(\d{5})(?:-\d{4})?\s*$",
@@ -1288,7 +1295,8 @@ def _guarded_quote(etd: EtdClient, address: str, code: str, want_state: str,
             # Geocoder wandered (the Ventura->Niagara Falls class of failure).
             city_state = ", ".join(address.split(",")[-2:]).strip() or address
             q = etd.quote(address=city_state, start=start, end=end,
-                          prefer_branch_code=code or None)
+                          prefer_branch_code=code or None,
+                          nearby_on_empty=nearby_on_empty)
             got = branch_state(q)
             if got and got != want_state:
                 raise RuntimeError(f"geocoder put the branch in {got}, expected "

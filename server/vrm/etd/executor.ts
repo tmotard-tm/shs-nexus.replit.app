@@ -380,6 +380,19 @@ export function intentAddress(item: QueueItem): {
     };
   }
   const rs = (facts.requestSeed || {}) as Record<string, any>;
+  // Fleet's branch wins over everything. A person typed it on the approval to book
+  // something the unattended guards refuse, so it also switches the state guard off:
+  // the guard exists to catch a geocode that wandered off an address nobody checked,
+  // and this address WAS checked, by a person. Second-guessing a human's explicit
+  // branch is the behaviour Tyler asked to remove on 2026-08-20. Mirrors `book_one`
+  // in etd-runner/scripts/book_request.py — change both or neither. VPRAK request
+  // #110 (2026-08-24) is why this exists here too: a BYOV breakdown with no shop and
+  // no reported branch, where the operator typed the Peoria branch on the approval
+  // and this lane quoted from nothing anyway.
+  const fleetBranch = String(rs.approvedBranch || "").trim();
+  if (fleetBranch) {
+    return { address: fleetBranch, code: "", wantState: "" };
+  }
   let address = joinAddress([rs.shopAddress, rs.shopCity, rs.shopState, rs.shopPostal]);
   if (!address) {
     // No shop: a new hire awaiting a vehicle. Their typed branch is all we have, and it
@@ -463,14 +476,15 @@ async function guardedQuote(
   wantState: string,
   start: string,
   end: string,
+  nearbyOnEmpty = false,
 ): Promise<QuoteResult> {
-  let q = await etd.quote({ address, start, end, preferBranchCode: code || undefined });
+  let q = await etd.quote({ address, start, end, preferBranchCode: code || undefined, nearbyOnEmpty });
   if (wantState && wantState.length === 2) {
     let got = branchState(q);
     if (got && got !== wantState) {
       const parts = address.split(",");
       const cityState = parts.slice(-2).join(",").trim() || address;
-      q = await etd.quote({ address: cityState, start, end, preferBranchCode: code || undefined });
+      q = await etd.quote({ address: cityState, start, end, preferBranchCode: code || undefined, nearbyOnEmpty });
       got = branchState(q);
       if (got && got !== wantState) {
         throw new Error(
@@ -531,7 +545,12 @@ export async function quoteWithReportedFallback(
   start: string,
   end: string,
 ): Promise<{ q: QuoteResult; usedReported: boolean }> {
-  const q = await guardedQuote(etd, address, code, wantState, start, end);
+  // A request may also walk to the next-nearest branch when the chosen one prices
+  // nothing (`nearbyOnEmpty` inside the client, which refuses to move a pinned
+  // branch). A cutover never opts in: its quote pins the contract branch, and the
+  // reservation must sit at the branch holding the Holman agreement.
+  const nearby = item.workflowType === WORKFLOW_REQUEST;
+  const q = await guardedQuote(etd, address, code, wantState, start, end, nearby);
   if ((q.classes || []).length) return { q, usedReported: false };
 
   const rs = ((item.facts || {}) as Record<string, any>).requestSeed || {};
@@ -758,6 +777,7 @@ async function runPreview(
     branchZip: null,
     branchPinned: false,
     quotedFromReportedBranch: false,
+    quotedFromNearbyBranch: false,
     pickupDate: "",
   };
   let classDecision: RunnerClassDecision & Record<string, unknown> = {
@@ -822,10 +842,19 @@ async function runPreview(
         branchZip: branchZip(q),
         branchPinned: !!q.branch_pinned,
         quotedFromReportedBranch: usedReported,
+        quotedFromNearbyBranch: !!q.branch_fallback_from_code,
         journeyId: q.journey_id,
         reference: q.reference,
         offeredClasses: classes.map((c) => ({ code: c.code, description: c.description })),
       });
+      // Name the branch that came up empty so the drawer reads "moved off X because
+      // it had no cars" instead of looking like the geocoder picked somewhere odd.
+      if (q.branch_fallback_from_code) {
+        (quote.warnings as string[]).push(
+          `nearest branch ${q.branch_fallback_from_name || "?"} (${q.branch_fallback_from_code}) ` +
+          `priced no classes; quoted ${q.branch_name} (${q.branch_code}) instead`,
+        );
+      }
     } catch (err) {
       quote.warnings = [clip(errText(err))];
     }

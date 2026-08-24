@@ -1609,6 +1609,11 @@ function publicFacts(f: EligibilityFacts): Record<string, unknown> {
             // was booked at Boston Logan on 2026-08-19 with the guard silently off.
             homeState: strOrNull(f.sourceRow.home_state),
             reportedBranch: strOrNull(f.sourceRow.tech_reported_branch),
+            // Fleet's branch, typed on the approval. The executor books from it over
+            // the shop address AND the technician's answer (state guard off — a human
+            // checked it). VPRAK #110: without this seed the documented override was
+            // dead code and a no-shop BYOV request quoted from nothing.
+            approvedBranch: strOrNull(f.sourceRow.approved_branch),
             approvedVehicleClass: strOrNull(f.sourceRow.approved_vehicle_class),
             truckNumber: strOrNull(f.sourceRow.truck_number),
             pickupAt: f.sourceRow.pickup_at ?? null,
@@ -1951,6 +1956,8 @@ export type RunnerQuote = {
   offeredClasses?: Array<string | { code: string | null; description: string | null }>;
   warnings?: string[];
   scheduleEvidence?: { watermarkUtc?: string | null; checkedAt?: string | null } | null;
+  /** REQUEST lane: the address the quote started from was fine, but its nearest branch priced zero classes and the client adopted the next-nearest one with cars. */
+  quotedFromNearbyBranch?: boolean;
 };
 
 export type RunnerClassDecision = {
@@ -2209,6 +2216,9 @@ export async function persistPreviewFromRunner(params: {
       // request the two are independent and a disagreement is worth catching
       // BEFORE Confirm, not after a reservation exists at the wrong branch.
       reportedBranch: isCutover ? null : strOrNull(facts.sourceRow?.tech_reported_branch),
+      // TRUE when the nearest branch priced no cars and the quote adopted the
+      // next-nearest one that did; the moved-off branch is named in quote.warnings.
+      quotedFromNearbyBranch: !!params.quote.quotedFromNearbyBranch,
       sipp,
       classDecision: params.classDecision,
       offeredClasses: params.quote.offeredClasses ?? [],
