@@ -317,7 +317,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts tests/direct-billing-void-db.test.ts"
+args = "npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts tests/direct-billing-void-db.test.ts tests/vrm-notification-hold.test.ts"
 
 [[workflows.workflow]]
 name = "comms-inbox-viewport"
