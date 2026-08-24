@@ -72,6 +72,26 @@ restructuring the component itself into pinned header/footer + a
 whenever content fits, pins the action button when it doesn't — all sizes).
 Verify pinning positively too: temporary tall filler INSIDE the body wrapper
 must still pass the button-in-viewport check.
+# CSS-only pin when the action button lives INSIDE the scroll body
+
+When a footer cannot be re-parented into a pinned flex sibling (inline-styled
+JSX, compact-only requirement), `position: sticky; bottom: 0` on the footer —
+kept the LAST child of the scroll body — pins it CSS-only (give it a
+background + z-index; negative side margins mirroring the body padding make
+it span the full panel width). Two guard traps that follow from sticky:
+- The overflow-stress spacer must be inserted BEFORE the sticky footer
+  (`insertBefore(spacer, footer)`, never `appendChild`) — content appended
+  after it moves the footer's natural position up and sticky no longer holds
+  it at scroll-bottom, so the guard tests the wrong contract.
+- The sabotage-sensitive assertion is button-in-viewport at `scrollTop = 0`
+  with the spacer in place (natural position far below the fold); the
+  scrolled-to-bottom variant passes with or without the CSS.
+For a compact-only pin, also assert the footer's computed `position` flips
+sticky/static across the media threshold — that is the "desktop unchanged"
+proof. A sticky-TOP header (VRM case-detail panel) is the mirror image: the
+sabotage-sensitive assertion is action-in-viewport after scrolling the
+container to the BOTTOM.
+
 # Lessons from pinning dialog footers (Fleet Comms dialogs)
 
 **A pinned-footer CSS contract only protects direct siblings of the scroll

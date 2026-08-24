@@ -33,7 +33,7 @@ import {
   assertPaneBottomWindow,
   viewportLabel,
 } from "./lib/viewport-guard";
-import { assertVrmCompactDensity } from "./lib/vrm-compact-probe";
+import { assertVrmCompactDensity, isCompactViewport } from "./lib/vrm-compact-probe";
 
 const PAGE_PATH = "/vehicle-rental-management/rental-repair-tracker";
 const VIEWPORTS = [...SMALL_LAPTOP_VIEWPORTS, { width: 1024, height: 500 }];
@@ -47,7 +47,9 @@ runViewportGuard({
     "was added to the shell or page (client/src/pages/vehicle-rental-management/pages/RentalRepairTracker.tsx), " +
     "or the header/search/toggle stack grew until the first section fell below the fold. " +
     "If only the compact-density checks fail, the Task #826 block in client/src/index.css was removed or its " +
-    "rdt-* hook classes were stripped from the page.",
+    "rdt-* hook classes were stripped from the page. " +
+    "If a panel-* check fails, the add/edit slide-over's pinned-footer rules (Task #832: .rdt-panel-footer " +
+    "sticky pin in the same index.css media block) or its rdt-panel-* hook classes were likely removed.",
   viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
@@ -77,6 +79,75 @@ runViewportGuard({
       compactPadTop: "6px",
       desktopPadTop: "10px",
     });
+
+    // ── Open-overlay: the add/edit entry slide-over (Task #832) ─────────────
+    // The Save/Add Entry footer lives INSIDE the scrolling body; the compact
+    // block in index.css sticky-pins it to the bottom of the body's
+    // scrollport so it never leaves a small-laptop screen. Desktop keeps the
+    // stock scroll-with-content behavior — proven by the computed-position
+    // probe below, not by absence of a check.
+    console.log(`[entry panel @ ${label}]`);
+    const compact = isCompactViewport(viewport);
+    await page.locator('[data-testid="button-add-entry"]').click();
+    await page.waitForSelector('[data-testid="button-panel-save"]', { timeout: SELECTOR_TIMEOUT_MS });
+    await page.waitForTimeout(300);
+    await assertNoPageScroll(rec, page, `no-page-scroll:panel@${label}`);
+
+    const footerPos = await page.evaluate(() => {
+      const f = document.querySelector(".rdt-panel-footer");
+      return f ? getComputedStyle(f).position : null;
+    });
+    const wantPos = compact ? "sticky" : "static";
+    rec.assert(
+      footerPos === wantPos,
+      `panel-footer-position@${label}`,
+      `computed position ${footerPos} on .rdt-panel-footer, expected ${wantPos} ` +
+        `(${compact ? "compact sticky pin" : "desktop scroll-with-content untouched"})`,
+    );
+
+    if (compact) {
+      // The Add Entry form is long; the pinned footer must be on screen
+      // as-opened…
+      await assertElementInViewport(rec, page, '[data-testid="button-panel-save"]', viewport, `panel-save-in-viewport@${label}`);
+      // …and stay there under a genuine overflow, however short the form may
+      // become (a short panel passes the plain check vacuously). The spacer
+      // goes BEFORE the footer so the footer stays the body's last child —
+      // the position the sticky pin protects.
+      const stress = await page.evaluate(() => {
+        const body = document.querySelector(".rdt-panel-body") as HTMLElement | null;
+        const footer = document.querySelector(".rdt-panel-footer") as HTMLElement | null;
+        if (!body || !footer) return null;
+        const spacer = document.createElement("div");
+        spacer.id = "__vg-rdt-panel-spacer";
+        spacer.style.height = "2000px";
+        spacer.style.flexShrink = "0";
+        body.insertBefore(spacer, footer);
+        body.scrollTop = 0; // footer's natural position now sits ~2000px below the scrollport
+        return { bodyScrolls: body.scrollHeight > body.clientHeight + 4 };
+      });
+      if (!stress) {
+        rec.assert(false, `panel-body-scrolls@${label}`, ".rdt-panel-body/.rdt-panel-footer not found in the open slide-over");
+      } else {
+        rec.assert(
+          stress.bodyScrolls,
+          `panel-body-scrolls@${label}`,
+          `with a 2000px spacer the body scrolls=${stress.bodyScrolls} (false means the body is no longer the panel's scroll container)`,
+        );
+      }
+      // Scrolled to the TOP with 2000px of form below, only the sticky pin
+      // keeps Save on screen — THE assertion that trips when the Task #832
+      // CSS is removed or the rdt-panel-* hook classes are stripped.
+      await assertElementInViewport(rec, page, '[data-testid="button-panel-save"]', viewport, `panel-save-pinned-overflow-top@${label}`);
+      await page.evaluate(() => {
+        const body = document.querySelector(".rdt-panel-body") as HTMLElement | null;
+        if (body) body.scrollTop = body.scrollHeight;
+      });
+      await assertElementInViewport(rec, page, '[data-testid="button-panel-save"]', viewport, `panel-save-pinned-overflow-bottom@${label}`);
+      await page.evaluate(() => document.getElementById("__vg-rdt-panel-spacer")?.remove());
+    }
+
+    await page.locator('[data-testid="button-panel-close"]').click();
+    await page.locator('[data-testid="rdt-panel"]').waitFor({ state: "hidden", timeout: SELECTOR_TIMEOUT_MS });
   },
 }).catch((err) => {
   console.error(`\nFATAL: ${err?.message || err}`);

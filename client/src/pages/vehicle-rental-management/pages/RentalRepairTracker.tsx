@@ -1773,7 +1773,13 @@ function UnifiedPanel({
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
       <div style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.18)" }} onClick={onClose} />
+      {/* rdt-panel / rdt-panel-body / rdt-panel-footer are style-free hooks for
+          the compact-density overlay rules in client/src/index.css (Task #832).
+          The overlay is position:fixed, so it gets its own hook scope instead
+          of riding the .repair-tracker page-scoped selectors. */}
       <div
+        className="rdt-panel"
+        data-testid="rdt-panel"
         style={{
           width: 520,
           height: "100%",
@@ -1809,7 +1815,7 @@ function UnifiedPanel({
               </span>
             )}
           </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+          <button onClick={onClose} data-testid="button-panel-close" style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
             <X size={20} color={colors.inkMuted} />
           </button>
         </div>
@@ -1849,7 +1855,7 @@ function UnifiedPanel({
         )}
 
         {/* Body */}
-        <div style={{ flex: 1, padding: "0 24px 40px", overflowY: "auto" }}>
+        <div className="rdt-panel-body" style={{ flex: 1, padding: "0 24px 40px", overflowY: "auto" }}>
           {isEdit && panelTab === "ams" ? (
             <AmsDrawerTab truckNumber={amsTruck} query={amsQuery} />
           ) : isEdit && panelTab === "punches" ? (
@@ -2169,10 +2175,15 @@ function UnifiedPanel({
           </>
           )}
 
-          {/* ── Footer buttons (always visible) ── */}
+          {/* ── Footer buttons ── They live INSIDE the scrolling body (scroll
+              with the form at desktop); under the compact media block the
+              rdt-panel-footer rule sticky-pins them to the bottom of the
+              body's scrollport so Save/Add Entry never leaves a small-laptop
+              screen (Task #832). */}
           {!(isEdit && panelTab === "punches") && (
-          <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+          <div className="rdt-panel-footer" style={{ display: "flex", gap: 10, marginTop: 24 }}>
             <button
+              data-testid="button-panel-save"
               onClick={() => saveMutation.mutate()}
               disabled={saveMutation.isPending}
               style={{

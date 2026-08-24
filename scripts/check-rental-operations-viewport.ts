@@ -33,6 +33,7 @@ import {
   viewportLabel,
 } from "./lib/viewport-guard";
 import { assertVrmCompactDensity } from "./lib/vrm-compact-probe";
+import { CASE_PANEL, CASE_PANEL_CLOSE, assertCaseDetailOverlay } from "./lib/vrm-overlay-probe";
 
 const PAGE_PATH = "/vehicle-rental-management/rental-operations";
 // The two shared mandatory sizes plus the scaled-small-laptop reality:
@@ -49,7 +50,9 @@ runViewportGuard({
     "was added to the shell or page (client/src/pages/vehicle-rental-management/pages/RentalOperations.tsx), or " +
     "the header/KPI/chip/filter stack grew until the table header fell below the fold. " +
     "If only the compact-density checks fail, the Task #826 block in client/src/index.css was removed or its " +
-    "ro-* hook classes were stripped from the page.",
+    "ro-* hook classes were stripped from the page. " +
+    "If a case-panel-* check fails, the shared case-file panel (components/case-detail-panel.tsx) lost its " +
+    "inline sticky header, its 90vh height cap, or its own overflow-y scroll (Task #832).",
   viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
@@ -79,6 +82,28 @@ runViewportGuard({
       compactPadTop: "5px",
       desktopPadTop: "9px",
     });
+
+    // ── Open-overlay: the shared case-file panel (Task #832) ────────────────
+    // Row click opens case-detail-panel.tsx; its sticky-header actions must
+    // stay on screen even under an overflow stress (see vrm-overlay-probe).
+    console.log(`[case panel @ ${label}]`);
+    const rows = page.locator(".ro-table-wrap tbody tr");
+    if ((await rows.count()) === 0) {
+      throw new Error(
+        "No rows on the Rental Operations board — the open-overlay check needs at least one rental case " +
+          "in dev (enterprise_rentals). Re-run the rental import/sync before trusting this guard.",
+      );
+    }
+    await rows.first().locator("td").first().click();
+    await page.waitForSelector(CASE_PANEL, { timeout: SELECTOR_TIMEOUT_MS });
+    // Let the case-detail query resolve so the panel is measured at its
+    // natural height (a slow fetch is tolerated — the overflow stress makes
+    // the check independent of content height anyway).
+    await page.waitForSelector('[data-testid="section-activity-log"]', { timeout: 15_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    await assertCaseDetailOverlay(rec, page, viewport);
+    await page.locator(CASE_PANEL_CLOSE).click();
+    await page.locator(CASE_PANEL).waitFor({ state: "hidden", timeout: SELECTOR_TIMEOUT_MS });
   },
 }).catch((err) => {
   console.error(`\nFATAL: ${err?.message || err}`);

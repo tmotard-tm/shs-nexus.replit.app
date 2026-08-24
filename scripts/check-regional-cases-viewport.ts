@@ -32,6 +32,7 @@ import {
   viewportLabel,
 } from "./lib/viewport-guard";
 import { assertVrmCompactDensity } from "./lib/vrm-compact-probe";
+import { CASE_PANEL, CASE_PANEL_CLOSE, assertCaseDetailOverlay } from "./lib/vrm-overlay-probe";
 
 const PAGE_PATH = "/vehicle-rental-management/cases-by-region";
 const VIEWPORTS = [...SMALL_LAPTOP_VIEWPORTS, { width: 1024, height: 500 }];
@@ -45,7 +46,9 @@ runViewportGuard({
     "was added to the shell or page (client/src/pages/vehicle-rental-management/pages/RegionalCases.tsx), or " +
     "the toolbar wrapped/grew until the table header fell below the fold. " +
     "If only the compact-density checks fail, the Task #826 block in client/src/index.css was removed or its " +
-    "rc-* hook classes were stripped from the page.",
+    "rc-* hook classes were stripped from the page. " +
+    "If a case-panel-* check fails, the shared case-file panel (components/case-detail-panel.tsx) lost its " +
+    "inline sticky header, its 90vh height cap, or its own overflow-y scroll (Task #832).",
   viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
@@ -73,6 +76,27 @@ runViewportGuard({
       compactPadTop: "5px",
       desktopPadTop: "9px",
     });
+
+    // ── Open-overlay: the shared case-file panel (Task #832) ────────────────
+    // Row click opens case-detail-panel.tsx. District band rows are <tr>s too
+    // but don't open a case — click the first REAL data row.
+    console.log(`[case panel @ ${label}]`);
+    const dataRows = page
+      .locator(".rc-table-wrap tbody tr")
+      .filter({ hasNot: page.locator("td.rc-district-header") });
+    if ((await dataRows.count()) === 0) {
+      throw new Error(
+        "No case rows on the Cases by Region board — the open-overlay check needs at least one rental case " +
+          "in dev (enterprise_rentals). Re-run the rental import/sync before trusting this guard.",
+      );
+    }
+    await dataRows.first().locator("td").first().click();
+    await page.waitForSelector(CASE_PANEL, { timeout: SELECTOR_TIMEOUT_MS });
+    await page.waitForSelector('[data-testid="section-activity-log"]', { timeout: 15_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+    await assertCaseDetailOverlay(rec, page, viewport);
+    await page.locator(CASE_PANEL_CLOSE).click();
+    await page.locator(CASE_PANEL).waitFor({ state: "hidden", timeout: SELECTOR_TIMEOUT_MS });
   },
 }).catch((err) => {
   console.error(`\nFATAL: ${err?.message || err}`);

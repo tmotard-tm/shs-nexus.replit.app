@@ -779,6 +779,38 @@
   .repair-tracker .rdt-table td {
     padding: 6px 8px !important;
   }
+
+  /* ── Pop-out overlays on the boards above (Task #832) ──
+     The overlays are position:fixed, so they carry their OWN hook classes —
+     the page-scoped selectors above would silently stop matching if the
+     panels ever move to a portal (see .agents/memory/compact-density-css.md).
+
+     Denial Tracker add/edit slide-over (UnifiedPanel in
+     RentalRepairTracker.tsx): its Save/Add Entry footer lives INSIDE the
+     scrolling body — CSS cannot re-parent it into a pinned flex sibling —
+     so under compact heights the long form pushed it below the fold.
+     Sticky-pin it to the bottom of the body's scrollport instead. The body's
+     inline padding tightens in lockstep so the pinned bar can bleed to the
+     panel edges (negative margins mirror the compact padding). Desktop keeps
+     the stock scroll-with-content behavior: the guard asserts the footer's
+     computed position stays "static" at 1280×720.
+
+     The shared case-file panel (case-detail-panel.tsx) needs no rules here:
+     its Refresh/Close actions ride an inline position:sticky header that
+     already holds at every size — the board guards assert it under an
+     overflow stress. */
+  .rdt-panel .rdt-panel-body {
+    padding: 0 16px 12px !important;
+  }
+  .rdt-panel .rdt-panel-footer {
+    position: sticky !important;
+    bottom: 0 !important;
+    z-index: 2;
+    margin: 16px -16px 0 !important;
+    padding: 10px 16px 12px !important;
+    background: var(--vrm-background) !important;
+    border-top: 1px solid var(--vrm-rule) !important;
+  }
 }
 
 /* Development Banner */
