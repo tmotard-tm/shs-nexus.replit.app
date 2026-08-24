@@ -389,7 +389,8 @@ export const HOLMAN_SWITCHED_SMS_BODY_TEMPLATE =
   "If you still need a rental, submit a rental request here:\n" +
   "{{rental_request_link}}\n\n" +
   "Or stop by your Enterprise branch and have them confirm your rental is on " +
-  "the new direct billing.";
+  "the new direct billing.\n\n" +
+  "Going forward, calling Holman will not get a rental approved or extended.";
 
 /**
  * Tech-facing denial SMS for a Holman-queue deny under the new-process

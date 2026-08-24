@@ -528,7 +528,7 @@ const TEMPLATE_DEFAULTS: Record<string, string> = {
   // Sent on a Holman-queue Deny when the tech is ALREADY booked on the new
   // direct-billing process (didn't follow the process).
   sms_template_deny_holman_switched:
-    "Good Morning {{tech_first_name}}, this is the Fleet team. Your rental was already switched to our new direct-billing process (reservation {{etd_reference}}). Requesting a rental or extension through Holman is not the correct process, and that request has been denied.\n\nIf you still need a rental, submit a rental request here:\n{{rental_request_link}}\n\nOr stop by your Enterprise branch and have them confirm your rental is on the new direct billing.",
+    "Good Morning {{tech_first_name}}, this is the Fleet team. Your rental was already switched to our new direct-billing process (reservation {{etd_reference}}). Requesting a rental or extension through Holman is not the correct process, and that request has been denied.\n\nIf you still need a rental, submit a rental request here:\n{{rental_request_link}}\n\nOr stop by your Enterprise branch and have them confirm your rental is on the new direct billing.\n\nGoing forward, calling Holman will not get a rental approved or extended.",
 };
 
 /** Returns unknown {{tokens}} present in `body` that are NOT in `allowed`. */
