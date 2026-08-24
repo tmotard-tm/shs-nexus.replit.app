@@ -328,6 +328,12 @@ def _join_address(*parts) -> str:
 NAMED_DOWNGRADE = ["MVAR", "FFAR", "SFAR", "IFAR", "CFAR",
                    "FCAR", "SCAR", "ICAR", "CCAR", "ECAR"]
 
+# Smallest-first, and only when EVERY sedan rung is empty: the last resort after a
+# named sedan's down-walk AND up-walk both ran dry. Mirrors ESCALATION_LADDER in
+# server/vrm/etd/vehicle-class.ts - the same list the plain sedan default's dead-end
+# uses - so the two bookers cannot escalate the same request to different vehicles.
+ESCALATION_LADDER = ["CFAR", "IFAR", "SFAR", "FFAR", "MVAR"]
+
 
 def _norm(s) -> str:
     """Loose text key: collapse whitespace, treat _ and - as spaces, lowercase."""
@@ -400,13 +406,21 @@ def _named_class_pick(wanted: str, classes: list):
     that already maps human words to codes, then a literal substring as a last
     resort.
 
-    If the resolved class is not offered here, walk DOWN from it and never up.
-    Somebody who asked for a minivan asked for SPACE, so take the largest thing at
-    or below what they named, ending at the biggest sedan - not the smallest.
-    Minivan stays the ceiling (Tyler, 2026-08-17), so nothing above the named class
-    is ever considered, and the premium/luxury sedans the SOP does not promise
-    (PCAR, LCAR) stay out of it. Every downgrade says so in the note, by name, so
-    it lands on the request where Fleet can see it rather than in a log.
+    If the resolved class is not offered here, walk DOWN from it first. Somebody who
+    asked for a minivan asked for SPACE, so take the largest thing at or below what
+    they named, ending at the biggest sedan - not the smallest.
+
+    A named SEDAN with nothing at or below it may then walk UP: naming SCAR at a
+    branch whose smallest car is full-size parked the request at class-unmapped
+    forever while the lot had sedans, and naming a small sedan must never book WORSE
+    than saying nothing (the plain default already walks up). Nearest LARGER sedan
+    first (FCAR stays the ceiling - PCAR/LCAR remain out), then the escalation
+    ladder smallest-first as a genuine last resort. Space classes (suv, minivan,
+    cargo van, pickup) keep the down-only rule: their walk already starts at MVAR,
+    the policy ceiling (Tyler, 2026-08-17), so there is no "up" left that policy
+    allows. Mirrors classForIntent in server/vrm/etd/executor.ts - change both or
+    neither. Every substitution says so in the note, by name, so it lands on the
+    request where Fleet can see it rather than in a log.
     """
     by_code: dict = {}
     for c in classes or []:
@@ -427,10 +441,10 @@ def _named_class_pick(wanted: str, classes: list):
     if code in by_code:
         return by_code[code], f"fleet-adjusted class '{w}' -> {code}"
 
-    # Not stocked here. Walk DOWN, and ACROSS body styles - a minivan request at a
-    # branch with no minivan should land on the biggest SUV on the lot, not skip
-    # every SUV and drop straight to a Corolla because a sedan happens to share a
-    # body letter with nothing.
+    # Not stocked here. Walk DOWN first, and ACROSS body styles - a minivan request
+    # at a branch with no minivan should land on the biggest SUV on the lot, not
+    # skip every SUV and drop straight to a Corolla because a sedan happens to share
+    # a body letter with nothing.
     # -1 when the named class sits ABOVE the ladder (RVAR cargo van, PPAR pickup):
     # the walk then starts at MVAR, the top. Using 0 skipped the minivan entirely,
     # which matters most for the HVAC carve-out - it names cargo van.
@@ -440,8 +454,31 @@ def _named_class_pick(wanted: str, classes: list):
             return (by_code[k],
                     f"DOWNGRADE: fleet-adjusted class '{w}' ({code}) is not offered at "
                     f"this branch; took the largest substitute available, {k}")
+    # A named sedan with nothing at or below it walks UP the sedan ladder next
+    # (FCAR ceiling), then the escalation ladder smallest-first. See the docstring;
+    # mirrors classForIntent in server/vrm/etd/executor.ts.
+    if code in SEDAN_LADDER:
+        rung = SEDAN_LADDER.index(code)
+        for k in SEDAN_LADDER[rung + 1:]:
+            if k in by_code:
+                return (by_code[k],
+                        f"UPGRADE: fleet-adjusted class '{w}' ({code}) is not offered at "
+                        f"this branch and nothing smaller is either; took {k}, the "
+                        f"nearest sedan above it")
+        for k in ESCALATION_LADDER:
+            if k in by_code:
+                return (by_code[k],
+                        f"UPGRADE: fleet-adjusted class '{w}' ({code}) is not offered at "
+                        f"this branch and no other sedan is either; escalated to {k} "
+                        f"(smallest available above the sedan ceiling)")
+    # Every ladder ran dry. That is an AVAILABILITY fact, not a mapping bug, and the
+    # note must say so or an operator goes hunting the mapping table: name the codes
+    # the branch DID offer so Fleet can adjust the approved class instead.
+    offered_codes = ", ".join(by_code) if by_code else \
+        "NOTHING - the quote returned no classes"
     return None, (f"fleet-adjusted class '{w}' ({code}) is not offered at this branch "
-                  f"and neither is anything smaller")
+                  f"and no usable substitute is either "
+                  f"(branch offered: {offered_codes})")
 
 
 def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,

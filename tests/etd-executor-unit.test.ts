@@ -504,11 +504,79 @@ describe("class choice per workflow", () => {
     assert.equal(got.decision.match, "approved_label");
   });
 
-  test("a named class that is not offered stays UNMAPPED rather than guessing", () => {
+  // Fixture classes by code, for the substitution-walk tests below. Non-code fields
+  // are irrelevant to the walk; CLASSES[0] donates them.
+  const cls = (code: string, description = `${code} class`): CarClass =>
+    ({ ...CLASSES[0], code, description });
+
+  test("a named SPACE class that is not offered walks DOWN only, from the minivan ceiling", () => {
+    // cargo van (RVAR) sits above the ladder, so the walk starts at MVAR — and it
+    // must never climb: there is no "up" above the policy ceiling.
     const got = classForIntent(item({ facts: { requestSeed: { approvedVehicleClass: "cargo van" } } }), CLASSES);
+    assert.equal(got.decision.chosenSipp, "MVAR");
+    assert.equal(got.decision.match, "named_class_downgraded");
+    // And a named SUV with a bigger SUV on the lot still goes DOWN, never up.
+    const suv = classForIntent(
+      item({ facts: { requestSeed: { approvedVehicleClass: "suv" } } }),
+      [cls("SFAR"), cls("FCAR")],
+    );
+    assert.equal(suv.decision.chosenSipp, "FCAR", "IFAR named: SFAR is above it and must not be taken");
+    assert.equal(suv.decision.match, "named_class_downgraded");
+  });
+
+  test("a named sedan with a smaller sedan offered still takes the down-walk", () => {
+    // CLASSES offers ECAR/ICAR/FCAR/MVAR; SCAR's down-walk finds ICAR first.
+    const got = classForIntent(item({ facts: { requestSeed: { approvedVehicleClass: "SCAR" } } }), CLASSES);
+    assert.equal(got.decision.chosenSipp, "ICAR");
+    assert.equal(got.decision.match, "named_class_downgraded");
+  });
+
+  test("a named sedan with only LARGER sedans offered walks UP to the nearest one", () => {
+    // The intent #110 shape: SCAR approved, branch stocks nothing smaller than
+    // full-size. Down-only parked it at class_unmapped forever; naming a small
+    // sedan must never book worse than the plain default, which walks up.
+    const got = classForIntent(
+      item({ facts: { requestSeed: { approvedVehicleClass: "SCAR" } } }),
+      [cls("FCAR"), cls("MVAR")],
+    );
+    assert.equal(got.decision.mapped, true);
+    assert.equal(got.decision.chosenSipp, "FCAR");
+    assert.equal(got.decision.match, "named_class_upgraded");
+    assert.match(String(got.decision.detail), /nearest sedan above/, "the substitution is named on the request");
+  });
+
+  test("ECAR named with nothing below takes the next sedan up, not a dead-end", () => {
+    // ECAR is the smallest rung: its down-walk can never find anything, so before
+    // the up-walk existed, naming it at a branch without one could NEVER map.
+    const got = classForIntent(
+      item({ facts: { requestSeed: { approvedVehicleClass: "ECAR" } } }),
+      [cls("ICAR"), cls("FCAR")],
+    );
+    assert.equal(got.decision.chosenSipp, "ICAR", "nearest larger sedan, not the largest");
+    assert.equal(got.decision.match, "named_class_upgraded");
+  });
+
+  test("a named sedan at a branch with NO sedans escalates smallest-first, as a last resort", () => {
+    const got = classForIntent(
+      item({ facts: { requestSeed: { approvedVehicleClass: "SCAR" } } }),
+      [cls("SFAR"), cls("MVAR")],
+    );
+    assert.equal(got.decision.chosenSipp, "SFAR", "smallest offered escalation class, never the minivan first");
+    assert.equal(got.decision.match, "named_class_escalated");
+    assert.match(String(got.decision.detail), /escalated to SFAR/);
+  });
+
+  test("a named class no ladder can satisfy stays UNMAPPED and names what WAS offered", () => {
+    // Only classes outside every ladder (pickup, cargo van). The note must read as
+    // an availability fact — listing the branch's real codes — not a mapping bug.
+    const got = classForIntent(
+      item({ facts: { requestSeed: { approvedVehicleClass: "SCAR" } } }),
+      [cls("PPAR"), cls("RVAR")],
+    );
     assert.equal(got.decision.mapped, false);
     assert.equal(got.decision.match, "UNMAPPED");
     assert.equal(got.pick, null);
+    assert.match(String(got.decision.detail), /branch offered: PPAR, RVAR/);
   });
 
   test("the raw pick never leaks into the persisted decision", () => {

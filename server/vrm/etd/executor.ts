@@ -64,7 +64,7 @@ import {
 } from "./client";
 import {
   choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER, descClass,
-  NAMED_DOWNGRADE,
+  NAMED_DOWNGRADE, SEDAN_LADDER, SEDAN_CODES,
   type OfferedClass,
 } from "./vehicle-class";
 import {
@@ -573,7 +573,7 @@ export function classForIntent(
   // vehicles. Largest-first, because someone who asked for a minivan needs the space,
   // and only then the sedan ladder.
   if (!pick && want !== "sedan") {
-    // Walk DOWN from what was NAMED, never up. Starting at the top of the ladder
+    // Walk DOWN from what was NAMED first. Starting at the top of the ladder
     // regardless of the request handed an "suv" a Chrysler Pacifica whenever the
     // branch had one, and the runner meanwhile refused the booking outright: the
     // same request produced two different vehicles depending on which booker ran.
@@ -589,6 +589,52 @@ export function classForIntent(
              + `took ${code}, the largest substitute at or below it`;
         break;
       }
+    }
+    // A named SEDAN with nothing at or below it may walk UP: intent #110 named SCAR
+    // at a branch whose smallest car was full-size, and the down-only rule parked it
+    // at class_unmapped forever while the lot had sedans. Naming a small sedan must
+    // never book WORSE than saying nothing (the plain default already walks up), so
+    // the nearest LARGER sedan comes next (FCAR stays the ceiling — PCAR/LCAR remain
+    // out), and only when no sedan exists at all does the escalation ladder run,
+    // smallest-first, exactly as the sedan default's dead-end does. Space classes
+    // (suv, minivan, cargo van, pickup) keep the down-only rule: their walk already
+    // starts at MVAR, the policy ceiling, so there is no "up" left that policy allows.
+    // Mirrored by _named_class_pick in etd-runner/scripts/book_request.py — change
+    // both or neither (the two bookers resolved the same request in OPPOSITE
+    // directions until 2026-08-19).
+    if (!pick && wantCode && SEDAN_CODES.has(wantCode)) {
+      const rung = SEDAN_LADDER.indexOf(wantCode);
+      for (const code of SEDAN_LADDER.slice(rung + 1)) {
+        const hit = offered.find((c) => String(c.code || "").toUpperCase() === code);
+        if (hit) {
+          pick = hit;
+          match = "named_class_upgraded";
+          note = `approved class '${want}' (${wantCode}) not offered and nothing smaller is either; `
+               + `took ${code}, the nearest sedan above it`;
+          break;
+        }
+      }
+      if (!pick) {
+        for (const code of ESCALATION_LADDER) {
+          const hit = offered.find((c) => String(c.code || "").toUpperCase() === code);
+          if (hit) {
+            pick = hit;
+            match = "named_class_escalated";
+            note = `approved class '${want}' (${wantCode}) not offered and no other sedan is either; `
+                 + `escalated to ${code} (smallest available above the sedan ceiling)`;
+            break;
+          }
+        }
+      }
+    }
+    // Still nothing: every ladder ran dry. Same lesson as the sedan-ladder dead-end
+    // below — this is an AVAILABILITY fact, not a mapping bug, and the note must say
+    // so or an operator goes hunting the mapping table. Name the codes the branch
+    // DID offer so staff can adjust the approved class from the panel.
+    if (!pick) {
+      const codes = offered.map((c) => String(c.code || "?")).filter(Boolean);
+      note = `${note}; no usable substitute on any ladder `
+           + `(branch offered: ${codes.length ? codes.join(", ") : "NOTHING - the quote returned no classes"})`;
     }
   }
   if (!pick && want === "sedan") {
