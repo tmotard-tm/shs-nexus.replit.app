@@ -27,3 +27,13 @@ Absence-only "indeterminate" flipped the failure mode: since declined resubmit a
 - Reopen guard: pending-verify rows keep the PRIOR round's decided_at, so the staleness anchor must be `GREATEST(decided_at, holman_approve_attempted_at)` (NULL-safe in PG) or a fresh attempt reads instantly stale and reopens on the next walk. `deny_pending_verify` is in the reopen set: PO still on grid past grace ⇒ back to the operator.
 
 **Why:** "never confirm from render" is right, but it needs a completion path — an unverifiable success must land in a self-healing pending state that grid truth finalizes, never a terminal FAILED that a human has to notice is a lie.
+
+## Zero-lines indeterminate = second absence shape (2026-08-24, third false DENY FAILED)
+
+A FIRST-ROUND PO renders only its own ask's radios, so a successful decline leaves ZERO decision lines — the judge honestly returns `indeterminate` ("page had no decision lines"), which previously fell through to deny_failed even though the deny applied (grid cleared it minutes later; sweep moved it to resolved_holman, deny pipeline never fired).
+
+**Rule:** for Decline, BOTH absence shapes grid-verify — `declineNeedsGridVerify(state)` = vanished OR indeterminate. Decisive render evidence (`actionable`: line still unlocked, or locked with the opposite decision) still fails loudly, never grid-verifies. Safe because grid verification is evidence-based either way: a decline that never applied stays on the grid ⇒ pendingVerify ⇒ reopen grace hands it back to the operator.
+
+**CAS lesson (review-found):** `markHolmanPoOutcome` must only stamp rows still in an actionable status (`WHERE status IN (...actionable)`), re-reading and returning the standing row on a lost write. Without it, a slow deny request (indeterminate read held behind a grid walk) can overwrite a concurrently finalized `denied` row back to pending-verify — and the next sweep re-finalizes and REPLAYS the deny pipeline (duplicate SMS). Routes echo the standing status, never the stamp they wanted.
+
+**Repair playbook for a stranded false-failure row:** grid absence on a complete walk (or the sweep's own resolved_holman flip after a deny attempt) = proof the deny applied; finalize as denied and run the recordHolmanDecision pipeline pieces (addRentalDecision → tracker sync → supervisor notify → redirect SMS via standing lookup → DCA) from a dev script against prod DB. resolved_holman after a deny attempt is a false-failure signature worth checking.

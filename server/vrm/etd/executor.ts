@@ -495,6 +495,67 @@ const normLabel = (s: unknown): string =>
  * The class decision the server persists verbatim, plus the raw offered class the
  * payload surgery needs (returned separately so it never reaches the database).
  */
+/**
+ * Quote, and when the shop address resolves to a branch that stocks nothing, re-quote
+ * from the branch the technician named on the form.
+ *
+ * The NEAREST branch is not always a branch we can rent from. Request #95 (SWICKLA,
+ * 2026-08-24) geocoded to its repair shop in Eau Claire and took the closest counter,
+ * `44N1 EAU NATIONAL` at 5.66 mi - a National-brand desk that returns an EMPTY class
+ * list on this account. The next one out, `44V6 EAU CLAIRE AIRPORT`, is Enterprise-brand
+ * and returns nothing either. The real branch, `4450 EAU CLAIRE`, sits 0.29 mi further
+ * at 5.94 mi with 17 classes on the lot, including the exact class that was approved.
+ * An empty list surfaces as `class_unmapped`, so the request sat for hours reading like
+ * a vehicle-mapping bug while a car was available the whole time.
+ *
+ * `book_request.py` has carried this fallback since the 8/13 cutover, and that is the
+ * only reason the Python booker rescued #95 when this path could not. The technician
+ * answered "which Enterprise branch is nearest you" on the form; when our own geocode
+ * lands somewhere that cannot rent, their answer is the better address. Mirrors
+ * `book_one`'s `used_reported` block - change both or neither.
+ *
+ * Deliberately NOT applied to the commit path. That one re-quotes against the branch the
+ * confirmed preview already priced, so moving its address would book a different branch
+ * than the one an operator approved.
+ *
+ * The `locatable` guard is the same one `intentAddress` uses: LGONZ15 typed the single
+ * word "Enterprise", which geocoded to Boston Logan and would have sent a California
+ * technician 3,000 miles. A reported branch with no digit and no state names no place.
+ */
+export async function quoteWithReportedFallback(
+  etd: EtdClient,
+  item: QueueItem,
+  address: string,
+  code: string,
+  wantState: string,
+  start: string,
+  end: string,
+): Promise<{ q: QuoteResult; usedReported: boolean }> {
+  const q = await guardedQuote(etd, address, code, wantState, start, end);
+  if ((q.classes || []).length) return { q, usedReported: false };
+
+  const rs = ((item.facts || {}) as Record<string, any>).requestSeed || {};
+  const reported = String(rs.reportedBranch || "").trim();
+  // No seed (a cutover has none), nothing typed, or the same address we just tried.
+  if (!reported || reported.toLowerCase() === address.toLowerCase()) {
+    return { q, usedReported: false };
+  }
+  const locatable =
+    /\d/.test(reported) || /(^|[\s,])[A-Z]{2}([\s,]|$)/.test(reported.toUpperCase());
+  if (!locatable) return { q, usedReported: false };
+
+  // A failed fallback must not destroy the original quote: the first result still
+  // carries the branch and journey the caller reports on, and a thrown geocode guard
+  // here would turn "this branch has no cars" into a hard abort.
+  try {
+    const q2 = await guardedQuote(etd, reported, code, wantState, start, end);
+    if ((q2.classes || []).length) return { q: q2, usedReported: true };
+  } catch {
+    /* keep the original empty quote and let the class note report availability */
+  }
+  return { q, usedReported: false };
+}
+
 export function classForIntent(
   item: QueueItem,
   classes: CarClass[],
@@ -696,6 +757,7 @@ async function runPreview(
     branchAddress: null,
     branchZip: null,
     branchPinned: false,
+    quotedFromReportedBranch: false,
     pickupDate: "",
   };
   let classDecision: RunnerClassDecision & Record<string, unknown> = {
@@ -738,7 +800,9 @@ async function runPreview(
       const { address, code, wantState } = intentAddress(item);
       if (!address) throw new Error("no branch/shop address seed on the intent facts");
 
-      const q = await guardedQuote(etd, address, code, wantState, start, end);
+      const { q, usedReported } = await quoteWithReportedFallback(
+        etd, item, address, code, wantState, start, end,
+      );
       const classes = q.classes || [];
       const chosen = classForIntent(item, classes);
       classDecision = chosen.decision;
@@ -757,6 +821,7 @@ async function runPreview(
         branchPhone: q.branch_phone ?? null,
         branchZip: branchZip(q),
         branchPinned: !!q.branch_pinned,
+        quotedFromReportedBranch: usedReported,
         journeyId: q.journey_id,
         reference: q.reference,
         offeredClasses: classes.map((c) => ({ code: c.code, description: c.description })),

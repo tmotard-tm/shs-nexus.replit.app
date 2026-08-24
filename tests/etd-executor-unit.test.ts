@@ -50,6 +50,7 @@ import {
   parseConfirmation,
   intentAddress,
   classForIntent,
+  quoteWithReportedFallback,
   redactedShape,
 } from "../server/vrm/etd/executor";
 import { safeErrorText, rejectionMessage, rejectionReasons } from "../server/vrm/etd/client";
@@ -1205,5 +1206,106 @@ describe("account additional-info is read live, never inherited from the capture
     assert.equal(run.results[0].status, "aborted_before_open");
     assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "a stale block must never reach savedr");
     assert.equal(calls.filter((c) => c.startsWith("gate:")).length, 0, "and it stops before the ETD gates");
+  });
+});
+
+
+/**
+ * The nearest counter is not always one we can rent from.
+ *
+ * Request #95 (SWICKLA, 2026-08-24) geocoded to its repair shop and took the closest
+ * branch, a National-brand desk 0.29 mi nearer than the Enterprise branch that actually
+ * had the approved class on the lot. The National desk answers with an EMPTY class list,
+ * which surfaces as `class_unmapped` and reads as a vehicle-mapping bug, so the request
+ * sat unbooked for hours. book_request.py had the fallback and rescued it; this path did
+ * not. These pin the fallback and, just as importantly, pin that it stays OUT of the way
+ * when the first quote is fine.
+ */
+describe("reported-branch fallback", () => {
+  /** A quote stub that answers differently per address, and records what it was asked. */
+  function addressAwareEtd(byAddress: Record<string, CarClass[] | "throw">) {
+    const asked: string[] = [];
+    const client = {
+      async quote(p: any) {
+        asked.push(String(p.address));
+        const hit = byAddress[String(p.address)];
+        if (hit === "throw") throw new Error("geocoder put the branch in TX, expected WI");
+        return {
+          journey_id: "j-fb", reference: "R-FB",
+          place: { latitude: "44.8", longitude: "-91.5" },
+          branch: { branchCode: "4450", customerFacingBranchName: "Eau Claire" },
+          branch_pinned: false, branch_code: "4450", branch_name: "Eau Claire",
+          branch_address: "2103 S HASTINGS WAY,ALTOONA,WI,54720",
+          site: {}, classes: hit ?? [],
+        };
+      },
+    };
+    return { client: client as unknown as EtdClient, asked };
+  }
+
+  const SHOP = "2521 N Clairemont Ave, EAU Claire, WI";
+  const REPORTED = "2103 S Hastings way Altoona Wi 54720";
+  const SOME: CarClass[] = [{
+    code: "SCAR", description: "VOLKSWAGEN JETTA OR SIMILAR", passengers: "5", bags: "3",
+    base_rate: 33.02, estimated_total: 42.01, currency: "USD", unit: null, unlimited_miles: null,
+  }];
+
+  function item(reportedBranch: string | null): QueueItem {
+    return {
+      workflowType: WORKFLOW_REQUEST,
+      facts: { requestSeed: { reportedBranch } },
+    } as unknown as QueueItem;
+  }
+
+  test("an empty class list at the shop address re-quotes from the branch the tech named", async () => {
+    const { client, asked } = addressAwareEtd({ [SHOP]: [], [REPORTED]: SOME });
+    const out = await quoteWithReportedFallback(
+      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, true, "the fallback must fire on an empty list");
+    assert.equal((out.q.classes ?? []).length, 1, "and the returned quote is the one WITH cars");
+    assert.deepEqual(asked, [SHOP, REPORTED], "shop first, tech's answer only as a fallback");
+  });
+
+  test("a shop address that already offers cars is never second-guessed", async () => {
+    const { client, asked } = addressAwareEtd({ [SHOP]: SOME, [REPORTED]: SOME });
+    const out = await quoteWithReportedFallback(
+      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, false);
+    assert.deepEqual(asked, [SHOP], "one quote only — the fallback must not cost a second call");
+  });
+
+  test("a reported branch naming no place is refused, not geocoded", async () => {
+    // LGONZ15 typed the single word "Enterprise" and it resolved to Boston Logan.
+    const { client, asked } = addressAwareEtd({ [SHOP]: [], Enterprise: SOME });
+    const out = await quoteWithReportedFallback(
+      client, item("Enterprise"), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, false, "no digit and no state names nowhere on earth");
+    assert.deepEqual(asked, [SHOP], "the unlocatable string must never reach the geocoder");
+  });
+
+  test("when the fallback is empty too, the original quote survives to report availability", async () => {
+    const { client, asked } = addressAwareEtd({ [SHOP]: [], [REPORTED]: [] });
+    const out = await quoteWithReportedFallback(
+      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, false);
+    assert.equal((out.q.classes ?? []).length, 0, "an empty list is a real answer about the lot");
+    assert.deepEqual(asked, [SHOP, REPORTED]);
+  });
+
+  test("a fallback that throws the state guard does not turn 'no cars' into a hard abort", async () => {
+    const { client } = addressAwareEtd({ [SHOP]: [], [REPORTED]: "throw" });
+    const out = await quoteWithReportedFallback(
+      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, false, "the throw is swallowed");
+    assert.equal(out.q.branch_code, "4450", "and the first quote is still what comes back");
+  });
+
+  test("a cutover has no reported branch and is left entirely alone", async () => {
+    const { client, asked } = addressAwareEtd({ [SHOP]: [] });
+    const cutover = { workflowType: WORKFLOW_CUTOVER, facts: {} } as unknown as QueueItem;
+    const out = await quoteWithReportedFallback(
+      client, cutover, SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, false);
+    assert.deepEqual(asked, [SHOP]);
   });
 });
