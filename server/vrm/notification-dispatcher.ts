@@ -29,9 +29,10 @@ import {
   markNotificationSent,
   markNotificationFailed,
   markNotificationSkipped,
+  deferNotificationUntil,
   getNotificationTemplates,
 } from "./storage";
-import { sendTwilioMessage } from "../fleet-scope-reg-messaging";
+import { sendTwilioMessage, getNextAllowedSendTime } from "../fleet-scope-reg-messaging";
 import { sendEmail } from "../email-service";
 
 /**
@@ -707,6 +708,39 @@ function buildDefaultEmailBody(ctx: DenyContext, supName: string, techLabel: str
   );
 }
 
+// ─── Quiet hours (TCPA floor) ───────────────────────────────────────────────
+// Every SMS this dispatcher sends lands on a personal phone — the technician's
+// deny/redirect/switched-billing texts and the supervisor ping. The rest of the
+// comms stack holds outbound texts between 9 PM and 7 AM in the recipient's
+// local timezone (getNextAllowedSendTime); this lane obeys the same floor.
+//
+// A deferred row is simply LEFT `queued` — nothing is marked — so the 30-second
+// drain re-picks it each tick and sends the moment the window opens. The state
+// is resolved from the decision's TECHNICIAN (fs_comms_contacts.primary_state):
+// the supervisor row rides the same tech-local window (same region in
+// practice), and a missing state falls back to Eastern inside
+// getNextAllowedSendTime, matching the rest of the stack.
+async function smsQuietHoursDeferral(n: Pick<VrmNotification, "decisionId">): Promise<Date | null> {
+  let state = "";
+  try {
+    const res = await db.execute(sql`
+      SELECT c.primary_state AS state
+      FROM vrm_rental_decisions d
+      LEFT JOIN fs_comms_contacts c ON c.ldap = UPPER(TRIM(d.tech_ldap))
+      WHERE d.id = ${n.decisionId}
+      LIMIT 1
+    `);
+    state = String((res.rows?.[0] as any)?.state ?? "");
+  } catch (err: any) {
+    // Lookup failure must not block the queue forever nor skip the floor:
+    // fall back to the Eastern-window default, same as an unknown state.
+    console.warn(
+      `[VRM Notif] quiet-hours state lookup failed (decision ${n.decisionId}): ${err?.message ?? err} — using default window`
+    );
+  }
+  return getNextAllowedSendTime(state);
+}
+
 // ─── Worker ────────────────────────────────────────────────────────────────
 
 async function dispatchOne(n: VrmNotification): Promise<void> {
@@ -721,6 +755,19 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
     if (n.channel === "sms" || n.channel === "sms_tech_deny") {
       if (!n.recipient || n.recipient === "(missing)") {
         await markNotificationSkipped(n.id, "no recipient");
+        return;
+      }
+      // Quiet hours: hold the text. Stamp not_before so the drain stops
+      // selecting the row until the recipient-local window opens (keeps held
+      // texts out of the FIFO batch — they can't starve dispatchable rows).
+      // The row stays `queued`; the first drain tick after the stamp passes
+      // re-checks this gate (by then null) and sends.
+      const quietUntil = await smsQuietHoursDeferral(n);
+      if (quietUntil) {
+        await deferNotificationUntil(n.id, quietUntil);
+        console.log(
+          `[VRM Notif] SMS held for quiet hours (decision ${n.decisionId}) — sends after ${quietUntil.toISOString()}`
+        );
         return;
       }
       // VRM approval SMS uses a dedicated one-way Twilio sender (when

@@ -2855,12 +2855,35 @@ export async function getQueuedNotifications(limit = 50): Promise<VrmNotificatio
   // Stable oldest-first ordering so the queue drains FIFO. Tie-break on id so a
   // single repeatedly-failing "poison" row at the head cannot starve the rest of
   // the batch by reappearing in a non-deterministic position each tick.
+  //
+  // Rows stamped with a future not_before (quiet-hours deferral) are excluded
+  // entirely: they keep their original createdAt, so without this filter fifty
+  // texts held overnight would occupy the whole FIFO batch and starve emails
+  // and awake-timezone SMS until morning.
   return db
     .select()
     .from(vrmNotifications)
-    .where(eq(vrmNotifications.status, "queued"))
+    .where(
+      and(
+        eq(vrmNotifications.status, "queued"),
+        or(isNull(vrmNotifications.notBefore), sql`${vrmNotifications.notBefore} <= now()`),
+      ),
+    )
     .orderBy(asc(vrmNotifications.createdAt), asc(vrmNotifications.id))
     .limit(limit);
+}
+
+/**
+ * Quiet-hours deferral stamp: park a queued row until `until`. The row stays
+ * `queued` (no status transition) — the drain simply stops selecting it until
+ * the stamp passes. Guarded on status so a concurrent send/skip cannot be
+ * resurrected into the queue window.
+ */
+export async function deferNotificationUntil(id: string, until: Date): Promise<void> {
+  await db
+    .update(vrmNotifications)
+    .set({ notBefore: until })
+    .where(and(eq(vrmNotifications.id, id), eq(vrmNotifications.status, "queued")));
 }
 
 export async function markNotificationSent(

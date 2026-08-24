@@ -730,6 +730,10 @@ export const vrmNotifications = pgTable("vrm_notifications", {
   uiDisplayedPhone: text("ui_displayed_phone"),
   trustedPhone: text("trusted_phone"),
   overrideOverridden: boolean("override_overridden").default(false).notNull(),
+  // Quiet-hours deferral: a queued SMS stamped with a future not_before is
+  // excluded from the drain's FIFO batch until due, so held overnight texts
+  // can never crowd out dispatchable rows (emails, awake-timezone SMS).
+  notBefore: timestamp("not_before"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   sentAt: timestamp("sent_at"),
 }, (table) => ({

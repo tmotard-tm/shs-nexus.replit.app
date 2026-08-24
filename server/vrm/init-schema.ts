@@ -618,6 +618,7 @@ export async function initVrmSchema(): Promise<void> {
   // created before twilio_sid / twilio_error_code existed.
   await db.execute(sql`ALTER TABLE vrm_notifications ADD COLUMN IF NOT EXISTS twilio_sid VARCHAR(64);`);
   await db.execute(sql`ALTER TABLE vrm_notifications ADD COLUMN IF NOT EXISTS twilio_error_code VARCHAR(16);`);
+  await db.execute(sql`ALTER TABLE vrm_notifications ADD COLUMN IF NOT EXISTS not_before TIMESTAMP;`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS vrm_notifications_decision_channel_uq ON vrm_notifications(decision_id, channel);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_notifications_status_idx ON vrm_notifications(status);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_notifications_twilio_sid_idx ON vrm_notifications(twilio_sid);`);
