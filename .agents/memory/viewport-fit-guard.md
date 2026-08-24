@@ -91,3 +91,18 @@ scrolling to bottom — false means the pinned layout CSS is gone), then
 re-assert the primary action's bounding box in-viewport, then remove the
 spacer. This makes the guard independent of fixture data height at every
 viewport.
+
+# False reds: cold caches and guard concurrency
+
+Two ways a viewport guard fails with NO layout regression:
+1. Cold start — the first run after a dev-server restart can exceed the
+   selector budget while a heavy board builds its caches; the same command
+   passes warm.
+2. Concurrency — validation runs launch every registered guard at once; many
+   Chromium instances starve the single vite dev server (page.goto timeouts,
+   CDP assert-crashes). runViewportGuard therefore serializes browser runs
+   through /tmp/viewport-guard-slot-* (2 concurrent max; PID-liveness reaping,
+   ownership-token release). New guards inherit this by using runViewportGuard;
+   bypassing the shared runner reintroduces the pile-up.
+Before debugging a red guard as a layout bug, check for a just-restarted
+server and rerun it alone on a warm one.

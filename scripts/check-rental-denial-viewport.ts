@@ -15,6 +15,8 @@
  *      applies below 1280×720 and provably does NOT apply at 1280×720
  *
  * Run: npx tsx scripts/check-rental-denial-viewport.ts
+ * Registered as the `rental-denial-viewport` validation command (also a
+ * workflow of the same name).
  * See scripts/lib/viewport-guard.ts and .agents/memory/viewport-fit-guard.md
  * for why multiple viewports are mandatory.
  */

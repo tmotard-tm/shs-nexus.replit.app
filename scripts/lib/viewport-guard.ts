@@ -24,6 +24,7 @@
 import { chromium } from "playwright-core";
 import type { Browser, Page } from "playwright-core";
 import { randomBytes } from "crypto";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "fs";
 import { Pool } from "pg";
 import { resolveChromiumPath } from "../../server/chromium-path";
 
@@ -149,6 +150,122 @@ export async function assertPaneBottomWindow(
   );
 }
 
+// ── Cross-process concurrency limiter ────────────────────────────────────────
+//
+// Validation runs launch every registered guard AT ONCE. Many guards each
+// spawning Chromium against the single vite dev server starve it: page.goto
+// (domcontentloaded) blows its 45s budget and playwright's CDP session can
+// assert-crash outright — false reds on unchanged layouts. Two slots keep
+// total wall time close to the concurrent run while eliminating the pile-up.
+//
+// Ownership model: a slot is an atomically mkdir'd directory containing an
+// owner.json with the holder's PID and a per-acquisition token. A slot is
+// reaped ONLY when its owner process is provably dead (kill(pid, 0) →
+// ESRCH) — never on age, so a legitimately slow holder is never evicted.
+// A dir with no owner.json is either a holder mid-write (grace window) or
+// wreckage from a crash between mkdir and writeFile (reaped after the
+// grace). Release verifies the token so a guard can never free a slot it
+// no longer owns.
+
+const SLOT_COUNT = 2;
+const SLOT_WAIT_TIMEOUT_MS = 12 * 60_000;
+const SLOT_POLL_MS = 2_000;
+const OWNERLESS_GRACE_MS = 30_000; // mkdir → owner.json write is immediate
+
+type GuardSlot = { dir: string; token: string };
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e: any) {
+    // ESRCH = no such process. EPERM would mean alive-but-not-ours; all
+    // guards run as the same user, but treat any non-ESRCH as alive to be
+    // safe (never reap a possibly-live holder).
+    return e?.code !== "ESRCH";
+  }
+}
+
+function tryReapSlot(dir: string): void {
+  const ownerPath = `${dir}/owner.json`;
+  let ownerRaw: string | undefined;
+  try {
+    ownerRaw = readFileSync(ownerPath, "utf8");
+  } catch {
+    // No owner file. Fresh holders write it immediately after mkdir, so an
+    // ownerless dir older than the grace window is crash wreckage.
+    try {
+      if (Date.now() - statSync(dir).mtimeMs > OWNERLESS_GRACE_MS) rmSync(dir, { recursive: true, force: true });
+    } catch {
+      /* raced another reaper / already gone */
+    }
+    return;
+  }
+  try {
+    const owner = JSON.parse(ownerRaw) as { pid?: number };
+    if (typeof owner.pid === "number" && !isPidAlive(owner.pid)) {
+      console.log(`Reaping viewport-guard slot ${dir} held by dead pid ${owner.pid}.`);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    /* unreadable owner file or raced removal — leave it; retry next poll */
+  }
+}
+
+async function acquireGuardSlot(): Promise<GuardSlot> {
+  const deadline = Date.now() + SLOT_WAIT_TIMEOUT_MS;
+  let waitingLogged = false;
+  for (;;) {
+    for (let i = 0; i < SLOT_COUNT; i++) {
+      const dir = `/tmp/viewport-guard-slot-${i}`;
+      try {
+        mkdirSync(dir); // atomic: fails if another guard holds the slot
+      } catch {
+        tryReapSlot(dir); // occupied — free it only if the holder is dead
+        continue;
+      }
+      const token = randomBytes(16).toString("hex");
+      try {
+        writeFileSync(`${dir}/owner.json`, JSON.stringify({ pid: process.pid, token }));
+      } catch (e) {
+        // Could not stamp ownership — give the slot back rather than hold
+        // an ownerless dir that another guard would eventually reap.
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {}
+        throw e;
+      }
+      return { dir, token };
+    }
+    if (Date.now() > deadline) {
+      throw new Error(
+        `Timed out after ${SLOT_WAIT_TIMEOUT_MS / 60_000} minutes waiting for a viewport-guard concurrency slot ` +
+          `(/tmp/viewport-guard-slot-*). If no other guard is actually running, delete the stale slot directories.`,
+      );
+    }
+    if (!waitingLogged) {
+      console.log(`Waiting for a viewport-guard concurrency slot (${SLOT_COUNT} max concurrent browser runs)...`);
+      waitingLogged = true;
+    }
+    await new Promise((r) => setTimeout(r, SLOT_POLL_MS));
+  }
+}
+
+function releaseGuardSlot(slot: GuardSlot): void {
+  try {
+    const owner = JSON.parse(readFileSync(`${slot.dir}/owner.json`, "utf8")) as { token?: string };
+    if (owner.token !== slot.token) {
+      // Should be impossible (liveness-only reaping), but never free a slot
+      // someone else now owns.
+      console.error(`WARNING: viewport-guard slot ${slot.dir} is no longer ours — not releasing.`);
+      return;
+    }
+    rmSync(slot.dir, { recursive: true, force: true });
+  } catch {
+    /* already gone / unreadable — nothing safe to do; dead-PID reap covers a leak */
+  }
+}
+
 // ── Runner ───────────────────────────────────────────────────────────────────
 
 export type ViewportGuardOptions = {
@@ -199,6 +316,11 @@ export async function runViewportGuard(opts: ViewportGuardOptions): Promise<void
   const rec = new CheckRecorder();
   let browser: Browser | undefined;
   let sessionMinted = false;
+
+  // Take a concurrency slot BEFORE minting the session — waiting for a slot
+  // must not burn the throwaway session's 10-minute TTL. Nothing sits between
+  // acquisition and the try, so the finally always releases what we hold.
+  const slot = await acquireGuardSlot();
 
   try {
     // ── 1. Mint a short-lived throwaway session for a privileged user ───────
@@ -265,7 +387,10 @@ export async function runViewportGuard(opts: ViewportGuardOptions): Promise<void
       );
     }
   } finally {
+    // Browser/context teardown must finish BEFORE the slot frees — otherwise
+    // a waiting guard's Chromium overlaps ours and the cap is >SLOT_COUNT.
     if (browser) await browser.close().catch(() => {});
+    releaseGuardSlot(slot);
     if (sessionMinted) {
       // Revoke the throwaway session no matter what happened above.
       await pool

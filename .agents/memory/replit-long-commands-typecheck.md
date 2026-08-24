@@ -59,3 +59,9 @@ shows NOTHING on timeout because the buffer never flushes. Run them with
 or via a console workflow writing to a logfile you poll.
 
 - Any test importing server code that opens the shared db pool never exits under `npx tsx --test`; always add `--test-force-exit`.
+
+## Validation commands bypass the workflow cap
+`setValidationCommand` (validation skill) succeeds even when direct `configureWorkflow`
+is blocked by the workflow cap, and it auto-registers a same-named workflow as a side
+effect. When a check must run automatically and the cap blocks workflows, register it
+as a validation command.

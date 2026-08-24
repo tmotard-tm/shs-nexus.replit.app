@@ -192,6 +192,18 @@ args = "vrm-ops-queue-viewport"
 task = "workflow.run"
 args = "all-vehicles-viewport"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "rental-operations-viewport"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "regional-cases-viewport"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "rental-denial-viewport"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -359,6 +371,39 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx scripts/check-all-vehicles-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "rental-operations-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-rental-operations-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "regional-cases-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-regional-cases-viewport.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "rental-denial-viewport"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx scripts/check-rental-denial-viewport.ts"
 
 [workflows.workflow.metadata]
 isValidation = true
