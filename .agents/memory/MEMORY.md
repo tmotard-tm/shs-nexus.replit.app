@@ -146,3 +146,4 @@
 - [ETD vehicle-class parity fixtures](etd-vehicle-class-fixtures.md) — Python-generated differential fixtures go stale silently and can fake parity both ways; regenerate + baseline-diff before diagnosing drift; suite runs in no workflow.
 - [Cutover publish-bundle premortem](cutover-bundle-premortem.md) — open risks from the 2026-08-24 merge wave: publish-readiness gates, degrade-open extensions invisible, silent override supersede, msg1 body drift, reopen wipes deny-verify reason.
 - [Compact density CSS overrides](compact-density-css.md) — small-laptop density = scoped media block + hook classes; threshold 1279.98px not 1280; mirror Tailwind's space-y :not([hidden]) selector or the override loses.
+- [ETD branch addressing & nearby fallback](etd-branch-fallback.md) — approved_branch wins w/ guard off; nearbyOnEmpty walk never moves a pin; Number(null)=0 / float('nan') mirror traps; retry calls must forward new quote opts.
