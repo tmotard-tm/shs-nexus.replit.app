@@ -1725,15 +1725,17 @@ export async function claimBookingWork(params: {
           : lane === "preview"
             ? sql`status = 'preview_pending'`
             : sql`status IN ('confirmed', 'booking')`;
+    // The candidate pick MUST be a CTE, not an IN (sub-select). Postgres may run a
+    // FOR UPDATE sub-select as a per-row SubPlan; each re-execution skips tuples this
+    // same UPDATE already touched, so the LIMIT window slides and one call can claim
+    // MORE rows than the limit (seen live: 3 claimed with limit 2 — plan-dependent,
+    // so it comes and goes with table stats). A locking CTE is never inlined: it runs
+    // exactly once, and the UPDATE joins its frozen id set.
+    // LIMIT is laneLimit, not remaining — laneLimit is what implements the reserved
+    // book slot described above; a non-book lane that spends `remaining` eats the
+    // reserve and a standing preview backlog starves bookings forever.
     const { rows } = await db.execute(sql`
-      UPDATE vrm_rental_workflow_intents
-      SET claimed_by = ${params.runnerId},
-          lease_expires_at = now() + make_interval(mins => ${LEASE_MINUTES}),
-          heartbeat_at = now(),
-          fencing_token = fencing_token + 1,
-          status = CASE WHEN status = 'confirmed' THEN 'booking' ELSE status END,
-          updated_at = now()
-      WHERE id IN (
+      WITH picked AS (
         SELECT id FROM vrm_rental_workflow_intents
         WHERE ${statusPredicate}
           ${typeFilter}
@@ -1742,10 +1744,19 @@ export async function claimBookingWork(params: {
           AND (claimed_by IS NULL OR lease_expires_at IS NULL OR lease_expires_at < now())
           AND (next_retry_at IS NULL OR next_retry_at <= now())
         ORDER BY id
-        LIMIT ${remaining}
+        LIMIT ${laneLimit}
         FOR UPDATE SKIP LOCKED
       )
-      RETURNING *
+      UPDATE vrm_rental_workflow_intents t
+      SET claimed_by = ${params.runnerId},
+          lease_expires_at = now() + make_interval(mins => ${LEASE_MINUTES}),
+          heartbeat_at = now(),
+          fencing_token = t.fencing_token + 1,
+          status = CASE WHEN t.status = 'confirmed' THEN 'booking' ELSE t.status END,
+          updated_at = now()
+      FROM picked
+      WHERE t.id = picked.id
+      RETURNING t.*
     `);
     remaining -= (rows as any[]).length;
 

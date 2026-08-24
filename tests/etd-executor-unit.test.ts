@@ -13,11 +13,11 @@
  * block and sends no technician texts (block_state is born 'not_applicable'), so
  * driving one to completion cannot reach ART or Twilio even by accident.
  *
- * One real external read remains and is deliberate: the orchestrator re-checks the
- * schedule server-side inside its own preview postback, and that read is NOT the
- * executor's injected one. ZZEXEC ldaps have no Snowflake schedule, so a persisted
- * preview always carries `not_working_day` here. The preview assertions are written
- * against the RUNNER-owned failure codes for exactly that reason.
+ * The orchestrator's own server-side schedule re-check (a real Snowflake-backed read,
+ * NOT the executor's injected one) is CUTOVER-ONLY at every home — preview, confirm
+ * and op_open. Request fixtures therefore pass through it untouched even though
+ * ZZEXEC ldaps have no Snowflake schedule; the preview assertions are still written
+ * against the RUNNER-owned failure codes so they cannot pass for the wrong reason.
  *
  * All fixtures use ZZEXEC* ldaps and are deleted in before()/after().
  */
@@ -458,9 +458,23 @@ describe("intent addressing", () => {
     assert.equal(got.wantState, "OH");
   });
 
-  test("a request with no shop address falls back to the branch the tech reported", () => {
-    const got = intentAddress(item({ facts: { requestSeed: { reportedBranch: "Enterprise Testville" } } }));
-    assert.equal(got.address, "Enterprise Testville");
+  test("a request with no shop address REFUSES a reported branch that names no place", () => {
+    // LGONZ15 typed the single word "Enterprise"; the geocoder resolved it to Boston
+    // Logan and booked a California technician a car 3,000 miles away (2026-08-19).
+    // A reported branch with no street number, no ZIP and no state must throw, not
+    // fall through to the geocoder's best guess.
+    assert.throws(
+      () => intentAddress(item({ facts: { requestSeed: { reportedBranch: "Enterprise Testville" } } })),
+      /names no location/,
+    );
+  });
+
+  test("a reported branch that IS locatable still serves as the no-shop fallback", () => {
+    const got = intentAddress(item({
+      facts: { requestSeed: { reportedBranch: "Enterprise, 4501 Main St, Testville, OH" } },
+    }));
+    assert.equal(got.address, "Enterprise, 4501 Main St, Testville, OH");
+    assert.equal(got.code, "", "a new rental is still not tied to an existing agreement");
   });
 });
 
@@ -718,15 +732,20 @@ describe("booking lane", () => {
   });
 
   test("the executor books NOTHING when the server declines to authorize the attempt", async () => {
-    // The orchestrator re-verifies the schedule against Snowflake immediately before
-    // authorizing the external call, and a synthetic technician has no schedule — so
-    // op_open is refused here. That refusal is the whole safety property: the executor
-    // has a complete, drift-free preview and a willing ETD client, and still must not
-    // touch savedr without the server's authorization.
+    // The orchestrator re-compares the confirmed preview to the CURRENT facts
+    // immediately before authorizing the external call. Here the technician's TPMS
+    // truck moves after the staffer confirmed — so op_open is refused. That refusal
+    // is the whole safety property: the executor has a complete preview and a willing
+    // ETD client, and still must not touch savedr without the server's authorization.
+    // (The schedule re-check is deliberately NOT the decline used here: it is
+    // cutover-only at every home, so it no longer refuses a request.)
     const ldap = `${LDAP_PREFIX}DARK`;
     const { intentId } = await makeRequestIntent({
       ldap, status: "confirmed", preview: preview(), eventDate: preview().reservation.pickupDate,
     });
+    await db.execute(sql`
+      UPDATE tpms_tech_profiles SET truck_no = '054321' WHERE upper(enterprise_id) = ${ldap}
+    `);
     const { client, calls } = fakeEtd();
 
     const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
@@ -757,17 +776,50 @@ describe("booking lane", () => {
     assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
   });
 
-  test("a class that is no longer offered aborts rather than substituting one", async () => {
+  test("a class that sold out between quote and commit substitutes from the same ladder", async () => {
+    // Demanding the exact preview class still be offered meant a sold-out Mirage
+    // aborted the whole booking (DWHITE0, 2026-08-18) even though the branch had
+    // other cars. The executor re-picks with the SAME ladder rules and books the
+    // substitute; the attempt is keyed on what is ACTUALLY booked, so the hash moves.
     const ldap = `${LDAP_PREFIX}NOCLS`;
-    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview({ sipp: "XXAR" }) });
+    const p = preview({ sipp: "XXAR" });
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: p });
     const { client, calls } = fakeEtd();
 
     const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
+    assert.equal(run.results[0].action, "DARK", "the substitution continues the pass instead of aborting it");
+    assert.equal(run.results[0].status, "dry_run_validated");
+    assert.ok(calls.some((c) => c.startsWith("gate:")), "the substitute is validated like any other pick");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "dry_run still never commits");
+    const attempts = await attemptsFor(intentId);
+    assert.equal(attempts.length, 1);
+    assert.equal(attempts[0].outcome, "dry_run_validated");
+    assert.notEqual(
+      attempts[0].request_hash,
+      bookingRequestHash({ branch: "9911", date: p.reservation.pickupDate, ldap, sipp: "XXAR" }),
+      "the attempt hash keys the substitute actually sent, not the sold-out class",
+    );
+  });
+
+  test("a class NOTHING on the ladder can replace still aborts", async () => {
+    // Only substitution on the same rules is allowed; an empty lot is not a licence
+    // to book whatever exists elsewhere.
+    const ldap = `${LDAP_PREFIX}NOLAD`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    const { client, calls } = fakeEtd({ classes: [] });
+
+    const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
     assert.equal(run.results[0].status, "aborted_before_open");
+    assert.match(run.results[0].detail ?? "", /nothing on the ladder/);
     assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
   });
 
-  test("a pickup date that is no longer a working day aborts", async () => {
+  test("a dead working-day feed does NOT stop a request — the schedule gate is cutover-only", async () => {
+    // A cutover pairs its reservation with a route block, so the day must be one the
+    // technician works. A request books a car for someone standing next to a dead
+    // van; ServicePower has no say in it. This used to abort here ("no longer a
+    // working day") and stranded real requests — all three homes of the gate are now
+    // cutover-only.
     const ldap = `${LDAP_PREFIX}NOWD`;
     const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
     const { client, calls } = fakeEtd();
@@ -777,8 +829,9 @@ describe("booking lane", () => {
       runnerId: "test-exec", intentId,
       deps: { client, schedule: fakeSchedule({ workingFrom: 999 }) },
     });
-    assert.equal(run.results[0].status, "aborted_before_open");
-    assert.equal(calls.filter((c) => c.startsWith("quote:")).length, 0, "the day check comes before the quote");
+    assert.ok(calls.some((c) => c.startsWith("quote:")), "the request proceeds to a real quote");
+    assert.equal(run.results[0].action, "DARK");
+    assert.equal(run.results[0].status, "dry_run_validated", "and runs the full dark lane to the stop");
   });
 
   test("an incomplete preview aborts instead of booking a half-specified reservation", async () => {
@@ -828,15 +881,13 @@ describe("booking lane", () => {
 
     assert.ok(calls.includes("search"), "the duplicate search still runs");
     assert.notEqual(run.results[0].action, "DUPE", "none of those journeys identifies as this intent's");
-    // It goes on to ask the server to authorize the attempt — which a synthetic
-    // technician's missing schedule then refuses. The point is that the duplicate
-    // search is no longer what stops it.
-    assert.equal(run.results[0].action, "HOLD");
-    assert.equal(run.results[0].status, "preview_required");
-    assert.equal(
-      String((await loadIntentRow(intentId)).status), "preview_required",
-      "and the intent is recoverable, not parked in manual_review",
-    );
+    // It goes on to open the attempt and run the full dark lane to the stop. The
+    // point is that 65 unrelated quotes are no longer what parks it.
+    assert.equal(run.results[0].action, "DARK");
+    assert.equal(run.results[0].status, "dry_run_validated");
+    const row = await loadIntentRow(intentId);
+    assert.equal(String(row.status), "awaiting_verification", "the intent proceeds, not parked in manual_review");
+    assert.equal(String(row.reservation_state), "dry_run_validated");
   });
 
   test("a pre-commit search FAILURE holds instead of booking on a blind spot", async () => {
@@ -860,9 +911,14 @@ describe("booking lane", () => {
       ldap: `${LDAP_PREFIX}LANEC`, status: "confirmed", preview: preview(),
     });
     const claimed = await claimBookingWork({ runnerId: "test-limit", limit: 2 });
+    const summary = JSON.stringify(claimed.map((i) => ({ id: i.intentId, kind: i.kind, ldap: i.ldap })));
     const mine = claimed.filter((i) => [a.intentId, b.intentId, c.intentId].includes(i.intentId));
-    assert.ok(claimed.length <= 2, `claimed ${claimed.length} with limit 2`);
-    assert.ok(mine.length >= 1, "and it still claims work");
+    assert.ok(claimed.length <= 2, `claimed ${claimed.length} with limit 2: ${summary}`);
+    assert.ok(mine.length >= 1, `and it still claims work (claimed: ${summary})`);
+    assert.ok(
+      claimed.some((i) => i.kind === "book"),
+      `one slot stays reserved for the book lane — a preview backlog must not starve bookings (claimed: ${summary})`,
+    );
   });
 
   test("the attempt the executor would open is keyed by the cross-runner request hash", async () => {

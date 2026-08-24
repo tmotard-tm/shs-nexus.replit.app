@@ -446,6 +446,70 @@ export function choose(
   };
 }
 
+// ------------------------------------------------------- ETD-description witness
+// Byte-parallel port of the Python runner's `_etd_tokens` / `etd_class_for`
+// (etd-runner/scripts/vehicle_class.py). Both runners share one differential
+// fixture, so every string here must match Python's output exactly — including
+// its repr() quoting.
+
+const ETD_STOP = new Set(["OR", "SIMILAR", "AND", "SERIES", "GRAN", "COUPE", "AWD", "4WD", "WAGON"]);
+const ETD_MAKES = new Set([
+  "MITSUBISHI", "MITS", "NISSAN", "NISN", "TOYOTA", "TOYO", "VOLKSWAGEN", "VOLK",
+  "CHRYSLER", "CHRY", "HYUNDAI", "HYUN", "CHEVROLET", "CHEV", "CHEVY", "MAZDA", "MAZD",
+  "FORD", "JEEP", "DODGE", "DODG", "AUDI", "GENESIS", "BMW", "KIA", "HONDA", "HOND",
+  "MERCEDES", "MERB", "MINI", "BUICK", "BUIC", "RAM", "GMC", "SUBARU", "LEXUS",
+  "CADILLAC", "LINCOLN", "ACURA", "INFINITI", "VOLVO", "TESLA",
+]);
+
+/** Python's repr() for the strings that reach these notes. */
+function pyRepr(s: string): string {
+  if (s.includes("'") && !s.includes('"')) return `"${s}"`;
+  return `'${s.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
+}
+
+/** Distinctive tokens: not a make, not filler, not a model year. */
+function etdTokens(text: unknown): string[] {
+  const out: string[] = [];
+  for (const w of String(text ?? "").toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").split(/\s+/)) {
+    if (!w) continue;
+    if (ETD_STOP.has(w) || ETD_MAKES.has(w)) continue;
+    if (/^\d{4}$/.test(w)) continue;
+    if (w.length < 2) continue;
+    out.push(w);
+  }
+  return out;
+}
+
+/** [code, why] read straight off ETD's class list. '' when it needs a human. */
+function etdClassFor(vehicleText: string, offered: OfferedClass[] | null | undefined): [string, string] {
+  const want = new Set(etdTokens(vehicleText));
+  if (want.size === 0) return ["", `nothing identifiable in ${pyRepr(String(vehicleText ?? ""))}`];
+  const hits = new Map<string, Set<string>>();
+  for (const c of offered ?? []) {
+    const code = String(c?.code ?? "").toUpperCase();
+    if (!code) continue;
+    // One description can name several exemplars, comma separated.
+    for (const part of String(c?.description ?? "").split(",")) {
+      for (const tok of etdTokens(part)) {
+        if (want.has(tok)) {
+          if (!hits.has(code)) hits.set(code, new Set());
+          hits.get(code)!.add(tok);
+        }
+      }
+    }
+  }
+  if (hits.size === 0) return ["", `no ETD class at this branch names ${pyRepr(vehicleText)}`];
+  if (hits.size > 1) {
+    const detail = [...hits.entries()]
+      .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+      .map(([k, v]) => `${k}(${[...v].sort().join("/")})`)
+      .join(", ");
+    return ["", `${pyRepr(vehicleText)} matches more than one ETD class (${detail}); needs a human`];
+  }
+  const code = hits.keys().next().value as string;
+  return [code, `ETD lists ${[...hits.get(code)!].sort().join("/")} as ${code} at this branch`];
+}
+
 /**
  * Reserve the SAME vehicle they already have. No right-sizing, ever.
  * Cutover-intent rule: the workflow promises "NO VEHICLE CHANGE", so the
@@ -467,15 +531,52 @@ export function chooseSameVehicle(
     return { pick: null, code: "", match: "NONE", changes_vehicle: null, note: "branch offered nothing" };
   }
 
-  // The FEED is the only witness that may pick a class (repair spec §9).
+  // ------------------------------------------------------------------ ETD first
+  // Repair spec §9 said the FEED is the only witness that may pick a class, because
+  // a vague "sedan" must not size a real reservation. That reasoning is right and is
+  // preserved below — but it treated the hand-built MODEL_MAP as the only way to
+  // read a vehicle, and that table not knowing a Corolla hard-stopped 30 of 37
+  // bookings on 2026-08-19.
+  //
+  // ETD's own class list is a stronger witness than either: it is the branch's live
+  // answer to exactly this question, and it cannot drift from what can be booked.
+  // A single unambiguous MODEL match is accepted from the feed vehicle or, failing
+  // that, from the technician's own words. Vague input still matches nothing and
+  // still goes to a human, so §9's actual guarantee holds.
+  const feedDesc = describeVehicle(make, model);
+  let [etdCode, etdWhy] = etdClassFor(feedDesc, offered ?? []);
+  let etdSrc = "feed";
+  if (!etdCode && String(techDesc ?? "").trim()) {
+    [etdCode, etdWhy] = etdClassFor(String(techDesc), offered ?? []);
+    etdSrc = "technician";
+  }
+
   const candidates = preferredCodes(make, model);
+
+  // Where both witnesses speak and disagree, ETD wins — it is the one that decides
+  // what actually gets booked — and the disagreement is reported so the table can be
+  // corrected rather than quietly rotting.
+  if (etdCode && candidates.length && candidates[0] !== etdCode && etdCode in byCode) {
+    return {
+      pick: byCode[etdCode], code: etdCode, match: "etd_description_over_table",
+      changes_vehicle: false,
+      note: `${etdWhy}; the local table said ${candidates[0]} - TABLE DRIFT, review MODEL_MAP for ${feedDesc || "this vehicle"}`,
+    };
+  }
+
   if (!candidates.length) {
+    if (etdCode && etdCode in byCode) {
+      return {
+        pick: byCode[etdCode], code: etdCode, match: "etd_description", changes_vehicle: false,
+        note: `${etdWhy} (read from the ${etdSrc}, no local mapping needed)`,
+      };
+    }
     const saidBit = String(techDesc ?? "").trim()
-      ? ` / tech says '${String(techDesc).trim()}'`
+      ? ` / tech says ${pyRepr(String(techDesc).trim())}`
       : "";
     return {
       pick: null, code: "", match: "UNMAPPED", changes_vehicle: null,
-      note: `no class mapping for ${describeVehicle(make, model) || "unknown vehicle"}${saidBit}; same-vehicle booking needs a human`,
+      note: `no class mapping for ${feedDesc || "unknown vehicle"}${saidBit}; ${etdWhy}; same-vehicle booking needs a human`,
     };
   }
 
