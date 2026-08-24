@@ -275,6 +275,16 @@ const DECISION_TONE: Record<string, [string, string]> = {
   REVIEW: [colors.accent, colors.accentLight],
 };
 
+// The ONE column approvers read. Four states, loud on purpose — the engine's
+// pill on the left is advice; this is the answer. Unknown/legacy values fall
+// back to muted so a vocabulary change can never render an unstyled cell.
+const STATUS_TONE: Record<string, [string, string]> = {
+  pending: [colors.amber, colors.amberLight],
+  approved: [colors.green, colors.greenLight],
+  denied: [colors.red, colors.redLight],
+  booked: [colors.accent, colors.accentLight],
+};
+
 function makeSortComparator<T>(accessor: (r: T) => unknown, dir: SortDir) {
   if (dir == null) return null;
   const sign = dir === "asc" ? 1 : -1;
@@ -955,7 +965,7 @@ export default function RentalRequests() {
     category: (r) => CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category,
     // Strongest telematics signal first; unchecked / non-applicable rows sink.
     samsara: (r) => (isSamsaraCategory(r) && r.samsara_verdict ? SAMSARA_ORDER[r.samsara_verdict] ?? 8 : null),
-    decision: (r) => r.auto_decision, rule: (r) => r.auto_rule, status: (r) => r.status,
+    decision: (r) => r.auto_decision, status: (r) => r.status,
     // Problems first, then in-flight, then booked, then blank — the triage order.
     booking: (r) => bookingSortKey(deriveBookingStatus(r, intentFor(r.request_no))),
     // Extensions tab only: Holman-book-only rows first, unknowns next.
@@ -1158,7 +1168,10 @@ export default function RentalRequests() {
               <SortHeader col="samsara" text="Samsara" sort={sort} setSort={setSort} />
               <SortHeader col="decision" text="Engine" sort={sort} setSort={setSort} />
               <SortHeader col="net" text="Net/day" sort={sort} setSort={setSort} />
-              <SortHeader col="rule" text="Rule" sort={sort} setSort={setSort} />
+              {/* No Rule column: it was a relic of the retired eight-rule
+                  engine (only "maintenance" or "approved" today), and it
+                  pulled approvers' eyes away from Status. The rule label
+                  still shows in the drawer for historical rows. */}
               <SortHeader col="status" text="Status" sort={sort} setSort={setSort} />
               <SortHeader col="booking" text="Booking" sort={sort} setSort={setSort} />
               <SortHeader col="shop" text="Shop" sort={sort} setSort={setSort} />
@@ -1297,11 +1310,20 @@ export default function RentalRequests() {
                                    : Number((r as any).prof_net_with) >= 0 ? colors.green : colors.red }}>
                       {(r as any).prof_net_with == null ? "—" : `$${Number((r as any).prof_net_with).toFixed(0)}`}
                     </td>
-                    <td style={tdBase} title={r.auto_reason ?? ""}>
-                      {r.auto_rule ? `${r.auto_rule} · ${RULE_LABEL[r.auto_rule] ?? ""}` : "—"}
-                    </td>
                     <td style={tdBase}>
-                      {r.status}{r.decided_by ? ` · ${r.decided_by}` : ""}
+                      {(() => {
+                        const [sfg, sbg] = STATUS_TONE[r.status] ?? [colors.inkMuted, colors.background];
+                        return (
+                          <>
+                            <Pill text={r.status} fg={sfg} bg={sbg} />
+                            {r.decided_by && (
+                              <span style={{ marginLeft: 6, fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                                {r.decided_by}
+                              </span>
+                            )}
+                          </>
+                        );
+                      })()}
                     </td>
                     {/* The booking outcome WITHOUT opening the drawer: booked
                         reference + branch, failed with the plain-language
@@ -1435,7 +1457,14 @@ export default function RentalRequests() {
                 </span>
                 <span style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, marginLeft: "auto",
                                color: (DECISION_TONE[detail.auto_decision ?? ""] ?? [colors.ink])[0] }}>
-                  {detail.auto_decision} · rule {detail.auto_rule}
+                  {detail.auto_decision ? (
+                    <>
+                      {detail.auto_decision} · rule {detail.auto_rule ?? "—"}
+                      {detail.auto_rule != null && RULE_LABEL[detail.auto_rule] ? ` (${RULE_LABEL[detail.auto_rule]})` : ""}
+                    </>
+                  ) : (
+                    <span style={{ color: colors.inkMuted, fontWeight: 400 }}>no engine decision</span>
+                  )}
                 </span>
               </div>
               {detail.auto_reason && (
