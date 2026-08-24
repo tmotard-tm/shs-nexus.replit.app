@@ -2715,15 +2715,15 @@ export function registerVrmRoutes(): Router {
       })
         .then(() => triggerImmediateDispatch(`holman deny supervisor ${decisionRow.id}`))
         .catch((err: any) => console.error("[VRM/HolmanPO] deny supervisor notify failed:", err?.message ?? err));
-      // New-process policy: Holman-queue denies send the redirect copy
-      // (branched on direct-billing standing) instead of the BYOV pitch.
-      // Legacy callers without a standing keep the old copy.
-      (denyRedirect
-        ? enqueueHolmanRedirectDenialSmsForTech({
-            decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null,
-            standing: denyRedirect.standing, etdReference: denyRedirect.etdReference,
-          })
-        : enqueueDenialSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null }))
+      // New-process policy (Tyler, 8/23): EVERY Holman-queue deny sends the
+      // redirect copy (branched on direct-billing standing). The legacy
+      // BYOV-pitch denial SMS is retired for this queue — a caller that could
+      // not resolve standing degrades to the plain redirect message, never
+      // the old template.
+      enqueueHolmanRedirectDenialSmsForTech({
+        decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null,
+        standing: denyRedirect?.standing ?? "none", etdReference: denyRedirect?.etdReference ?? null,
+      })
         .then(() => triggerImmediateDispatch(`holman deny tech ${decisionRow.id}`))
         .catch((err: any) => console.error("[VRM/HolmanPO] deny tech SMS failed:", err?.message ?? err));
       enqueueDcaMakeUnavailableForDecision(decisionRow.id).catch((err: any) =>

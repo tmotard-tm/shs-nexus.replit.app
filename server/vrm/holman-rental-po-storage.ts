@@ -50,14 +50,24 @@ export interface HolmanRentalPoRow {
    */
   requestKind: "extension" | "new";
   /**
-   * Whether this tech was already moved to the new direct-billing process
-   * (vrm_rental_cutover by LDAP): a booked reservation, a live book anchor, or
-   * an un-voided direct-billing confirmation. 'booked' techs calling Holman
-   * did not follow the process — the deny sends the switched-billing message
-   * and the row carries a loud staff alert.
+   * Whether this tech already has a reservation in the new system, through
+   * EITHER door: the cutover push (vrm_rental_cutover by LDAP — booked
+   * reservation, live book anchor, or un-voided direct-billing confirmation)
+   * OR a booked self-serve rental request (vrm_rental_request status
+   * 'booked'). 'booked' techs calling Holman did not follow the process — the
+   * deny sends the switched-billing message and the row carries a loud staff
+   * alert.
    */
   directBillingStanding: "booked" | "none";
   cutoverEtdReference: string | null;
+  /**
+   * The tech's latest non-denied request in the new self-serve system, if
+   * any — so the operator can see "they already applied the right way"
+   * (submitted/screened/approved/deferred) even before anything is booked.
+   * request_no is a bigint → arrives as a string.
+   */
+  newSystemRequestNo: string | null;
+  newSystemRequestStatus: string | null;
 }
 
 interface EnrichRow {
@@ -329,8 +339,7 @@ export async function listHolmanPoQueue(
     SELECT q.*, tl.district AS "district", tl.state AS "state",
       CASE WHEN COALESCE(q."additionalRequestedAmt", 0) > 0 OR q."reopenCount" > 0
            THEN 'extension' ELSE 'new' END AS "requestKind",
-      CASE WHEN co.booked THEN 'booked' ELSE 'none' END AS "directBillingStanding",
-      co.etd_reference AS "cutoverEtdReference"
+      ${sql.raw(NEW_SYSTEM_STANDING_EXPRS)}
     FROM (
       SELECT ${sql.raw(SELECT_COLS)} FROM holman_rental_po_queue
       WHERE status IN (${statusList})
@@ -345,12 +354,7 @@ export async function listHolmanPoQueue(
         ) AS district,
         (SELECT a2.home_state FROM all_techs a2 WHERE UPPER(a2.tech_racfid) = UPPER(q."techLdap") LIMIT 1) AS state
     ) tl ON TRUE
-    LEFT JOIN LATERAL (
-      SELECT ${sql.raw(CUTOVER_BOOKED_PREDICATE)} AS booked, c.etd_reference
-      FROM vrm_rental_cutover c
-      WHERE UPPER(c.ldap) = UPPER(q."techLdap")
-      LIMIT 1
-    ) co ON TRUE
+    ${sql.raw(NEW_SYSTEM_LATERALS('q."techLdap"'))}
     ORDER BY q."scrapedAt" DESC
   `);
   return result.rows as unknown as HolmanRentalPoRow[];
@@ -370,9 +374,48 @@ const CUTOVER_BOOKED_PREDICATE = `(
 )`;
 
 /**
- * Deny-time re-check of the tech's direct-billing standing (fresher than the
- * listing row the operator loaded). Missing/blank LDAP or no cutover row =
- * 'none'.
+ * "Already in the new system" laterals — ONE definition shared by the queue
+ * listing and the deny-time standing re-check so the badge the operator saw
+ * and the SMS the tech receives can never disagree. Two doors count as a
+ * reservation in the new system:
+ *   co — vrm_rental_cutover (the staff-driven cutover push): CUTOVER_BOOKED_PREDICATE;
+ *   rq — vrm_rental_request (the self-serve form): the tech's latest
+ *        non-denied request; status 'booked' = a verified reservation.
+ * `ldapRef` must be a SQL expression yielding the tech's LDAP.
+ */
+const NEW_SYSTEM_LATERALS = (ldapRef: string) => `
+    LEFT JOIN LATERAL (
+      SELECT ${CUTOVER_BOOKED_PREDICATE} AS booked, c.etd_reference
+      FROM vrm_rental_cutover c
+      WHERE UPPER(c.ldap) = UPPER(${ldapRef})
+      LIMIT 1
+    ) co ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT r.request_no, r.status, r.etd_reference
+      FROM vrm_rental_request r
+      WHERE UPPER(r.ldap) = UPPER(${ldapRef}) AND r.status <> 'denied'
+      ORDER BY r.created_at DESC
+      LIMIT 1
+    ) rq ON TRUE`;
+
+/**
+ * Select expressions over the NEW_SYSTEM_LATERALS aliases. The reservation
+ * reference is taken from whichever door is actually booked — a failed
+ * cutover row's etd_reference must never masquerade as a live reservation.
+ */
+const NEW_SYSTEM_STANDING_EXPRS = `
+      CASE WHEN COALESCE(co.booked, FALSE) OR rq.status = 'booked'
+           THEN 'booked' ELSE 'none' END AS "directBillingStanding",
+      CASE WHEN COALESCE(co.booked, FALSE) THEN co.etd_reference
+           WHEN rq.status = 'booked' THEN rq.etd_reference
+      END AS "cutoverEtdReference",
+      rq.request_no AS "newSystemRequestNo",
+      rq.status AS "newSystemRequestStatus"`;
+
+/**
+ * Deny-time re-check of the tech's new-system standing (fresher than the
+ * listing row the operator loaded). Missing/blank LDAP or no record in either
+ * door = 'none'. Runs the SAME laterals + expressions as the queue listing.
  */
 export async function getDirectBillingStandingForLdap(
   ldap: string | null | undefined,
@@ -380,14 +423,15 @@ export async function getDirectBillingStandingForLdap(
   const key = (ldap ?? "").trim();
   if (!key) return { standing: "none", etdReference: null };
   const result = await db.execute(sql`
-    SELECT ${sql.raw(CUTOVER_BOOKED_PREDICATE)} AS booked, c.etd_reference AS "etdReference"
-    FROM vrm_rental_cutover c
-    WHERE UPPER(c.ldap) = UPPER(${key})
-    LIMIT 1
+    SELECT ${sql.raw(NEW_SYSTEM_STANDING_EXPRS)}
+    FROM (SELECT ${key}::text AS "techLdap") q
+    ${sql.raw(NEW_SYSTEM_LATERALS('q."techLdap"'))}
   `);
-  const row = result.rows[0] as { booked: boolean | null; etdReference: string | null } | undefined;
+  const row = result.rows[0] as
+    | { directBillingStanding: "booked" | "none"; cutoverEtdReference: string | null }
+    | undefined;
   if (!row) return { standing: "none", etdReference: null };
-  return { standing: row.booked ? "booked" : "none", etdReference: row.etdReference ?? null };
+  return { standing: row.directBillingStanding, etdReference: row.cutoverEtdReference ?? null };
 }
 
 /**

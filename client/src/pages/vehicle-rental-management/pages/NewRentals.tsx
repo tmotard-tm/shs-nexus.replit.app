@@ -2257,7 +2257,7 @@ export default function NewRentals() {
                   }}>
                     {po.directBillingStanding === "booked"
                       ? <>The tech is <strong>already on the new direct-billing process</strong>{po.cutoverEtdReference ? ` (reservation ${po.cutoverEtdReference})` : ""}. They'll be texted that going through Holman isn't the correct process, with the rental-request link and the Enterprise-branch billing option. Edit the wording in Settings → Notification templates.</>
-                      : <>The tech will be texted that Holman rentals are over under the new process, with a link to submit a rental request. Edit the wording in Settings → Notification templates.</>}
+                      : <>The tech will be texted that Holman rentals are over under the new process, with a link to submit a rental request.{po.newSystemRequestStatus && po.newSystemRequestStatus !== "booked" ? <> (They already have request #{po.newSystemRequestNo} in the new system — status {po.newSystemRequestStatus}.)</> : null} Edit the wording in Settings → Notification templates.</>}
                   </p>
                 )}
                 <input
@@ -2458,6 +2458,21 @@ export default function NewRentals() {
                                 }}
                               >
                                 ON DIRECT BILLING — PROCESS NOT FOLLOWED
+                              </span>
+                            )}
+                            {/* Tech already went through the new self-serve form but
+                                nothing is booked yet — staff can see the redirect text
+                                is telling them to do something they already did. */}
+                            {po.directBillingStanding !== "booked" && po.newSystemRequestStatus && po.newSystemRequestStatus !== "booked" && (
+                              <span
+                                title={`This tech already has request #${po.newSystemRequestNo} in the new rental system (status: ${po.newSystemRequestStatus}) — nothing booked yet.`}
+                                style={{
+                                  fontFamily: fonts.dmSans, fontSize: 9.5, fontWeight: 700,
+                                  color: colors.blueDeep, border: `1px solid ${colors.blueDeep}`,
+                                  padding: "1px 6px", borderRadius: 4, letterSpacing: "0.04em",
+                                }}
+                              >
+                                REQUEST IN NEW SYSTEM — {String(po.newSystemRequestStatus).toUpperCase()}
                               </span>
                             )}
                           </div>
