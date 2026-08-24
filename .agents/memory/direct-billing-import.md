@@ -16,6 +16,9 @@ Each upload is full open-ticket state and sweeps its source's absent cases. **Wh
 ## Truck authority (Tyler's locked rule)
 Displayed truck = the resolved tech's **live TPMS assignment only**. Never a report value, never the booking intent's truck (booking-time snapshot), never the last-known truck→tech edge (may *confirm identity*, never supply the truck). No live truck → truckless case under a `db:<RA#>` key; blank enrichment is by design.
 
+## Synthetic `db:` keys leak into truck-keyed sets
+case_key doubles as the truck number in every truck-keyed join/CTE (scrape universe, portal hist, PO context). A synthetic `db:<RA#>` key passes `toDisplayNumber` unchanged (non-numeric strings pass through), so it looks like a valid truck downstream. **Why:** truckless direct cases became perpetual never-scraped Chromium targets. **How to apply:** any set built from case_key that means "trucks" must shape-filter `case_key ~ '^[0-9]+$'` at the shared source (never per consumer) — and it must be a KEY-SHAPE filter, not a source filter: trucked `enterprise_direct` cases must stay in scrape scope (their trucks carry Holman repair POs even though the rental has no Holman PO). Regression-locked by tests/scrape-universe-direct.test.ts.
+
 ## Source coexistence & overrides
 - **Why:** case_key is the truck, and the same physical rental can sit in both the ECARS feed and the direct report during changeover — two sources would ping-pong one key.
 - While a live `enterprise_direct` case holds a case_key, feed rows for that key are dropped in persist; feeds reclaim automatically when the direct case leaves the report.

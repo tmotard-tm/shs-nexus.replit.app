@@ -1052,7 +1052,7 @@ export function judgeConfirmState(
     // The acted-on line no longer renders. For a Decline this is USUALLY the
     // decision applying — declined resubmit asks drop off the render while
     // approved lines persist forever as locked+checked history (observed live
-    // 2026-08-24: the declined round-3 line of PO 120059545 vanished while both
+    // 2026-08-24: the declined round-3 line of a resubmit PO vanished while both
     // approved rounds stayed). But there is no completeness marker on the page:
     // a partial render that merely omits the acted-on line reads identically,
     // and `confirmed` here marks the row denied AND releases the redirect SMS.
@@ -1258,7 +1258,7 @@ async function submitDecision(
   //    with the line still ENABLED counts as "not applied"; an unreadable page forces
   //    a fresh login and a retry.
   //
-  //    CRITICAL #2 (learned live 2026-08-24, PO 120059545): confirmation must be
+  //    CRITICAL #2 (learned live 2026-08-24 on a resubmit PO): confirmation must be
   //    scoped to the exact line(s) we acted on. A Resubmit PO renders one radio row
   //    per authorization round, and PRIOR rounds stay locked with their own decision
   //    forever — an earlier APPROVED round's Decline radio is locked-unchecked for

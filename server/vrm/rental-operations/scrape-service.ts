@@ -83,11 +83,23 @@ const NORM_VENDOR = (col: any) => sql`upper(regexp_replace(${col}, '[^A-Za-z0-9]
 // looked at) and the two must not drift apart on WHICH trucks are in scope, or
 // the never-scraped backfill would quietly stop covering trucks the delta sweep
 // still targets.
+//
+// TRUCKS ONLY — case_key is the truck number for every trucked case, but a
+// TRUCKLESS direct-billing case keys by a synthetic `db:<RA#>` string
+// (direct-billing-import.ts). Those are not trucks: the portal has nothing to
+// scrape for them, so left unfiltered they sit in the never_scraped tier
+// forever, burn a Chromium session erroring against Holman on every sweep, and
+// crowd real trucks out of the MAX_TARGETS_PER_RUN cap. The digit test drops
+// them at the source for BOTH consumers. Note it is a KEY-SHAPE filter, not a
+// source filter: a direct-billing case WITH a resolved truck keys by that
+// truck and must stay in scope — its truck still has Holman repair POs even
+// though the rental itself has no Holman PO (task 785 regression test).
 const UNIVERSE_CTE = sql`
   universe AS (
     SELECT c.case_key AS truck
     FROM vrm_rental_operations_cases c
     WHERE c.present_in_latest = true
+      AND c.case_key ~ '^[0-9]+$'
     UNION
     SELECT ownp.own_pad AS truck
     FROM vrm_rental_operations_cases c

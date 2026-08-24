@@ -1,7 +1,8 @@
 /**
  * judgeConfirmState — the pure confirmation judge for Holman portal decisions.
  *
- * Regression anchor (live, 2026-08-24, PO 120059545 / JAMIESON): a Resubmit PO
+ * Regression anchor (live resubmit-PO extension case, 2026-08-24; all fixture
+ * identifiers below are synthetic): a Resubmit PO
  * renders one radio row per authorization round, and prior rounds stay locked
  * with their ORIGINAL decision forever. The old logic judged every rendered
  * line, so a correct deny on any PO with a previously-approved round (i.e.
@@ -27,19 +28,19 @@ type Line = {
 function line(seq: string, opts: { disabled: boolean; checked: boolean }): Line {
   return {
     fieldName: `ctl00$ctl00$grid$ctl${seq}`,
-    lineId: "119423214",
-    poNumber: "120059545",
+    lineId: "900000001",
+    poNumber: "999000111",
     amount: "390.25",
     seq,
-    value: `119423214^120059545^390.25^${seq}`,
+    value: `900000001^999000111^390.25^${seq}`,
     disabled: opts.disabled,
     checked: opts.checked,
   };
 }
 
-const acted = (...seqs: string[]) => new Set(seqs.map((s) => `119423214^120059545^390.25^${s}`));
+const acted = (...seqs: string[]) => new Set(seqs.map((s) => `900000001^999000111^390.25^${s}`));
 
-test("JAMIESON regression: prior approved rounds locked-unchecked do NOT poison a confirmed decline", () => {
+test("resubmit-PO regression: prior approved rounds locked-unchecked do NOT poison a confirmed decline", () => {
   // Page after a successful deny of the round-3 ask: rounds 1+2 are approve-locked
   // (their Decline radios render disabled+unchecked forever), round 3 is
   // decline-locked with our radio checked.
