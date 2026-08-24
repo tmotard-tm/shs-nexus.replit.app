@@ -890,6 +890,17 @@ export async function initFormsSchema(): Promise<void> {
   // exists even when the process died mid-call. Unique on (intent, phase,
   // attempt_no) so two writers can never share an attempt number.
   await db.execute(sql`
+    -- Serialize this batch across concurrent boots. It is the ONLY init block
+    -- that mixes an UPDATE (RowExclusiveLock) with CREATE INDEX (ShareLock)
+    -- inside one implicit transaction: two processes running it at once (e.g.
+    -- every test workflow re-firing on a restart wave) each held RowExclusive
+    -- from the pre-clean UPDATE, then blocked on the other's lock for the
+    -- index build -> deadlock 40P01 that cancelled whole suites (2026-08-24).
+    -- xact-scoped advisory lock: same implicit transaction (no-param simple
+    -- query batch on the pg pool), auto-released at commit -- none of the
+    -- pooled session-lock re-entrancy/leak problems.
+    SELECT pg_advisory_xact_lock(hashtext('vrm_workflow_attempts_ddl'));
+
     CREATE TABLE IF NOT EXISTS vrm_workflow_attempts (
       id            serial PRIMARY KEY,
       intent_id     integer NOT NULL REFERENCES vrm_rental_workflow_intents(id) ON DELETE CASCADE,
