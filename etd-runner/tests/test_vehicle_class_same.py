@@ -16,11 +16,50 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from vehicle_class import choose_same_vehicle  # noqa: E402
+from vehicle_class import choose, choose_same_vehicle  # noqa: E402
 
 
 def offered(*codes):
     return [{"code": c, "description": f"desc {c}"} for c in codes]
+
+
+class ChooseEscalatesWhenNoSedan(unittest.TestCase):
+    """choose() must never park a plain-sedan request at an SUV-only branch.
+
+    The TS port (server/vrm/etd/vehicle-class.ts) escalates smallest-first
+    through ESCALATION_LADDER when every sedan rung is empty; this file pins
+    the Python reference copy to the same behaviour, note spelling included,
+    so the two bookers cannot resolve the same branch differently.
+    """
+
+    def test_suv_only_branch_escalates_smallest_first(self):
+        out = choose(None, None, offered("SFAR", "IFAR", "MVAR"))
+        self.assertEqual(out["match"], "escalated_no_sedan")
+        self.assertEqual(out["code"], "IFAR")
+        self.assertIs(out["changes_vehicle"], True)
+        self.assertEqual(
+            out["note"],
+            "no sedan at or below full-size offered; escalated to IFAR "
+            "(smallest available above the sedan ceiling)")
+
+    def test_minivan_is_the_last_rung(self):
+        out = choose(None, None, offered("MVAR"))
+        self.assertEqual(out["match"], "escalated_no_sedan")
+        self.assertEqual(out["code"], "MVAR")
+
+    def test_any_sedan_rung_still_wins_over_escalation(self):
+        out = choose(None, None, offered("SFAR", "FCAR"))
+        self.assertEqual(out["match"], "rightsize_to_sedan")
+        self.assertEqual(out["code"], "FCAR")
+
+    def test_nothing_on_either_ladder_still_reviews(self):
+        # Pickups/full-size vans are on neither ladder: refuse, don't upgrade.
+        out = choose(None, None, offered("SGAR", "PPAR", "RVAR"))
+        self.assertEqual(out["match"], "NO_VEHICLE")
+        self.assertIsNone(out["pick"])
+        self.assertEqual(
+            out["note"],
+            "branch offered nothing on the sedan ladder or the escalation ladder. REVIEW")
 
 
 class ChooseSameVehicleHardStops(unittest.TestCase):

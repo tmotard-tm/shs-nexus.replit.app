@@ -213,6 +213,15 @@ def describe(make: str | None, model: str | None, year: str | None = None) -> st
 SEDAN_LADDER = ["ECAR", "CCAR", "ICAR", "SCAR", "FCAR"]
 SEDAN_CODES = set(SEDAN_LADDER)
 
+# Only when EVERY sedan rung is empty. Smallest first, so a full-size SUV or a
+# minivan is genuinely the last thing reached rather than a convenient default
+# (Tyler, 2026-08-18: "gated by what's available using the FSUV and larger only as
+# a last resort"). Before this the ladder simply stopped at FCAR and a branch with
+# no sedan produced REVIEW and no car, which is the worst outcome available: the
+# lot has vehicles and the technician goes home. Mirrors ESCALATION_LADDER in
+# server/vrm/etd/vehicle-class.ts — change both or neither.
+ESCALATION_LADDER = ["CFAR", "IFAR", "SFAR", "FFAR", "MVAR"]
+
 HVAC_PATTERN = re.compile(r"hvac|refrig|heat|air\s*cond", re.I)
 
 
@@ -317,8 +326,16 @@ def choose(make: str | None, model: str | None, offered: list,
                          if changed else f"sedan {code}"),
             }
 
-    return {"pick": None, "code": "", "match": "NO_SEDAN", "changes_vehicle": None,
-            "note": "branch offered no sedan at or below full-size. REVIEW"}
+    # Every sedan rung empty. Take the smallest thing the branch DOES have rather than
+    # sending a stranded technician home, and say plainly that it is an escalation.
+    for code in ESCALATION_LADDER:
+        if code in by_code:
+            return {"pick": by_code[code], "code": code, "match": "escalated_no_sedan",
+                    "changes_vehicle": True,
+                    "note": f"no sedan at or below full-size offered; escalated to {code} "
+                            f"(smallest available above the sedan ceiling)"}
+    return {"pick": None, "code": "", "match": "NO_VEHICLE", "changes_vehicle": None,
+            "note": "branch offered nothing on the sedan ladder or the escalation ladder. REVIEW"}
 
 
 

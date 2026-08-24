@@ -155,3 +155,4 @@
 - [etd-executor test baseline is red](etd-executor-test-baseline.md) — 5 stale failures + a flaky claim-limit test on a clean tree; diff failing NAMES vs a fresh baseline run, never trust the fail count.
 - [Tech shifts schedule feed](tech-shifts-feed.md) — secret name is plural TECHS_SHIFTS_API_KEY (client takes both); fetchShiftRows caches by query only (env-blind — test trap); VRM page + Fleet Scope wrapper + request drawer.
 - [Cutover msg1 adoption lane](msg1-adoption-lane.md) — adopted intents: born non-claimable, msg1-only, deterministic-uuid source, epoch-gated; page evidence = live guards/comms rows, never mutable msg1_state; tracking-row write failure must surface.
+- [ETD vehicle-class parity fixtures](etd-vehicle-class-fixtures.md) — Python-generated differential fixtures go stale silently and can fake parity both ways; regenerate + baseline-diff before diagnosing drift; suite runs in no workflow.
