@@ -25,6 +25,16 @@ async function main() {
     `[cutover-morning-sweep] done in ${((Date.now() - started) / 1000).toFixed(1)}s: ` +
       JSON.stringify(summary),
   );
+  // Msg1 confirmation sweep (task: catch a booking wave that missed its
+  // confirmation text within 24h): dry-run gap count, then live sends via the
+  // Fleet Comms lane when armed, or a staff alert when dark. Non-fatal — the
+  // morning sweep above already succeeded, and this layer alerts on its own.
+  try {
+    const { runMsg1BackfillSweep } = await import("./vrm/forms/msg1-confirmation-backfill");
+    await runMsg1BackfillSweep({ trigger: "scheduled-deployment" });
+  } catch (err: any) {
+    console.error("[cutover-morning-sweep] msg1 confirmation sweep FAILED:", err?.stack || err?.message || err);
+  }
 }
 
 main()

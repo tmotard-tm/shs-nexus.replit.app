@@ -425,3 +425,288 @@ export async function runMsg1ConfirmationBackfill(opts: {
   }
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// Scheduled sweep — catch any future booking wave that misses its
+// confirmation text within 24 hours.
+// ---------------------------------------------------------------------------
+//
+// The 2026-08-20 wave (65 of the audit's 71) went undetected for 4 days
+// because the one-time Msg1 blast ran 2026-08-18 and nothing checked after
+// it. This sweep rides the daily cutover morning-sweep trigger (route +
+// one-shot script): a dry-run pass of the backfill counts the gap, and when
+// one exists the run either proceeds live (armed — sends still ride the
+// Fleet Comms lane: quiet hours, opt-outs, 24h dedupe) or fires a staff
+// alert so a human runs the backfill.
+//
+// Safety model:
+//   - The live pass reuses runMsg1ConfirmationBackfill verbatim, which
+//     re-checks isContractBlockLive() and is idempotent by construction
+//     (evidence-based skip + the comms lane's 24h duplicate gate), so a
+//     dispatcher poke or double trigger cannot double-text anyone.
+//   - The ALERT is what needs throttling, not the run: withheld rows
+//     (missing reservation/branch facts) legitimately persist until a human
+//     fixes data, and an unthrottled daily emailer becomes noise nobody
+//     reads. One alert per ALERT_THROTTLE window.
+//   - Alert delivery falls back to a loud console.error when no recipient
+//     is configured (VRM_MSG1_ALERT_EMAILS) or SendGrid refuses — explicit
+//     in the summary, never a silent no-op.
+
+/** app_settings key holding the ISO timestamp of the last delivered alert. */
+export const MSG1_SWEEP_ALERT_SETTING_KEY = "msg1_sweep_last_alert_at";
+
+/** Alert at most once per window (matches the extension-reminder watermark). */
+export const MSG1_SWEEP_ALERT_THROTTLE_MS = 20 * 60 * 60 * 1000;
+
+export type SweepAction = {
+  runLive: boolean;
+  alert: boolean;
+  reason:
+    | "clean"
+    | "live_and_alert"
+    | "live_alert_throttled"
+    | "alert_disarmed"
+    | "alert_throttled"
+    | "alert_withheld_only"
+    | "alert_withheld_only_throttled";
+};
+
+/**
+ * Pure sweep decision.
+ *   - sendable candidates + armed  → run live (and alert with the outcome)
+ *   - sendable candidates + dark   → alert only (a human must arm/run)
+ *   - withheld-only gap            → alert only (data fix needed; a live run
+ *                                    would send nothing, so never fire one)
+ *   - the alert respects the throttle window; the live run NEVER does —
+ *     it is idempotent and the whole point is catching gaps within 24h.
+ */
+export function planSweepAction(f: {
+  candidates: number;
+  withheld: number;
+  armed: boolean;
+  lastAlertAtMs: number | null;
+  nowMs: number;
+}): SweepAction {
+  const throttled =
+    f.lastAlertAtMs !== null && f.nowMs - f.lastAlertAtMs < MSG1_SWEEP_ALERT_THROTTLE_MS;
+  if (f.candidates > 0) {
+    if (f.armed) {
+      return { runLive: true, alert: !throttled, reason: throttled ? "live_alert_throttled" : "live_and_alert" };
+    }
+    return { runLive: false, alert: !throttled, reason: throttled ? "alert_throttled" : "alert_disarmed" };
+  }
+  if (f.withheld > 0) {
+    return {
+      runLive: false,
+      alert: !throttled,
+      reason: throttled ? "alert_withheld_only_throttled" : "alert_withheld_only",
+    };
+  }
+  return { runLive: false, alert: false, reason: "clean" };
+}
+
+/** Staff-alert content. Pure so wording is pinned by tests. No SMS bodies. */
+export function buildSweepAlert(f: {
+  dry: BackfillRunResult;
+  live: BackfillRunResult | null;
+  armed: boolean;
+  trigger: string;
+}): { subject: string; text: string } {
+  const gap = f.dry.candidates + f.dry.withheld;
+  const subject = f.live
+    ? `[VRM cutover] Msg1 sweep sent ${f.live.sent + f.live.queued} missed confirmation text(s)`
+    : `[VRM cutover] ${gap} booked tech(s) missing their confirmation text`;
+  const lines: string[] = [];
+  lines.push(
+    `Msg1 confirmation sweep (${f.trigger}, ${f.dry.todayISO}): of ${f.dry.population} cutover rows, ` +
+      `${f.dry.candidates} booked + block-filed tech(s) still on the Holman book have no ` +
+      `confirmation-shaped text, and ${f.dry.withheld} more are withheld (missing reservation ` +
+      `number or branch facts — a text would be unactionable).`,
+  );
+  if (f.live) {
+    lines.push(
+      `Armed, so the sweep ran LIVE through the Fleet Comms lane: ` +
+        `${f.live.sent} sent, ${f.live.queued} queued (quiet-hours deferral), ` +
+        `${f.live.skippedByLane} refused by the lane (opt-out / duplicate / no phone).`,
+    );
+  } else if (f.armed) {
+    lines.push(`No sendable candidates — nothing was sent.`);
+  } else {
+    lines.push(
+      `VRM_CONTRACT_BLOCK_ENABLED is not armed, so NOTHING was sent. Review the dry run and ` +
+        `fire the backfill: POST /api/vrm/forms/rental-survey/cutover/msg1-backfill ` +
+        `(dry-run by default; live needs { dryRun: false, confirm: true }).`,
+    );
+  }
+  const rows = f.dry.results.filter((r) => r.action === "send" || r.action === "withhold");
+  if (rows.length) {
+    lines.push("");
+    lines.push("Rows needing attention:");
+    for (const r of rows.slice(0, 50)) {
+      lines.push(
+        `  ${r.ldap}  ${r.action} (${r.reason})` +
+          (r.needsRefileReview ? "  [route block needs re-filing review]" : ""),
+      );
+    }
+    if (rows.length > 50) lines.push(`  … and ${rows.length - 50} more`);
+  }
+  if (f.dry.needsRefileReview.length) {
+    lines.push("");
+    lines.push(
+      `Route blocks past their date (catch-up wording used; block likely needs re-filing): ` +
+        f.dry.needsRefileReview.join(", "),
+    );
+  }
+  return { subject, text: lines.join("\n") };
+}
+
+export type SweepAlertDelivery = {
+  channel: "email" | "log";
+  ok: boolean;
+  to?: string;
+  error?: string;
+};
+
+export type Msg1SweepDeps = {
+  runBackfill: (opts: {
+    dryRun: boolean;
+    requestedBy?: string;
+  }) => Promise<BackfillRunResult>;
+  isArmed: () => boolean;
+  now: () => Date;
+  getLastAlertAt: () => Promise<number | null>;
+  recordAlertAt: (at: Date) => Promise<void>;
+  deliverAlert: (content: { subject: string; text: string }) => Promise<SweepAlertDelivery>;
+};
+
+async function defaultGetLastAlertAt(): Promise<number | null> {
+  const { getSetting } = await import("../../app-settings");
+  const raw = await getSetting<string>(MSG1_SWEEP_ALERT_SETTING_KEY);
+  const ms = Date.parse(String(raw ?? ""));
+  return Number.isFinite(ms) ? ms : null;
+}
+
+async function defaultRecordAlertAt(at: Date): Promise<void> {
+  const { setSetting } = await import("../../app-settings");
+  await setSetting(MSG1_SWEEP_ALERT_SETTING_KEY, at.toISOString(), "msg1-sweep");
+}
+
+/**
+ * Default alert channel: SendGrid email to VRM_MSG1_ALERT_EMAILS (comma-
+ * separated). No recipient configured → loud log alert (still an alert, and
+ * the summary says channel:"log" so the misconfiguration is visible).
+ */
+async function defaultDeliverAlert(content: { subject: string; text: string }): Promise<SweepAlertDelivery> {
+  const recipients = String(process.env.VRM_MSG1_ALERT_EMAILS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!recipients.length) {
+    console.error(
+      `[msg1-sweep] STAFF ALERT (no VRM_MSG1_ALERT_EMAILS configured — set it to email instead):\n` +
+        `${content.subject}\n${content.text}`,
+    );
+    return { channel: "log", ok: true };
+  }
+  const { sendEmail } = await import("../../email-service");
+  const [to, ...cc] = recipients;
+  const out = await sendEmail({
+    to,
+    ...(cc.length ? { cc } : {}),
+    from: process.env.SENDGRID_EMAIL || "",
+    subject: content.subject,
+    text: content.text,
+  });
+  if (!out.success) {
+    console.error(`[msg1-sweep] alert email to ${recipients.join(", ")} FAILED: ${out.error}`);
+    console.error(`[msg1-sweep] STAFF ALERT (email failed):\n${content.subject}\n${content.text}`);
+    return { channel: "email", ok: false, to: recipients.join(", "), error: out.error };
+  }
+  return { channel: "email", ok: true, to: recipients.join(", ") };
+}
+
+export type Msg1SweepSummary = {
+  trigger: string;
+  todayISO: string;
+  armed: boolean;
+  population: number;
+  candidates: number;
+  withheld: number;
+  needsRefileReview: string[];
+  action: SweepAction;
+  live: null | { sent: number; queued: number; skippedByLane: number };
+  alert: SweepAlertDelivery | null;
+};
+
+/**
+ * One sweep pass: dry-run the backfill, decide, optionally run live and/or
+ * alert. Deps are injectable for hermetic tests; production callers pass only
+ * a trigger label. Never sends outside the Fleet Comms lane.
+ */
+export async function runMsg1BackfillSweep(opts?: {
+  trigger?: string;
+  deps?: Partial<Msg1SweepDeps>;
+}): Promise<Msg1SweepSummary> {
+  const trigger = String(opts?.trigger ?? "manual");
+  const deps: Msg1SweepDeps = {
+    runBackfill: (o) => runMsg1ConfirmationBackfill(o),
+    isArmed: isContractBlockLive,
+    now: () => new Date(),
+    getLastAlertAt: defaultGetLastAlertAt,
+    recordAlertAt: defaultRecordAlertAt,
+    deliverAlert: defaultDeliverAlert,
+    ...(opts?.deps ?? {}),
+  };
+
+  const armed = deps.isArmed();
+  const dry = await deps.runBackfill({ dryRun: true, requestedBy: `msg1-sweep:${trigger}` });
+  // Watermark read failure must not kill the sweep (the run matters more than
+  // the throttle) — degrade to "no prior alert".
+  let lastAlertAtMs: number | null = null;
+  try {
+    lastAlertAtMs = await deps.getLastAlertAt();
+  } catch (e: any) {
+    console.warn(`[msg1-sweep] alert watermark read failed (treating as none): ${e?.message ?? e}`);
+  }
+  const action = planSweepAction({
+    candidates: dry.candidates,
+    withheld: dry.withheld,
+    armed,
+    lastAlertAtMs,
+    nowMs: deps.now().getTime(),
+  });
+
+  let live: BackfillRunResult | null = null;
+  if (action.runLive) {
+    live = await deps.runBackfill({ dryRun: false, requestedBy: `msg1-sweep:${trigger}` });
+  }
+
+  let alert: SweepAlertDelivery | null = null;
+  if (action.alert) {
+    alert = await deps.deliverAlert(buildSweepAlert({ dry, live, armed, trigger }));
+    // Throttle only DELIVERED email alerts: a failed email should retry on the
+    // next trigger, and a log alert is bounded by the trigger cadence anyway.
+    if (alert.ok && alert.channel === "email") {
+      try {
+        await deps.recordAlertAt(deps.now());
+      } catch (e: any) {
+        console.warn(`[msg1-sweep] alert watermark write failed: ${e?.message ?? e}`);
+      }
+    }
+  }
+
+  const summary: Msg1SweepSummary = {
+    trigger,
+    todayISO: dry.todayISO,
+    armed,
+    population: dry.population,
+    candidates: dry.candidates,
+    withheld: dry.withheld,
+    needsRefileReview: dry.needsRefileReview,
+    action,
+    live: live ? { sent: live.sent, queued: live.queued, skippedByLane: live.skippedByLane } : null,
+    alert,
+  };
+  console.log(`[msg1-sweep] ${trigger}: ${JSON.stringify({ ...summary, needsRefileReview: summary.needsRefileReview.length })}`);
+  return summary;
+}

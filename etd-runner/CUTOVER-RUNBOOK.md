@@ -87,7 +87,15 @@ Notes:
 ## 2. The morning sweep (server-side, no browser)
 
 Block readback verification, msg2 release on the event day, crash
-reconciliation, completion. One pass and exit:
+reconciliation, completion — plus the **Msg1 confirmation sweep**: a dry-run
+pass of `runMsg1ConfirmationBackfill` that counts booked + block-filed techs
+still on the Holman book with no confirmation-shaped text. When a gap exists
+it runs the backfill LIVE if `VRM_CONTRACT_BLOCK_ENABLED` is armed (sends ride
+the Fleet Comms lane: quiet hours, opt-outs, 24h dedupe), otherwise it emails
+the addresses in `VRM_MSG1_ALERT_EMAILS` (comma-separated; unset = loud log
+alert). Alerts are throttled to one per ~20h via the
+`msg1_sweep_last_alert_at` app setting; the live pass is never throttled — it
+is idempotent by evidence. One pass and exit:
 
 ```bash
 npx tsx server/run-cutover-morning-sweep.ts

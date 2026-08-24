@@ -257,3 +257,206 @@ test("planMsg1Backfill classifies every row and uppercases ldaps", () => {
     ],
   );
 });
+
+// ---------------------------------------------------------------------------
+// scheduled sweep — decision, alert content, orchestration
+// ---------------------------------------------------------------------------
+
+import {
+  planSweepAction,
+  buildSweepAlert,
+  runMsg1BackfillSweep,
+  MSG1_SWEEP_ALERT_THROTTLE_MS,
+  type BackfillRunResult,
+  type Msg1SweepDeps,
+} from "../server/vrm/forms/msg1-confirmation-backfill";
+
+const NOW = Date.parse("2026-08-24T15:00:00Z");
+
+function dryResult(overrides: Partial<BackfillRunResult> = {}): BackfillRunResult {
+  return {
+    dryRun: true,
+    todayISO: "2026-08-24",
+    population: 100,
+    candidates: 0,
+    sent: 0,
+    queued: 0,
+    skippedByLane: 0,
+    withheld: 0,
+    skipped: {},
+    needsRefileReview: [],
+    results: [],
+    ...overrides,
+  };
+}
+
+test("planSweepAction: no gap → clean, nothing fires", () => {
+  const a = planSweepAction({ candidates: 0, withheld: 0, armed: true, lastAlertAtMs: null, nowMs: NOW });
+  assert.deepEqual(a, { runLive: false, alert: false, reason: "clean" });
+});
+
+test("planSweepAction: candidates while dark → alert only, never live", () => {
+  const a = planSweepAction({ candidates: 3, withheld: 0, armed: false, lastAlertAtMs: null, nowMs: NOW });
+  assert.deepEqual(a, { runLive: false, alert: true, reason: "alert_disarmed" });
+});
+
+test("planSweepAction: candidates while armed → live run + alert", () => {
+  const a = planSweepAction({ candidates: 3, withheld: 1, armed: true, lastAlertAtMs: null, nowMs: NOW });
+  assert.deepEqual(a, { runLive: true, alert: true, reason: "live_and_alert" });
+});
+
+test("planSweepAction: throttle silences the alert but NEVER the live run", () => {
+  const recent = NOW - (MSG1_SWEEP_ALERT_THROTTLE_MS - 60_000);
+  const armed = planSweepAction({ candidates: 3, withheld: 0, armed: true, lastAlertAtMs: recent, nowMs: NOW });
+  assert.deepEqual(armed, { runLive: true, alert: false, reason: "live_alert_throttled" });
+  const dark = planSweepAction({ candidates: 3, withheld: 0, armed: false, lastAlertAtMs: recent, nowMs: NOW });
+  assert.deepEqual(dark, { runLive: false, alert: false, reason: "alert_throttled" });
+});
+
+test("planSweepAction: throttle window expiry re-arms the alert", () => {
+  const stale = NOW - (MSG1_SWEEP_ALERT_THROTTLE_MS + 1);
+  const a = planSweepAction({ candidates: 1, withheld: 0, armed: false, lastAlertAtMs: stale, nowMs: NOW });
+  assert.deepEqual(a, { runLive: false, alert: true, reason: "alert_disarmed" });
+});
+
+test("planSweepAction: withheld-only gap alerts but never runs live (nothing sendable)", () => {
+  const a = planSweepAction({ candidates: 0, withheld: 2, armed: true, lastAlertAtMs: null, nowMs: NOW });
+  assert.deepEqual(a, { runLive: false, alert: true, reason: "alert_withheld_only" });
+  const recent = NOW - 1000;
+  const t = planSweepAction({ candidates: 0, withheld: 2, armed: true, lastAlertAtMs: recent, nowMs: NOW });
+  assert.deepEqual(t, { runLive: false, alert: false, reason: "alert_withheld_only_throttled" });
+});
+
+test("buildSweepAlert: dark alert names the gap, says nothing was sent, lists rows", () => {
+  const dry = dryResult({
+    candidates: 2,
+    withheld: 1,
+    needsRefileReview: ["AAA"],
+    results: [
+      { ldap: "AAA", action: "send", reason: "block_date_past", needsRefileReview: true },
+      { ldap: "BBB", action: "send", reason: "needs_confirmation" },
+      { ldap: "CCC", action: "withhold", reason: "missing_branch_facts" },
+    ],
+  });
+  const { subject, text } = buildSweepAlert({ dry, live: null, armed: false, trigger: "morning-sweep" });
+  assert.match(subject, /3 booked tech\(s\) missing/);
+  assert.match(text, /NOTHING was sent/);
+  assert.match(text, /msg1-backfill/);
+  assert.match(text, /AAA\s+send \(block_date_past\)\s+\[route block needs re-filing review\]/);
+  assert.match(text, /CCC\s+withhold \(missing_branch_facts\)/);
+  assert.match(text, /Route blocks past their date.*AAA/);
+  // never leak SMS bodies into the email
+  assert.doesNotMatch(text, /Sears Fleet\. We have a rental reservation/);
+});
+
+test("buildSweepAlert: live alert reports sent/queued/lane-refused counts", () => {
+  const dry = dryResult({ candidates: 3 });
+  const live = dryResult({ dryRun: false, candidates: 3, sent: 1, queued: 1, skippedByLane: 1 });
+  const { subject, text } = buildSweepAlert({ dry, live, armed: true, trigger: "morning-sweep" });
+  assert.match(subject, /sent 2 missed confirmation text\(s\)/);
+  assert.match(text, /1 sent, 1 queued \(quiet-hours deferral\), 1 refused by the lane/);
+});
+
+/** Hermetic deps recorder for runMsg1BackfillSweep. */
+function fakeDeps(f: {
+  dry: BackfillRunResult;
+  live?: BackfillRunResult;
+  armed: boolean;
+  lastAlertAtMs?: number | null;
+  delivery?: { channel: "email" | "log"; ok: boolean };
+}) {
+  const calls: { backfill: Array<{ dryRun: boolean }>; alerts: string[]; recorded: Date[] } = {
+    backfill: [],
+    alerts: [],
+    recorded: [],
+  };
+  const deps: Partial<Msg1SweepDeps> = {
+    runBackfill: async (o) => {
+      calls.backfill.push({ dryRun: o.dryRun });
+      if (o.dryRun) return f.dry;
+      if (!f.live) throw new Error("unexpected live run");
+      return f.live;
+    },
+    isArmed: () => f.armed,
+    now: () => new Date(NOW),
+    getLastAlertAt: async () => f.lastAlertAtMs ?? null,
+    recordAlertAt: async (at) => { calls.recorded.push(at); },
+    deliverAlert: async (c) => {
+      calls.alerts.push(c.subject);
+      return { channel: f.delivery?.channel ?? "email", ok: f.delivery?.ok ?? true, to: "staff@x" };
+    },
+  };
+  return { deps, calls };
+}
+
+test("sweep: clean run does one dry pass — no live, no alert, no watermark", async () => {
+  const { deps, calls } = fakeDeps({ dry: dryResult(), armed: true });
+  const s = await runMsg1BackfillSweep({ trigger: "test", deps });
+  assert.deepEqual(calls.backfill, [{ dryRun: true }]);
+  assert.equal(calls.alerts.length, 0);
+  assert.equal(calls.recorded.length, 0);
+  assert.equal(s.action.reason, "clean");
+  assert.equal(s.live, null);
+  assert.equal(s.alert, null);
+});
+
+test("sweep: gap while dark → alert delivered and watermark recorded, no live pass", async () => {
+  const { deps, calls } = fakeDeps({ dry: dryResult({ candidates: 2 }), armed: false });
+  const s = await runMsg1BackfillSweep({ trigger: "test", deps });
+  assert.deepEqual(calls.backfill, [{ dryRun: true }]);
+  assert.equal(calls.alerts.length, 1);
+  assert.deepEqual(calls.recorded, [new Date(NOW)]);
+  assert.equal(s.action.reason, "alert_disarmed");
+  assert.equal(s.live, null);
+  assert.equal(s.alert?.ok, true);
+});
+
+test("sweep: gap while armed → live pass runs and the alert carries its counts", async () => {
+  const { deps, calls } = fakeDeps({
+    dry: dryResult({ candidates: 2 }),
+    live: dryResult({ dryRun: false, candidates: 2, sent: 2 }),
+    armed: true,
+  });
+  const s = await runMsg1BackfillSweep({ trigger: "test", deps });
+  assert.deepEqual(calls.backfill, [{ dryRun: true }, { dryRun: false }]);
+  assert.equal(calls.alerts.length, 1);
+  assert.match(calls.alerts[0], /sent 2 missed confirmation text\(s\)/);
+  assert.deepEqual(s.live, { sent: 2, queued: 0, skippedByLane: 0 });
+});
+
+test("sweep: recent alert throttles the email but an armed gap still sends live", async () => {
+  const { deps, calls } = fakeDeps({
+    dry: dryResult({ candidates: 1 }),
+    live: dryResult({ dryRun: false, candidates: 1, sent: 1 }),
+    armed: true,
+    lastAlertAtMs: NOW - 1000,
+  });
+  const s = await runMsg1BackfillSweep({ trigger: "test", deps });
+  assert.deepEqual(calls.backfill, [{ dryRun: true }, { dryRun: false }]);
+  assert.equal(calls.alerts.length, 0);
+  assert.equal(s.action.reason, "live_alert_throttled");
+});
+
+test("sweep: failed email delivery does NOT stamp the watermark (retries next trigger)", async () => {
+  const { deps, calls } = fakeDeps({
+    dry: dryResult({ candidates: 1 }),
+    armed: false,
+    delivery: { channel: "email", ok: false },
+  });
+  const s = await runMsg1BackfillSweep({ trigger: "test", deps });
+  assert.equal(calls.alerts.length, 1);
+  assert.equal(calls.recorded.length, 0);
+  assert.equal(s.alert?.ok, false);
+});
+
+test("sweep: log-channel alert (no recipients) never stamps the watermark", async () => {
+  const { deps, calls } = fakeDeps({
+    dry: dryResult({ candidates: 1 }),
+    armed: false,
+    delivery: { channel: "log", ok: true },
+  });
+  const s = await runMsg1BackfillSweep({ trigger: "test", deps });
+  assert.equal(calls.alerts.length, 1);
+  assert.equal(calls.recorded.length, 0);
+  assert.equal(s.alert?.channel, "log");
+});

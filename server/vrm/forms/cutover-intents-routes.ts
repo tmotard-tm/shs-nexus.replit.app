@@ -326,7 +326,22 @@ export function registerCutoverIntentRoutes(router: Router): void {
         confirmationGuards = { error: String(err?.message ?? err).slice(0, 300) };
         console.error("[cutover] morning-sweep confirmation ensure failed:", err?.message ?? err);
       }
-      res.json({ ...summary, executor, confirmationGuards });
+      // Msg1 confirmation sweep (task: catch a booking wave that missed its
+      // confirmation text within 24h). Runs AFTER the confirmation guards so
+      // its gap count reflects what the ensure pass just sent (those sends are
+      // durable comms evidence). Dynamic import: static would close the cycle
+      // intents-routes → msg1 → survey → intents-routes. A sweep failure must
+      // not fail the morning sweep — it is a detection layer, not part of the
+      // recovery pass.
+      let msg1Sweep: unknown = null;
+      try {
+        const { runMsg1BackfillSweep } = await import("./msg1-confirmation-backfill");
+        msg1Sweep = await runMsg1BackfillSweep({ trigger: "morning-sweep" });
+      } catch (err: any) {
+        msg1Sweep = { error: String(err?.message ?? err).slice(0, 300) };
+        console.error("[cutover] morning-sweep msg1 confirmation sweep failed:", err?.message ?? err);
+      }
+      res.json({ ...summary, executor, confirmationGuards, msg1Sweep });
     } catch (e: any) {
       sendOrchestratorError(res, e);
     }
