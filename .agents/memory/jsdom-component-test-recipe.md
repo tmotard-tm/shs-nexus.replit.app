@@ -20,3 +20,8 @@ Working recipe proven by the Create Vehicle form-wiring suite (`tests/vehicle-cr
 - `act` comes from `react` itself (18.3+); poll-style `waitFor` sleeping inside `act` flushes everything with real timers.
 - CSV/blob exports are assertable: patch `URL.createObjectURL` to capture the Blob (return "blob:test"), no-op `revokeObjectURL` + `HTMLAnchorElement.prototype.click`, then `await blob.text()`. Sort-header buttons fire via plain `btn.click()` inside `act`. Mutation-verify such suites (temporarily revert the cell/accessor, confirm red, restore).
 - Native `<select>` elements (unlike Radix) CAN be driven in jsdom: call the native value setter (`Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(el, v)`) then dispatch a bubbling `change` Event inside `act` — the native setter bypasses React's value tracker so the event isn't deduped. Proven by tests/rental-origin-filter.test.ts.
+
+
+## Broken-on-clean-tree suites (as of 2026-08-24)
+The RentalRequests drawer suites fail and then HANG (never exit; timeout kills the run) on an UNCHANGED tree: rental-approval-sms-drawer test 2 (in-flight template race / "drawer to close" timeout) and rental-drawer-booking-states tests 2-5. Before blaming an edit to that page, diff against a clean-tree baseline run (copy the edited file to /tmp, git restore, run, copy back — safer than stash when another git process may hold index.lock; a failed stash push followed by stash pop will pop someone ELSE'S parked stash).
+**How to apply:** capture real exit codes with `> /tmp/out 2>&1; echo $?` — piping a test run into tail/grep makes the pipeline exit 0/grep's code and silently masks both failures and timeout kills.
