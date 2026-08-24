@@ -145,3 +145,4 @@
 - [Validation vs reviewer fixture race](validation-review-fixture-race.md) — completion review runs the task's DB-fixture suites DURING validation; strict dev-DB compare suites must scrub ZZ* rows + retry with backoff.
 - [ETD vehicle-class parity fixtures](etd-vehicle-class-fixtures.md) — Python-generated differential fixtures go stale silently and can fake parity both ways; regenerate + baseline-diff before diagnosing drift; suite runs in no workflow.
 - [Cutover publish-bundle premortem](cutover-bundle-premortem.md) — open risks from the 2026-08-24 merge wave: publish-readiness gates, degrade-open extensions invisible, silent override supersede, msg1 body drift, reopen wipes deny-verify reason.
+- [Compact density CSS overrides](compact-density-css.md) — small-laptop density = scoped media block + hook classes; threshold 1279.98px not 1280; mirror Tailwind's space-y :not([hidden]) selector or the override loses.

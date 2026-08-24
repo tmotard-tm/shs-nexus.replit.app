@@ -13,8 +13,11 @@
  * single-row horizontally scrolling category tab strip.
  *
  * This script loads /fleet-communications headless at 1280x720 AND 1024x576
- * (see scripts/lib/viewport-guard.ts for why both sizes are mandatory), opens
- * a real thread at each size, and asserts:
+ * (see scripts/lib/viewport-guard.ts for why both sizes are mandatory), plus
+ * a third 1024x500 viewport (Task #820: a 13" Windows laptop at 125-150%
+ * display scaling leaves ~1024x500 after browser chrome and the taskbar —
+ * the size the compact density media query in client/src/index.css targets),
+ * opens a real thread at each size, and asserts:
  *   1. no page-level scroll (document scrollHeight <= viewport height)
  *   2. the inbox pane's bottom edge lands near the viewport bottom (the
  *      flex-1 fill), never past it
@@ -33,6 +36,7 @@ import {
   BASE_URL,
   NAV_TIMEOUT_MS,
   SELECTOR_TIMEOUT_MS,
+  SMALL_LAPTOP_VIEWPORTS,
   runViewportGuard,
   failIfOnLoginPage,
   assertNoPageScroll,
@@ -42,6 +46,11 @@ import {
 } from "./lib/viewport-guard";
 
 const PAGE_PATH = "/fleet-communications";
+// The two shared mandatory sizes plus the scaled-small-laptop reality
+// (Task #820): 13" Windows machines at 125-150% scaling end up around
+// 1024x500 effective viewport. The compact density treatment must hold the
+// exact same pane-fill + composer-visible invariants there.
+const VIEWPORTS = [...SMALL_LAPTOP_VIEWPORTS, { width: 1024, height: 500 }];
 // The pane should absorb all remaining height. Its bottom edge sits above the
 // page container's bottom padding (p-4 md:p-6 => up to 24px); 48px of slack
 // tolerates that padding plus rounding without letting a shrunken pane pass.
@@ -53,7 +62,10 @@ runViewportGuard({
     "The Fleet Communications inbox no longer fits a small-laptop viewport. " +
     "Likely causes: the /fleet-communications route lost its h-[100dvh] MainContent wrapper (client/src/App.tsx), " +
     "the inbox pane lost flex-1/min-h-0 or regained hardcoded viewport math (client/src/pages/fleet-communications.tsx), " +
-    "the toolbar overflow menu / 2xl breakpoint split was removed, or the category tabs wrap again.",
+    "the toolbar overflow menu / 2xl breakpoint split was removed, or the category tabs wrap again. " +
+    "If only 1024x500 fails, the compact density block in client/src/index.css (Task #820) may have been " +
+    "removed or its fc-* hook classes stripped from the page.",
+  viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
     await page.goto(`${BASE_URL}${PAGE_PATH}`, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
