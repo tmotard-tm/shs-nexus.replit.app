@@ -88,6 +88,9 @@ export type TechShiftsErrorCode =
   | "RATE_LIMITED"
   | "UPSTREAM_UNAVAILABLE"
   | "TIMEOUT"
+  // A bad TECH_SHIFTS_BASE_URL is NOT the same fault as a missing key, and
+  // must not tell an operator to go add a secret that is already set.
+  | "CONFIG_INVALID"
   | "MALFORMED_RESPONSE";
 
 export class TechShiftsError extends Error {
@@ -150,6 +153,13 @@ export interface TechSchedule {
   activities: string[];
   /** False when the feed returned no rows for this LDAP. */
   found: boolean;
+  /**
+   * Set when the lookup FAILED rather than came back empty. `found:false`
+   * with no `error` means the feed was asked and knows nothing; `found:false`
+   * WITH an error means we never got an answer. Collapsing the two lets a
+   * cold upstream render as a confident "this technician has no schedule".
+   */
+  error?: TechShiftsErrorCode;
 }
 
 /**
@@ -169,6 +179,12 @@ export interface TechShiftsClientOptions {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  /**
+   * Bypass the TTL cache. Required for the health probe: its query key is
+   * constant for a whole day, so a cached hit would report the feed reachable
+   * with 0ms latency for five minutes after it actually died.
+   */
+  skipCache?: boolean;
 }
 
 /**
@@ -193,7 +209,7 @@ function getConfig(env: NodeJS.ProcessEnv): { baseUrl: string; apiKey: string } 
     const parsed = new URL(raw);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") throw new Error("invalid protocol");
   } catch {
-    throw new TechShiftsError("CONFIG_MISSING", `TECH_SHIFTS_BASE_URL is not a valid URL: ${raw}`);
+    throw new TechShiftsError("CONFIG_INVALID", `TECH_SHIFTS_BASE_URL is not a valid URL: ${raw}`);
   }
   return { baseUrl: raw.replace(/\/+$/, ""), apiKey };
 }
@@ -216,6 +232,14 @@ const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 function assertIsoDate(value: string, label: string): void {
   if (!ISO_DATE.test(value)) {
     throw new TechShiftsError("BAD_REQUEST", `${label} must be YYYY-MM-DD, got ${JSON.stringify(value)}`);
+  }
+  // The regex is a SHAPE check, not a validity check. "2026-13-01" passes it
+  // and then throws RangeError deep inside toISOString(), which surfaces as a
+  // 500 on plain bad input; "2026-02-31" is worse, because JS silently rolls
+  // it to March 2 and answers a different week with no warning. Round-trip it.
+  const d = new Date(`${value}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== value) {
+    throw new TechShiftsError("BAD_REQUEST", `${label} is not a real date: ${JSON.stringify(value)}`);
   }
 }
 
@@ -261,10 +285,31 @@ export interface ShiftsQuery {
  * in rental-request.ts) so process-local state must stay disposable.
  */
 const CACHE_TTL_MS = 5 * 60 * 1000;
+/**
+ * Hard ceiling on entries. Every week-pager click, every batched LDAP and
+ * every district window mints a distinct key, and a 120-day district window
+ * is thousands of rows, so an unswept Map grows monotonically until the Repl
+ * restarts. Expired entries are swept on write and the oldest are evicted.
+ */
+const CACHE_MAX_ENTRIES = 200;
 const cache = new Map<string, { at: number; rows: RawShiftRow[] }>();
 
 export function clearTechShiftsCache(): void {
   cache.clear();
+}
+
+function cacheSet(key: string, rows: RawShiftRow[]): void {
+  const now = Date.now();
+  for (const [k, v] of Array.from(cache.entries())) {
+    if (now - v.at >= CACHE_TTL_MS) cache.delete(k);
+  }
+  // Map iterates in insertion order, so the first keys are the oldest.
+  while (cache.size >= CACHE_MAX_ENTRIES) {
+    const oldest = cache.keys().next();
+    if (oldest.done) break;
+    cache.delete(oldest.value);
+  }
+  cache.set(key, { at: now, rows });
 }
 
 function cacheKey(q: ShiftsQuery): string {
@@ -298,8 +343,10 @@ export async function fetchShiftRows(
   };
 
   const key = cacheKey(normalized);
-  const hit = cache.get(key);
-  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
+  if (!options.skipCache) {
+    const hit = cache.get(key);
+    if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.rows;
+  }
 
   const config = getConfig(env);
   const url = new URL("/api/shifts/export", config.baseUrl);
@@ -351,7 +398,7 @@ export async function fetchShiftRows(
   }
 
   const rows = parsed.data.data ?? [];
-  cache.set(key, { at: Date.now(), rows });
+  cacheSet(key, rows);
   return rows;
 }
 
@@ -417,7 +464,12 @@ export function buildSchedules(rows: RawShiftRow[], startDate: string, endDate: 
   return out;
 }
 
-function emptySchedule(ldap: string, startDate: string, endDate: string): TechSchedule {
+function emptySchedule(
+  ldap: string,
+  startDate: string,
+  endDate: string,
+  error?: TechShiftsErrorCode,
+): TechSchedule {
   return {
     ldap,
     techName: null,
@@ -433,6 +485,7 @@ function emptySchedule(ldap: string, startDate: string, endDate: string): TechSc
     offDays: 0,
     activities: [],
     found: false,
+    error,
   };
 }
 
@@ -474,13 +527,29 @@ export async function getTechSchedules(
       try {
         out.push(await getTechSchedule(ldap, startDate, endDate, options));
       } catch (err: any) {
-        // CONFIG_MISSING and AUTHENTICATION_FAILED are not per-technician
-        // problems; re-throw so the caller sees a real failure instead of a
-        // table that quietly says nobody has a schedule.
-        if (err instanceof TechShiftsError && (err.code === "CONFIG_MISSING" || err.code === "AUTHENTICATION_FAILED")) {
+        // CONFIG_MISSING / CONFIG_INVALID / AUTHENTICATION_FAILED are not
+        // per-technician problems; re-throw so the caller sees a real failure
+        // instead of a table that quietly says nobody has a schedule.
+        if (
+          err instanceof TechShiftsError &&
+          (err.code === "CONFIG_MISSING" ||
+            err.code === "CONFIG_INVALID" ||
+            err.code === "AUTHENTICATION_FAILED")
+        ) {
           throw err;
         }
-        out.push(emptySchedule(ldap, startDate, endDate));
+        // Everything else IS per-technician-survivable, but it must carry the
+        // reason. A cold autoscale upstream 502s the whole fan-out, and
+        // without this the roll-up would announce "60 with no schedule on
+        // file" — a confident wrong answer produced by never having asked.
+        out.push(
+          emptySchedule(
+            ldap,
+            startDate,
+            endDate,
+            err instanceof TechShiftsError ? err.code : "UPSTREAM_UNAVAILABLE",
+          ),
+        );
       }
     }
   }
@@ -497,44 +566,12 @@ export async function getDistrictSchedules(
   endDate: string,
   options: TechShiftsClientOptions = {},
 ): Promise<TechSchedule[]> {
+  // A blank district silently drops the filter and pulls the entire fleet
+  // (~3.6 MB for a week). The route guards this too; the guard belongs here
+  // as well so no future caller can trip it.
+  if (!district?.trim()) throw new TechShiftsError("BAD_REQUEST", "district is required");
   const rows = await fetchShiftRows({ startDate, endDate, district }, options);
   return buildSchedules(rows, startDate, endDate);
-}
-
-/**
- * The rental-lane question: can this technician collect a vehicle on this date?
- * Returns the day itself plus the next working day, so a caller can offer an
- * alternative instead of only refusing.
- */
-export interface WorkingDayVerdict {
-  ldap: string;
-  date: string;
-  /** null when the feed has no row for that technician on that date. */
-  day: TechDay | null;
-  isWorking: boolean;
-  /** First working day on or after `date` inside the lookahead window. */
-  nextWorkingDay: string | null;
-  /** False when the feed knows nothing about this technician at all. */
-  known: boolean;
-}
-
-export async function checkWorkingDay(
-  ldap: string,
-  date: string,
-  lookaheadDays = 14,
-  options: TechShiftsClientOptions = {},
-): Promise<WorkingDayVerdict> {
-  assertIsoDate(date, "date");
-  const schedule = await getTechSchedule(ldap, date, addDaysISO(date, Math.max(0, lookaheadDays)), options);
-  const day = schedule.days.find((d) => d.date === date) ?? null;
-  return {
-    ldap: normalizeShiftLdap(ldap),
-    date,
-    day,
-    isWorking: !!day?.isWorking,
-    nextWorkingDay: schedule.days.find((d) => d.isWorking)?.date ?? null,
-    known: schedule.found,
-  };
 }
 
 /** Date-only arithmetic in UTC, so a server timezone can never shift the day. */

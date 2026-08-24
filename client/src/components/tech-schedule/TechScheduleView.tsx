@@ -54,6 +54,13 @@ export interface TechSchedule {
   offDays: number;
   activities: string[];
   found: boolean;
+  /**
+   * Present when the lookup FAILED rather than came back empty.
+   * `found:false` with no `error` means the feed was asked and knows
+   * nothing about this technician. `found:false` WITH an error means we
+   * never got an answer, which must never be rendered as "no schedule".
+   */
+  error?: string;
   roster?: { name: string | null; jobTitle: string | null; district: string | null } | null;
 }
 
@@ -110,12 +117,27 @@ export function useTechSchedule(ldap: string, start: string, end: string, enable
 }
 
 /** Split an error thrown by queryClient (`${status}: ${body}`) into something showable. */
+/**
+ * queryClient throws `${status}: ${body}`. The status alone is NOT enough to
+ * conclude the feed is unconfigured: the session middleware in front of
+ * /api/vrm also answers 503 on a transient auth-backend blip, and telling an
+ * operator to add a secret that is already set sends them to fix the one
+ * thing that is correct. Require the route's own machine-readable signal.
+ */
 export function describeScheduleError(error: unknown): { notConfigured: boolean; message: string } {
   const raw = String((error as Error)?.message ?? error ?? "");
-  return {
-    notConfigured: raw.startsWith("503:") || /TECHS?_SHIFTS_API_KEY/.test(raw),
-    message: raw,
-  };
+  let notConfigured = /TECHS?_SHIFTS_API_KEY/.test(raw);
+  if (!notConfigured) {
+    const body = raw.slice(raw.indexOf(":") + 1).trim();
+    try {
+      const parsed = JSON.parse(body);
+      notConfigured = parsed?.code === "CONFIG_MISSING" || parsed?.configured === false;
+    } catch {
+      // Not JSON (an HTML error page, a proxy timeout). Then it is not a
+      // configuration answer and must not be reported as one.
+    }
+  }
+  return { notConfigured, message: raw };
 }
 
 function dayNum(iso: string): string {
@@ -297,9 +319,12 @@ export function TechScheduleView({
 }: TechScheduleViewProps) {
   const normalizedLdap = (ldap || "").trim().toUpperCase();
 
+  // todayET() is read inside the memo, so it must also be a dependency or a
+  // tab left open across midnight keeps rendering last week.
+  const today = todayET();
   const start = useMemo(
-    () => startOfWeekISO(startDate || highlightDate || todayET()),
-    [startDate, highlightDate],
+    () => startOfWeekISO(startDate || highlightDate || today),
+    [startDate, highlightDate, today],
   );
   const end = useMemo(() => addDaysISO(start, weeks * 7 - 1), [start, weeks]);
 

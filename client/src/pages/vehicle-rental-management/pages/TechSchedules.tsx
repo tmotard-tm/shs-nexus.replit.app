@@ -31,30 +31,19 @@ import {
 } from "lucide-react";
 
 import { colors, fonts } from "../lib/constants";
-import { TechScheduleView, type TechSchedule } from "@/components/tech-schedule/TechScheduleView";
+import {
+  TechScheduleView,
+  addDaysISO,
+  startOfWeekISO,
+  todayET,
+  type TechSchedule,
+} from "@/components/tech-schedule/TechScheduleView";
 
 const DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
-function addDaysISO(iso: string, days: number): string {
-  const d = new Date(`${iso}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
-function startOfWeekISO(iso: string): string {
-  const dow = new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0 = Sunday
-  return addDaysISO(iso, dow === 0 ? -6 : 1 - dow);
-}
-
-function todayET(): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone: "America/New_York",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
-}
-
+// addDaysISO / startOfWeekISO / todayET are imported from the shared schedule
+// component. They were duplicated here byte-for-byte, which is two copies of
+// UTC date arithmetic to keep in sync across a DST boundary.
 function pretty(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-US", {
     month: "short",
@@ -202,9 +191,15 @@ function RollUp({
   weekEnd: string;
   caption: string;
 }) {
-  // Surface the two states that cost money before the grid, because nobody
-  // scans 77 rows looking for them.
-  const noSchedule = schedules.filter((s) => !s.found);
+  // Surface the states that cost money before the grid, because nobody scans
+  // 77 rows looking for them.
+  //
+  // `checkFailed` and `noSchedule` are deliberately NOT one bucket. A cold or
+  // rate-limited upstream fails every call in a 60-way fan-out, and merging
+  // the two would print "60 with no schedule on file" - a confident answer to
+  // a question we never actually got to ask.
+  const checkFailed = schedules.filter((s) => !s.found && s.error);
+  const noSchedule = schedules.filter((s) => !s.found && !s.error);
   const zeroWorking = schedules.filter((s) => s.found && s.workingDays === 0);
 
   return (
@@ -212,6 +207,25 @@ function RollUp({
       <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkSoft, marginBottom: 8 }}>
         {caption} · {pretty(weekStart)} – {pretty(weekEnd)} · numbers are scheduled hours
       </div>
+
+      {checkFailed.length ? (
+        <div
+          style={{
+            marginBottom: 10,
+            padding: "8px 11px",
+            borderRadius: 8,
+            border: `1px solid ${colors.red}`,
+            background: colors.redLight,
+            fontFamily: fonts.dmSans,
+            fontSize: 12,
+            color: colors.ink,
+          }}
+        >
+          <strong>{checkFailed.length} could NOT be checked</strong> (the schedule feed did not
+          answer): {checkFailed.map((s) => s.ldap).join(", ")}. Their rows below are blank
+          because the lookup failed, not because they are off. Reload to retry.
+        </div>
+      ) : null}
 
       {noSchedule.length || zeroWorking.length ? (
         <div
@@ -514,7 +528,7 @@ export default function TechSchedules() {
                   const active = selected?.ldap === hit.ldap;
                   return (
                     <button
-                      key={hit.ldap}
+                      key={`${hit.ldap}-${hit.district ?? ""}`}
                       type="button"
                       onClick={() => setSelected(hit)}
                       style={{

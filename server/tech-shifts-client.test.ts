@@ -13,12 +13,12 @@ import assert from "node:assert/strict";
 import {
   addDaysISO,
   buildSchedules,
-  checkWorkingDay,
   classifyRow,
   clearTechShiftsCache,
   fetchShiftRows,
   getTechSchedule,
   getTechSchedules,
+  getDistrictSchedules,
   isTechShiftsConfigured,
   isWorkingRow,
   normalizeShiftLdap,
@@ -262,31 +262,6 @@ assert.deepEqual(buildSchedules([row({ enterpriseId: null })], "2026-08-23", "20
   assert.deepEqual(s.days, []);
 }
 
-// ---------------------------------------------------------- checkWorkingDay
-{
-  clearTechShiftsCache();
-  const { impl } = stubFetch(
-    ok([
-      row({ date: "2026-08-26", hours: "OFF" }),
-      row({ date: "2026-08-27", hours: "OFF" }),
-      row({ date: "2026-08-28", hours: 9.5 }),
-    ]),
-  );
-  const v = await checkWorkingDay("ABRANTL", "2026-08-26", 7, { env: ENV, fetchImpl: impl });
-  assert.equal(v.isWorking, false);
-  assert.equal(v.day?.state, "off");
-  assert.equal(v.nextWorkingDay, "2026-08-28", "offer the alternative instead of only refusing");
-  assert.equal(v.known, true);
-}
-{
-  clearTechShiftsCache();
-  const { impl } = stubFetch(ok([]));
-  const v = await checkWorkingDay("GHOST", "2026-08-26", 7, { env: ENV, fetchImpl: impl });
-  assert.equal(v.known, false, "unknown must be distinguishable from not-working");
-  assert.equal(v.isWorking, false);
-  assert.equal(v.nextWorkingDay, null);
-}
-
 // --------------------------------------------------------------- batch fan-out
 {
   clearTechShiftsCache();
@@ -359,5 +334,165 @@ assert.equal(startOfWeekISO("2026-08-23"), "2026-08-17", "Sunday belongs to the 
 assert.equal(startOfWeekISO("2026-08-24"), "2026-08-24", "Monday is its own week start");
 assert.equal(startOfWeekISO("2026-08-28"), "2026-08-24", "Friday");
 assert.equal(startOfWeekISO("2026-08-30"), "2026-08-24", "Sunday again");
+
+// ================================================================
+// Regressions from the 2026-08-23 adversarial review.
+// ================================================================
+
+// --------------------------------------- a real date, not just an ISO shape
+// The regex is a shape check. "2026-13-01" used to pass it and then throw
+// RangeError inside toISOString(), surfacing as a 500 on plain bad input;
+// "2026-02-31" was worse, silently rolling to March 2 and answering a
+// different week with no warning at all.
+for (const bad of ["2026-13-01", "2026-00-10", "2026-02-31", "2026-04-31", "2026-08-32"]) {
+  await assert.rejects(
+    () => fetchShiftRows({ startDate: bad, endDate: "2026-12-31" }, { env: ENV }),
+    (e: any) => e instanceof TechShiftsError && e.code === "BAD_REQUEST",
+    `${bad} must be rejected as BAD_REQUEST, never reach Date arithmetic`,
+  );
+}
+// A leap day that really exists must still pass.
+clearTechShiftsCache();
+{
+  const { impl } = stubFetch(ok([]));
+  await fetchShiftRows({ startDate: "2028-02-29", endDate: "2028-03-01" }, { env: ENV, fetchImpl: impl });
+}
+assert.equal(addDaysISO("2028-02-28", 1), "2028-02-29", "2028 is a leap year");
+assert.throws(() => addDaysISO("2026-02-30", 1), (e: any) => e instanceof TechShiftsError);
+
+// ------------------- a bad base URL is CONFIG_INVALID, never CONFIG_MISSING
+// Telling an operator to add an API key that is already set sends them to fix
+// the one thing that is correct.
+clearTechShiftsCache();
+await assert.rejects(
+  () =>
+    fetchShiftRows(
+      { startDate: "2026-09-14", endDate: "2026-09-15" },
+      { env: { TECHS_SHIFTS_API_KEY: "k", TECH_SHIFTS_BASE_URL: "not a url" } as NodeJS.ProcessEnv },
+    ),
+  (e: any) => e instanceof TechShiftsError && e.code === "CONFIG_INVALID",
+  "a malformed base URL must not masquerade as a missing secret",
+);
+
+// ------------------------- a failed check is not "no schedule on file"
+// A cold autoscale upstream fails every call in a fan-out. Without the error
+// field the roll-up announces "N with no schedule on file", which is a
+// confident answer to a question that was never successfully asked.
+clearTechShiftsCache();
+{
+  const impl = (async (input: any) => {
+    const ldap = new URL(String(input)).searchParams.get("enterpriseId") ?? "";
+    if (ldap === "DOWN") {
+      return { ok: false, status: 502, text: async () => "bad gateway", json: async () => ({}) } as unknown as Response;
+    }
+    if (ldap === "GHOST") {
+      return { ok: true, status: 200, json: async () => ok([]), text: async () => "" } as unknown as Response;
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ok([row({ enterpriseId: ldap, techName: ldap })]),
+      text: async () => "",
+    } as unknown as Response;
+  }) as unknown as typeof fetch;
+
+  const out = await getTechSchedules(["OKTECH", "DOWN", "GHOST"], "2026-09-21", "2026-09-22", {
+    env: ENV,
+    fetchImpl: impl,
+  });
+  const byLdap = new Map(out.map((s) => [s.ldap, s]));
+
+  assert.equal(byLdap.get("OKTECH")?.found, true);
+  assert.equal(byLdap.get("OKTECH")?.error, undefined, "a successful lookup carries no error");
+
+  assert.equal(byLdap.get("DOWN")?.found, false);
+  assert.equal(
+    byLdap.get("DOWN")?.error,
+    "UPSTREAM_UNAVAILABLE",
+    "a failed lookup must say WHY, so the UI can refuse to call it 'no schedule'",
+  );
+
+  assert.equal(byLdap.get("GHOST")?.found, false);
+  assert.equal(
+    byLdap.get("GHOST")?.error,
+    undefined,
+    "a genuinely empty answer has no error — this is the case that MAY read as 'no schedule on file'",
+  );
+}
+
+// A config or auth failure is fleet-wide, not per-technician, and must still
+// surface rather than becoming sixty quiet 'found:false' rows.
+clearTechShiftsCache();
+await assert.rejects(
+  () => getTechSchedules(["AAA"], "2026-09-28", "2026-09-29", { env: {} as NodeJS.ProcessEnv }),
+  (e: any) => e instanceof TechShiftsError && e.code === "CONFIG_MISSING",
+);
+clearTechShiftsCache();
+{
+  const { impl } = stubFetch({ error: "nope" }, 401);
+  await assert.rejects(
+    () => getTechSchedules(["AAA"], "2026-10-05", "2026-10-06", { env: ENV, fetchImpl: impl }),
+    (e: any) => e instanceof TechShiftsError && e.code === "AUTHENTICATION_FAILED",
+  );
+}
+
+// ------------------------------------- skipCache: liveness must be measured
+// The health probe's query key is constant for a whole day, so a cached hit
+// would report the feed reachable with 0ms latency long after it died.
+clearTechShiftsCache();
+{
+  let n = 0;
+  const impl = (async () => {
+    n += 1;
+    return { ok: true, status: 200, json: async () => ok([]), text: async () => "" } as unknown as Response;
+  }) as unknown as typeof fetch;
+  const q = { startDate: "2026-10-12", endDate: "2026-10-13" };
+  await fetchShiftRows(q, { env: ENV, fetchImpl: impl });
+  await fetchShiftRows(q, { env: ENV, fetchImpl: impl });
+  assert.equal(n, 1, "the second identical call is served from cache");
+  await fetchShiftRows(q, { env: ENV, fetchImpl: impl, skipCache: true });
+  assert.equal(n, 2, "skipCache always hits the network");
+}
+
+// ------------------------------------------------ the cache stays bounded
+// Every week-pager click and every batched LDAP mints a distinct key, so an
+// unswept Map grows until the Repl restarts.
+clearTechShiftsCache();
+{
+  const impl = (async () =>
+    ({ ok: true, status: 200, json: async () => ok([]), text: async () => "" }) as unknown as Response) as unknown as typeof fetch;
+  for (let i = 0; i < 260; i += 1) {
+    await fetchShiftRows(
+      { startDate: "2026-01-01", endDate: "2026-01-02", enterpriseId: `T${i}` },
+      { env: ENV, fetchImpl: impl },
+    );
+  }
+  // The oldest key must have been evicted; the newest must still be warm.
+  let hits = 0;
+  const counting = (async () => {
+    hits += 1;
+    return { ok: true, status: 200, json: async () => ok([]), text: async () => "" } as unknown as Response;
+  }) as unknown as typeof fetch;
+  await fetchShiftRows(
+    { startDate: "2026-01-01", endDate: "2026-01-02", enterpriseId: "T0" },
+    { env: ENV, fetchImpl: counting },
+  );
+  assert.equal(hits, 1, "the oldest entry was evicted, so it must refetch");
+  await fetchShiftRows(
+    { startDate: "2026-01-01", endDate: "2026-01-02", enterpriseId: "T259" },
+    { env: ENV, fetchImpl: counting },
+  );
+  assert.equal(hits, 1, "the newest entry is still cached");
+}
+
+// ------------------------- a blank district must never pull the whole fleet
+clearTechShiftsCache();
+for (const blank of ["", "   "]) {
+  await assert.rejects(
+    () => getDistrictSchedules(blank, "2026-10-19", "2026-10-20", { env: ENV }),
+    (e: any) => e instanceof TechShiftsError && e.code === "BAD_REQUEST",
+    "a blank district drops the filter and pulls ~3.6 MB of the whole fleet",
+  );
+}
 
 console.log("tech-shifts-client: all assertions passed");

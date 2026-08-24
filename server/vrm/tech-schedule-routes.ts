@@ -83,6 +83,10 @@ function sendClientError(res: any, err: unknown): void {
   if (err instanceof TechShiftsError) {
     const status =
       err.code === "CONFIG_MISSING" ? 503
+      // A malformed base URL is a real misconfiguration, but adding the API
+      // key will not fix it, so it must not answer 503/configured:false and
+      // send the operator to Secrets.
+      : err.code === "CONFIG_INVALID" ? 500
       : err.code === "BAD_REQUEST" ? 400
       : err.code === "AUTHENTICATION_FAILED" ? 502
       : err.code === "RATE_LIMITED" ? 429
@@ -116,7 +120,10 @@ export function registerTechScheduleRoutes(router: Router): void {
     const today = etTodayISO();
     const startedAt = Date.now();
     try {
-      const probe = await getDistrictSchedules("__healthcheck__", today, today);
+      // skipCache is mandatory here. The probe key is constant for a whole
+      // day, so a cached hit would keep reporting the feed reachable with 0ms
+      // latency for five minutes after it actually went down.
+      const probe = await getDistrictSchedules("__healthcheck__", today, today, { skipCache: true });
       res.json({
         configured: true,
         reachable: true,
@@ -150,24 +157,32 @@ export function registerTechScheduleRoutes(router: Router): void {
       // technician by "%", and dropping them means no ESCAPE clause to get
       // wrong through two layers of quoting.
       const like = `%${q.replace(/[%_\\]/g, "")}%`;
+      // DISTINCT ON the LDAP: 195 tech_racfid values appear on more than one
+      // all_techs row. The active-status filter hides all but one of them
+      // today, which makes this exactly the kind of latent duplicate-key bug
+      // that shows up on some future search and not in testing.
       const { rows } = await db.execute(sql`
-        SELECT tech_racfid AS ldap,
-               tech_name,
-               first_name,
-               last_name,
-               job_title,
-               district_no,
-               employment_status
-        FROM all_techs
-        WHERE employment_status IS DISTINCT FROM 'T'
-          AND (
-            tech_racfid ILIKE ${like}
-            OR tech_name ILIKE ${like}
-            OR (COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) ILIKE ${like}
-          )
+        SELECT * FROM (
+          SELECT DISTINCT ON (UPPER(tech_racfid))
+                 tech_racfid AS ldap,
+                 tech_name,
+                 first_name,
+                 last_name,
+                 job_title,
+                 district_no,
+                 employment_status
+          FROM all_techs
+          WHERE employment_status IS DISTINCT FROM 'T'
+            AND (
+              tech_racfid ILIKE ${like}
+              OR tech_name ILIKE ${like}
+              OR (COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) ILIKE ${like}
+            )
+          ORDER BY UPPER(tech_racfid), (employment_status = 'A') DESC NULLS LAST, updated_at DESC
+        ) t
         ORDER BY
           -- an exact LDAP match is what the operator pasted; float it
-          CASE WHEN UPPER(tech_racfid) = ${q.toUpperCase()} THEN 0 ELSE 1 END,
+          CASE WHEN UPPER(ldap) = ${q.toUpperCase()} THEN 0 ELSE 1 END,
           last_name NULLS LAST, first_name NULLS LAST
         LIMIT ${limit}
       `);
@@ -247,7 +262,9 @@ export function registerTechScheduleRoutes(router: Router): void {
           SELECT first_name, last_name, tech_name, job_title, district_no
           FROM all_techs
           WHERE UPPER(tech_racfid) = ${ldap}
-          ORDER BY employment_status = 'A' DESC, updated_at DESC
+          -- Postgres DESC defaults to NULLS FIRST, so a NULL employment_status
+          -- would sort AHEAD of the active row and win the LIMIT 1.
+          ORDER BY (employment_status = 'A') DESC NULLS LAST, updated_at DESC
           LIMIT 1
         `);
         const r = (rows as any[])[0];
@@ -261,8 +278,11 @@ export function registerTechScheduleRoutes(router: Router): void {
             district: r.district_no ?? null,
           };
         }
-      } catch {
-        // The roster is a nicety. A schedule without a display name still ships.
+      } catch (rosterErr: any) {
+        // The roster is a nicety. A schedule without a display name still
+        // ships — but a bare swallow is how a broken query stays invisible
+        // for months, so say something.
+        console.warn("[tech-schedule] roster lookup failed for", ldap, rosterErr?.message ?? rosterErr);
       }
 
       res.json({ ...schedule, roster });

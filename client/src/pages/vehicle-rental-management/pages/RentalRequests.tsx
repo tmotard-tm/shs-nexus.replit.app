@@ -1222,7 +1222,7 @@ export default function RentalRequests() {
       )}
 
       {detail && (
-        <div onClick={() => { suggestedFor.current = null; setDetail(null); }}
+        <div onClick={() => { suggestedFor.current = null; setScheduleFor(null); setDetail(null); }}
              style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 60, display: "flex", justifyContent: "flex-end" }}>
           <div onClick={(e) => e.stopPropagation()}
                style={{ width: 520, maxWidth: "94vw", height: "100%", display: "flex", flexDirection: "column", background: colors.background, borderLeft: `1px solid ${colors.rule}` }}>
@@ -1240,7 +1240,7 @@ export default function RentalRequests() {
                                  color: colors.inkSoft, cursor: "pointer" }}>
                   <CalendarDays size={12} /> Schedule
                 </button>
-                <button type="button" onClick={() => { suggestedFor.current = null; setDetail(null); }}
+                <button type="button" onClick={() => { suggestedFor.current = null; setScheduleFor(null); setDetail(null); }}
                         style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted }}>
                   <X size={18} />
                 </button>
