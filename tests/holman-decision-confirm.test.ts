@@ -12,7 +12,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { judgeConfirmState } from "../server/holman-portal-service";
+import { judgeConfirmState, declineNeedsGridVerify } from "../server/holman-portal-service";
 
 type Line = {
   fieldName: string;
@@ -118,6 +118,28 @@ test("mid-race opposite decision on the acted-on line = actionable, never confir
 test("empty page (no lines for the PO) = indeterminate", () => {
   const state = judgeConfirmState([], acted("3"), "Decline");
   assert.equal(state.kind, "indeterminate");
+});
+
+// 2026-08-24, third live false DENY FAILED: a FIRST-ROUND PO renders only its
+// own ask's radios, so a successful decline leaves ZERO decision lines — the
+// judge honestly reads `indeterminate` (identical to a broken render), and the
+// CALLER must resolve it against the awaiting grid, exactly like `vanished`.
+test("decline grid-verify covers BOTH absence shapes: vanished AND zero-lines indeterminate", () => {
+  const vanished = judgeConfirmState([line("1", { disabled: true, checked: true })], acted("3"), "Decline");
+  assert.equal(vanished.kind, "vanished");
+  assert.equal(declineNeedsGridVerify(vanished), true);
+  const zeroLines = judgeConfirmState([], acted("3"), "Decline");
+  assert.equal(zeroLines.kind, "indeterminate");
+  assert.equal(declineNeedsGridVerify(zeroLines), true);
+});
+
+test("decline grid-verify never fires on decisive render evidence (actionable/confirmed)", () => {
+  const stillActionable = judgeConfirmState([line("3", { disabled: false, checked: false })], acted("3"), "Decline");
+  assert.equal(stillActionable.kind, "actionable");
+  assert.equal(declineNeedsGridVerify(stillActionable), false);
+  const confirmed = judgeConfirmState([line("3", { disabled: true, checked: true })], acted("3"), "Decline");
+  assert.equal(confirmed.kind, "confirmed");
+  assert.equal(declineNeedsGridVerify(confirmed), false);
 });
 
 test("plain single-round PO still confirms exactly as before", () => {

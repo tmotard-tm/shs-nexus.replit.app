@@ -639,6 +639,13 @@ export async function markHolmanPoOutcome(
   error: string,
 ): Promise<HolmanRentalPoRow | null> {
   const now = new Date().toISOString();
+  // CAS-guarded: only rows still in an actionable state may take an outcome
+  // stamp. Without the predicate, a slow deny request (e.g. an indeterminate
+  // confirm read held up behind a grid walk) could overwrite a row a
+  // concurrent walk already finalized as denied/resolved_holman — and the
+  // next sweep would then re-finalize it and REPLAY the deny pipeline
+  // (duplicate Decision Log row + duplicate tech SMS). Losing the write is
+  // correct: the newer state stands, and we hand it back to the caller.
   const result = await db.execute(sql`
     UPDATE holman_rental_po_queue
     SET status = ${status},
@@ -647,9 +654,14 @@ export async function markHolmanPoOutcome(
         holman_approve_error = ${error},
         approved_in_holman = false
     WHERE id = ${id}
+      AND status IN ('pending', 'blocked', 'approve_failed', 'deny_failed', 'deny_pending_verify')
     RETURNING ${sql.raw(SELECT_COLS)}
   `);
-  return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
+  const row = (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
+  if (row) return row;
+  // Lost update (or unknown id): re-read and return what actually stands so
+  // the caller can report the real state instead of the stamp it wanted.
+  return getHolmanPoRow(id);
 }
 
 export async function markHolmanPoDenied(id: string, decidedByName: string): Promise<HolmanRentalPoRow | null> {

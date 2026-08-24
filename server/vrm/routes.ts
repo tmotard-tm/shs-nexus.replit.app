@@ -3363,13 +3363,28 @@ export function registerVrmRoutes(): Router {
       if (holmanResult.success && holmanResult.pendingVerify) {
         const msg = holmanResult.error ?? "Decline posted — awaiting Holman grid verification";
         const updated = await markHolmanPoOutcome(id, "deny_pending_verify", who, msg);
-        return res.json({ ok: true, status: "deny_pending_verify", error: msg, holmanResult, row: updated });
+        // The stamp is CAS-guarded: a concurrent walk may have finalized the
+        // row (denied/resolved_holman) while we were verifying — echo what
+        // actually stands, never the stamp we wanted.
+        const stands = updated?.status ?? "deny_pending_verify";
+        return res.json({
+          ok: true, status: stands,
+          error: stands === "deny_pending_verify" ? msg : null,
+          holmanResult, row: updated,
+        });
       }
 
       // Real submit but NOT confirmed on re-read → FAILED. Loud, visible, retryable.
       const failMsg = holmanResult.error ?? "Holman did not confirm the denial on re-read";
       const updated = await markHolmanPoOutcome(id, "deny_failed", who, failMsg);
-      return res.json({ ok: false, status: "deny_failed", error: failMsg, holmanResult, row: updated });
+      // CAS-guarded (see above): if a concurrent walk already finalized the
+      // deny, report that success instead of a stale failure.
+      const stands = updated?.status ?? "deny_failed";
+      return res.json({
+        ok: stands !== "deny_failed", status: stands,
+        error: stands === "deny_failed" ? failMsg : null,
+        holmanResult, row: updated,
+      });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue deny error:", e.message);
       res.status(500).json({ ok: false, error: e.message });

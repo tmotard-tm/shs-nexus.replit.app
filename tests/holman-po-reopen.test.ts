@@ -20,6 +20,7 @@ import { sql } from "drizzle-orm";
 import { db, pool } from "../server/db.js";
 import {
   upsertHolmanRentalPoQueue,
+  markHolmanPoOutcome,
   HOLMAN_PO_REOPEN_GRACE_MINUTES,
 } from "../server/vrm/holman-rental-po-storage.js";
 import type { HolmanPortalPO } from "../server/holman-portal-service.js";
@@ -177,4 +178,37 @@ test("actionable rows keep flowing: fields refresh, status untouched, no reopen 
   assert.equal(row.vendor_name, "ENTERPRISE RENT-A-CAR (NEW NAME)", "scraped fields refreshed");
   assert.equal(Number(row.reopen_count), 0);
   assert.equal(row.reopen_reason, null);
+});
+
+test("CAS: an outcome stamp loses to a concurrent finalize and returns the standing row", async () => {
+  // Race the review flagged (2026-08-24): a slow deny request (indeterminate
+  // confirm read held up behind a grid walk) must NOT overwrite a row a
+  // concurrent walk already finalized as denied — or the next sweep would
+  // re-finalize it and replay the deny pipeline (duplicate SMS).
+  const po = `${PREFIX}CASRACE`;
+  await upsert([mkPo(po)], new Date());
+  await decide(po, "denied", 1); // concurrent walk finalized first
+  const idRow = await db.execute(sql`
+    SELECT id FROM holman_rental_po_queue WHERE po_number = ${po}
+  `);
+  const id = String((idRow.rows[0] as any).id);
+  const returned = await markHolmanPoOutcome(id, "deny_pending_verify", "cas-test", "late indeterminate read");
+  assert.ok(returned, "lost update still returns the standing row");
+  assert.equal(returned!.status, "denied", "caller is handed the state that actually stands");
+  const row = await getRow(po);
+  assert.equal(row.status, "denied", "finalized row was NOT overwritten");
+  assert.equal(row.holman_approve_error, "stale error from prior cycle", "outcome fields untouched on a lost write");
+});
+
+test("CAS positive control: an actionable row still takes the outcome stamp", async () => {
+  const po = `${PREFIX}CASOK`;
+  await upsert([mkPo(po)], new Date());
+  const idRow = await db.execute(sql`
+    SELECT id FROM holman_rental_po_queue WHERE po_number = ${po}
+  `);
+  const id = String((idRow.rows[0] as any).id);
+  const returned = await markHolmanPoOutcome(id, "deny_pending_verify", "cas-test", "held for grid verification");
+  assert.equal(returned!.status, "deny_pending_verify");
+  const row = await getRow(po);
+  assert.equal(row.status, "deny_pending_verify");
 });

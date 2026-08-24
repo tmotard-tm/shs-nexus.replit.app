@@ -1086,6 +1086,21 @@ export function judgeConfirmState(
     : { kind: "actionable", detail: "line locked but NOT with our decision — opposite decision appears applied; verify in Holman" };
 }
 
+// Pure (unit-tested): which unconfirmed Decline reads warrant grid verification?
+// `vanished` — the acted-on ask left an otherwise-rendering page: the decline's
+// normal success signature. `indeterminate` after retries — observed live
+// 2026-08-24 (third false DENY FAILED): a FIRST-ROUND PO renders only its own
+// ask's radios, so a successful decline leaves ZERO decision lines and "page
+// had no decision lines" is byte-identical to a broken render. The render
+// cannot distinguish success from breakage in either case; the awaiting grid
+// can — and the grid path is safe on a genuinely broken read too: a decline
+// that never applied stays listed → pendingVerify → the reopen grace hands it
+// back to the operator. Never a false DENY FAILED, never a confirm from the
+// render alone. `actionable` stays failed: the line demonstrably did NOT lock.
+export function declineNeedsGridVerify(state: ConfirmState): boolean {
+  return state.kind === "vanished" || state.kind === "indeterminate";
+}
+
 // Collect the ~23 empty Telerik *_ClientState fields + grid plumbing fields verbatim
 // from the GET so the postback round-trips them (server expects them present/blank).
 function collectClientStateFields(html: string): Array<[string, string]> {
@@ -1320,7 +1335,11 @@ async function submitDecision(
   // "applied" signal (same truth the resolved_holman sweep trusts). Still listed
   // = clearance lag (manual-style portal decisions clear in <6 min) → hand back
   // pendingVerify and let the next walk's sweep finalize.
-  if (!confirmed && state.kind === "vanished" && decision === "Decline") {
+  // (2026-08-24, third live false DENY FAILED: `indeterminate` joins `vanished`
+  // here — a first-round PO's only ask, once declined, leaves ZERO decision
+  // radios, so the confirm read cannot tell success from a broken page. See
+  // declineNeedsGridVerify.)
+  if (!confirmed && decision === "Decline" && declineNeedsGridVerify(state)) {
     try {
       const grid = await scrapeAwaitingAuth(true);
       if (grid.walkComplete && !grid.error) {
@@ -1349,7 +1368,9 @@ async function submitDecision(
     error: confirmed
       ? undefined
       : pendingVerify
-        ? `Decline posted and the ask left the Holman page (the decline's normal success signature), but the awaiting grid has not cleared it yet — held for verification; the next Refresh from Holman finalizes it automatically`
+        ? state.kind === "vanished"
+          ? `Decline posted and the ask left the Holman page (the decline's normal success signature), but the awaiting grid has not cleared it yet — held for verification; the next Refresh from Holman finalizes it automatically`
+          : `Decline posted but the confirmation page could not be read (${state.detail}) — held for verification against the awaiting grid; the next Refresh from Holman finalizes it automatically`
         : state.kind === "actionable"
           ? `Decision POST returned but not confirmed: ${state.detail} — verify in Holman portal`
           : `Decision POST returned but confirmation was unreadable after retries (${state.detail}) — the decision may HAVE applied; check Holman before retrying`,
