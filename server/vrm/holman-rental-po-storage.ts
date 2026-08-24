@@ -40,11 +40,13 @@ export interface HolmanRentalPoRow {
   district: string | null;
   state: string | null;
   /**
-   * How this authorization round arrived. 'extension' = a reopen of a PO we
-   * already decided (weekly rental extensions re-authorize the SAME PO number);
-   * 'new' = first time this PO has hit the queue. Under the new-process policy
-   * BOTH kinds get the redirect denial — the badge just tells the operator
-   * which one they're looking at.
+   * How this authorization round arrived. 'extension' = Holman is asking to
+   * approve ADDITIONAL dollars on an existing rental PO (additional_requested_amt
+   * > 0) or a reopen of a PO we already decided (weekly extensions re-authorize
+   * the SAME PO number, sometimes at $0.00); 'new' = the initial authorization.
+   * Per Tyler (Aug 2026): a scraped additional amount means extension, full
+   * stop. Under the new-process policy BOTH kinds get the redirect denial —
+   * the badge just tells the operator which one they're looking at.
    */
   requestKind: "extension" | "new";
   /**
@@ -325,7 +327,8 @@ export async function listHolmanPoQueue(
   // each lookup is load-bearing - a plain join would duplicate those rows.
   const result = await db.execute(sql`
     SELECT q.*, tl.district AS "district", tl.state AS "state",
-      CASE WHEN q."reopenCount" > 0 THEN 'extension' ELSE 'new' END AS "requestKind",
+      CASE WHEN COALESCE(q."additionalRequestedAmt", 0) > 0 OR q."reopenCount" > 0
+           THEN 'extension' ELSE 'new' END AS "requestKind",
       CASE WHEN co.booked THEN 'booked' ELSE 'none' END AS "directBillingStanding",
       co.etd_reference AS "cutoverEtdReference"
     FROM (
