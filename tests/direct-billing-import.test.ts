@@ -526,6 +526,9 @@ function importDeps(over: Partial<DirectImportDeps> = {}): Partial<DirectImportD
       totalCases: 1, enterpriseCount: 0, holmanCount: 0, pendedCount: 0,
     }),
     stampSwitchover: async () => ({ techs: 1, stamped: 1, unmatched: [] }),
+    // hermetic anchor-retry seam (task #806): the default dynamic-imports
+    // cutover-anchor.ts and sweeps the REAL dev DB — never in these fixtures.
+    retryAnchors: async () => ({ scanned: 0, anchored: 0, anchoredLdaps: [], failed: 0, failedLdaps: [] }),
     buildCutoverPayload: async () => ({ rows: [], book: { as_of: "2026-08-21", age_days: 1, stale: false } }),
     // hermetic off-page seam (task #774): the default dynamic-imports survey.ts
     // and reads the REAL dev DB — never let that happen in these fixtures.
@@ -703,6 +706,67 @@ test("importer: off-page scan carries double-bills and the unknown-identity blin
   // independent from the anchored comparison — both statuses present
   assert.ok("offPageCheckStatus" in res);
   assert.equal(res.oldBillingComparisonStatus, "ok");
+});
+
+// ── post-import anchor retry (task #806) ─────────────────────────────────────
+
+test("importer: anchor retry results ride through with status 'ok' (task #806)", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ retryAnchors: async () => ({ scanned: 3, anchored: 2, anchoredLdaps: ["KCOLE17", "CMORAL1"], failed: 0, failedLdaps: [] }) }),
+  );
+  assert.equal(res.anchorRetryStatus, "ok");
+  assert.equal(res.anchorRetryScanned, 3);
+  assert.equal(res.anchorRetryAnchored, 2);
+  assert.deepEqual(res.anchorRetryLdaps, ["KCOLE17", "CMORAL1"]);
+  assert.equal(res.anchorRetryFailed, 0);
+});
+
+test("importer: per-row anchor failures land status 'partial', never 'ok' — errored rows are named", async () => {
+  // A row whose anchor attempt ERRORED was not retried; that is not the same
+  // claim as "no evidence found", and the operator must be able to tell.
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ retryAnchors: async () => ({ scanned: 3, anchored: 1, anchoredLdaps: ["KCOLE17"], failed: 2, failedLdaps: ["CMORAL1", "JDOE42"] }) }),
+  );
+  assert.equal(res.anchorRetryStatus, "partial");
+  assert.equal(res.anchorRetryAnchored, 1, "successful anchors on the same pass still count");
+  assert.equal(res.anchorRetryFailed, 2);
+  assert.deepEqual(res.anchorRetryFailedLdaps, ["CMORAL1", "JDOE42"]);
+  assert.equal(res.runId, "run-test", "partial retry never fails the import");
+});
+
+test("importer: a throwing anchor retry lands anchorRetryStatus 'failed' — the import and sibling steps still succeed", async () => {
+  const res = await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({ retryAnchors: async () => { throw new Error("vrm_rental_cutover scan timeout"); } }),
+  );
+  assert.equal(res.anchorRetryStatus, "failed");
+  // the failed sweep's numbers must be ABSENT, not zero-shaped-clean
+  assert.equal(res.anchorRetryScanned, undefined);
+  assert.equal(res.anchorRetryAnchored, undefined);
+  assert.equal(res.anchorRetryLdaps, undefined);
+  assert.equal(res.anchorRetryFailed, undefined);
+  assert.equal(res.anchorRetryFailedLdaps, undefined);
+  assert.equal(res.switchoverStampStatus, "ok");
+  assert.equal(res.oldBillingComparisonStatus, "ok");
+  assert.equal(res.offPageCheckStatus, "ok");
+  assert.equal(res.runId, "run-test", "an anchor-retry failure must never fail the import itself");
+});
+
+test("importer: anchor retry runs AFTER the stamp and BEFORE the old-book comparison (task #806)", async () => {
+  // Order matters: the comparison derives book state live, so a row anchored
+  // on THIS pass must be compared as 'anchored', never still 'unanchored'.
+  const order: string[] = [];
+  await importDirectBillingReport(
+    { rows: [row({ reservation: "777" })] },
+    importDeps({
+      stampSwitchover: async () => { order.push("stamp"); return { techs: 0, stamped: 0, unmatched: [] }; },
+      retryAnchors: async () => { order.push("retry"); return { scanned: 0, anchored: 0, anchoredLdaps: [], failed: 0, failedLdaps: [] }; },
+      buildCutoverPayload: async () => { order.push("comparison"); return { rows: [], book: { as_of: "2026-08-21", age_days: 1, stale: false } }; },
+    }),
+  );
+  assert.deepEqual(order, ["stamp", "retry", "comparison"]);
 });
 
 test("feed carries the resolution audit trail", () => {

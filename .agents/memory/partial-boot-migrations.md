@@ -34,3 +34,7 @@ the deployed code.
 - Boot DDL must be genuinely re-runnable: no unconditional `DROP INDEX` + recreate of a
   guard the live app depends on. Rebuild only when the definition actually differs,
   otherwise every boot opens a window with the guard gone.
+- **The same drift exists on DEV:** boot DDL from newly merged code may never have run
+  against a dev DB the app hasn't booted on, so DB-backed suites fail wholesale on a
+  missing column (unwrap drizzle's `Failed query:` via `e.cause.message`). Schema drift
+  is a dev suspect too, not just a prod one.

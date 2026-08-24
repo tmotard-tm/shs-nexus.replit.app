@@ -155,4 +155,5 @@
 - [SKIP LOCKED claim bound](skip-locked-claim-bound.md) — UPDATE…IN(SELECT…LIMIT n FOR UPDATE SKIP LOCKED) can overclaim (plan-dependent); pick ids in a locking CTE; lane budgets bind laneLimit, not remaining.
 - [Tech shifts schedule feed](tech-shifts-feed.md) — secret name is plural TECHS_SHIFTS_API_KEY (client takes both); fetchShiftRows caches by query only (env-blind — test trap); VRM page + Fleet Scope wrapper + request drawer.
 - [Cutover msg1 adoption lane](msg1-adoption-lane.md) — adopted intents: born non-claimable, msg1-only, deterministic-uuid source, epoch-gated; page evidence = live guards/comms rows, never mutable msg1_state; tracking-row write failure must surface.
+- [Validation vs reviewer fixture race](validation-review-fixture-race.md) — completion review runs the task's DB-fixture suites DURING validation; strict dev-DB compare suites must scrub ZZ* rows + retry with backoff.
 - [ETD vehicle-class parity fixtures](etd-vehicle-class-fixtures.md) — Python-generated differential fixtures go stale silently and can fake parity both ways; regenerate + baseline-diff before diagnosing drift; suite runs in no workflow.

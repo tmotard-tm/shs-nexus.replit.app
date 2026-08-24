@@ -1,0 +1,22 @@
+---
+name: Completion review races validation on the shared dev DB
+description: Why strict cross-surface DB suites fail nondeterministically only during markTaskComplete validation, and how to make them immune.
+---
+
+**Rule:** Strict cross-surface alignment suites (payloads compared row-by-row against
+the shared dev DB) must treat ZZ*-prefixed rows as synthetic fixtures — scrub them from
+row-level comparisons and give the coherence/rebuild loop enough patience (retries with
+~10s+ backoff) to outlast a concurrent fixture suite's seed→clean window.
+
+**Why:** The completion code review runs concurrently with the validation shell
+commands and it EXECUTES the task's DB-backed test suites itself. Those suites seed and
+clean ZZ* fixtures on the same dev database mid-validation, so an alignment suite sees a
+fixture row in one surface build and not the next ("case sets differ" by ZZANC-*,
+openTotal off by the fixture count). The suite passes every time it is run alone —
+the failure exists only inside validation runs.
+
+**How to apply:** When a validation-only failure shows fixture-prefixed keys (ZZ*) in a
+set diff, don't hunt for a data bug or leftover rows (the DB will be clean by the time
+you look) — the churn came from the reviewer re-running fixture suites. Fix the strict
+suite's tolerance, not the fixtures. ZZ* is the reserved synthetic-key prefix
+(ZZANC*, ZZPROBE*); new DB fixtures should keep using it so the scrub keeps working.

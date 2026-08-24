@@ -855,6 +855,39 @@ export default function RentalOperations() {
           });
         }
       }
+      // Task #806: each import retries anchoring booked cutover rows still
+      // 'unanchored' — later book/identity evidence gets snapshotted before
+      // the old ticket drops off the book. Anchors gained are worth telling
+      // the operator (rows leave the needs-resolution bucket permanently),
+      // and a failed sweep must never read as "nothing to anchor".
+      if (r.anchorRetryStatus === "failed") {
+        toast({
+          title: "Anchor retry did not run",
+          description: "The sweep that re-anchors 'unanchored' cutover rows failed on this upload — rows needing resolution were NOT retried. The next import retries automatically; manual resolution on Cutover Tracking still works.",
+          variant: "destructive",
+        });
+      } else {
+        // 'partial': the sweep ran but some rows' anchor attempts errored —
+        // those rows were NOT retried, which is not the same as "no evidence
+        // found" (unknown ≠ clean). Anchors gained on the same pass still show.
+        if (r.anchorRetryStatus === "partial") {
+          const failedWho: string[] = r.anchorRetryFailedLdaps ?? [];
+          const failedN = Number(r.anchorRetryFailed ?? failedWho.length);
+          toast({
+            title: `Anchor retry skipped ${failedN} row${failedN === 1 ? "" : "s"} on errors`,
+            description: `${failedN} unanchored cutover row${failedN === 1 ? "" : "s"} could NOT be retried on this upload (errors, not a clean "no evidence" result)${failedWho.length ? `: ${failedWho.slice(0, 6).join(", ")}${failedWho.length > 6 ? ` +${failedWho.length - 6} more` : ""}` : ""}. The next import retries automatically; manual resolution still works.`,
+            variant: "destructive",
+          });
+        }
+        const gained = Number(r.anchorRetryAnchored ?? 0);
+        if (gained > 0) {
+          const who: string[] = r.anchorRetryLdaps ?? [];
+          toast({
+            title: `${gained} unanchored cutover row${gained === 1 ? "" : "s"} auto-anchored`,
+            description: `New book/identity evidence identified the old ticket${gained === 1 ? "" : "s"}: ${who.slice(0, 6).join(", ")}${who.length > 6 ? ` +${who.length - 6} more` : ""} — ${gained === 1 ? "this row" : "these rows"} no longer need${gained === 1 ? "s" : ""} manual resolution.`,
+          });
+        }
+      }
       // Premortem fix: coverage gaps are part of the result, not a footnote —
       // these techs were NOT checked for double-billing at all.
       const blind = Number(s?.switchoverBlindRows ?? 0);

@@ -27,7 +27,7 @@ import { sql } from "drizzle-orm";
 
 import { db, pool } from "../server/db";
 import { buildCutoverStatusPayload } from "../server/vrm/forms/survey";
-import { computeBookAnchor, anchorCutoverRow } from "../server/vrm/forms/cutover-anchor";
+import { computeBookAnchor, anchorCutoverRow, anchorCutoverRowStrict, retryAnchorUnanchoredCutoverRows } from "../server/vrm/forms/cutover-anchor";
 
 const LDAPS = ["ZZANC1", "ZZANC2", "ZZANC3", "ZZANC4", "ZZANC5"];
 
@@ -313,5 +313,97 @@ describe("cutover book anchoring (task #738)", () => {
 
     // Booked rows are still present in the widened payload (superset, not swap).
     assert.ok((w.rows as any[]).some((x) => x.ldap === "ZZANC2"), "booked rows remain in the widened payload");
+  });
+
+  test("task #806: import-time anchor retry sweeps booked unanchored rows — overrides included, evidence never overwritten, no churn without evidence", async () => {
+    // ZZANC9: booked, empty anchor, resolvable evidence → gains an anchor.
+    await seedCutover("ZZANC9", "99909");
+    await seedCase({ caseKey: "ZZANC-9", truck: "99909", ticket: "ZZTK9A", start: "2026-08-01" });
+    await seedResolution("ZZANC-9", "ZZ99909");
+    await seedTech("ZZ99909", "ZZANC9");
+    // ZZANC10: manual off-book override + evidence → the sweep anchors it
+    // anyway (a found anchor outranks the override by design).
+    await seedCutover("ZZANC10", "99910");
+    await db.execute(sql`
+      UPDATE vrm_rental_cutover
+      SET book_override_state = 'off_book', book_override_at = now(),
+          book_override_by = 'zztest', book_override_reason = 'fixture override'
+      WHERE ldap = 'ZZANC10'`);
+    await seedCase({ caseKey: "ZZANC-10", truck: "99910", ticket: "ZZTK10", start: "2026-08-01" });
+    await seedResolution("ZZANC-10", "ZZ99910");
+    await seedTech("ZZ99910", "ZZANC10");
+    // ZZANC11: NON-empty anchor → not a candidate, never rewritten.
+    await seedCutover("ZZANC11", "99911", { anchors: ["ZZKEEP"] });
+    // ZZANC12: booked, empty anchor, NO evidence → scanned, but skipEmpty
+    // means no write (book_anchor_at stays NULL — no churn on every import).
+    await seedCutover("ZZANC12", "99912");
+    // ZZANC13: non-booked → outside the sweep's scope entirely.
+    await seedCutover("ZZANC13", "99913", { status: "released" });
+
+    const res = await retryAnchorUnanchoredCutoverRows({
+      onlyLdaps: ["ZZANC9", "ZZANC10", "ZZANC11", "ZZANC12", "ZZANC13"],
+    });
+    assert.equal(res.scanned, 3, "ZZANC9 + ZZANC10 + ZZANC12 (anchored/non-booked rows excluded)");
+    assert.equal(res.anchored, 2);
+    assert.deepEqual([...res.anchoredLdaps].sort(), ["ZZANC10", "ZZANC9"]);
+    assert.equal(res.failed, 0, "clean pass reports zero per-row failures");
+
+    const { rows: after } = await db.execute(sql`
+      SELECT ldap, book_anchor_tickets::text AS tickets, book_anchor_source, book_anchor_at
+      FROM vrm_rental_cutover WHERE ldap IN ('ZZANC9','ZZANC10','ZZANC11','ZZANC12','ZZANC13')`);
+    const by = new Map((after as any[]).map((r) => [r.ldap, r]));
+    assert.equal(by.get("ZZANC9").tickets, '["ZZTK9A"]');
+    assert.equal(by.get("ZZANC9").book_anchor_source, "repair");
+    assert.equal(by.get("ZZANC10").tickets, '["ZZTK10"]');
+    assert.equal(by.get("ZZANC11").tickets, '["ZZKEEP"]', "non-empty anchor untouched");
+    assert.equal(by.get("ZZANC11").book_anchor_source, "backfill", "non-empty anchor's provenance untouched");
+    assert.equal(by.get("ZZANC12").book_anchor_at, null, "no-evidence row must not be stamped (skipEmpty)");
+    assert.equal(by.get("ZZANC13").book_anchor_at, null, "non-booked row untouched");
+
+    // The anchored override row now derives from EVIDENCE, not the override…
+    const p1 = await buildCutoverStatusPayload();
+    const r10 = rowFor(p1, "ZZANC10");
+    assert.equal(r10.holman_book_match, "anchored", "found anchor outranks the manual override");
+    assert.equal(r10.holman_book_state, "open");
+
+    // …and permanence: once anchored, the row NEVER reads 'unanchored' again,
+    // even after the old ticket later leaves the book.
+    await db.execute(sql`DELETE FROM vrm_rental_operations_cases WHERE case_key = 'ZZANC-10'`);
+    const p2 = await buildCutoverStatusPayload();
+    const gone = rowFor(p2, "ZZANC10");
+    assert.equal(gone.holman_book_state, "", "anchored ticket off the book = off-book, not unanchored");
+    assert.equal(gone.holman_book_match, "anchored");
+  });
+
+  test("task #806: a row whose anchor attempt ERRORS is counted failed — never 'no evidence', never aborts the sweep", async () => {
+    // ZZANC12 (still booked + unanchored from the previous test) plus a fresh
+    // candidate with real evidence. The anchor fn blows up on ZZANC12 only:
+    // the sweep must keep going, anchor the healthy row, and report the
+    // errored row separately — an error is NOT a "we looked and found
+    // nothing" claim, and the importer surfaces it as status 'partial'.
+    await seedCutover("ZZANC14", "99914");
+    await seedCase({ caseKey: "ZZANC-14", truck: "99914", ticket: "ZZTK14", start: "2026-08-01" });
+    await seedResolution("ZZANC-14", "ZZ99914");
+    await seedTech("ZZ99914", "ZZANC14");
+
+    const res = await retryAnchorUnanchoredCutoverRows({
+      onlyLdaps: ["ZZANC12", "ZZANC14"],
+      anchorFn: async (ldap, source, opts) => {
+        if (ldap === "ZZANC12") throw new Error("simulated compute failure");
+        return anchorCutoverRowStrict(ldap, source, opts);
+      },
+    });
+    assert.equal(res.scanned, 2);
+    assert.equal(res.anchored, 1, "the healthy row still anchors after a sibling's failure");
+    assert.deepEqual(res.anchoredLdaps, ["ZZANC14"]);
+    assert.equal(res.failed, 1);
+    assert.deepEqual(res.failedLdaps, ["ZZANC12"], "the errored row is named, not folded into 'no evidence'");
+
+    const { rows } = await db.execute(sql`
+      SELECT ldap, book_anchor_tickets::text AS tickets, book_anchor_at
+      FROM vrm_rental_cutover WHERE ldap IN ('ZZANC12','ZZANC14')`);
+    const by = new Map((rows as any[]).map((r) => [r.ldap, r]));
+    assert.equal(by.get("ZZANC14").tickets, '["ZZTK14"]');
+    assert.equal(by.get("ZZANC12").book_anchor_at, null, "the errored row is untouched");
   });
 });

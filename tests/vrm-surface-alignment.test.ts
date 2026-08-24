@@ -217,14 +217,25 @@ function surfaces() {
       keysOf(s.master) === keysOf(s.region)
       && s.exec.headline?.openTotal === (s.master.rows as AnyRow[]).length;
     let s = await build();
-    for (let i = 0; i < 2 && !coherent(s); i++) {
+    for (let i = 0; i < 4 && !coherent(s); i++) {
+      // A concurrent DB-fixture suite (e.g. a completion review re-running the
+      // ZZ*-prefixed fixture tests) churns for a minute or more — pause so the
+      // rebuild lands after the churn instead of inside it.
       console.log("# surfaces diverged (ingest or concurrent fixtures raced the build) — rebuilding");
+      await new Promise((res) => setTimeout(res, 12_000));
       s = await build();
     }
     return s;
   })();
   return surfacesP;
 }
+
+// Synthetic DB fixtures use the reserved ZZ* key prefix (ZZANC*, ZZPROBE*…).
+// Another suite seeding/cleaning them mid-build makes the row SETS diverge by
+// exactly those rows; that is fixture noise, not surface drift, so row-level
+// comparisons exclude them. Real cases are still compared strictly.
+const isSyntheticFixture = (key: unknown) => typeof key === "string" && key.startsWith("ZZ");
+const realRows = (rows: AnyRow[]) => rows.filter((r) => !isSyntheticFixture(r.case_key));
 
 const byCaseKey = (rows: AnyRow[]) => new Map<string, AnyRow>(rows.map((r) => [r.case_key, r]));
 
@@ -237,9 +248,10 @@ const WORKBOOK_FIELDS = new Set([
 
 test("master vs by-region: same cases, every shared field identical", { skip: !HAS_DB }, async () => {
   const { master, region } = await surfaces();
-  const m = byCaseKey(master.rows);
-  const r = byCaseKey(region.rows);
-  assert.equal(m.size, master.rows.length, "master case_key not unique");
+  const mRows = realRows(master.rows);
+  const m = byCaseKey(mRows);
+  const r = byCaseKey(realRows(region.rows));
+  assert.equal(m.size, mRows.length, "master case_key not unique");
   assert.deepEqual([...m.keys()].sort(), [...r.keys()].sort(), "case sets differ");
 
   // Computed against NOW() in SQL at each build — two builds minutes apart

@@ -85,31 +85,123 @@ export async function computeBookAnchor(ldap: string): Promise<BookAnchorTicket[
  * evidence can only help. `force` is for repair scripts only.
  *
  * Returns the anchored tickets, or null when the row was left untouched.
- * NEVER throws — callers are booking paths whose success must not depend
- * on the tracking page's bookkeeping.
+ *
+ * Two variants share one core:
+ * - anchorCutoverRowStrict THROWS on compute/update failure — for callers
+ *   that must account for failures (the task #806 retry sweep: a row whose
+ *   anchor attempt errored must NEVER read as "no evidence found").
+ * - anchorCutoverRow NEVER throws — callers are booking paths whose success
+ *   must not depend on the tracking page's bookkeeping.
  */
+export async function anchorCutoverRowStrict(
+  ldap: string,
+  source: "booking" | "backfill" | "repair",
+  opts?: { force?: boolean; skipEmpty?: boolean },
+): Promise<string[] | null> {
+  const detail = await computeBookAnchor(ldap);
+  const tickets = detail.map((d) => d.ticket);
+  // Retry sweeps (task #806) pass skipEmpty: rewriting [] over an already
+  // empty anchor adds no evidence — it would only churn book_anchor_at/
+  // book_anchor_source ('repair' over a row nothing was found for) on every
+  // import. Booking-time callers keep writing []: "we looked at booking
+  // time and found nothing" is itself a fact worth dating.
+  if (opts?.skipEmpty && tickets.length === 0) return null;
+  const res = await db.execute(sql`
+    UPDATE vrm_rental_cutover
+    SET book_anchor_tickets = ${JSON.stringify(tickets)}::jsonb,
+        book_anchor_detail  = ${JSON.stringify(detail)}::jsonb,
+        book_anchor_at      = now(),
+        book_anchor_source  = ${source},
+        updated_at          = now()
+    WHERE upper(ldap) = upper(${ldap})
+      AND (${opts?.force === true}
+           OR jsonb_array_length(COALESCE(book_anchor_tickets, '[]'::jsonb)) = 0)
+  `);
+  return ((res as any).rowCount ?? 0) > 0 ? tickets : null;
+}
+
 export async function anchorCutoverRow(
   ldap: string,
   source: "booking" | "backfill" | "repair",
-  opts?: { force?: boolean },
+  opts?: { force?: boolean; skipEmpty?: boolean },
 ): Promise<string[] | null> {
   try {
-    const detail = await computeBookAnchor(ldap);
-    const tickets = detail.map((d) => d.ticket);
-    const res = await db.execute(sql`
-      UPDATE vrm_rental_cutover
-      SET book_anchor_tickets = ${JSON.stringify(tickets)}::jsonb,
-          book_anchor_detail  = ${JSON.stringify(detail)}::jsonb,
-          book_anchor_at      = now(),
-          book_anchor_source  = ${source},
-          updated_at          = now()
-      WHERE upper(ldap) = upper(${ldap})
-        AND (${opts?.force === true}
-             OR jsonb_array_length(COALESCE(book_anchor_tickets, '[]'::jsonb)) = 0)
-    `);
-    return ((res as any).rowCount ?? 0) > 0 ? tickets : null;
+    return await anchorCutoverRowStrict(ldap, source, opts);
   } catch (e: any) {
     console.error(`[cutover-anchor] anchor failed for ${ldap}:`, e?.message || e);
     return null;
   }
+}
+
+export interface CutoverAnchorRetryResult {
+  /** booked rows with an empty anchor the sweep looked at */
+  scanned: number;
+  /** rows that gained a non-empty anchor on this pass */
+  anchored: number;
+  anchoredLdaps: string[];
+  /**
+   * rows whose anchor attempt ERRORED (compute or update threw) — distinct
+   * from "no evidence found". A failed row was NOT retried; unknown ≠ clean.
+   */
+  failed: number;
+  failedLdaps: string[];
+}
+
+/**
+ * Task #806: retry anchoring for booked cutover rows still WITHOUT an
+ * anchored old ticket. Evidence can appear after booking time — a later
+ * Enterprise book import lands the old ticket, or a new identity resolution
+ * (human override, re-resolved case) makes it identifiable. Until now that
+ * late evidence was only picked up by the live fallback truck-match, never
+ * snapshotted, so it evaporated once the old ticket dropped off the book.
+ *
+ * Runs after each enterprise/direct-billing import completes. Manual
+ * off-book overrides are scanned too — a found anchor outranks the override
+ * by design (the payload consults the override strictly after the evidence
+ * branches). anchorCutoverRow's write-once rule still holds: a non-empty
+ * anchor is never overwritten, and skipEmpty stops a no-evidence recompute
+ * from churning book_anchor_at/source on every import.
+ *
+ * Per-row failures never abort the sweep, but they are COUNTED separately
+ * (failed/failedLdaps) — an errored anchor attempt must not read as "no
+ * evidence found" or the operator toast would report a clean pass.
+ *
+ * `onlyLdaps` scopes the sweep (tests); `anchorFn` is a test seam for the
+ * per-row anchor call; production callers pass nothing.
+ */
+export async function retryAnchorUnanchoredCutoverRows(
+  opts?: { onlyLdaps?: string[]; anchorFn?: typeof anchorCutoverRowStrict },
+): Promise<CutoverAnchorRetryResult> {
+  const { rows } = await db.execute(sql`
+    SELECT ldap
+    FROM vrm_rental_cutover
+    WHERE reservation_status = 'booked'
+      AND jsonb_array_length(COALESCE(book_anchor_tickets, '[]'::jsonb)) = 0
+    ORDER BY ldap
+  `);
+  const only = opts?.onlyLdaps?.length
+    ? new Set(opts.onlyLdaps.map((l) => l.trim().toUpperCase()))
+    : null;
+  const candidates = (rows as any[])
+    .map((r) => String(r.ldap ?? "").trim().toUpperCase())
+    .filter((l) => l && (!only || only.has(l)));
+  const anchor = opts?.anchorFn ?? anchorCutoverRowStrict;
+  let anchored = 0;
+  const anchoredLdaps: string[] = [];
+  let failed = 0;
+  const failedLdaps: string[] = [];
+  for (const ldap of candidates) {
+    try {
+      const res = await anchor(ldap, "repair", { skipEmpty: true });
+      if (res && res.length > 0) {
+        anchored++;
+        anchoredLdaps.push(ldap);
+      }
+    } catch (e: any) {
+      failed++;
+      failedLdaps.push(ldap);
+      console.error(`[cutover-anchor] retry sweep: anchor attempt FAILED for ${ldap} (row not retried):`, e?.message || e);
+    }
+  }
+  return { scanned: candidates.length, anchored, anchoredLdaps, failed, failedLdaps };
 }

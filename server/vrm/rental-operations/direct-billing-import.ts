@@ -41,6 +41,7 @@ import {
   persistRentalCases, loadTruckTechMap, type RentalCase, type IngestResult,
 } from "./ingest";
 import type { IdentityResolution, TruckTech, CandidateEvidence } from "./identity-resolver";
+import type { CutoverAnchorRetryResult } from "../forms/cutover-anchor";
 
 // ── raw OOXML parsing ────────────────────────────────────────────────────────
 
@@ -1180,6 +1181,21 @@ export interface DirectImportResult extends IngestResult {
   switchoverStampStatus: "ok" | "failed";
   oldBillingComparisonStatus: "ok" | "failed";
   /**
+   * Task #806: post-import anchor retry — same "silence never reads clean"
+   * contract as the statuses above; ALWAYS set. 'failed' = the sweep did not
+   * run at all; 'partial' = it ran but SOME rows' anchor attempts errored
+   * (those rows were NOT retried — see anchorRetryFailedLdaps); 'ok' = every
+   * candidate row was actually attempted.
+   */
+  anchorRetryStatus: "ok" | "partial" | "failed";
+  /** booked-but-unanchored rows the retry scanned / rows that gained an anchor */
+  anchorRetryScanned?: number;
+  anchorRetryAnchored?: number;
+  anchorRetryLdaps?: string[];
+  /** rows whose anchor attempt errored (unknown ≠ clean; retried next import) */
+  anchorRetryFailed?: number;
+  anchorRetryFailedLdaps?: string[];
+  /**
    * Task #774: off-page scan status — same "silence never reads clean"
    * contract as the two statuses above; ALWAYS set, 'failed' means the scan
    * did not run and the operator must be told.
@@ -1225,6 +1241,8 @@ export interface DirectImportDeps {
   loadCtx: typeof loadDirectResolveCtx;
   persist: typeof persistRentalCases;
   stampSwitchover: typeof stampCutoverBillingSwitchover;
+  /** Task #806: post-import anchor retry (cutover-anchor.ts retryAnchorUnanchoredCutoverRows) */
+  retryAnchors: () => Promise<CutoverAnchorRetryResult>;
   buildCutoverPayload: () => Promise<any>;
   /** Task #774: off-page list builder (survey.ts buildDirectOffPagePayload) */
   buildOffPagePayload: () => Promise<any>;
@@ -1321,6 +1339,45 @@ export async function importDirectBillingReport(input: {
     console.log(`[VRM/RentalOps] direct import: billing switchover stamped on ${st.stamped} cutover row(s) (${st.techs} resolved tech(s) on the report${st.unmatched.length ? `; NO cutover row for: ${st.unmatched.join(", ")}` : ""})`);
   } catch (e: any) {
     console.warn("[VRM/RentalOps] direct import: cutover switchover stamp failed (non-fatal):", e?.message || e);
+  }
+
+  // Task #806: retry anchoring for booked cutover rows still without an
+  // anchored old ticket. Later evidence (a fresh Enterprise book import, a
+  // new identity resolution) can make the old ticket identifiable AFTER
+  // booking time — snapshot it as an anchor now, before the ticket drops off
+  // the book. anchorCutoverRow upgrades EMPTY anchors only (never overwrites
+  // evidence), manual off-book overrides are scanned too (a found anchor
+  // outranks the override by design), and the whole sweep is best-effort.
+  // Runs BEFORE the old-book comparison so newly anchored rows are compared
+  // on real evidence instead of reading 'unanchored'.
+  let anchorRetryScanned: number | undefined, anchorRetryAnchored: number | undefined;
+  let anchorRetryLdaps: string[] | undefined;
+  let anchorRetryFailed: number | undefined;
+  let anchorRetryFailedLdaps: string[] | undefined;
+  let anchorRetryStatus: "ok" | "partial" | "failed" = "failed";
+  try {
+    const retry = deps.retryAnchors ?? (async () => {
+      const { retryAnchorUnanchoredCutoverRows } = await import("../forms/cutover-anchor");
+      return retryAnchorUnanchoredCutoverRows();
+    });
+    const ar = await retry();
+    anchorRetryScanned = ar.scanned; anchorRetryAnchored = ar.anchored;
+    anchorRetryLdaps = ar.anchoredLdaps;
+    anchorRetryFailed = ar.failed; anchorRetryFailedLdaps = ar.failedLdaps;
+    // Per-row errors must not read as a clean pass: those rows were NOT
+    // retried, and "no evidence found" is a claim the sweep can't make for
+    // them. 'partial' keeps the successful counts honest while flagging it.
+    anchorRetryStatus = ar.failed > 0 ? "partial" : "ok";
+    if (ar.anchored > 0) {
+      console.log(`[VRM/RentalOps] direct import: anchor retry snapshotted old-ticket anchor(s) onto ${ar.anchored} of ${ar.scanned} unanchored booked cutover row(s): ${ar.anchoredLdaps.join(", ")}`);
+    } else {
+      console.log(`[VRM/RentalOps] direct import: anchor retry found no new evidence (${ar.scanned} unanchored booked cutover row(s) scanned)`);
+    }
+    if (ar.failed > 0) {
+      console.warn(`[VRM/RentalOps] direct import: anchor retry could NOT attempt ${ar.failed} row(s) (errors, not "no evidence"): ${ar.failedLdaps.join(", ")}`);
+    }
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] direct import: cutover anchor retry failed (non-fatal):", e?.message || e);
   }
 
   // Comparison against the OLD enterprise billing — runs AFTER the stamp so
@@ -1442,6 +1499,8 @@ export async function importDirectBillingReport(input: {
     dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus,
     headerRow, matchedCols, stats, switchoverTechs, switchoverStamped,
     switchoverStampStatus, oldBillingComparisonStatus, switchoverUnmatchedLdaps,
+    anchorRetryStatus, anchorRetryScanned, anchorRetryAnchored, anchorRetryLdaps,
+    anchorRetryFailed, anchorRetryFailedLdaps,
     oldBillingConflicts, oldBookAsOf, oldBookAgeDays, oldBookStale,
     comparisonNonBookedStamped, preflight,
     offPageCheckStatus, offPageDoubleBills, offPageUnknownIdentity, offPageTotal,
