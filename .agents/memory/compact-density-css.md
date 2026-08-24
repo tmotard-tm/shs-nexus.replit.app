@@ -23,14 +23,30 @@ classes (`fc-*`) placed on the page. Rules to reuse:
   heights on the flex-fill pane chain; after adding density, still run the page's
   viewport guard AND both sabotage modes (hardcoded pinned height + removed
   height wrapper) per viewport-fit-guard.md.
-- **Pinned-height sabotage needs `flexShrink: 0`.** A bare `height: 900` on a
-  flex-item pane is silently shrunk back to fit by the default `flex-shrink: 1`
-  (overflow-auto zeroes the automatic min-size), so the guard stays green and the
-  sabotage proves nothing. Seen live on both shell mains 2026-08-24.
+- **Pinned-height sabotage needs `flexShrink: 0` AND the flex classes stripped.**
+  A bare `height: 900` on a flex-item pane is silently shrunk back to fit by the
+  default `flex-shrink: 1` (overflow-auto zeroes the automatic min-size). Worse:
+  on a `flex-1` pane (`flex: 1 1 0%`) even `height + flexShrink:0` is a no-op in
+  the column direction — flex-basis 0% wins over `height`, the guard stays green,
+  and the sabotage proves nothing (seen live on the VRM shell 2026-08-24). Real
+  pin = remove `flex-1 min-h-0` from the pane while adding the height.
 - **Inline-styled pages** (e.g. VRM Ops Queue) need `!important` on every
-  override of an inline property; hidden elements (`display:none`) don't. A
-  shell's inline padding can be reclaimed page-scoped via
-  `main[data-testid=...]:has(.page-root) { padding: Npx !important; }`.
+  override of an inline property — *including `display:none`* when the target
+  carries an inline `display:flex` (the VRM Rental Ops clock line silently
+  stayed visible without it). A shell's inline padding can be reclaimed
+  page-scoped via `main[data-testid=...]:has(.page-root) { padding: Npx !important; }`.
+- **Pages with their own viewport math move in lockstep.** An inline
+  `maxHeight: calc(100vh - Npx)` scroller and a sticky offset tied to the
+  header-row height (`top: 32` tuned to a 35px desktop `th`) both go wrong once
+  the chrome above compacts; re-tune both constants inside the compact block by
+  live measurement, never by arithmetic on the desktop values.
+- **Mechanism probes beat screenshots for pass/fail:** a shared helper
+  (scripts/lib/vrm-compact-probe.ts) asserts per viewport that (1) matchMedia
+  for the compact query flips exactly at the threshold, (2) the shell main's
+  computed padding is the reclaimed value under compact and the stock inline
+  value otherwise, (3) one hooked element's computed padding flips between its
+  compact/desktop values — catching both a deleted CSS block and stripped hook
+  classes at every viewport, data-independent.
 - **"Desktop unchanged" proof on live-data boards:** before/after screenshot
   compare drifts (clocks, counts, cache warm-up). Prove it with
   `matchMedia(query).matches === false` at 1280×720 plus computed-style probes

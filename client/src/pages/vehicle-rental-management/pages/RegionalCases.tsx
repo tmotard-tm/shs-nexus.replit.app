@@ -936,7 +936,9 @@ export default function RegionalCases() {
 
 
   return (
-    <div>
+    // regional-cases + the rc-* classes below are style-free hooks for the
+    // small-laptop compact density block in client/src/index.css (Task #826).
+    <div className="regional-cases">
       {/* One line above the work: region, search, count, export.
           The operator chrome this page inherited from Rental Operations — KPI
           cards, cohort pills, AMS/class/category/mark filters, the pended and
@@ -944,11 +946,11 @@ export default function RegionalCases() {
           gone. This is a work queue for the person recovering the rental, not a
           control centre. Those controls still exist on Rental Operations, which
           is where they belong. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+      <div className="rc-toolbar" data-testid="rc-toolbar" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
         {[...(data?.regions ?? []), ...(data?.unassigned && data.unassigned.caseCount > 0 ? [data.unassigned] : [])].map((sm) => {
           const on = sm.region === region;
           return (
-            <button key={sm.region} type="button" onClick={() => setRegion(sm.region)}
+            <button key={sm.region} type="button" className="rc-region-tab" onClick={() => setRegion(sm.region)}
               style={{ fontFamily: fonts.dmSans, fontSize: 14, fontWeight: on ? 700 : 400,
                 padding: "4px 2px", marginRight: 18, background: "transparent", border: "none",
                 borderBottom: `2px solid ${on ? colors.accent : "transparent"}`,
@@ -1021,7 +1023,7 @@ export default function RegionalCases() {
       </div>
 
       {/* Table */}
-      <div style={{ overflow: "auto", border: `1px solid ${colors.rule}`, borderRadius: 12, maxHeight: "calc(100vh - 360px)" }}>
+      <div className="rc-table-wrap" data-testid="regional-cases-table" style={{ overflow: "auto", border: `1px solid ${colors.rule}`, borderRadius: 12, maxHeight: "calc(100vh - 360px)" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>
@@ -1062,7 +1064,7 @@ export default function RegionalCases() {
                 <Fragment key={r.case_key}>
                 {showDistrictHeader && (
                   <tr>
-                    <td colSpan={11} style={{ padding: "7px 10px", background: colors.background,
+                    <td colSpan={11} className="rc-district-header" style={{ padding: "7px 10px", background: colors.background,
                       borderTop: `1px solid ${colors.rule}`, borderBottom: `1px solid ${colors.rule}`,
                       fontFamily: fonts.dmSans, fontSize: 11.5, fontWeight: 600, color: colors.inkSoft,
                       position: "sticky", top: 32, zIndex: 1 }}>

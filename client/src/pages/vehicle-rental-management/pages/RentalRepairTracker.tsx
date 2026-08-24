@@ -2576,9 +2576,11 @@ export default function RentalRepairTracker() {
   };
 
   return (
-    <div>
+    // repair-tracker + the rdt-* classes below are style-free hooks for the
+    // small-laptop compact density block in client/src/index.css (Task #826).
+    <div className="repair-tracker">
       {/* Page header */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+      <div className="rdt-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: "4px 0 0" }}>
             Track techs denied a rental — truck number, shop details, and current status.
@@ -2707,6 +2709,7 @@ export default function RentalRepairTracker() {
           </button>
           <button
             onClick={() => setPanelEntry("new")}
+            data-testid="button-add-entry"
             style={{
               display: "flex",
               alignItems: "center",
@@ -2729,7 +2732,7 @@ export default function RentalRepairTracker() {
       </div>
 
       {/* Search bar */}
-      <div style={{ position: "relative", maxWidth: 320, marginBottom: 20 }}>
+      <div className="rdt-search" style={{ position: "relative", maxWidth: 320, marginBottom: 20 }}>
         <Search
           size={15}
           color={colors.inkMuted}
@@ -2755,7 +2758,7 @@ export default function RentalRepairTracker() {
       </div>
 
       {/* Archived toggle */}
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+      <div className="rdt-toggle" style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, cursor: "pointer" }}>
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
           Show archived (Completed &gt;14 days)
@@ -3062,6 +3065,7 @@ export default function RentalRepairTracker() {
           return (
             <div
               key={name}
+              className="rdt-section"
               style={{
                 backgroundColor: colors.background,
                 border: `1px solid ${colors.rule}`,
@@ -3071,6 +3075,7 @@ export default function RentalRepairTracker() {
               }}
             >
               <div
+                className="rdt-section-header"
                 onClick={() => setCollapsed((c) => ({ ...c, [name]: !c[name] }))}
                 style={{
                   display: "flex", alignItems: "center", gap: 10,
@@ -3124,7 +3129,7 @@ export default function RentalRepairTracker() {
                   </div>
                 ) : (
                   <div style={{ overflow: "auto" }}>
-                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <table className="rdt-table" style={{ width: "100%", borderCollapse: "collapse" }}>
                       {renderHeader()}
                       <tbody>{rows.map(renderRow)}</tbody>
                     </table>

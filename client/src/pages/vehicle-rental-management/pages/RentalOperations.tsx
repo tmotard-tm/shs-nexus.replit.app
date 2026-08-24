@@ -1037,15 +1037,17 @@ export default function RentalOperations() {
   ];
 
   return (
-    <div style={{ fontFamily: fonts.dmSans, color: colors.ink }}>
+    // rental-ops + the ro-* classes below are style-free hooks for the
+    // small-laptop compact density block in client/src/index.css (Task #826).
+    <div className="rental-ops" style={{ fontFamily: fonts.dmSans, color: colors.ink }}>
       {/* Header */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
+      <div className="ro-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <div>
           <h1 style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, margin: 0, color: colors.ink }}>Rental Operations Control Center</h1>
-          <div title={asOf?.title} style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
+          <div className="ro-sub" title={asOf?.title} style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
             {basePool.length} {includePended ? "rentals (incl. pended)" : "open rentals"} · {stats.cohorts.open_repair ?? 0} with an open repair ticket · {(stats.identityStates.REVIEW ?? 0) + (stats.identityStates.EXCEPTION ?? 0)} identities need review{!includePended && pendedTotal ? ` · ${pendedTotal} pended hidden (matches Rentals Ops Dashboard)` : ""}
           </div>
-          <div style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 6 }}>
+          <div className="ro-sub" style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 6 }}>
             <span>
               last sync: {sh.lastSyncAt ? fmtDate(sh.lastSyncAt) : "—"} (file {sh.clocks?.find((c) => c.source_key === "scheduled_sync")?.last_file_date || "—"})
               {"   ·   "}last import: {sh.lastImportAt ? `${fmtDate(sh.lastImportAt)} (file ${sh.clocks?.find((c) => c.source_key === "manual_enterprise_import")?.last_file_date || "—"})` : "none"}
@@ -1060,8 +1062,8 @@ export default function RentalOperations() {
             <AsOfStamp info={asOf} inline />
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <button type="button" onClick={() => syncMut.mutate()} disabled={syncMut.isPending} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: colors.accent, borderColor: colors.accent }}>
+        <div className="ro-actions" style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <button type="button" data-testid="button-sync-now" onClick={() => syncMut.mutate()} disabled={syncMut.isPending} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: colors.accent, borderColor: colors.accent }}>
             <RefreshCw size={13} style={{ animation: syncMut.isPending ? "spin 1s linear infinite" : undefined }} /> {syncMut.isPending ? "Syncing…" : "Sync now"}
           </button>
           <button type="button" onClick={() => fileRef.current?.click()} disabled={importMut.isPending} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -1092,19 +1094,19 @@ export default function RentalOperations() {
       {showReminders && <ExtensionRemindersPanel />}
 
       {/* KPI cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
+      <div className="ro-kpis" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
         {kpis.map((k) => (
-          <div key={k.label} title={asOf?.title} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
+          <div key={k.label} className="ro-kpi" title={asOf?.title} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: colors.inkMuted, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
               <k.icon size={14} style={{ color: k.fg }} /> {k.label}
             </div>
-            <div style={{ fontFamily: fonts.syne, fontSize: 26, fontWeight: 700, color: k.fg, marginTop: 4 }}>{k.value}</div>
+            <div className="ro-kpi-value" style={{ fontFamily: fonts.syne, fontSize: 26, fontWeight: 700, color: k.fg, marginTop: 4 }}>{k.value}</div>
           </div>
         ))}
       </div>
 
       {/* Cohort tabs */}
-      <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+      <div className="ro-chips" style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
         {COHORTS.map((c) => {
           const n: number | string = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
@@ -1142,7 +1144,7 @@ export default function RentalOperations() {
 
       {/* Workload banner — the governing sentence for whichever workload tab is on */}
       {WORKLOAD_TABS.has(cohort) && (
-        <div style={{ marginBottom: 12, padding: "11px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.5,
+        <div className="ro-banner" style={{ marginBottom: 12, padding: "11px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.5,
           border: `1px solid ${cohort === "cannot_work" ? colors.red : cohort === "mismatch_no_po" ? colors.amber : colors.green}`,
           background: cohort === "cannot_work" ? "rgba(239,68,68,.06)" : cohort === "mismatch_no_po" ? "rgba(245,158,11,.07)" : "rgba(34,197,94,.06)",
           color: colors.inkSoft }}>
@@ -1166,7 +1168,7 @@ export default function RentalOperations() {
       )}
 
       {/* Filter bar */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="ro-filters" style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative" }}>
           <Search size={14} style={{ position: "absolute", left: 10, top: 9, color: colors.inkMuted }} />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter truck, tech, shop, vehicle, phone…" style={{ ...selStyle, paddingLeft: 30, width: 240 }} />
@@ -1211,7 +1213,7 @@ export default function RentalOperations() {
 
       {/* LUCA Call Queue banner — the callable-shops feed handed to the LUCA agent */}
       {cohort === "luca_queue" && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12, padding: "12px 16px", border: `1px solid ${colors.green}`, background: "rgba(34,197,94,.06)", borderRadius: 12 }}>
+        <div className="ro-banner" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12, padding: "12px 16px", border: `1px solid ${colors.green}`, background: "rgba(34,197,94,.06)", borderRadius: 12 }}>
           <div>
             <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink, display: "inline-flex", alignItems: "center", gap: 7 }}>
               <PhoneCall size={15} style={{ color: colors.green }} /> LUCA Call Queue — {lucaQueue.length} callable shop{lucaQueue.length === 1 ? "" : "s"}
@@ -1251,7 +1253,7 @@ export default function RentalOperations() {
       )}
 
       {/* Table */}
-      <div style={{ overflow: "auto", border: `1px solid ${colors.rule}`, borderRadius: 12, maxHeight: "calc(100vh - 360px)" }}>
+      <div className="ro-table-wrap" data-testid="rental-ops-table" style={{ overflow: "auto", border: `1px solid ${colors.rule}`, borderRadius: 12, maxHeight: "calc(100vh - 360px)" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr>

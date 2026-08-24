@@ -615,6 +615,172 @@
   overflow-y: auto;
 }
 
+/* ── VRM dense-board compact density: Rental Operations, Cases by Region,
+   Rental Denial Tracker (Task #826 — same pattern and thresholds as the
+   Fleet Communications / Task #823 blocks above; see
+   .agents/memory/compact-density-css.md).
+
+   Density ONLY — padding, gaps, control/font sizes. All three pages are
+   inline-styled, so every override of an inline property carries !important.
+   The shell height chain (RouteReadyLayout h-screen + min-h-0/overflow-auto
+   main) is never touched; the per-page viewport guards protect it. Hook
+   classes are style-free and live in:
+     client/src/pages/vehicle-rental-management/pages/RentalOperations.tsx  (ro-*)
+     client/src/pages/vehicle-rental-management/pages/RegionalCases.tsx     (rc-*)
+     client/src/pages/vehicle-rental-management/pages/RentalRepairTracker.tsx (rdt-*)
+   At exactly 1280×720 and larger (unless ≤650px tall), nothing below applies
+   and the pages are unchanged. */
+@media (max-width: 1279.98px), (max-height: 650px) {
+  /* The VRM shell main carries inline padding:32; reclaim it only when one of
+     these boards is the mounted page (same move as the Ops Queue rule above). */
+  main[data-testid="vrm-main"]:has(.rental-ops),
+  main[data-testid="vrm-main"]:has(.regional-cases),
+  main[data-testid="vrm-main"]:has(.repair-tracker) {
+    padding: 12px !important;
+  }
+
+  /* ── Rental Operations master board ── */
+  .rental-ops .ro-header {
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+  }
+  .rental-ops .ro-header h1 {
+    font-size: 17px !important;
+  }
+  /* Subtitle + sync-clock lines: hidden at compact (same move as fc-/tq-/oq-
+     subtitles). Nothing is lost that isn't still on screen — the counts ride
+     the KPI cards and chips, and the AsOfStamp also renders in the chip row. */
+  .rental-ops .ro-sub {
+    /* !important required: the clock line carries an inline display:flex. */
+    display: none !important;
+  }
+  .rental-ops .ro-actions {
+    gap: 6px !important;
+  }
+  .rental-ops .ro-actions button {
+    padding: 3px 8px !important;
+  }
+  .rental-ops .ro-kpis {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+    gap: 8px !important;
+    margin-bottom: 8px !important;
+  }
+  .rental-ops .ro-kpi {
+    padding: 6px 10px !important;
+  }
+  /* Un-wrap the card labels (2 lines at desktop tracking inside a ~180px
+     card) so every KPI card is a 2-line block, not 3. */
+  .rental-ops .ro-kpi > div:first-child {
+    font-size: 10px !important;
+    letter-spacing: 0 !important;
+  }
+  .rental-ops .ro-kpi-value {
+    font-size: 18px !important;
+    margin-top: 2px !important;
+  }
+  .rental-ops .ro-chips {
+    gap: 4px !important;
+    margin-bottom: 6px !important;
+  }
+  .rental-ops .ro-chips > button {
+    padding: 2px 8px !important;
+    font-size: 11px !important;
+  }
+  .rental-ops .ro-banner {
+    margin-bottom: 8px !important;
+    padding: 6px 10px !important;
+  }
+  .rental-ops .ro-filters {
+    gap: 6px !important;
+    margin-bottom: 6px !important;
+  }
+  .rental-ops .ro-filters > input,
+  .rental-ops .ro-filters > select,
+  .rental-ops .ro-filters > div > input {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+    font-size: 11px !important;
+  }
+  /* The search box is inline-sized to 240px for desktop; 170px still fits its
+     placeholder at the compact font and buys back a wrap row. */
+  .rental-ops .ro-filters > div > input {
+    width: 170px !important;
+  }
+  /* The page's own scroller cap moves in lockstep with the compacted chrome
+     above it (still page-internal — the shell flex chain carries no heights).
+     330px ≈ topbar + compact header/KPIs/chips/filters at 1024 wide. */
+  .rental-ops .ro-table-wrap {
+    max-height: calc(100vh - 330px) !important;
+  }
+  .rental-ops .ro-table-wrap th,
+  .rental-ops .ro-table-wrap td {
+    padding: 5px 8px !important;
+  }
+
+  /* ── Cases by Region ── */
+  .regional-cases .rc-toolbar {
+    gap: 6px !important;
+    margin-bottom: 8px !important;
+  }
+  .regional-cases .rc-toolbar .rc-region-tab {
+    font-size: 13px !important;
+    margin-right: 10px !important;
+  }
+  .regional-cases .rc-toolbar > input,
+  .regional-cases .rc-toolbar > select,
+  .regional-cases .rc-toolbar > button:not(.rc-region-tab) {
+    padding-top: 3px !important;
+    padding-bottom: 3px !important;
+  }
+  /* Scroller cap rides the compacted chrome above it: ~180px ≈ topbar +
+     reclaimed main padding + wrapped compact toolbar at 1024 wide. */
+  .regional-cases .rc-table-wrap {
+    max-height: calc(100vh - 180px) !important;
+  }
+  .regional-cases .rc-table-wrap th,
+  .regional-cases .rc-table-wrap td {
+    padding: 5px 8px !important;
+  }
+  /* The district band sticks below the header row; the header row is 27px
+     under compact density, so the stick offset must shrink with it (inline
+     top:32 was tuned to the 35px desktop row; 26px = 1px overlap, same as
+     the desktop tuning). */
+  .regional-cases .rc-table-wrap td.rc-district-header {
+    padding: 4px 8px !important;
+    top: 26px !important;
+  }
+
+  /* ── Rental Denial Tracker ── */
+  .repair-tracker .rdt-header {
+    margin-bottom: 8px !important;
+  }
+  .repair-tracker .rdt-header button {
+    padding: 4px 10px !important;
+  }
+  .repair-tracker .rdt-search {
+    margin-bottom: 8px !important;
+  }
+  .repair-tracker .rdt-search input {
+    padding-top: 4px !important;
+    padding-bottom: 4px !important;
+  }
+  .repair-tracker .rdt-toggle {
+    margin-bottom: 4px !important;
+  }
+  .repair-tracker .rdt-section {
+    margin-bottom: 8px !important;
+  }
+  .repair-tracker .rdt-section-header {
+    padding: 6px 10px !important;
+  }
+  .repair-tracker .rdt-table th {
+    padding: 6px 8px !important;
+  }
+  .repair-tracker .rdt-table td {
+    padding: 6px 8px !important;
+  }
+}
+
 /* Development Banner */
 .dev-banner {
   background: linear-gradient(90deg, hsl(208, 100%, 47%), hsl(200, 85%, 55%));
