@@ -28,3 +28,19 @@ classes (`fc-*`) placed on the page. Rules to reuse:
 scoped media block, extend that page's guard with the smaller viewport
 (~1024×500 simulates 125–150% Windows scaling), sabotage-test, screenshot both
 sizes.
+
+## Dialogs (Radix portals) need their own hook scope
+
+Dialogs portal to `<body>`, so `.page-scope .hook` selectors never match them —
+give the DialogContent its own hook class (e.g. `fc-dialog`) inside the same
+media block. Density alone can't fit a dialog whose body holds an unbounded
+list (recipient picker); the winning compact-only pattern is:
+- `display:flex; flex-direction:column; overflow-y:hidden` on the (doubled)
+  content class, `flex:1 1 auto; min-height:0; overflow-y:auto` on a body hook,
+  `flex-shrink:0` on the other children → header+footer pinned, only the body
+  scrolls, primary button always on screen. Desktop keeps the stock
+  grid + whole-dialog scroll (existing behavior, intentionally unchanged).
+- Guard: assert primary-button-in-viewport only when the viewport matches the
+  compact media condition; assert no-page-scroll at every size. Sabotage-verify
+  the assertion actually fails with the CSS removed — a short dialog (Templates)
+  can pass vacuously.

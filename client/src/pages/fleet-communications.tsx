@@ -2021,9 +2021,12 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
-      <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
+      {/* fc-dialog/fc-dialog-body: compact-density hooks (Task #822) — on small
+          laptops the media block in index.css pins header+footer and scrolls
+          only the body so Send never leaves the screen. Desktop unchanged. */}
+      <DialogContent className="fc-dialog max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>New message</DialogTitle></DialogHeader>
-        <div className="space-y-3">
+        <div className="fc-dialog-body space-y-3">
           {/* Recipient: pick from the technician roster, or text an arbitrary number */}
           <div className="flex gap-1 rounded-lg bg-muted p-1 text-sm">
             <button type="button" onClick={() => setRecipientMode("tech")} className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${recipientMode === "tech" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`} data-testid="button-recipient-mode-tech">Technician</button>
@@ -2331,9 +2334,9 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
       {/* The audience lists can make this dialog taller than the viewport —
           without its own scroll the template chips / message box / send button
           get clipped off-screen (looked like they were "removed"). */}
-      <DialogContent className="max-w-xl max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="fc-dialog max-w-xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>Bulk message</DialogTitle></DialogHeader>
-        <div className="space-y-3">
+        <div className="fc-dialog-body space-y-3">
           <Select value={cat} onValueChange={setCat}>
             <SelectTrigger
               className={needsCat ? "border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/40" : undefined}
@@ -2624,9 +2627,9 @@ function TemplateAdminDialog({ open, onOpenChange, categories, tokens }: {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) resetForm(); }}>
-      <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto">
+      <DialogContent className="fc-dialog max-w-2xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>Manage templates</DialogTitle></DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="fc-dialog-body grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Select value={category} onValueChange={(v) => { setCategory(v); resetForm(); }}>
               <SelectTrigger data-testid="select-template-admin-category"><SelectValue /></SelectTrigger>

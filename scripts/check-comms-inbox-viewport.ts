@@ -26,6 +26,16 @@
  *   5. the "..." overflow menu button is visible while the full (>=2xl)
  *      toolbar buttons are hidden
  *
+ * Task #822 extends the same run to the three dialogs (New, Bulk, Templates):
+ * at each viewport it opens each dialog and asserts the page still doesn't
+ * scroll; at the compact sizes (matching the index.css media query: <1280px
+ * wide or <=650px tall) it additionally asserts the dialog's primary action
+ * button (Send / Preview / Create) is fully inside the viewport — the
+ * fc-dialog rules pin the dialog header+footer and confine scrolling to the
+ * body, so the action button must never leave the screen. At 1280x720 the
+ * dialogs keep their stock whole-dialog scroll (desktop unchanged), so the
+ * button-visible assertion is compact-only by design.
+ *
  * Session mint/revoke, Chromium launch, and the viewport loop live in
  * scripts/lib/viewport-guard.ts (shared with the other screen-fit guards).
  *
@@ -64,7 +74,9 @@ runViewportGuard({
     "the inbox pane lost flex-1/min-h-0 or regained hardcoded viewport math (client/src/pages/fleet-communications.tsx), " +
     "the toolbar overflow menu / 2xl breakpoint split was removed, or the category tabs wrap again. " +
     "If only 1024x500 fails, the compact density block in client/src/index.css (Task #820) may have been " +
-    "removed or its fc-* hook classes stripped from the page.",
+    "removed or its fc-* hook classes stripped from the page. " +
+    "If a dialog-* check fails, the fc-dialog/fc-dialog-body hook classes on the New/Bulk/Templates " +
+    "DialogContent (Task #822) or their compact media rules in client/src/index.css were likely removed.",
   viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
@@ -158,6 +170,75 @@ runViewportGuard({
 
     await assertElementInViewport(rec, page, '[data-testid="button-send"]', viewport, `send-button-in-viewport@${label}`);
     await assertNoPageScroll(rec, page, `no-page-scroll:thread@${label}`);
+
+    // ── Dialogs (Task #822): New / Bulk / Templates ──────────────────────────
+    // The compact fc-dialog rules apply below 1280px wide or at <=650px tall
+    // (same condition as the index.css media query). Only there do we demand
+    // the primary action button on screen — at desktop sizes the dialogs keep
+    // their stock whole-dialog scroll and the button may sit below the fold of
+    // a long recipient list (existing, intentional behavior).
+    const compact = viewport.width < 1280 || viewport.height <= 650;
+    console.log(`[dialog state @ ${label}${compact ? ", compact" : ""}]`);
+
+    const dialogs: Array<{
+      name: string;
+      open: () => Promise<void>;
+      /** Selector that proves the dialog is open AND is its primary action. */
+      primary: string;
+      /** Optional wait for async dialog content to finish expanding. */
+      settle?: () => Promise<void>;
+    }> = [
+      {
+        name: "compose",
+        open: async () => {
+          await page.locator('[data-testid="button-compose"]').click();
+        },
+        primary: '[data-testid="button-compose-send"]',
+        settle: async () => {
+          // The recipient picker fetches the full roster; wait for rows so the
+          // dialog is measured at its tallest (a missing roster in dev is
+          // tolerated — the dialog is then shorter, which can only pass).
+          await page
+            .waitForSelector('[data-testid^="picker-contact-"]', { timeout: 15_000 })
+            .catch(() => {});
+        },
+      },
+      {
+        name: "bulk",
+        open: async () => {
+          // Below 2xl the Bulk button lives in the "..." overflow menu — the
+          // same path a real small-laptop user takes.
+          await page.locator('[data-testid="button-toolbar-overflow"]').click();
+          await page.locator('[data-testid="menu-bulk-send"]').click();
+        },
+        primary: '[data-testid="button-bulk-preview"]',
+      },
+      {
+        name: "templates",
+        open: async () => {
+          await page.locator('[data-testid="button-toolbar-overflow"]').click();
+          await page.locator('[data-testid="menu-manage-templates"]').click();
+        },
+        primary: '[data-testid="button-save-template"]',
+      },
+    ];
+
+    for (const d of dialogs) {
+      await d.open();
+      const primaryEl = page.locator(d.primary);
+      await primaryEl.waitFor({ state: "visible", timeout: SELECTOR_TIMEOUT_MS });
+      if (d.settle) await d.settle();
+      // Let queries/animations finish before measuring.
+      await page.waitForTimeout(500);
+
+      if (compact) {
+        await assertElementInViewport(rec, page, d.primary, viewport, `dialog-${d.name}-primary-in-viewport@${label}`);
+      }
+      await assertNoPageScroll(rec, page, `no-page-scroll:dialog-${d.name}@${label}`);
+
+      await page.keyboard.press("Escape");
+      await primaryEl.waitFor({ state: "hidden", timeout: SELECTOR_TIMEOUT_MS });
+    }
   },
 }).catch((err) => {
   console.error(`\nFATAL: ${err?.message || err}`);
