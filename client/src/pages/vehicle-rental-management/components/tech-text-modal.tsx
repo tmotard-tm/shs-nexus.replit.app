@@ -78,9 +78,14 @@ export function TechTextModal({ caseKey, onClose }: { caseKey: string; onClose: 
   return (
     <div onClick={onClose}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      {/* Flex column with the title + footer pinned and ONLY the middle
+          scrolling — on a short laptop viewport (90vh can be ~450px) the
+          send button must never scroll off screen with the body. See
+          .agents/memory/compact-density-css.md; guarded by
+          scripts/check-vrm-ops-queue-viewport.ts. */}
       <div onClick={(e) => e.stopPropagation()} data-testid="tech-text-modal"
-        style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 14, width: "min(560px, 100%)", maxHeight: "90vh", overflow: "auto", padding: 20 }}>
-        <div style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>
+        style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 14, width: "min(560px, 100%)", maxHeight: "90vh", overflow: "hidden", padding: 20, display: "flex", flexDirection: "column" }}>
+        <div style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 4, flexShrink: 0 }}>
           Text the technician
         </div>
 
@@ -89,6 +94,7 @@ export function TechTextModal({ caseKey, onClose }: { caseKey: string; onClose: 
 
         {data && (
           <>
+            <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
             <div style={{ fontSize: 12.5, color: colors.inkSoft, marginBottom: 14, fontFamily: fonts.jetbrains }}>
               {t?.tech_name || "unknown tech"}
               {t?.phone ? <> · {t.phone}</> : <span style={{ color: colors.red }}> · no phone on file</span>}
@@ -121,8 +127,9 @@ export function TechTextModal({ caseKey, onClose }: { caseKey: string; onClose: 
               {effectiveBody.length} chars · {segments} SMS segment{segments === 1 ? "" : "s"}
               {data.wouldQueue ? " · outside the tech's local send window, this will queue and go out automatically" : ""}
             </div>
+            </div>
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16, flexShrink: 0 }}>
               <button type="button" onClick={onClose}
                 style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 9, padding: "8px 14px", cursor: "pointer" }}>
                 Cancel

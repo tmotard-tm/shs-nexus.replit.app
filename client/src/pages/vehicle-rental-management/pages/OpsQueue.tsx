@@ -1386,6 +1386,7 @@ function QueueRow({
               </span>
               <button type="button" onClick={(e) => { e.stopPropagation(); actions.onEditShop(item); }}
                 title="Edit shop info" aria-label={`Edit shop info for truck ${item.truckNumber}`}
+                data-testid={`button-edit-shop-${item.truckNumber}`}
                 style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", padding: 2, color: colors.inkMuted }}>
                 <Pencil size={11} />
               </button>
@@ -1597,6 +1598,7 @@ function BucketRow({
                   writes the shared record the board, region view, and LUCA read. */}
               <button type="button" onClick={(e) => { e.stopPropagation(); actions.onEditShop(item); }}
                 title="Edit shop info" aria-label={`Edit shop info for truck ${item.truckNumber}`}
+                data-testid={`button-edit-shop-${item.truckNumber}`}
                 style={{ display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer", padding: 2, color: colors.inkMuted }}>
                 <Pencil size={11} />
               </button>

@@ -6,21 +6,29 @@
  * min-h-0/overflow-auto on <main data-testid="fleet-scope-main">, and
  * min-w-0 on the SidebarInset so wide content cannot push the document
  * wider than the screen):
- *   1. the document NEVER scrolls — vertically or horizontally — at either
+ *   1. the document NEVER scrolls — vertically or horizontally — at any
  *      viewport; all scrolling happens inside the shell main
  *   2. the shell main's bottom edge lands exactly at the viewport bottom
  *      (flex fill; a hardcoded height on the shell either overflows past it
- *      or strands a gap at one of the two sizes)
+ *      or strands a gap at one of the sizes)
  *   3. the primary action (Refresh, data-testid=button-refresh-queue) and the
  *      page title stay fully inside the viewport on load
  *   4. the work-type strip starts above the fold, and the queue pane exists
  *      (the queue list itself is taller than any laptop screen by design and
  *      scrolls inside the shell main under the sticky page header)
  *
+ * Task #825 adds the truck-detail slide-out (the page's one drawer, opened by
+ * clicking any queue row): at EVERY size the sheet's pinned header (with the
+ * Full Details action) must stay fully inside the viewport and the page must
+ * still not scroll. The sheet is a flex column (SheetHeader shrink-0 +
+ * ScrollArea flex-1 in TruckDetailPanel.tsx), so only its body scrolls; a
+ * hardcoded height or a removed flex chain pushes the header/sheet out of the
+ * viewport at the short sizes and trips this.
+ *
  * Run: npx tsx scripts/check-todays-queue-viewport.ts
  * Registered as the `todays-queue-viewport` validation command.
  * See scripts/lib/viewport-guard.ts and .agents/memory/viewport-fit-guard.md
- * for why BOTH viewports are mandatory.
+ * for why ALL viewports are mandatory.
  */
 import {
   BASE_URL,
@@ -54,7 +62,10 @@ runViewportGuard({
     "SidebarInset lost min-w-0 (wide tables push the page sideways), a hardcoded height was added to " +
     "the shell or page (client/src/pages/fleet-scope/TodaysQueue.tsx), or the header toolbar grew past the fold. " +
     "If only 1024x500 fails, the compact density block in client/src/index.css (Task #823) may have been " +
-    "removed or its tq-* hook classes stripped from the page.",
+    "removed or its tq-* hook classes stripped from the page. " +
+    "If a drawer-* check fails, the truck-detail sheet (client/src/components/fleet-scope/TruckDetailPanel.tsx) " +
+    "lost its flex column (p-0 flex flex-col SheetContent, shrink-0 header, flex-1 ScrollArea body) or gained " +
+    "a hardcoded height — its header must stay pinned on screen while only the body scrolls.",
   viewports: VIEWPORTS,
   runAtViewport: async (page, viewport, rec) => {
     const label = viewportLabel(viewport);
@@ -97,6 +108,36 @@ runViewportGuard({
     // The queue list pane must exist (list content scrolls inside the shell).
     const paneCount = await page.locator('[data-testid="queue-pane"]').count();
     rec.assert(paneCount > 0, `queue-pane-present@${label}`, `queue-pane found: ${paneCount > 0}`);
+
+    // ── Truck-detail drawer (Task #825) ─────────────────────────────────────
+    console.log(`[truck-detail drawer @ ${label}]`);
+    const row = page.locator('[data-testid^="queue-row-"], [data-testid^="bucket-row-"]').first();
+    try {
+      await row.waitFor({ state: "visible", timeout: SELECTOR_TIMEOUT_MS });
+    } catch {
+      throw new Error(
+        "No queue/bucket row appeared — the drawer check needs at least one item in today's queue to open " +
+          "the truck-detail sheet. If the dev queue is genuinely empty, re-run once data exists.",
+      );
+    }
+    await row.click();
+
+    const panel = page.locator('[data-testid="panel-truck-detail"]');
+    await panel.waitFor({ state: "visible", timeout: SELECTOR_TIMEOUT_MS });
+    // Header actions render only once the truck payload resolves.
+    const fullDetail = page.locator('[data-testid="button-open-full-detail"]');
+    await fullDetail.waitFor({ state: "visible", timeout: SELECTOR_TIMEOUT_MS });
+    await page.waitForTimeout(500);
+
+    // The whole sheet must sit inside the viewport (it is h-full; a hardcoded
+    // height overflows the short sizes), its pinned-header action must be on
+    // screen at every size, and the document must still not scroll.
+    await assertElementInViewport(rec, page, '[data-testid="panel-truck-detail"]', viewport, `drawer-sheet-in-viewport@${label}`);
+    await assertElementInViewport(rec, page, '[data-testid="button-open-full-detail"]', viewport, `drawer-header-action-in-viewport@${label}`);
+    await assertNoPageScroll(rec, page, `no-page-scroll:drawer@${label}`);
+
+    await page.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden", timeout: SELECTOR_TIMEOUT_MS });
   },
 }).catch((err) => {
   console.error(`\nFATAL: ${err?.message || err}`);

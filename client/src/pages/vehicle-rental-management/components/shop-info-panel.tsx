@@ -140,15 +140,20 @@ export function ShopInfoPanel({ item, onClose }: { item: ShopInfoPanelItem; onCl
     <>
       <div onClick={onClose}
         style={{ position: "fixed", inset: 0, zIndex: 70, background: "rgba(15,23,42,0.45)" }} />
-      <div role="dialog" aria-label={`Shop info for truck ${item.truckNumber}`}
+      {/* Header + footer are pinned; only the middle (facts + form) scrolls.
+          On a short laptop viewport (~500px) the panel content is taller than
+          the screen — whole-panel scrolling put "Save shop info" below the
+          fold. See .agents/memory/compact-density-css.md; guarded by
+          scripts/check-vrm-ops-queue-viewport.ts. */}
+      <div role="dialog" aria-label={`Shop info for truck ${item.truckNumber}`} data-testid="shop-info-panel"
         style={{
           position: "fixed", top: 0, right: 0, bottom: 0, zIndex: 71,
           width: 440, maxWidth: "94vw", background: colors.background,
           borderLeft: `1px solid ${colors.rule}`, boxShadow: "-24px 0 70px rgba(0,0,0,0.35)",
-          display: "flex", flexDirection: "column", overflowY: "auto",
+          display: "flex", flexDirection: "column", overflow: "hidden",
         }}>
         {/* Header */}
-        <div style={{ padding: "18px 20px 14px", borderBottom: `1px solid ${colors.rule}` }}>
+        <div style={{ padding: "18px 20px 14px", borderBottom: `1px solid ${colors.rule}`, flexShrink: 0 }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -168,6 +173,8 @@ export function ShopInfoPanel({ item, onClose }: { item: ShopInfoPanelItem; onCl
           </div>
         </div>
 
+        {/* Scrollable middle: read-only facts + editable form */}
+        <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
         {/* Read-only facts */}
         <div style={{ padding: "14px 20px", borderBottom: `1px solid ${colors.rule}`, display: "grid", gridTemplateColumns: "52px minmax(0,1fr)", columnGap: 12, rowGap: 7, alignContent: "start" }}>
           {facts.filter(Boolean).map((f) => (
@@ -255,14 +262,15 @@ export function ShopInfoPanel({ item, onClose }: { item: ShopInfoPanelItem; onCl
             </div>
           )}
         </div>
+        </div>
 
         {/* Footer */}
-        <div style={{ marginTop: "auto", padding: "14px 20px 18px", borderTop: `1px solid ${colors.rule}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
+        <div style={{ flexShrink: 0, marginTop: "auto", padding: "14px 20px 18px", borderTop: `1px solid ${colors.rule}`, display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button type="button" onClick={onClose}
             style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 600, padding: "8px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, background: colors.surface, color: colors.inkSoft, cursor: "pointer" }}>
             Cancel
           </button>
-          <button type="button" disabled={!dirty || !phoneValid || !nameValid || save.isPending} onClick={() => save.mutate()}
+          <button type="button" data-testid="button-save-shop-info" disabled={!dirty || !phoneValid || !nameValid || save.isPending} onClick={() => save.mutate()}
             style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 700, padding: "8px 16px", borderRadius: 8, border: `1px solid ${colors.accent}`, background: colors.accent, color: "#fff", cursor: "pointer", opacity: !dirty || !phoneValid || !nameValid || save.isPending ? 0.5 : 1 }}>
             {save.isPending ? "Saving…" : "Save shop info"}
           </button>

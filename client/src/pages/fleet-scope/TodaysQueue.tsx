@@ -695,6 +695,7 @@ function QueueRow({
         dismissed && "opacity-40"
       )}
       onClick={() => onRowClick(item.truckId)}
+      data-testid={`queue-row-${item.truckNumber}`}
     >
       <div className="pt-0.5">
         <span className={cn("inline-flex items-center justify-center rounded-full text-sm font-bold w-6 h-6 border", STEP_COLORS[item.step])}>
@@ -789,6 +790,7 @@ function BucketRow({
         dismissed && "opacity-40"
       )}
       onClick={() => onRowClick(item.truckId)}
+      data-testid={`bucket-row-${item.truckNumber}`}
     >
       <IdentityCell item={item} dismissed={dismissed} />
 

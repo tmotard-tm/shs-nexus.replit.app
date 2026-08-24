@@ -51,6 +51,27 @@ args, so nested functions inside `page.evaluate(() => ...)` throw
 `ReferenceError: __name is not defined` in the browser — pass the evaluate
 body as a plain string instead.
 
+
+# Lessons from extending guards to dialogs/drawers/overlays
+
+**Radix popovers self-heal child-level assertions.** Collision handling
+repositions the popover so an "input-in-viewport" check passes even when the
+content is sabotaged 600px taller — assert the
+`div[data-radix-popper-content-wrapper]` box instead; that CAN overflow a
+short screen and actually trips.
+
+**Duplicate JSX className silently drops a sabotage.** Adding
+`className="mt-[600px]"` to an element that already has a later `className`
+prop does nothing (later attribute wins, no error) — merge into the existing
+class list or the sabotage run proves nothing.
+
+**Inline-styled custom overlays can't use scoped-CSS density hooks.** Inline
+styles beat class overrides without `!important`; the clean fix is
+restructuring the component itself into pinned header/footer + a
+`flex:1 1 auto; minHeight:0; overflowY:auto` body wrapper (visually identical
+whenever content fits, pins the action button when it doesn't — all sizes).
+Verify pinning positively too: temporary tall filler INSIDE the body wrapper
+must still pass the button-in-viewport check.
 # Lessons from pinning dialog footers (Fleet Comms dialogs)
 
 **A pinned-footer CSS contract only protects direct siblings of the scroll
