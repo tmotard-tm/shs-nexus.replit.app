@@ -815,12 +815,25 @@ def _record_booking(r: dict, res: dict, label: str) -> int:
 
 
 def drain(etd: EtdClient, template: dict, mapping: dict, old_j, old_r,
-          confirm: bool, limit: int) -> int:
+          confirm: bool, limit: int, only: int = 0, class_override: str = "") -> int:
     status, payload = nexus("GET", f"/api/vrm/forms/rental-request/booking-queue?runner={RUNNER}")
     if status != 200:
         print(f"  booking-queue returned {status}: {payload}")
         return 0
     queue = payload.get("queue") or []
+    # --only books exactly one request_no. It exists because a single stuck request
+    # (#95: its nearest branch is a National counter that stocks nothing on this
+    # account) has to be rescued WITHOUT touching the six others in the same queue.
+    if only:
+        queue = [r for r in queue if int(r.get("request_no") or 0) == int(only)]
+    # --class overrides the approved class for this run ONLY. Nothing is written back
+    # to approved_vehicle_class; the reservation carries the override and the row keeps
+    # Fleet's original decision. Marked "fleet" so the job-title ladder cannot re-enter
+    # and quietly re-size the pick.
+    if class_override:
+        for r in queue:
+            r["vehicle_class"] = class_override
+            r["vehicle_class_source"] = "fleet"
     if limit:
         queue = queue[:limit]
     if not queue:
@@ -874,6 +887,10 @@ def main() -> None:
     ap.add_argument("--confirm", action="store_true",
                     help="actually create reservations. Without this nothing is booked.")
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--only", type=int, default=0,
+                    help="book only this request_no, ignoring the rest of the queue")
+    ap.add_argument("--class", dest="class_override", default="",
+                    help="override the approved vehicle class for this run (e.g. SCAR)")
     ap.add_argument("--watch", action="store_true",
                     help="stay running and book approvals as they land")
     ap.add_argument("--interval", type=int, default=10, help="seconds between polls in --watch")
@@ -911,7 +928,7 @@ def main() -> None:
           else "dry run — everything except the commit")
 
     if not args.watch:
-        n = drain(etd, template, mapping, old_j, old_r, args.confirm, args.limit)
+        n = drain(etd, template, mapping, old_j, old_r, args.confirm, args.limit, args.only, args.class_override)
         print(f"\n{'booked' if args.confirm else 'would book'}: {n}")
         if not args.confirm:
             print("Nothing was created. Re-run with --confirm to book.")
@@ -924,7 +941,7 @@ def main() -> None:
             # never wait on it, so pay that cost between polls rather than
             # inside an approval.
             etd._auth()
-            drain(etd, template, mapping, old_j, old_r, args.confirm, args.limit)
+            drain(etd, template, mapping, old_j, old_r, args.confirm, args.limit, args.only, args.class_override)
         except KeyboardInterrupt:
             print("\nstopped")
             return
