@@ -78,6 +78,11 @@ export interface ApprovalResult {
   dryRun?: boolean;
   blocked?: boolean; // RepairDetails page shares other awaiting PO(s) → can't auto-approve the rental alone
   blockingPos?: string[]; // the other PO number(s) on the page (e.g. the repair PO)
+  // Decline only: the acted-on line left the render (the decline's normal success
+  // signature) but the awaiting grid couldn't prove it yet (still listed —
+  // clearance lag — or the verification walk failed). The caller holds the row
+  // as deny_pending_verify; the next clean grid walk finalizes it.
+  pendingVerify?: boolean;
   error?: string;
 }
 
@@ -1037,7 +1042,7 @@ function parseDecisionLines(html: string, decision: "Approve" | "Decline"): Deci
 // actionable at POST time (the ones we actually selected). Prior authorization
 // rounds render as locked lines with their ORIGINAL decision, so only the
 // acted-on lines may be judged — see CRITICAL #2 at the call site.
-export type ConfirmState = { kind: "confirmed" | "actionable" | "indeterminate"; detail: string };
+export type ConfirmState = { kind: "confirmed" | "actionable" | "indeterminate" | "vanished"; detail: string };
 
 export function judgeConfirmState(
   mine: DecisionLine[],
@@ -1052,18 +1057,20 @@ export function judgeConfirmState(
     // The acted-on line no longer renders. For a Decline this is USUALLY the
     // decision applying — declined resubmit asks drop off the render while
     // approved lines persist forever as locked+checked history (observed live
-    // 2026-08-24: the declined round-3 line of a resubmit PO vanished while both
-    // approved rounds stayed). But there is no completeness marker on the page:
-    // a partial render that merely omits the acted-on line reads identically,
-    // and `confirmed` here marks the row denied AND releases the redirect SMS.
-    // Absence from a page we cannot prove complete is never confirmation —
-    // report indeterminate and let the operator / the resolved_holman grid
-    // sweep settle it from grid truth.
+    // 2026-08-24 TWICE: the declined ask of a resubmit PO vanished while the
+    // approved rounds stayed, on two different POs). But there is no
+    // completeness marker on the page: a partial render that merely omits the
+    // acted-on line reads identically, and `confirmed` here marks the row
+    // denied AND releases the redirect SMS. So this judge never confirms on
+    // absence — it reports the distinct `vanished` kind, and the CALLER proves
+    // it from grid truth: a Decline whose PO is gone from a COMPLETE
+    // awaiting-grid walk is confirmed; still listed (grid clearance lag) =
+    // pendingVerify, finalized by the next walk's sweep.
     return {
-      kind: "indeterminate",
+      kind: "vanished",
       detail:
         decision === "Decline"
-          ? "acted-on line no longer rendered — declined asks drop off the page, so the decline LIKELY applied, but a partial render reads the same; verify via the awaiting grid (Refresh from Holman)"
+          ? "acted-on line no longer rendered — declined asks drop off the page, so the decline LIKELY applied, but a partial render reads the same; verifying via the awaiting grid"
           : "acted-on line vanished from the page — cannot confirm the approval",
     };
   }
@@ -1301,15 +1308,51 @@ async function submitDecision(
     state = readState(confirmHtml, (confirmResp as any).url ?? "");
   }
 
-  const confirmed = state.kind === "confirmed";
+  let confirmed = state.kind === "confirmed";
+  let pendingVerify = false;
+
+  // GRID VERIFICATION (added 2026-08-24 after the SECOND live false "DENY FAILED"):
+  // a vanished Decline line is the decline's normal success signature — declined
+  // asks drop off the RepairDetails render — but the render alone cannot prove it
+  // (a partial page omitting the line reads identically; the architect review
+  // rightly rejected confirming from absence). The awaiting grid CAN prove it:
+  // a decided PO leaves the grid, so absence from a COMPLETE walk is the durable
+  // "applied" signal (same truth the resolved_holman sweep trusts). Still listed
+  // = clearance lag (manual-style portal decisions clear in <6 min) → hand back
+  // pendingVerify and let the next walk's sweep finalize.
+  if (!confirmed && state.kind === "vanished" && decision === "Decline") {
+    try {
+      const grid = await scrapeAwaitingAuth(true);
+      if (grid.walkComplete && !grid.error) {
+        const stillListed = grid.rows.some((r) => String(r.poNumber) === String(poNumber));
+        if (!stillListed) {
+          confirmed = true;
+          console.log(`[HolmanPortal] Decline PO ${poNumber} grid-verified: acted-on line vanished AND PO gone from a complete awaiting walk — decline applied`);
+        } else {
+          pendingVerify = true;
+          console.log(`[HolmanPortal] Decline PO ${poNumber}: line vanished but grid still lists it (clearance lag?) — pending verification`);
+        }
+      } else {
+        pendingVerify = true;
+        console.warn(`[HolmanPortal] Decline PO ${poNumber}: grid verification walk incomplete (${grid.error ?? "partial walk"}) — pending verification`);
+      }
+    } catch (e: any) {
+      pendingVerify = true;
+      console.warn(`[HolmanPortal] Decline PO ${poNumber}: grid verification failed (${e?.message}) — pending verification`);
+    }
+  }
+
   return {
     success: true,
     confirmed,
+    pendingVerify: pendingVerify || undefined,
     error: confirmed
       ? undefined
-      : state.kind === "actionable"
-        ? `Decision POST returned but not confirmed: ${state.detail} — verify in Holman portal`
-        : `Decision POST returned but confirmation was unreadable after retries (${state.detail}) — the decision may HAVE applied; check Holman before retrying`,
+      : pendingVerify
+        ? `Decline posted and the ask left the Holman page (the decline's normal success signature), but the awaiting grid has not cleared it yet — held for verification; the next Refresh from Holman finalizes it automatically`
+        : state.kind === "actionable"
+          ? `Decision POST returned but not confirmed: ${state.detail} — verify in Holman portal`
+          : `Decision POST returned but confirmation was unreadable after retries (${state.detail}) — the decision may HAVE applied; check Holman before retrying`,
   };
 }
 

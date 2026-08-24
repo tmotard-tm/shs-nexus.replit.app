@@ -1146,7 +1146,7 @@ export default function NewRentals() {
   // Actionable worklist: pending AND the loud not-done states (blocked / failed) so a PO
   // that could NOT be approved in Holman stays visible and red, never silently gone.
   const pendingPoQueue = poQueue.filter((r: any) =>
-    ["pending", "blocked", "approve_failed", "deny_failed"].includes(r.status));
+    ["pending", "blocked", "approve_failed", "deny_failed", "deny_pending_verify"].includes(r.status));
   // From the response, not from row[0]. The endpoint now returns ONLY actionable
   // rows, so when the queue is empty (the normal state) there is no row to carry
   // the timestamp and the staleness line would have gone blank.
@@ -1316,6 +1316,13 @@ export default function NewRentals() {
         toast({ title: "🚫 BLOCKED in Holman — NOT denied", description: data.error ?? "This rental shares its repair page with another PO; decline it manually in Holman.", variant: "destructive" });
       } else if (st === "deny_failed") {
         toast({ title: "❌ FAILED in Holman — NOT denied", description: data.error ?? "Holman did not confirm the Decline. The PO is still pending; handle it manually.", variant: "destructive" });
+      } else if (st === "deny_pending_verify") {
+        // Not a failure: the Decline posted and showed its success signature
+        // (the ask left the Holman page); the grid just hasn't cleared it yet.
+        toast({
+          title: "Deny sent — verifying with Holman",
+          description: "The Decline posted and the ask left the Holman page. It finalizes automatically on the next refresh — the tech's redirect text sends then.",
+        });
       } else if (st === "dry_run") {
         toast({ title: "DRY RUN — nothing sent to Holman", description: "Would click Decline. Set HOLMAN_DECISION_DRY_RUN=false to submit for real." });
       } else if (st === "denied") {
@@ -2433,6 +2440,11 @@ export default function NewRentals() {
                   const terminal = ["approved", "denied", "resolved_holman"].includes(po.status);
                   const failed = po.status === "blocked" || po.status === "approve_failed" || po.status === "deny_failed";
                   const failLabel = po.status === "blocked" ? "BLOCKED" : po.status === "deny_failed" ? "DENY FAILED" : "FAILED";
+                  // Deny posted with its success signature; awaiting grid proof.
+                  // Amber informational state, NOT red — and no decide buttons,
+                  // since re-posting a Decline that already applied would 404
+                  // into the no-actionable-radio error.
+                  const verifying = po.status === "deny_pending_verify";
                   return (
                     <tr key={po.id} style={{ borderBottom: idx < pendingPoQueue.length - 1 ? `1px solid ${colors.rule}` : "none", backgroundColor: failed ? colors.red + "12" : undefined }}>
                       <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
@@ -2550,6 +2562,11 @@ export default function NewRentals() {
                             {failLabel} in Holman — not approved: {po.holmanApproveError}
                           </div>
                         )}
+                        {verifying && (
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.amber, fontWeight: 600, marginTop: 4, maxWidth: 460, lineHeight: 1.35 }}>
+                            Deny sent — the Decline posted and the ask left the Holman page. Waiting for Holman's awaiting grid to confirm; Refresh from Holman finalizes it and sends the tech's redirect text.
+                          </div>
+                        )}
                         {/* A decided PO Holman put back on its awaiting grid (rental
                             extensions re-authorize on the SAME PO number, usually at
                             the same $0.00). Before 8/3 these were silently hidden —
@@ -2628,11 +2645,19 @@ export default function NewRentals() {
                                 padding: "2px 7px", borderRadius: 4, alignSelf: "flex-start", letterSpacing: "0.04em",
                               }}>{failLabel}</span>
                             )}
+                            {verifying && (
+                              <span title="The Decline posted and the ask left the Holman page. The next Refresh from Holman confirms it against the awaiting grid, finalizes the deny and sends the tech's redirect text."
+                                style={{
+                                fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 700,
+                                color: "#fff", backgroundColor: colors.amber,
+                                padding: "2px 7px", borderRadius: 4, alignSelf: "flex-start", letterSpacing: "0.04em",
+                              }}>DENY SENT — VERIFYING</span>
+                            )}
                             <div style={{ display: "flex", gap: 6 }}>
                             {!canApproveHolman && (
                               <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>view only</span>
                             )}
-                            {canApproveHolman && (<>
+                            {canApproveHolman && !verifying && (<>
                             {/* New-process policy: Deny is the pre-set path for every
                                 Holman-originated request, so it carries the filled
                                 (primary) style; Approve stays available but demoted. */}

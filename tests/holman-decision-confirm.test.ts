@@ -65,25 +65,27 @@ test("old-logic counterfactual: judging ALL lines would have failed the same pag
   assert.equal(mine.every((l) => l.checked), false);
 });
 
-test("decline: acted-on line vanished = indeterminate, NEVER confirmed (partial render reads identically)", () => {
+test("decline: acted-on line vanished = 'vanished', NEVER confirmed from the render alone", () => {
   // Vanishing usually means the decline applied (declined asks drop off the
   // render) — but a partial page that merely omits the acted-on line reads the
-  // same, and `confirmed` releases the redirect SMS. Absence from a page we
-  // cannot prove complete must never be confirmation; the resolved_holman grid
-  // sweep reconciles from grid truth instead.
+  // same, and `confirmed` releases the redirect SMS. The judge reports the
+  // distinct `vanished` kind so the CALLER can prove it from grid truth (PO
+  // gone from a complete awaiting-grid walk = confirmed; still listed =
+  // deny_pending_verify, finalized by the next walk's sweep). It must never
+  // confirm here.
   const mine = [
     line("1", { disabled: true, checked: false }),
     line("2", { disabled: true, checked: false }),
   ];
   const state = judgeConfirmState(mine, acted("3"), "Decline");
-  assert.equal(state.kind, "indeterminate");
+  assert.equal(state.kind, "vanished");
   assert.match(state.detail, /LIKELY applied/);
 });
 
-test("approve: acted-on line vanished = indeterminate, never success", () => {
+test("approve: acted-on line vanished = 'vanished', never success (approved lines persist, so vanish is NOT an approve signature)", () => {
   const mine = [line("1", { disabled: true, checked: true })];
   const state = judgeConfirmState(mine, acted("3"), "Approve");
-  assert.equal(state.kind, "indeterminate");
+  assert.equal(state.kind, "vanished");
 });
 
 test("historical-only render (only prior locked rounds visible) never confirms either decision", () => {
@@ -91,8 +93,8 @@ test("historical-only render (only prior locked rounds visible) never confirms e
     line("1", { disabled: true, checked: false }),
     line("2", { disabled: true, checked: true }),
   ];
-  assert.equal(judgeConfirmState(mine, acted("9"), "Decline").kind, "indeterminate");
-  assert.equal(judgeConfirmState(mine, acted("9"), "Approve").kind, "indeterminate");
+  assert.equal(judgeConfirmState(mine, acted("9"), "Decline").kind, "vanished");
+  assert.equal(judgeConfirmState(mine, acted("9"), "Approve").kind, "vanished");
 });
 
 test("acted-on line still enabled = actionable (decision not applied)", () => {

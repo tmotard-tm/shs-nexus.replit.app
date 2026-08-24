@@ -149,10 +149,20 @@ export const HOLMAN_PO_REOPEN_GRACE_MINUTES = 120;
 //                           than any plausible clearance lag (see above).
 // NB: ON CONFLICT SET expressions all read the OLD row, so these compare the
 // frozen as-decided values against what the walk just scraped.
-const PO_DECIDED = `holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')`;
+// deny_pending_verify counts as decided here: the Decline posted and showed its
+// success signature, so a PO STILL on the grid past the grace window means the
+// decline never actually applied — reopen it to the operator like any other
+// contradicted decision. (Gone from the grid = the sweep below finalizes it.)
+const PO_DECIDED = `holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman', 'deny_pending_verify')`;
 const PO_AMOUNT_CHANGED = `holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt`;
 const PO_RESUBMITTED = `holman_rental_po_queue.submitted_date IS DISTINCT FROM EXCLUDED.submitted_date`;
-const PO_DECISION_STALE = `(COALESCE(holman_rental_po_queue.decided_at, holman_rental_po_queue.last_synced_at) IS NULL OR COALESCE(holman_rental_po_queue.decided_at, holman_rental_po_queue.last_synced_at) < EXCLUDED.scraped_at - INTERVAL '${HOLMAN_PO_REOPEN_GRACE_MINUTES} minutes')`;
+// The staleness anchor is the LATEST decision-ish moment: decided_at alone lied
+// for failed/pending-verify rows, whose decided_at still carries the PRIOR
+// round's date — a fresh deny attempt would have read as instantly stale and
+// reopened on the very next walk instead of waiting out the clearance grace.
+// (Postgres GREATEST ignores NULLs, so a never-attempted row falls back cleanly.)
+const PO_DECISION_ANCHOR = `COALESCE(GREATEST(holman_rental_po_queue.decided_at, holman_rental_po_queue.holman_approve_attempted_at), holman_rental_po_queue.last_synced_at)`;
+const PO_DECISION_STALE = `(${PO_DECISION_ANCHOR} IS NULL OR ${PO_DECISION_ANCHOR} < EXCLUDED.scraped_at - INTERVAL '${HOLMAN_PO_REOPEN_GRACE_MINUTES} minutes')`;
 const PO_REOPEN = `(${PO_DECIDED} AND (${PO_AMOUNT_CHANGED} OR ${PO_RESUBMITTED} OR ${PO_DECISION_STALE}))`;
 
 export async function upsertHolmanRentalPoQueue(
@@ -160,7 +170,7 @@ export async function upsertHolmanRentalPoQueue(
   enriched: EnrichRow[],
   scrapedAt: Date,
   opts: { sweepResolved?: boolean } = {},
-): Promise<void> {
+): Promise<{ confirmedDenies: HolmanRentalPoRow[] }> {
   // The resolved_holman sweep infers "Holman resolved it" from ABSENCE in the
   // scraped set. That inference is only valid when the pager walk completed —
   // a partial scrape would silently and permanently resolve pending POs.
@@ -253,7 +263,7 @@ export async function upsertHolmanRentalPoQueue(
   // Rows that dropped off the Holman queue while still pending = resolved on Holman side
   if (!sweepResolved) {
     console.warn(`[VRM/HolmanPO] partial scrape — skipping resolved_holman sweep (${activePOs.length} scraped rows upserted only)`);
-    return;
+    return { confirmedDenies: [] };
   }
   // Anything still awaiting a decision here but absent from a clean scrape has been
   // cleared on the Holman side. When the scrape is empty the NOT IN clause is simply
@@ -267,6 +277,28 @@ export async function upsertHolmanRentalPoQueue(
   // this predicate that stale list resolves a PO the newer walk just discovered,
   // and resolved_holman is terminal — nothing anywhere moves a row back out of
   // it. A walk may only resolve rows it could actually have observed.
+  // deny_pending_verify first: the operator's Decline posted and showed its
+  // success signature (the acted-on ask left the render), but the immediate grid
+  // check could not prove it. Absence from THIS clean walk is that proof — the
+  // same grid truth the resolved_holman sweep trusts — so finalize the row as
+  // denied and hand it back for the caller to complete the decision pipeline
+  // (Decision Log + redirect SMS + supervisor notify + DCA + Full Log), exactly
+  // like an in-route confirm. Rows still on the grid stay put until a later walk
+  // clears them or the reopen grace pulls them back to the operator as pending.
+  const denySwept = await db.execute(sql.raw(`
+    UPDATE holman_rental_po_queue
+    SET status = 'denied', decided_at = '${now}', holman_approve_confirmed_at = '${now}',
+        holman_approve_error = NULL, last_synced_at = '${now}'
+    WHERE status = 'deny_pending_verify'
+      AND (last_synced_at IS NULL OR last_synced_at <= '${now}')
+      ${notActive}
+    RETURNING ${SELECT_COLS}
+  `));
+  const confirmedDenies = (((denySwept as any)?.rows ?? []) as unknown) as HolmanRentalPoRow[];
+  if (confirmedDenies.length) {
+    console.log(`[VRM/HolmanPO] grid-confirmed ${confirmedDenies.length} pending-verify deny(s): ${confirmedDenies.map((r) => r.poNumber).join(", ")}`);
+  }
+
   const swept = await db.execute(sql.raw(`
     UPDATE holman_rental_po_queue
     SET status = 'resolved_holman', last_synced_at = '${now}'
@@ -278,6 +310,7 @@ export async function upsertHolmanRentalPoQueue(
   if (sweptCount) {
     console.log(`[VRM/HolmanPO] swept ${sweptCount} PO(s) to resolved_holman (gone from Holman; ${activePOs.length} still on the page)`);
   }
+  return { confirmedDenies };
 }
 
 /**
@@ -293,7 +326,7 @@ export async function upsertHolmanRentalPoQueue(
  * reach the page at all. The queue could silently drop the exact rows it exists
  * to show.
  */
-export const ACTIONABLE_PO_STATUSES = ["pending", "blocked", "approve_failed", "deny_failed"] as const;
+export const ACTIONABLE_PO_STATUSES = ["pending", "blocked", "approve_failed", "deny_failed", "deny_pending_verify"] as const;
 
 /**
  * Status of each EXISTING queue row for a set of scraped PO numbers, keyed by
@@ -601,7 +634,7 @@ export async function updateHolmanApprovalResult(
 // visible (NOT 'approved'), stamp who tried + the reason, so the UI can surface it red.
 export async function markHolmanPoOutcome(
   id: string,
-  status: "blocked" | "approve_failed" | "deny_failed",
+  status: "blocked" | "approve_failed" | "deny_failed" | "deny_pending_verify",
   decidedByName: string,
   error: string,
 ): Promise<HolmanRentalPoRow | null> {
@@ -627,7 +660,7 @@ export async function markHolmanPoDenied(id: string, decidedByName: string): Pro
         decided_by_name = ${decidedByName},
         decided_at = ${now},
         holman_approve_error = NULL
-    WHERE id = ${id} AND status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
+    WHERE id = ${id} AND status IN ('pending', 'blocked', 'approve_failed', 'deny_failed', 'deny_pending_verify')
     RETURNING ${sql.raw(SELECT_COLS)}
   `);
   return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;

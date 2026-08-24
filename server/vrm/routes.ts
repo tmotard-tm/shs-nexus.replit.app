@@ -2926,9 +2926,28 @@ export function registerVrmRoutes(): Router {
       const enriched = await Promise.all(
         scraped.map(async (po) => ({ poNumber: po.poNumber, ...(await matchDriverNameToTech(po.driverName)) }))
       );
-      await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt, {
+      const { confirmedDenies } = await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt, {
         sweepResolved: walkComplete !== false && !scrapeErr,
       });
+      // Pending-verify denies this clean walk just proved (PO gone from the
+      // grid): run the SAME decision pipeline an in-route confirm runs —
+      // Decision Log, tech redirect SMS, supervisor notify, DCA
+      // make-unavailable, Full Log. Fault-isolated per row: the row is already
+      // 'denied' on grid truth, so a pipeline hiccup must not fail the walk —
+      // it logs loudly for manual replay instead.
+      for (const dRow of confirmedDenies) {
+        try {
+          const who = dRow.decidedByName ?? "Holman queue";
+          const standing = await getDirectBillingStandingForLdap(dRow.techLdap ?? "").catch((e: any) => {
+            console.error(`[VRM/HolmanPO] standing lookup failed for ${dRow.techLdap} — plain redirect copy:`, e?.message);
+            return { standing: "none" as const, etdReference: null };
+          });
+          const decisionId = await recordHolmanDecision(dRow, who, "denied", standing);
+          console.log(`[VRM/HolmanPO] grid-confirmed deny completed for PO ${dRow.poNumber} (decision ${decisionId ?? "NOT LOGGED — no matched tech"})`);
+        } catch (e: any) {
+          console.error(`[VRM/HolmanPO] grid-confirmed deny pipeline FAILED for PO ${dRow.poNumber} (row is denied; replay manually):`, e?.message);
+        }
+      }
       // Which decided rows did the upsert actually pull BACK onto the worklist?
       // Measured after the fact instead of predicted here: the reopen rule
       // (grace window / resubmit date / amount change) lives in the SQL, and a
@@ -3334,6 +3353,17 @@ export function registerVrmRoutes(): Router {
           }
         }
         return res.json({ ok: true, status: "denied", decisionId, smsScheduledFor, smsScheduledTechLocal, holmanResult, row: updated });
+      }
+
+      // Decline posted and the acted-on ask left the page (the decline's normal
+      // success signature) but the awaiting grid hasn't cleared it yet — hold for
+      // verification instead of crying failure. The next walk finalizes it: gone
+      // from a clean grid = denied + full pipeline (SMS then, not now); still
+      // listed past the reopen grace = back to the operator as pending.
+      if (holmanResult.success && holmanResult.pendingVerify) {
+        const msg = holmanResult.error ?? "Decline posted — awaiting Holman grid verification";
+        const updated = await markHolmanPoOutcome(id, "deny_pending_verify", who, msg);
+        return res.json({ ok: true, status: "deny_pending_verify", error: msg, holmanResult, row: updated });
       }
 
       // Real submit but NOT confirmed on re-read → FAILED. Loud, visible, retryable.
