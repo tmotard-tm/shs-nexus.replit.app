@@ -68,6 +68,16 @@ interface Row {
   book_anchor_at?: string | null;
   book_anchor_source?: string | null;
   /**
+   * Task #796: audited manual off-book resolution. Set when staff verified
+   * with Holman that an UNANCHORED row is off the book. Consulted server-side
+   * strictly after the anchored/fallback evidence branches (evidence wins);
+   * when it is the deciding factor, holman_book_match reads 'manual'.
+   */
+  book_override_state?: string | null;
+  book_override_at?: string | null;
+  book_override_by?: string | null;
+  book_override_reason?: string | null;
+  /**
    * Billing switchover proof: set when this tech's rental appeared on the
    * Enterprise DIRECT-billing report (write-once — dropping off a later
    * report means the rental ended, still switched). Stamped automatically by
@@ -166,7 +176,11 @@ function bookTone(state: string | null | undefined): { label: string; fg: string
   if (s === "open") return { label: "still billing", fg: colors.amber, bg: colors.amberLight, bold: true };
   if (s === "rolled") return { label: "rolled past swap", fg: colors.red, bg: colors.redLight, bold: true };
   if (s === "pended") return { label: "pended", fg: colors.inkSoft, bg: colors.accentLight, bold: false };
-  if (s === "unanchored") return { label: "no anchor", fg: colors.inkMuted, bg: colors.accentLight, bold: false };
+  // Task #796: 'unanchored' is UNKNOWN, not clean — no anchored old ticket
+  // and no identity-verified truck match. Loud on purpose: these rows need a
+  // human to verify with Holman and resolve them (or a later import to find
+  // evidence); they must never read as quietly fine.
+  if (s === "unanchored") return { label: "unanchored — needs resolution", fg: colors.amber, bg: colors.amberLight, bold: true };
   return { label: "off the book", fg: colors.greenDeep, bg: colors.greenDeepLight, bold: false };
 }
 
@@ -350,6 +364,29 @@ export default function CutoverTracking() {
     voidMut.mutate({ ldap, action, reason: trimmed });
   }
 
+  // Task #796: audited manual resolution for an UNANCHORED book state. Staff
+  // who verified with Holman directly can mark the row off-book; the server
+  // refuses anchored rows (evidence wins) and keeps an append-only history.
+  const bookOverrideMut = useMutation({
+    mutationFn: (v: { ldap: string; action: "off_book" | "clear"; reason: string }) =>
+      apiRequest("POST",
+        `/api/vrm/forms/rental-survey/cutover/${encodeURIComponent(v.ldap)}/book-override`,
+        { action: v.action, reason: v.reason }),
+    onSuccess: () => refetch(),
+    onError: (e: any) => window.alert(e?.message || "book-override failed"),
+  });
+
+  function promptBookOverride(ldap: string, action: "off_book" | "clear") {
+    const reason = window.prompt(
+      action === "off_book"
+        ? `Mark ${ldap} as OFF the Holman book?\n\nOnly do this after verifying with Holman that the old rental is collected/closed.\n\nReason (required, kept as the audit trail):`
+        : `Clear ${ldap}'s manual off-book override?\n\nThe row will read "unanchored — needs resolution" again.\n\nReason (required):`);
+    const trimmed = (reason ?? "").trim();
+    if (!trimmed) return;
+    if (trimmed.length < 5) { window.alert("Reason must be at least 5 characters."); return; }
+    bookOverrideMut.mutate({ ldap, action, reason: trimmed });
+  }
+
   const rows = data?.rows ?? [];
 
   const stageCounts = useMemo(() => {
@@ -446,6 +483,9 @@ export default function CutoverTracking() {
       ["On Holman book", (r) => bookTone(r.holman_book_state).label],
       ["Book match", (r) => r.holman_book_match ?? ""],
       ["Anchor tickets", (r) => r.anchor_tickets ?? ""],
+      ["Book override", (r) => r.holman_book_match === "manual"
+        ? `off book (manual${r.book_override_by ? ` by ${r.book_override_by}` : ""}${r.book_override_reason ? `: ${r.book_override_reason}` : ""})`
+        : ""],
       ["Book as of", () => data?.book?.as_of ?? ""],
       ["Billing switched", (r) => stampEffective(r) ? "yes" : ""],
       ["Switch confirmed", (r) => r.direct_billing_confirmed_at ?? ""],
@@ -546,8 +586,9 @@ export default function CutoverTracking() {
         : "their own old ticket is still open" },
     { label: "Rolled past swap", value: rolled, icon: AlertTriangle, tone: colors.red,
       sub: "old ticket restarted on/after the ETD pickup day" },
-    { label: "No anchor", value: unanchored, icon: AlertTriangle, tone: colors.inkMuted,
-      sub: "no old ticket on record — book state unknown" },
+    { label: "Unanchored — needs resolution", value: unanchored, icon: AlertTriangle,
+      tone: unanchored > 0 ? colors.amber : colors.inkMuted,
+      sub: "book state unknown — verify with Holman, then mark off book on the row" },
     { label: "No confirmation text", value: confirmGaps, icon: AlertTriangle,
       tone: confirmGaps > 0 ? colors.red : colors.inkMuted,
       sub: "booked + route blocked, but the technician was never told" },
@@ -949,6 +990,36 @@ export default function CutoverTracking() {
                     {r.holman_book_match === "fallback" && (
                       <div style={{ fontSize: 11, color: colors.inkMuted }}>
                         truck match — no anchored ticket
+                      </div>
+                    )}
+                    {/* Task #796: manual resolution controls. 'unanchored' =
+                        the book state is unknown; once staff verify with
+                        Holman they resolve it here. 'manual' = a human
+                        already did — show who/when and offer the undo. */}
+                    {r.holman_book_state === "unanchored" && (
+                      <button onClick={() => promptBookOverride(r.ldap, "off_book")}
+                              disabled={bookOverrideMut.isPending}
+                              title="Verified with Holman that the old rental is collected/closed? Mark this row off the book (audited; a later-found anchor always wins)"
+                              style={{ display: "block", background: "none", border: "none", padding: 0,
+                                       cursor: "pointer", fontFamily: fonts.dmSans, fontSize: 10.5,
+                                       color: colors.inkMuted, textDecoration: "underline" }}>
+                        verified with Holman — mark off book
+                      </button>
+                    )}
+                    {r.holman_book_match === "manual" && (
+                      <div title={r.book_override_reason ?? undefined}>
+                        <div style={{ fontSize: 11, color: colors.inkMuted }}>
+                          manual{r.book_override_by ? ` by ${r.book_override_by}` : ""}
+                          {r.book_override_at ? ` · ${fmtDate(r.book_override_at)}` : ""}
+                        </div>
+                        <button onClick={() => promptBookOverride(r.ldap, "clear")}
+                                disabled={bookOverrideMut.isPending}
+                                title="Undo the manual off-book override — the row reads 'unanchored' again"
+                                style={{ display: "block", background: "none", border: "none", padding: 0,
+                                         cursor: "pointer", fontFamily: fonts.dmSans, fontSize: 10.5,
+                                         color: colors.inkMuted, textDecoration: "underline" }}>
+                          undo override
+                        </button>
                       </div>
                     )}
                     {r.anchor_tickets && (

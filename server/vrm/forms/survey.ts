@@ -1849,6 +1849,91 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
   });
 
   /**
+   * Task #796: audited manual resolution for an UNANCHORED book state.
+   *
+   * A row is 'unanchored' when it has no anchored old ticket AND no
+   * identity-verified truck match — the Holman book state is UNKNOWN, and
+   * nothing automatic can resolve it (the old ticket is long off the book, so
+   * re-running the anchor snapshot records nothing). Staff who verify with
+   * Holman directly mark the row off-book here.
+   *
+   * off_book — sets the override. The write REQUIRES an empty anchor (an
+   *            anchored row already has evidence — 409), and the payload
+   *            consults the override strictly after the anchored/fallback
+   *            branches, so later-found evidence always wins over the human
+   *            assertion. NEVER touches book_anchor_* columns.
+   * clear    — undoes a mistaken override; the row reads 'unanchored' again.
+   *
+   * Both actions append to book_override_history (append-only audit, same
+   * discipline as direct_billing_void_history) and require a reason.
+   * Session-only via requireStaffSession so the actor is always a person.
+   */
+  router.post("/forms/rental-survey/cutover/:ldap/book-override", requireStaffSession, async (req, res) => {
+    try {
+      const ldap = String(req.params.ldap || "").trim().toUpperCase();
+      const action = String(req.body?.action || "off_book");
+      const reason = String(req.body?.reason || "").trim();
+      if (!ldap) return res.status(400).json({ message: "ldap required" });
+      if (action !== "off_book" && action !== "clear") {
+        return res.status(400).json({ message: "action must be 'off_book' or 'clear'" });
+      }
+      if (reason.length < 5) {
+        return res.status(400).json({ message: "a reason (at least 5 characters) is required — it is the audit trail" });
+      }
+      const actor = String((req as any).user?.username || (req as any).user?.email || "unknown").slice(0, 80);
+      const historyEvent = sql`COALESCE(book_override_history, '[]'::jsonb)
+            || jsonb_build_object('action', ${action}::text, 'at', now(),
+                                  'by', ${actor}::text, 'reason', ${reason}::text)`;
+      if (action === "off_book") {
+        const r = await db.execute(sql`
+          UPDATE vrm_rental_cutover
+          SET book_override_state   = 'off_book',
+              book_override_at      = now(),
+              book_override_by      = ${actor},
+              book_override_reason  = ${reason},
+              book_override_history = ${historyEvent},
+              updated_at            = now()
+          WHERE upper(trim(ldap)) = ${ldap}
+            -- Evidence wins: an anchored row is never manually overridden.
+            AND jsonb_array_length(COALESCE(book_anchor_tickets, '[]'::jsonb)) = 0
+        `);
+        if (!Number((r as any).rowCount ?? 0)) {
+          const { rows: chk } = await db.execute(sql`
+            SELECT 1 FROM vrm_rental_cutover WHERE upper(trim(ldap)) = ${ldap}
+          `);
+          if (!(chk as any[]).length) {
+            return res.status(404).json({ message: "no cutover row for that LDAP" });
+          }
+          return res.status(409).json({
+            message: "row has anchored old ticket(s) — the anchor is the evidence; the manual override is only for unanchored rows",
+          });
+        }
+        console.log(`[survey] book state manually marked OFF-BOOK for ${ldap} by ${actor}: ${reason}`);
+      } else {
+        const r = await db.execute(sql`
+          UPDATE vrm_rental_cutover
+          SET book_override_state   = NULL,
+              book_override_at      = NULL,
+              book_override_by      = NULL,
+              book_override_reason  = NULL,
+              book_override_history = ${historyEvent},
+              updated_at            = now()
+          WHERE upper(trim(ldap)) = ${ldap}
+            AND book_override_state IS NOT NULL
+        `);
+        if (!Number((r as any).rowCount ?? 0)) {
+          return res.status(404).json({ message: "no book override on that LDAP" });
+        }
+        console.log(`[survey] book override CLEARED for ${ldap} by ${actor}: ${reason}`);
+      }
+      res.json({ ok: true, ldap, action });
+    } catch (error: any) {
+      console.error("[survey] book-override failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "book-override failed" });
+    }
+  });
+
+  /**
    * Task #772: direct-billed rentals with NO booked cutover row — ~20% of the
    * direct report used to surface only in the upload toast at import time.
    * This is their permanent home, derived from the durable rental-ops book
@@ -1986,6 +2071,12 @@ export async function buildCutoverStatusPayload(opts?: {
                          FROM jsonb_array_elements_text(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) t), '')
                  AS anchor_tickets,
                c.book_anchor_at, c.book_anchor_source,
+               -- Task #796: audited manual off-book resolution for rows whose
+               -- book state is otherwise UNKNOWN ('unanchored'). Exposed so
+               -- the page can show who resolved the row, when and why, and
+               -- offer the undo.
+               c.book_override_state, c.book_override_at,
+               c.book_override_by, c.book_override_reason,
                -- Billing switchover proof (2026-08-22): stamped by the manual
                -- direct-billing import when this tech's rental shows up on the
                -- Enterprise direct-account report. Write-once — see
@@ -2169,6 +2260,10 @@ export async function buildCutoverStatusPayload(opts?: {
           SELECT
             CASE WHEN jsonb_array_length(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) > 0 THEN 'anchored'
                  WHEN COALESCE(fb.matched, 0) > 0                                          THEN 'fallback'
+                 -- Task #796: staff verified with Holman directly. Consulted
+                 -- strictly AFTER the evidence branches — a later-found anchor
+                 -- or verified truck match always beats the human assertion.
+                 WHEN c.book_override_state = 'off_book'                                   THEN 'manual'
                  ELSE 'none' END AS book_match,
             CASE
               WHEN jsonb_array_length(COALESCE(c.book_anchor_tickets, '[]'::jsonb)) > 0 THEN
@@ -2181,6 +2276,9 @@ export async function buildCutoverStatusPayload(opts?: {
                      WHEN COALESCE(fb.open_rolled, false) THEN 'rolled'
                      WHEN COALESCE(fb.pended, false)      THEN 'pended'
                      ELSE '' END
+              -- Task #796: the manual override resolves ONLY the unknown case
+              -- (no anchor, no verified truck match) to off-book.
+              WHEN c.book_override_state = 'off_book' THEN ''
               ELSE 'unanchored'
             END AS book_state
         ) hb ON TRUE

@@ -1034,6 +1034,35 @@ export async function initFormsSchema(): Promise<void> {
     `);
   }
 
+  // Task #796: audited MANUAL resolution for an 'unanchored' book state.
+  // A handful of backfill-era rows have no anchored old ticket AND no
+  // identity-verified truck match, so their Holman book state is UNKNOWN —
+  // unknown ≠ clean, and nothing automatic can resolve them (the old ticket
+  // is long off the book). Staff who verify with Holman directly can mark
+  // the row off-book here. The override is consulted ONLY when the derived
+  // state would be 'unanchored': anchored/fallback evidence always wins.
+  // History is append-only (same discipline as direct_billing_void_history).
+  // Same steady-state-zero-DDL pattern as the blocks above.
+  const { rows: bookOvCols } = await db.execute(sql`
+    SELECT count(*)::int AS n FROM information_schema.columns
+    WHERE table_name = 'vrm_rental_cutover'
+      AND column_name IN ('book_override_state','book_override_at','book_override_by',
+                          'book_override_reason','book_override_history')
+  `);
+  if (Number((bookOvCols as any[])[0]?.n ?? 0) < 5) {
+    await db.execute(sql`
+      BEGIN;
+      SET LOCAL lock_timeout = '5s';
+      ALTER TABLE vrm_rental_cutover
+        ADD COLUMN IF NOT EXISTS book_override_state   text,
+        ADD COLUMN IF NOT EXISTS book_override_at      timestamptz,
+        ADD COLUMN IF NOT EXISTS book_override_by      text,
+        ADD COLUMN IF NOT EXISTS book_override_reason  text,
+        ADD COLUMN IF NOT EXISTS book_override_history jsonb;
+      COMMIT;
+    `);
+  }
+
   // Task #759: Samsara evidence check on breakdown/accident requests. The
   // verdict is ADVISORY (a badge for the reviewer, never a gate); the snapshot
   // is the structured evidence behind it; checked_at ages the badge honestly.
