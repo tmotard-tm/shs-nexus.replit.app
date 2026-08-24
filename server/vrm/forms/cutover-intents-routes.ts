@@ -46,6 +46,7 @@ import {
   firstWorkingDay,
   addDaysISO,
   etTodayISO,
+  ensureCutoverConfirmationGuards,
   morningSweep,
   isContractBlockLive,
   recordCancellationEvidence,
@@ -315,7 +316,17 @@ export function registerCutoverIntentRoutes(router: Router): void {
         console.error("[cutover] morning-sweep executor pass failed:", err?.message ?? err);
       }
       const summary = await morningSweep();
-      res.json({ ...summary, executor });
+      // Task #793 backstop: catch any booked+blocked row whose door-time
+      // confirmation ensure was missed (crash, deploy gap, direct DB write).
+      // Epoch + comms-evidence dedupe inside make this idempotent and safe.
+      let confirmationGuards: unknown = null;
+      try {
+        confirmationGuards = await ensureCutoverConfirmationGuards();
+      } catch (err: any) {
+        confirmationGuards = { error: String(err?.message ?? err).slice(0, 300) };
+        console.error("[cutover] morning-sweep confirmation ensure failed:", err?.message ?? err);
+      }
+      res.json({ ...summary, executor, confirmationGuards });
     } catch (e: any) {
       sendOrchestratorError(res, e);
     }

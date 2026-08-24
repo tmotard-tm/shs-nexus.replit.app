@@ -4154,6 +4154,254 @@ export async function adoptRunnerBooking(
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// Msg1 adoption — confirmation-text guarantee for bookings made OUTSIDE the
+// intents workflow (external runner writebacks + manual route-block filings).
+// ---------------------------------------------------------------------------
+
+/**
+ * Bookings recorded before this date belong to the manual-blast era (the 8/18
+ * blast + the 8/20 wave that task #792 is texting by hand). The adoption lane
+ * must never auto-text that backlog — only rows booked or block-filed on/after
+ * the epoch are eligible. A re-filed block moves route_block_filed_at forward,
+ * which is a genuinely new filing and correctly re-enters the window.
+ */
+export const CUTOVER_MSG1_ADOPTION_EPOCH = "2026-08-24T00:00:00Z";
+
+/**
+ * The msg1 body's distinctive phrase (renderMsg1) — also what the 8/18 manual
+ * blast used, verified against the prod comms log. Any outbound message to the
+ * tech containing it (or their exact confirmation number) counts as evidence
+ * the technician was told, so the adoption lane will not text again.
+ */
+export const MSG1_BODY_EVIDENCE_PHRASE = "blocked the first 30 minutes";
+
+/** Deterministic, valid-UUID source id so the intents unique index dedupes adoption races. */
+export function msg1AdoptionSourceId(ldap: string, confirmation: string): string {
+  const h = crypto.createHash("sha256")
+    .update(`msg1-adopt:${String(ldap).trim().toUpperCase()}:${String(confirmation).trim()}`)
+    .digest("hex");
+  // Format as a v4-shaped UUID: fetchEligibilityFacts casts source_id::uuid, so
+  // this MUST parse as a uuid (a readable "adopt:LDAP" tag would throw there).
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+export type Msg1AdoptionSummary = {
+  mode: "live" | "dry_run";
+  scanned: number;
+  adopted: number;
+  redriven: number;
+  workflowOwned: number;
+  skippedNoConfirmation: number;
+  blocked: number;
+  failures: Array<{ ldap: string; error: string }>;
+};
+
+/**
+ * Guarantee a durable msg1_evening send guard for every booked cutover
+ * reservation with a live filed route block ("booked but never told" killer).
+ *
+ * For each such vrm_rental_cutover row with NO confirmation-text evidence —
+ * no same-mode cutover intent whose msg1 moved off 'pending', and no outbound
+ * comms message carrying the msg1 phrase or the confirmation number — this
+ * either:
+ *   - re-drives releaseMessagesIfEligible on an existing nonterminal intent
+ *     (the workflow owns the send; the call self-gates and is idempotent), or
+ *   - creates an ADOPTED intent born status='reservation_verified' (never
+ *     claimable by the booking runner — booking already happened outside the
+ *     workflow) with reservation/block evidence copied from the tracking row,
+ *     then releases msg1 through the standard guard path. Send failure leaves
+ *     the guard 'blocked' + intent in manual_review — the loud path.
+ *
+ * Adopted intents are msg1-only (msg2_state='skipped_adopted'): the morning
+ * reminder belongs to the full workflow, and an adopted intent must not sit
+ * nonterminal forever holding the per-LDAP live lock, so it completes as soon
+ * as msg1 is sent or queued.
+ *
+ * Idempotent and race-safe: deterministic source_id dedupes concurrent doors
+ * via the intents unique index; the live nonterminal per-LDAP lock is treated
+ * as "workflow owns this tech", never an error.
+ */
+export async function ensureCutoverConfirmationGuards(opts?: {
+  ldaps?: string[];
+  limit?: number;
+}): Promise<Msg1AdoptionSummary> {
+  const mode = defaultExecutionMode();
+  const limit = Math.max(1, Math.min(500, opts?.limit ?? 200));
+  const ldapFilter = (opts?.ldaps ?? [])
+    .map((l) => String(l).trim().toUpperCase())
+    .filter(Boolean);
+
+  const summary: Msg1AdoptionSummary = {
+    mode, scanned: 0, adopted: 0, redriven: 0, workflowOwned: 0,
+    skippedNoConfirmation: 0, blocked: 0, failures: [],
+  };
+
+  const { rows } = await db.execute(sql`
+    SELECT c.ldap, c.tech_name, c.truck_number, c.etd_reference,
+           c.branch_code_booked, c.branch_name, c.branch_address, c.vehicle_class,
+           c.reservation_start::text AS reservation_start,
+           c.reservation_end::text   AS reservation_end,
+           c.reserved_at, c.route_block_project_id, c.route_block_project_name,
+           c.route_block_date::text  AS route_block_date,
+           c.route_block_filed_at,
+           i.id     AS intent_id,
+           i.status AS intent_status,
+           i.msg1_state AS intent_msg1_state
+    FROM vrm_rental_cutover c
+    LEFT JOIN LATERAL (
+      SELECT i.id, i.status, i.msg1_state
+      FROM vrm_rental_workflow_intents i
+      WHERE i.workflow_type = ${WORKFLOW_CUTOVER}
+        AND upper(i.ldap) = upper(c.ldap)
+        AND i.execution_mode = ${mode}
+        AND i.status NOT IN ('cancelled', 'abandoned')
+      ORDER BY (i.msg1_state <> 'pending') DESC, i.id DESC
+      LIMIT 1
+    ) i ON TRUE
+    WHERE c.reservation_status = 'booked'
+      AND c.route_block_status = 'filed'
+      AND c.route_block_live IS TRUE
+      AND upper(COALESCE(c.ldap, '')) NOT LIKE 'ZZ%'
+      AND (c.reserved_at >= ${CUTOVER_MSG1_ADOPTION_EPOCH}::timestamptz
+           OR c.route_block_filed_at >= ${CUTOVER_MSG1_ADOPTION_EPOCH}::timestamptz)
+      AND (i.id IS NULL OR i.msg1_state = 'pending')
+      AND NOT EXISTS (
+        SELECT 1 FROM fs_comms_messages m
+        WHERE m.direction = 'outbound'
+          AND upper(COALESCE(m.ldap, '')) = upper(c.ldap)
+          AND (m.body ILIKE ${"%" + MSG1_BODY_EVIDENCE_PHRASE + "%"}
+               OR (NULLIF(btrim(COALESCE(c.etd_reference, '')), '') IS NOT NULL
+                   AND m.body ILIKE '%' || btrim(c.etd_reference) || '%'))
+          AND (c.reserved_at IS NULL OR m.created_at >= c.reserved_at - interval '1 day')
+      )
+      ${ldapFilter.length
+        ? sql`AND upper(c.ldap) = ANY(string_to_array(${ldapFilter.join(",")}, ','))`
+        : sql``}
+    ORDER BY c.reserved_at DESC NULLS LAST
+    LIMIT ${limit}
+  `);
+
+  for (const row of rows as any[]) {
+    const ldap = String(row.ldap || "").trim().toUpperCase();
+    summary.scanned++;
+    try {
+      // An existing nonterminal same-mode intent owns the send. Re-drive the
+      // release (self-gating, CAS-guarded); if msg1 stays pending the workflow
+      // simply is not there yet — leave it alone.
+      if (row.intent_id) {
+        await releaseMessagesIfEligible(Number(row.intent_id));
+        const after = await loadIntent(Number(row.intent_id));
+        if (after.msg1_state && after.msg1_state !== "pending") {
+          summary.redriven++;
+          if (after.msg1_state === "blocked") summary.blocked++;
+        } else {
+          summary.workflowOwned++;
+        }
+        continue;
+      }
+
+      const conf = String(row.etd_reference ?? "").trim();
+      if (!conf) {
+        // A "booked" row with no confirmation number cannot render a truthful
+        // msg1. Leave it — the tracking page flags it as a confirmation gap.
+        summary.skippedNoConfirmation++;
+        continue;
+      }
+
+      const nowISO = new Date().toISOString();
+      const reservedAtISO = row.reserved_at ? new Date(row.reserved_at).toISOString() : nowISO;
+      const sourceId = msg1AdoptionSourceId(ldap, conf);
+      const reservationEvidence = {
+        confirmation: conf,
+        verifiedBy: "msg1-adoption",
+        verifiedAt: reservedAtISO,
+        adopted: { from: "vrm_rental_cutover", at: nowISO },
+      };
+      const blockEvidence = {
+        adopted: true,
+        projectId: row.route_block_project_id ?? null,
+        projectName: row.route_block_project_name ?? null,
+        filedAt: row.route_block_filed_at ? new Date(row.route_block_filed_at).toISOString() : null,
+        source: "vrm_rental_cutover",
+      };
+      const preview = {
+        workflowType: WORKFLOW_CUTOVER,
+        adopted: true,
+        reservation: {
+          branchCode: row.branch_code_booked ?? null,
+          branchName: row.branch_name ?? null,
+          branchAddress: row.branch_address ?? null,
+          sipp: row.vehicle_class ?? null,
+          pickupDate: row.reservation_start ? String(row.reservation_start).slice(0, 10) : null,
+          returnDate: row.reservation_end ? String(row.reservation_end).slice(0, 10) : null,
+        },
+      };
+
+      let intentId: number | null = null;
+      try {
+        const ins = await db.execute(sql`
+          INSERT INTO vrm_rental_workflow_intents
+            (workflow_type, source_id, source_revision, execution_mode,
+             ldap, tech_name, truck_number,
+             status, reservation_state, block_state, msg1_state, msg2_state,
+             event_date, reservation_evidence, block_evidence, block_submitted_at,
+             preview, created_by)
+          VALUES
+            (${WORKFLOW_CUTOVER}, ${sourceId}, 0, ${mode},
+             ${ldap}, ${row.tech_name ?? null}, ${row.truck_number ?? null},
+             'reservation_verified', 'verified', 'verified', 'pending', 'skipped_adopted',
+             ${row.route_block_date ?? null},
+             ${JSON.stringify(reservationEvidence)}::jsonb,
+             ${JSON.stringify(blockEvidence)}::jsonb,
+             ${row.route_block_filed_at ?? null},
+             ${JSON.stringify(preview)}::jsonb, 'msg1-adoption')
+          ON CONFLICT DO NOTHING
+          RETURNING id
+        `);
+        intentId = (ins.rows as any[])[0]?.id ? Number((ins.rows as any[])[0].id) : null;
+      } catch (e: any) {
+        // Live nonterminal per-LDAP lock: another live intent exists for this
+        // tech (raced in after our scan). The workflow owns them — skip.
+        if (isUniqueViolation(e)) {
+          summary.workflowOwned++;
+          continue;
+        }
+        throw e;
+      }
+      if (intentId === null) {
+        // ON CONFLICT DO NOTHING on the (type, source, revision, mode) identity:
+        // a concurrent door already adopted this exact booking.
+        summary.workflowOwned++;
+        continue;
+      }
+
+      await releaseMessagesIfEligible(intentId);
+      const after = await loadIntent(intentId);
+      summary.adopted++;
+      if (["sent", "queued", "released"].includes(String(after.msg1_state))) {
+        // Msg1-only adoption: complete now rather than waiting on a msg2 that
+        // will never come, so the per-LDAP live lock is not held forever.
+        await db.execute(sql`
+          UPDATE vrm_rental_workflow_intents
+          SET status = 'completed', updated_at = now()
+          WHERE id = ${intentId} AND status = 'reservation_verified'
+        `);
+        await mirrorCutoverSummary(intentId);
+      } else if (after.msg1_state === "blocked") {
+        summary.blocked++;
+        await mirrorCutoverSummary(intentId);
+      }
+    } catch (e: any) {
+      const msg = String(e?.message ?? e).slice(0, 300);
+      console.error(`[cutover] msg1 adoption failed for ${ldap}:`, msg);
+      summary.failures.push({ ldap, error: msg });
+    }
+  }
+
+  return summary;
+}
+
 export async function retryIntent(
   intentId: number,
   requestedBy: string,

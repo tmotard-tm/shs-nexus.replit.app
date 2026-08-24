@@ -93,6 +93,18 @@ interface Row {
    * even when the import-time stamp is absent (a void still wins).
    */
   direct_billing_book_live?: boolean | null;
+  /**
+   * Task #793 confirmation-text evidence, derived server-side:
+   * 'sent' (live msg1 guard sent, or an outbound comms message carrying the
+   * msg1 phrase / this row's confirmation number), 'queued' (scheduled in the
+   * comms queue), 'pending' (workflow owns the send, not released yet),
+   * 'blocked' (send FAILED loudly), 'none' (no evidence at all).
+   */
+  confirm_text_status?: string | null;
+  confirm_text_at?: string | null;
+  confirm_text_scheduled_for?: string | null;
+  /** booked + live filed block + no confirmation-text evidence = never told. */
+  confirm_text_gap?: boolean | null;
 }
 
 interface Payload {
@@ -107,6 +119,8 @@ interface Payload {
   double_billed?: number;
   /** switched rows whose old-book state is UNANCHORED — unknown, not clean */
   billing_unknown?: number;
+  /** Task #793: booked + live filed block with NO confirmation-text evidence */
+  confirm_gaps?: number;
   /** Enterprise book snapshot freshness — the truth ceiling of every book state. */
   book?: {
     as_of: string | null;
@@ -425,6 +439,10 @@ export default function CutoverTracking() {
       ["Supervisor phone", (r) => r.supervisor_phone ?? ""],
       ["Block live", (r) => r.route_block_live == null ? "" : r.route_block_live ? "yes" : "TEST"],
       ["Block problem", (r) => r.route_block_error ?? ""],
+      ["Confirmation text", (r) => r.confirm_text_gap
+        ? (r.confirm_text_status === "blocked" ? "SEND BLOCKED" : "NO TEXT")
+        : (r.confirm_text_status ?? "")],
+      ["Confirmation texted at", (r) => r.confirm_text_at ?? ""],
       ["On Holman book", (r) => bookTone(r.holman_book_state).label],
       ["Book match", (r) => r.holman_book_match ?? ""],
       ["Anchor tickets", (r) => r.anchor_tickets ?? ""],
@@ -459,6 +477,10 @@ export default function CutoverTracking() {
   ).length;
   const rolled = rows.filter((r) => r.holman_book_state === "rolled").length;
   const unanchored = rows.filter((r) => r.holman_book_state === "unanchored").length;
+  // Task #793: booked + live filed block with NO confirmation-text evidence —
+  // same predicate as the server's confirm_gaps count (the server also sets
+  // r.confirm_text_gap per row so the KPI, the tint and the cell agree).
+  const confirmGaps = rows.filter((r) => r.confirm_text_gap === true).length;
   // Effective stamps only — a voided stamp is NOT switched (matches the
   // server's billing_switched count and every facet bucket on this page).
   const billingSwitched = rows.filter(stampEffective).length;
@@ -526,6 +548,9 @@ export default function CutoverTracking() {
       sub: "old ticket restarted on/after the ETD pickup day" },
     { label: "No anchor", value: unanchored, icon: AlertTriangle, tone: colors.inkMuted,
       sub: "no old ticket on record — book state unknown" },
+    { label: "No confirmation text", value: confirmGaps, icon: AlertTriangle,
+      tone: confirmGaps > 0 ? colors.red : colors.inkMuted,
+      sub: "booked + route blocked, but the technician was never told" },
     { label: "Billing switched", value: billingSwitched, icon: CheckCircle2, tone: colors.greenDeep,
       sub: "confirmed on the Enterprise direct-billing report" },
     { label: "Double billed", value: doubleBilled, icon: AlertTriangle,
@@ -785,6 +810,7 @@ export default function CutoverTracking() {
                 ["van_status", "Why in a rental"], ["stage", "Stage"],
                 ["etd_reference", "Reservation"], ["branch_name", "Branch"],
                 ["route_block_status", "Route block"], ["route_block_date", "Block day"],
+                ["confirm_text_status", "Confirm text"],
                 ["holman_book_state", "On Holman book"],
                 ["direct_billing_confirmed_at", "Billing switched"],
                 ["district", "Dist"], ["supervisor_name", "Supervisor"]]
@@ -861,6 +887,53 @@ export default function CutoverTracking() {
                     {r.route_block_date
                       ? fmtDay(r.route_block_date)
                       : <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
+                  {/* Task #793: was the technician actually TOLD? A booked
+                      reservation with a live block and no text evidence is the
+                      exact silent failure the 8/20 wave hid — loud, day one. */}
+                  <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}>
+                    {(() => {
+                      const s = r.confirm_text_status ?? "none";
+                      if (r.confirm_text_gap) {
+                        return (
+                          <span style={{ color: colors.red, fontWeight: 700 }}>
+                            {s === "blocked" ? "SEND BLOCKED" : "NO TEXT"}
+                            <div style={{ fontSize: 11, fontWeight: 400, color: colors.red }}>
+                              never told about pickup
+                            </div>
+                          </span>
+                        );
+                      }
+                      if (s === "sent") {
+                        return (
+                          <span style={{ color: colors.greenDeep, fontWeight: 700 }}>
+                            texted ✓
+                            {r.confirm_text_at && (
+                              <div style={{ fontSize: 11, fontWeight: 400, color: colors.inkMuted }}>
+                                {fmtDate(r.confirm_text_at)}
+                              </div>
+                            )}
+                          </span>
+                        );
+                      }
+                      if (s === "queued") {
+                        return (
+                          <span style={{ color: colors.blue }}>
+                            queued
+                            {r.confirm_text_scheduled_for && (
+                              <div style={{ fontSize: 11, color: colors.inkMuted }}>
+                                for {fmtDate(r.confirm_text_scheduled_for)}
+                              </div>
+                            )}
+                          </span>
+                        );
+                      }
+                      if (s === "pending") {
+                        return <span style={{ color: colors.amber }}>pending</span>;
+                      }
+                      // No evidence but also no live filed block yet — not a gap.
+                      return <span style={{ color: colors.inkMuted }}>—</span>;
+                    })()}
                   </td>
                   <td style={{ ...td, fontSize: 12, whiteSpace: "nowrap" }}
                       title={r.anchor_tickets ? `anchored ticket(s): ${r.anchor_tickets}` : undefined}>
@@ -957,7 +1030,7 @@ export default function CutoverTracking() {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={13} style={{ ...td, textAlign: "center", color: colors.inkMuted,
+                <td colSpan={14} style={{ ...td, textAlign: "center", color: colors.inkMuted,
                                          padding: 30 }}>
                   {rows.length === 0
                     ? "No complete records yet. A technician appears here once their reservation is booked and their route block is filed."

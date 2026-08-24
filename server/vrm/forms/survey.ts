@@ -25,7 +25,7 @@ import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 import { buildCutoverBlockArgs } from "./cutover-block-args";
 import { anchorCutoverRow } from "./cutover-anchor";
 import { runMsg1ConfirmationBackfill } from "./msg1-confirmation-backfill";
-
+import { ensureCutoverConfirmationGuards, type Msg1AdoptionSummary } from "./cutover-orchestrator";
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
   const digits = String(v || "").replace(/\D/g, "").replace(/^0+/, "");
@@ -1098,36 +1098,57 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         projectName?: string | null;
         filedNow: boolean;
         error?: string | null;
-      }) => {
-        try {
-          await db.execute(sql`
-            INSERT INTO vrm_rental_cutover
-              (ldap, tech_name, truck_number, route_block_status,
-               route_block_project_id, route_block_project_name, route_block_date,
-               route_block_live, route_block_filed_at, route_block_error, updated_at)
-            VALUES (${r.ldap}, ${r.tech_name ?? null}, ${truck}, ${o.status},
-                    ${o.projectId ?? null}, ${o.projectName ?? null}, ${date}::date,
-                    ${live}, ${o.filedNow ? sql`now()` : sql`NULL`},
-                    ${o.error ?? null}, now())
-            ON CONFLICT (ldap) DO UPDATE SET
-              tech_name                = COALESCE(EXCLUDED.tech_name, vrm_rental_cutover.tech_name),
-              truck_number             = COALESCE(EXCLUDED.truck_number, vrm_rental_cutover.truck_number),
-              route_block_status       = EXCLUDED.route_block_status,
-              route_block_project_id   = EXCLUDED.route_block_project_id,
-              route_block_project_name = EXCLUDED.route_block_project_name,
-              route_block_date         = EXCLUDED.route_block_date,
-              route_block_live         = EXCLUDED.route_block_live,
-              route_block_filed_at     = EXCLUDED.route_block_filed_at,
-              route_block_error        = EXCLUDED.route_block_error,
-              updated_at               = now()
-          `);
-        } catch (trackErr: any) {
-          // Never let bookkeeping fail a block that was actually filed.
-          console.error("[survey] cutover tracking failed for", r.ldap, trackErr?.message);
+      }): Promise<boolean> => {
+        // Task #793 review: this row IS the source every downstream safety
+        // reads — the confirmation-text ensure lane, the tracking page's gap
+        // flag, and the morning-sweep backstop all re-query vrm_rental_cutover.
+        // A swallowed write after a LIVE filing therefore used to be the exact
+        // silent "blocked but never told" state this task kills. Retry once
+        // (the realistic failure is a transient Neon drop), and on final
+        // failure return false so the caller surfaces it in the response.
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            await db.execute(sql`
+              INSERT INTO vrm_rental_cutover
+                (ldap, tech_name, truck_number, route_block_status,
+                 route_block_project_id, route_block_project_name, route_block_date,
+                 route_block_live, route_block_filed_at, route_block_error, updated_at)
+              VALUES (${r.ldap}, ${r.tech_name ?? null}, ${truck}, ${o.status},
+                      ${o.projectId ?? null}, ${o.projectName ?? null}, ${date}::date,
+                      ${live}, ${o.filedNow ? sql`now()` : sql`NULL`},
+                      ${o.error ?? null}, now())
+              ON CONFLICT (ldap) DO UPDATE SET
+                tech_name                = COALESCE(EXCLUDED.tech_name, vrm_rental_cutover.tech_name),
+                truck_number             = COALESCE(EXCLUDED.truck_number, vrm_rental_cutover.truck_number),
+                route_block_status       = EXCLUDED.route_block_status,
+                route_block_project_id   = EXCLUDED.route_block_project_id,
+                route_block_project_name = EXCLUDED.route_block_project_name,
+                route_block_date         = EXCLUDED.route_block_date,
+                route_block_live         = EXCLUDED.route_block_live,
+                route_block_filed_at     = EXCLUDED.route_block_filed_at,
+                route_block_error        = EXCLUDED.route_block_error,
+                updated_at               = now()
+            `);
+            return true;
+          } catch (trackErr: any) {
+            // Never let bookkeeping fail a block that was actually filed —
+            // but never let it vanish either.
+            console.error(
+              `[survey] cutover tracking failed for ${r.ldap} (attempt ${attempt + 1}/2):`,
+              trackErr?.message,
+            );
+          }
         }
+        return false;
       };
 
       const results: any[] = [];
+      const filedLdaps: string[] = [];
+      // LIVE filings whose tracking row could not be written even after a
+      // retry: the block is REAL but every downstream safety net is blind to
+      // it. Returned loudly so the operator re-runs filing for these ldaps
+      // (idempotent: the tracked row upserts; ensure/dedupe gates re-check).
+      const trackingFailures: Array<{ ldap: string; error: string }> = [];
       let filed = 0, skipped = 0, failed = 0;
       for (const r of rows as any[]) {
         const truck = String(r.truck_number || "").trim() || "n/a";
@@ -1168,13 +1189,21 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         // technician before moving on.
         const blkStatus = out.ok ? (live ? "filed" : "test")
                         : out.skipReason ? "skipped" : "failed";
-        await trackOutcome(r, truck, {
+        if (blkStatus === "filed") filedLdaps.push(String(r.ldap));
+        const tracked = await trackOutcome(r, truck, {
           status: blkStatus,
           projectId: out.projectId ?? null,
           projectName: out.projectName ?? null,
           filedNow: out.ok,
           error: out.errorMessage ?? out.skipReason ?? null,
         });
+        if (!tracked && blkStatus === "filed") {
+          trackingFailures.push({
+            ldap: String(r.ldap),
+            error: "LIVE block filed but the tracking row failed to persist — "
+              + "confirmation text NOT guaranteed; re-run filing for this ldap",
+          });
+        }
         results.push({
           ldap: r.ldap, tech_name: r.tech_name, truck_number: truck, unit,
           ok: out.ok, skipReason: out.skipReason ?? null,
@@ -1182,6 +1211,10 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           httpStatus: out.httpStatus, error: out.errorMessage,
         });
       }
+
+      // Confirmation-text guarantee (task #793): a live filed block means the
+      // technician's route really is blocked tomorrow — they must be told.
+      const confirmationGuards = await ensureConfirmationTexts(filedLdaps);
 
       res.json({
         date, dryRun, live,
@@ -1192,6 +1225,10 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
              : "LUCA_ROUTE_BLOCK_ENABLED is off, so this went out as TEST and will not be processed."),
         candidates: rows.length, filed, skipped, failed,
         results,
+        confirmationGuards,
+        // Non-empty = REAL filed blocks invisible to every downstream safety
+        // net. Never silent: the caller must re-run these ldaps.
+        trackingFailures,
       });
     } catch (error: any) {
       console.error("[survey] file-route-blocks failed:", error?.message || error);
@@ -1617,7 +1654,13 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
-  router.post("/forms/rental-survey/record-booking", async (req, res) => {
+  // requireCronOrStaff (review, task #793): this door now triggers a real
+  // outbound confirmation SMS via the ensure lane, so it re-enforces the same
+  // route-level gate as its SMS-capable siblings (/remind,
+  // /file-route-blocks) instead of relying on the mount-level allowlist
+  // alone. Zero change for legitimate callers: the Python runner's
+  // x-internal-cron bearer and signed-in sessions both pass.
+  router.post("/forms/rental-survey/record-booking", requireCronOrStaff, async (req, res) => {
     try {
       const items = Array.isArray(req.body?.results) ? req.body.results : [];
       if (!items.length) return res.status(400).json({ message: "results[] required" });
@@ -1697,7 +1740,14 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         if (status === "booked") await anchorCutoverRow(ldap, "booking");
         recorded++;
       }
-      res.json({ recorded });
+      // Confirmation-text guarantee (task #793): every booking recorded through
+      // this door gets a durable msg1 send guard — sent, queued, or loudly
+      // blocked — never silently booked-but-untold.
+      const bookedLdaps = items
+        .filter((it: any) => !it?.error && it?.etd_reference && it?.ldap)
+        .map((it: any) => String(it.ldap));
+      const confirmationGuards = await ensureConfirmationTexts(bookedLdaps);
+      res.json({ recorded, confirmationGuards });
     } catch (error: any) {
       console.error("[survey] record-booking failed:", error?.message || error);
       res.status(500).json({ message: error?.message || "record-booking failed" });
@@ -1955,6 +2005,33 @@ export async function buildCutoverStatusPayload(opts?: {
                  AS direct_billing_effective,
                (COALESCE(dbk.direct_live, 0) > 0)
                  AS direct_billing_book_live,
+               -- Confirmation-text evidence (task #793): was this technician
+               -- actually TOLD about the reservation + route block? Evidence
+               -- is either a LIVE msg1_evening send guard (the workflow's
+               -- durable send record) or an outbound comms message carrying
+               -- the msg1 phrase / this row's confirmation number (the 8/18
+               -- manual blast + task-#792 backfill). booked+blocked with
+               -- neither = the silent "booked but never told" state this
+               -- column exists to make loud.
+               -- Review fix (task #793): 'sent'/'queued' come from the GUARD
+               -- (the durable send record) or from comms evidence — never from
+               -- the intent's mutable msg1_state, which a migrated or manually
+               -- touched intent could carry with no send behind it. The two
+               -- deliberate msg1_state reads: 'skipped_already_notified' is an
+               -- explicit staff assertion the tech already knows (guard-less
+               -- by design), and 'blocked' is the loud failure state.
+               CASE
+                 WHEN m1.guard_status IN ('sent', 'sent_duplicate') THEN 'sent'
+                 WHEN m1x.texted_at IS NOT NULL                     THEN 'sent'
+                 WHEN m1.guard_status = 'queued'                    THEN 'queued'
+                 WHEN m1.msg1_state = 'skipped_already_notified'    THEN 'sent'
+                 WHEN m1.msg1_state = 'blocked'
+                   OR m1.guard_status = 'blocked'                   THEN 'blocked'
+                 WHEN m1.intent_id IS NOT NULL                      THEN 'pending'
+                 ELSE 'none'
+               END AS confirm_text_status,
+               COALESCE(m1x.texted_at, m1.evidenced_at) AS confirm_text_at,
+               m1.scheduled_for AS confirm_text_scheduled_for,
                sup.district, sup.supervisor_name, sup.supervisor_ldap, sup.supervisor_phone
         FROM vrm_rental_cutover c
         -- Pickup day, parsed once, kept as TEXT on purpose: reservation_start
@@ -1996,6 +2073,44 @@ export async function buildCutoverStatusPayload(opts?: {
           ORDER BY s.created_at DESC
           LIMIT 1
         ) s ON true
+        -- Task #793: the row's LIVE msg1_evening send guard, preferring one
+        -- with positive evidence. execution_mode = 'live' ONLY — a dry-run
+        -- simulated guard proves the machinery ran, not that a technician was
+        -- told. Cancelled/abandoned intents never count as coverage.
+        LEFT JOIN LATERAL (
+          SELECT i.id AS intent_id, i.msg1_state,
+                 g.status AS guard_status, g.scheduled_for,
+                 COALESCE(g.updated_at, i.updated_at) AS evidenced_at
+          FROM vrm_rental_workflow_intents i
+          LEFT JOIN vrm_workflow_send_guards g
+            ON g.intent_id = i.id
+           AND g.message_moment = 'msg1_evening'
+           AND g.execution_mode = i.execution_mode
+          WHERE i.workflow_type = 'cutover_survey'
+            AND upper(i.ldap) = upper(c.ldap)
+            AND i.execution_mode = 'live'
+            AND i.status NOT IN ('cancelled', 'abandoned')
+          ORDER BY (g.status IN ('sent', 'sent_duplicate', 'queued')) DESC,
+                   (i.msg1_state IN ('sent', 'queued', 'skipped_already_notified')) DESC,
+                   i.id DESC
+          LIMIT 1
+        ) m1 ON TRUE
+        -- Task #793 fallback: outbound comms evidence predating the workflow
+        -- (8/18 manual blast, task-#792 backfill). Same predicate as the
+        -- adoption lane's dedupe in cutover-orchestrator.ts — the two MUST
+        -- agree or the page would flag rows the sender refuses to text.
+        LEFT JOIN LATERAL (
+          SELECT m.created_at AS texted_at
+          FROM fs_comms_messages m
+          WHERE m.direction = 'outbound'
+            AND upper(COALESCE(m.ldap, '')) = upper(c.ldap)
+            AND (m.body ILIKE '%blocked the first 30 minutes%'
+                 OR (NULLIF(btrim(COALESCE(c.etd_reference, '')), '') IS NOT NULL
+                     AND m.body ILIKE '%' || btrim(c.etd_reference) || '%'))
+            AND (c.reserved_at IS NULL OR m.created_at >= c.reserved_at - interval '1 day')
+          ORDER BY m.created_at DESC
+          LIMIT 1
+        ) m1x ON TRUE
         -- Still on the Holman rental book? Task #738: driven by the ANCHORED
         -- old ticket(s), never by "any open ticket sharing the truck number" —
         -- that match kept a reassigned truck's NEW renter billing against the
@@ -2117,6 +2232,19 @@ export async function buildCutoverStatusPayload(opts?: {
         return out;
       };
 
+      // Task #793: THE confirmation-gap predicate, computed once server-side
+      // so the KPI, the facet and the row flag can never disagree. A gap is a
+      // technician whose reservation is booked AND whose route really is
+      // blocked (filed + live) with NO confirmation-text evidence — including
+      // a send that ended 'blocked' (told nobody, loudly failed).
+      for (const r of rows as any[]) {
+        (r as any).confirm_text_gap =
+          r.reservation_status === "booked" &&
+          r.route_block_status === "filed" &&
+          r.route_block_live === true &&
+          (r.confirm_text_status === "none" || r.confirm_text_status === "blocked");
+      }
+
       const book = await loadEnterpriseBookMeta();
 
       return {
@@ -2137,6 +2265,10 @@ export async function buildCutoverStatusPayload(opts?: {
         // is UNKNOWN for this row. Unknown ≠ clean; its own bucket.
         billing_unknown: (rows as any[]).filter((r) => r.direct_billing_effective === true
           && r.holman_book_state === "unanchored").length,
+        // Task #793: booked + live filed block with NO confirmation-text
+        // evidence — the "booked but never told" count the page must surface
+        // the day it happens, not in an audit.
+        confirm_gaps: (rows as any[]).filter((r) => r.confirm_text_gap === true).length,
         book,
         rows,
       };
@@ -2345,4 +2477,23 @@ export async function buildDirectOffPagePayload(): Promise<any> {
     book: await loadEnterpriseBookMeta(),
     rows: rs,
   };
+}
+
+/**
+ * Task #793: any door that books a reservation or files a live route block
+ * OUTSIDE the intents workflow must guarantee the confirmation text (the 8/20
+ * wave of 65 got blocks but no text because nothing owned the send). Failures
+ * here must never fail the booking write that already happened — they are
+ * reported in the response and the tracking page flags the gap.
+ */
+async function ensureConfirmationTexts(ldaps: string[]): Promise<Msg1AdoptionSummary | { error: string } | null> {
+  const unique = Array.from(new Set(ldaps.map((l) => String(l).trim().toUpperCase()).filter(Boolean)));
+  if (!unique.length) return null;
+  try {
+    return await ensureCutoverConfirmationGuards({ ldaps: unique });
+  } catch (error: any) {
+    const msg = String(error?.message || error).slice(0, 300);
+    console.error("[survey] confirmation-guard ensure failed:", msg);
+    return { error: msg };
+  }
 }
