@@ -63,6 +63,12 @@ import {
   type QuoteResult,
 } from "./client";
 import { ensureEtdUser } from "./ensure-user";
+// The last-pickup cutoff lives in one leaf module and is imported by both the
+// booking preview and the approval SMS. Two copies of this rule would let the
+// technician be promised a day the booking does not use, which is exactly the
+// bug this fixed on 2026-08-25.
+import { notBeforeNowET, resolvePickupWindow } from "./pickup-window";
+export { notBeforeNowET };
 import {
   choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER, descClass,
   NAMED_DOWNGRADE, SEDAN_LADDER, SEDAN_CODES,
@@ -230,44 +236,6 @@ type ScheduleEvidence = {
  * the preview. A STALE watermark yields null: booking is hard-stopped until the next
  * schedule load rather than guessing a date the tech may not be working.
  */
-/**
- * The later of a wanted wall-clock time and a safe lead margin from right now (ET),
- * rounded up to the next half hour. Returns HH:MM:SS. Never returns a time in the past.
- */
-export function notBeforeNowET(
-  wanted: string,
-  now: Date = new Date(),
-  leadMinutes = 90,
-): { time: string; nextDay: boolean } {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "America/New_York",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(now);
-  const hh = Number(parts.find((x) => x.type === "hour")?.value ?? "0") % 24;
-  const mm = Number(parts.find((x) => x.type === "minute")?.value ?? "0");
-  const m = /^(\d{1,2}):(\d{2})/.exec(String(wanted));
-  const wantMin = m ? Number(m[1]) * 60 + Number(m[2]) : 9 * 60;
-  let floorMin = hh * 60 + mm + leadMinutes;
-  floorMin = Math.ceil(floorMin / 30) * 30;
-  // EARLIEST matters as much as LAST_PICKUP. Run at 01:08 the now+90m floor returns
-  // 03:00, and a 3am pickup gets exactly the same empty class list as a 6pm one: the
-  // branch is shut. Never ask for a car before the counter opens.
-  const EARLIEST = 9 * 60;
-  const use = Math.max(wantMin, floorMin, EARLIEST);
-  // LAST_PICKUP is the latest slot a branch will realistically hand over a car.
-  // Capping at 18:00 and staying on today was the original behaviour and it produced
-  // a quote for 6pm at a branch that shuts at 5:30 - Enterprise returns an EMPTY class
-  // list for that, with no warning, which surfaced as `class_unmapped` and read as a
-  // vehicle problem rather than an opening-hours one. Roll the day instead.
-  const LAST_PICKUP = 16 * 60 + 30;
-  if (use > LAST_PICKUP) return { time: "09:00:00", nextDay: true };
-  const H = String(Math.floor(use / 60)).padStart(2, "0");
-  const M = String(use % 60).padStart(2, "0");
-  return { time: `${H}:${M}:00`, nextDay: false };
-}
-
 async function nextWorkingDay(
   ldap: string,
   readSchedule: NonNullable<ExecutorDeps["schedule"]>,
@@ -837,10 +805,22 @@ async function runPreview(
       // Only today's date needs flooring; a future date is already whatever the form
       // asked for. If the floor pushes past the end of the working day, take the slot
       // AND the day it belongs to.
-      const floored =
-        firstDay === etTodayISO() ? notBeforeNowET(wanted) : { time: wanted, nextDay: false };
-      const startDay = floored.nextDay ? addDaysISO(firstDay, 1) : firstDay;
-      const start = `${startDay}T${floored.time}`;
+      const window = resolvePickupWindow({
+        dayISO: firstDay,
+        wantedTime: wanted,
+        todayISO: etTodayISO(),
+      });
+      const startDay = window.day;
+      const start = `${startDay}T${window.time}`;
+      // A roll used to be completely silent: pickupDate simply became tomorrow
+      // and nothing in the preview, the drawer or the approval text said so.
+      // 31 requests moved day this way before anyone noticed. Name it.
+      if (window.rolled) {
+        (quote.warnings as string[]).push(
+          `requested ${firstDay} ${wanted} is past the ${"16:30"} last-pickup cutoff; `
+          + `quoted ${startDay} ${window.time} instead`,
+        );
+      }
       const end = fmtISO(addDaysDT(parseLocalDT(start), days));
       const { address, code, wantState } = intentAddress(item);
       if (!address) throw new Error("no branch/shop address seed on the intent facts");
@@ -857,7 +837,7 @@ async function runPreview(
         // 09:00 was never true; the commit re-quotes from these, so a stale value here
         // silently books a different reservation than the one that was priced.
         pickupDate: startDay,
-        pickupTime: floored.time,
+        pickupTime: window.time,
         returnDate: end.slice(0, 10),
         returnTime: "09:00:00",
         branchCode: q.branch_code,

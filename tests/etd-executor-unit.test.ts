@@ -55,6 +55,7 @@ import {
   quoteWithReportedFallback,
   redactedShape,
 } from "../server/vrm/etd/executor";
+import { resolvePickupWindow } from "../server/vrm/etd/pickup-window";
 import { safeErrorText, rejectionMessage, rejectionReasons, EtdClient as EtdClientImpl } from "../server/vrm/etd/client";
 import { useAccountAdditionalInfo, assertAdditionalInfoComplete } from "../server/vrm/etd/surgery";
 import type { EtdClient, CarClass } from "../server/vrm/etd/client";
@@ -850,14 +851,43 @@ describe("preview lane", () => {
       "a request quotes regardless of the schedule watermark",
     );
     assert.doesNotMatch(run.results[0].detail ?? "", /no_date/, "today is always a date");
-    // The pickup date IS today. That is the whole contract for this lane, and it is
-    // what makes a technician with no ServicePower route bookable.
+    // The pickup date IS today, and the SCHEDULE never moves it. That is the whole
+    // contract for this lane and it is what makes a technician with no ServicePower
+    // route bookable.
+    //
+    // The one thing that legitimately moves it is the branch cutoff: past roughly
+    // 15:00 ET a now+90m pickup lands after the last realistic hand-over, so the
+    // quote takes tomorrow at 09:00 instead. Asserting a bare etTodayISO() made this
+    // test fail every single afternoon and pass every morning, which is worse than
+    // no test - it trained everyone to ignore a red run. Ask the same resolver the
+    // preview asks, so the expectation is right at any hour and a real regression
+    // (the schedule pushing the day) still fails.
     const row = await loadIntentRow(intentId);
+    const expected = resolvePickupWindow({
+      dayISO: etTodayISO(),
+      wantedTime: "09:00:00",
+      todayISO: etTodayISO(),
+    });
     assert.equal(
       String((row.preview as any)?.reservation?.pickupDate ?? ""),
-      etTodayISO(),
-      "a same-day request is dated today, never pushed to the next working day",
+      expected.day,
+      "a same-day request takes today, or tomorrow only because of the branch cutoff",
     );
+    // And when the cutoff does move it, the preview must SAY so. A silent roll is
+    // how 31 technicians were told "pickup today" for a reservation that was not
+    // there until the next morning.
+    const warnings = ((row.preview as any)?.reservation?.quote?.warnings ?? []) as string[];
+    if (expected.rolled) {
+      assert.ok(
+        warnings.some((w) => /last-pickup cutoff/i.test(w)),
+        `the roll is named in the preview (warnings: ${JSON.stringify(warnings)})`,
+      );
+    } else {
+      assert.ok(
+        !warnings.some((w) => /last-pickup cutoff/i.test(w)),
+        "no cutoff warning when nothing rolled",
+      );
+    }
   });
 
   test("a quote failure lands in the preview warnings, not in an exception", async () => {

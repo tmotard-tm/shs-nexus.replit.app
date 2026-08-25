@@ -50,6 +50,11 @@ import {
   REQUEST_APPROVE_TEMPLATE_KEY,
   REQUEST_APPROVE_MONDAY_TEMPLATE_KEY,
 } from "../../../shared/rental-approval-sms";
+// The booking preview refuses a pickup past the branch cutoff and moves the
+// reservation to the next morning. The approval text has to promise the SAME
+// day or the technician is told "today" for a car that is not there until
+// tomorrow - measured on 31 requests before 2026-08-25.
+import { resolvePickupWindow } from "../etd/pickup-window";
 import { getNotificationTemplates } from "../storage";
 // Extension emails to Enterprise ride the shared SendGrid service (verified
 // sender = SENDGRID_EMAIL), not the comms SMS lane.
@@ -2866,6 +2871,16 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // An EXTENSION approval books nothing, so the Friday→Monday resolver
       // (a new-booking concept) never runs for it; the fixed extension copy
       // is what gets sent and audited.
+      // The pickup day the technician will be TOLD. A same-day approval taken
+      // after the branch cutoff is booked for the next morning by the preview,
+      // so promising today here would be a lie the confirmation text then has
+      // to contradict.
+      const smsPickupDayEt = (() => {
+        const day = String(cur.effective_pickup_day_et ?? "");
+        const time = /T(\d{2}:\d{2}:\d{2})/.exec(String(cur.effective_pickup ?? ""))?.[1]
+          ?? "09:00:00";
+        return resolvePickupWindow({ dayISO: day, wantedTime: time, todayISO: etTodayISO() }).day;
+      })();
       const approveText = decision !== "APPROVE"
         ? ""
         : isExtensionRow
@@ -2875,7 +2890,10 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
               override: approvalSms,
               todayISO: etTodayISO(),
               requestedPickupISO: String(cur.requested_day_et ?? ""),
-              effectivePickupISO: String(cur.effective_pickup_day_et ?? ""),
+              // The day the BOOKING will really use, not the day the row asked
+              // for. Same cutoff the preview applies, imported from the one
+              // module that owns it.
+              effectivePickupISO: smsPickupDayEt,
               techName: cur.tech_name ?? null,
               techLdap: String(cur.ldap ?? ""),
               // Blankness here must match the resolver's own test (trim), or a
