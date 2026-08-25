@@ -338,6 +338,7 @@ export interface IStorage {
   updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
   // Stale-roster sweep: rows not touched by the sync run that started at `since`
   // are no longer returned by the Snowflake roster views.
+  markAllTechsSeenByEmployeeIds(employeeIds: string[], seenAt: Date): Promise<number>;
   countAllTechsMissingFromSync(since: Date): Promise<number>;
   markAllTechsDroppedFromSource(since: Date): Promise<number>;
 
@@ -1485,6 +1486,10 @@ export class MemStorage implements IStorage {
 
   async updateAllTech(_id: string, _updates: Partial<AllTech>): Promise<AllTech | undefined> {
     return undefined; // Not implemented in memory storage
+  }
+
+  async markAllTechsSeenByEmployeeIds(_employeeIds: string[], _seenAt: Date): Promise<number> {
+    return 0; // Not implemented in memory storage
   }
 
   async countAllTechsMissingFromSync(_since: Date): Promise<number> {
@@ -4083,6 +4088,20 @@ export class DatabaseStorage implements IStorage {
       .where(eq(allTechs.id, id))
       .returning();
     return result[0];
+  }
+
+  async markAllTechsSeenByEmployeeIds(employeeIds: string[], seenAt: Date): Promise<number> {
+    if (employeeIds.length === 0) return 0;
+
+    const result = await db.update(allTechs)
+      .set({
+        syncedAt: seenAt,
+        droppedFromSourceAt: null,
+        updatedAt: seenAt,
+      })
+      .where(inArray(allTechs.employeeId, employeeIds))
+      .returning({ id: allTechs.id });
+    return result.length;
   }
 
   async countAllTechsMissingFromSync(since: Date): Promise<number> {

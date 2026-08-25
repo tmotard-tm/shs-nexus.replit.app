@@ -10,6 +10,10 @@ import { getInitialToolsTaskStatusAsync, TOOLS_OWNER } from './byov-utils';
 import { sendToolAuditNotification } from './notification-service';
 import { toDisplayNumber, toCanonical, toSnowflakeRef } from './vehicle-number-utils';
 import { resolveRosterDistrict } from './roster-district-resolution';
+import {
+  futureTermEmployeeIds,
+  reconcileRosterRows,
+} from './roster-effective-date-reconciliation';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -740,41 +744,33 @@ export class SnowflakeSyncService {
       await snowflake.connect();
 
       console.log('[Sync] Fetching all techs from Snowflake with contact info and TPMS assignments...');
-      // Roster of record derived from the IT_ANALYTICS HR rosters (2026-07-11).
+      // Roster of record derived from the IT_ANALYTICS HR rosters.
       // DRIVELINE_ALL_TECHS was retired as the roster-status source because it
       // produced false terminations (48 active techs mismarked on the day of the
-      // swap). Reconciliation rule (Tyler):
-      //   1. Active roster first (EMPL_STATUS A/L/P/S) — authoritative, carries
-      //      its own LAST_HIRE_DT; no other source consulted for these techs.
-      //   2. Term roster marks a tech 'T' ONLY if not on the active roster AND
-      //      not superseded by a later hire (rehire: LAST_HIRE_DT > term date;
-      //      LAST_DATE_WORKED is the tiebreak inside TERM_DT).
+      // swap). Reconcile active and terminated events by employee ID, not
+      // enterprise ID: latest applicable effective date wins, future terms do
+      // not apply early, and active wins exact-date/all-null ties.
       // District: TPMS wins when it has the employee. The corrected
       // DRIVELINE_ALL_TECHS district is an EMPL_ID-scoped fallback for employees
       // absent from TPMS. Never join this fallback only by enterprise ID because
       // reused IDs can have multiple employee rows and conflicting districts.
       const query = `
         WITH active AS (
-          SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
+          SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, TRIM(EMPLID) AS EMPLID,
+                 EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
                  EMPL_STATUS, LAST_HIRE_DT, LAST_DATE_WORKED
           FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_ACTIVE_ROSTER_DAILY_VW
-          WHERE EMPL_STATUS IN ('A','L','P','S') AND ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+          WHERE EMPL_STATUS IN ('A','L','P','S')
+            AND ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+            AND EMPLID IS NOT NULL AND TRIM(EMPLID) <> ''
         ),
         term AS (
-          SELECT EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME, TERM_DT, LAST_DATE_WORKED FROM (
-            SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
-                   COALESCE(EFFDT, LAST_DATE_WORKED) AS TERM_DT, LAST_DATE_WORKED,
-                   ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ENTERPRISE_ID))
-                                      ORDER BY COALESCE(EFFDT, LAST_DATE_WORKED) DESC NULLS LAST) AS rn
-            FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_TERM_ROSTER_VW
-            WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
-          ) WHERE rn = 1
-        ),
-        hire AS (
-          SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, MAX(LAST_HIRE_DT) AS LAST_HIRE_DT
-          FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
+          SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, TRIM(EMPLID) AS EMPLID,
+                 EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
+                 COALESCE(EFFDT, LAST_DATE_WORKED) AS TERM_DT, LAST_DATE_WORKED
+          FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_TERM_ROSTER_VW
           WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
-          GROUP BY 1
+            AND EMPLID IS NOT NULL AND TRIM(EMPLID) <> ''
         ),
         tpms_now AS (
           SELECT EID, DISTRICT, TRUCK_LU, FILE_DATE FROM (
@@ -798,18 +794,31 @@ export class SnowflakeSyncService {
           WHERE EMPL_ID IS NOT NULL AND TRIM(EMPL_ID) <> ''
           GROUP BY 1
         ),
-        roster AS (
+        roster_events AS (
           SELECT EMPLID, EID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
-                 EMPL_STATUS AS DERIVED_STATUS, LAST_HIRE_DT AS EFF_DT, LAST_DATE_WORKED
+                 EMPL_STATUS AS DERIVED_STATUS, LAST_HIRE_DT AS EFF_DT,
+                 LAST_DATE_WORKED, 1 AS SOURCE_PRIORITY
           FROM active
           UNION ALL
           SELECT t.EMPLID, t.EID, t.EMPL_NAME, t.JOBTITLE, t.PLANNING_AREA_NAME,
-                 'T' AS DERIVED_STATUS, t.TERM_DT AS EFF_DT, t.LAST_DATE_WORKED
+                 'T' AS DERIVED_STATUS, t.TERM_DT AS EFF_DT,
+                 t.LAST_DATE_WORKED, 0 AS SOURCE_PRIORITY
           FROM term t
-          LEFT JOIN active a ON t.EID = a.EID
-          LEFT JOIN hire h ON t.EID = h.EID
-          WHERE a.EID IS NULL
-            AND NOT (h.LAST_HIRE_DT IS NOT NULL AND h.LAST_HIRE_DT > t.TERM_DT)
+          WHERE t.TERM_DT IS NULL OR t.TERM_DT <= CURRENT_DATE()
+        ),
+        ranked_roster AS (
+          SELECT roster_events.*,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY EMPLID
+                   ORDER BY EFF_DT DESC NULLS LAST, SOURCE_PRIORITY DESC, EID DESC
+                 ) AS rn
+          FROM roster_events
+        ),
+        roster AS (
+          SELECT EMPLID, EID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
+                 DERIVED_STATUS, EFF_DT, LAST_DATE_WORKED
+          FROM ranked_roster
+          WHERE rn = 1
         )
         SELECT
           r.EMPLID AS EMPL_ID,
@@ -845,12 +854,34 @@ export class SnowflakeSyncService {
       const rawRows = await snowflake.executeQuery(query) as SnowflakeAllTechRow[];
       console.log(`[Sync] Retrieved ${rawRows.length} tech records from Snowflake`);
 
-      // Deduplicate by employee ID (keep last occurrence)
-      const dedupeMap = new Map<string, SnowflakeAllTechRow>();
-      for (const row of rawRows) {
-        dedupeMap.set(row.EMPL_ID, row);
+      // A future-dated termination is not a current T event, but its employee
+      // still counts as present for the stale-roster sweep. Without this seen
+      // marker, a brief omission from the active view could hide the employee
+      // before the termination date arrives.
+      const futureTermRows = await snowflake.executeQuery(`
+        SELECT DISTINCT
+          TRIM(EMPLID) AS EMPL_ID,
+          'T' AS EMPLOYMENT_STATUS,
+          TO_VARCHAR(COALESCE(EFFDT, LAST_DATE_WORKED)) AS EFFDT
+        FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_TERM_ROSTER_VW
+        WHERE EMPLID IS NOT NULL
+          AND TRIM(EMPLID) <> ''
+          AND COALESCE(EFFDT, LAST_DATE_WORKED) > CURRENT_DATE()
+      `) as SnowflakeAllTechRow[];
+      const protectedFutureTermIds = futureTermEmployeeIds(futureTermRows);
+      if (protectedFutureTermIds.length > 0) {
+        const protectedCount = await storage.markAllTechsSeenByEmployeeIds(
+          protectedFutureTermIds,
+          new Date(),
+        );
+        console.log(
+          `[Sync] Future-term protection: ${protectedFutureTermIds.length} employee ID(s), ${protectedCount} existing roster row(s) kept visible`,
+        );
       }
-      const rows = Array.from(dedupeMap.values());
+
+      // Defensive backstop for accidental one-to-many enrichment joins. The
+      // winner is date/status ranked and independent of Snowflake row order.
+      const rows = reconcileRosterRows(rawRows);
       console.log(`[Sync] After deduplication: ${rows.length} unique employees`);
 
       // Process in batches of 500 for much faster performance
