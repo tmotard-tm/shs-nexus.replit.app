@@ -62,6 +62,7 @@ import {
   type EtdCallLog,
   type QuoteResult,
 } from "./client";
+import { ensureEtdUser } from "./ensure-user";
 import {
   choose as chooseClass, chooseSameVehicle, isHvac, ESCALATION_LADDER, descClass,
   NAMED_DOWNGRADE, SEDAN_LADDER, SEDAN_CODES,
@@ -1279,6 +1280,30 @@ async function runBook(
     return result("ABRT", "aborted_before_open", `${pickup} no longer a working day`);
   }
 
+  // 1.5 The driver must exist in ETD BEFORE we spend a journey on this booking.
+  //
+  // This check used to live at step 3, after the quote. quote() calls
+  // createJourney() as its very first act, so every booking for a technician
+  // with no ETD seat created a draft journey assessment on the Enterprise
+  // account and then aborted. Three of those on 2026-08-25 alone, and each one
+  // still had to be provisioned by hand afterwards.
+  //
+  // ensureEtdUser provisions from LIVE TPMS, not from tpms_tech_profiles: that
+  // table is an incremental sync and was missing 107 active technicians the day
+  // this was written, which is exactly the new-hire population that lands here.
+  // It only throws when TPMS cannot identify the person or has no usable phone,
+  // and those are tasks for a human, not booking failures - so the reason text
+  // says which one it is rather than repeating "no ETD user".
+  let etdUsername: string;
+  try {
+    const ensured = await ensureEtdUser(etd, ldap, mapping);
+    etdUsername = ensured.username;
+  } catch (err) {
+    const reason = clip(errText(err), 200);
+    await post("op_result", { outcome: "aborted_before_open", evidence: { reason } });
+    return result("ABRT", "aborted_before_open", clip(reason, 160));
+  }
+
   // 2. Fresh journey, then exact-match against the confirmed preview.
   let q: QuoteResult;
   let start: string;
@@ -1329,15 +1354,9 @@ async function runBook(
   }
 
   // 3. Build the exact model with the proven payload surgery.
-  const username = mapping[ldap] || ldap;
-  const user = await etd.findUserByUsername(username);
-  if (!user) {
-    await post("op_result", {
-      outcome: "aborted_before_open",
-      evidence: { reason: `no ETD user for ${username}` },
-    });
-    return result("ABRT", "aborted_before_open", `no ETD user for ${username}`);
-  }
+  // Resolved and read back at step 1.5, before the journey was created. Looking
+  // it up again here would be a second round trip for an answer we already have.
+  const username = etdUsername;
 
   const truck = String(facts.tpmsTruck || prev.tpmsTruck || "");
   const model = cloneTemplate(template);

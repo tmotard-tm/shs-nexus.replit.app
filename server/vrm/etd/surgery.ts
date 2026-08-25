@@ -714,6 +714,35 @@ export function loadUserMapping(): Record<string, string> {
   return mappingCache!;
 }
 
+/**
+ * Persist a newly discovered LDAP -> ETD username mapping.
+ *
+ * Only SHS- collision handles ever need recording: a seat created under the bare
+ * LDAP resolves without any mapping. This must be called whenever a collision
+ * name is created or found, or the next booking looks up the bare LDAP, misses,
+ * tries to create again, is refused again, and loops forever. That failure is
+ * how 29 profiles stayed invisible to the roster audit for months.
+ */
+export function recordUserMapping(ldap: string, username: string): void {
+  const key = String(ldap || "").trim().toUpperCase();
+  const val = String(username || "").trim();
+  if (!key || !val) return;
+  const current = loadUserMapping();
+  if (current[key] === val) return;
+  const next = { ...current, [key]: val };
+  try {
+    fs.writeFileSync(MAPPING_PATH, JSON.stringify(next, null, 2) + "
+", "utf-8");
+    mappingCache = next;
+    console.log(`[etd-user] mapping recorded ${key} -> ${val}`);
+  } catch (err) {
+    // The in-memory cache still gets it so THIS process keeps working; the next
+    // boot will rediscover the seat by its SHS- name and try to write again.
+    mappingCache = next;
+    console.error(`[etd-user] could not persist ${MAPPING_PATH}:`, err);
+  }
+}
+
 /** The template's own journey/reference ids, needed by retarget(). */
 export function templateOldIds(template: Record<string, unknown>): { oldJ: string | null; oldR: string | null } {
   const jvm = (template.journeyViewModel ?? {}) as Record<string, unknown>;

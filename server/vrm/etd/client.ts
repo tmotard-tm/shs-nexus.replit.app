@@ -38,6 +38,15 @@ export const NEARBY_FALLBACK_MAX_DISTANCE = 40;
 /** ETD silently caps PageSize at 100 — asking for more returns 100 rows with no warning. */
 export const MAX_PAGE_SIZE = 100;
 
+// Identity constants, mirrored from the proven Python client. COMPANY_UID is the
+// account's own uid inside the user model and is NOT the same value as
+// COMPANY_ID, which is the numeric CompanyInternalNumber used by search.
+export const COMPANY_UID = "86d9bd6f-44b4-4d3f-b316-6ed1e97c54a4";
+export const COMPANY_NAME = "TransformCo";
+export const DEFAULT_LANGUAGE = "en-US";
+export const ROLE_ADMIN = "CompanyAdministrator";
+export const ROLE_EMPLOYEE = "CompanyEmployee";
+
 export class EtdError extends Error {
   /** HTTP status of the failing call, when there was a response at all. */
   readonly httpStatus?: number;
@@ -430,6 +439,77 @@ export class EtdClient {
       if (seen >= total || rows.length < MAX_PAGE_SIZE) return null;
       page += 1;
     }
+  }
+
+  /**
+   * ETD's own empty user model. Overlay this and post it back; never hand-build
+   * one. Their validator returns 200 with success:false and names one missing
+   * field at a time, so a hand-built body turns into a guessing game.
+   */
+  blankUser(): Promise<Json> {
+    return this.get("/api/identity/create");
+  }
+
+  /** The full, editable model for one user. The search row does not carry the phone. */
+  readUser(username: string): Promise<Json> {
+    return this.get(`/api/identity/user?uid=${encodeURIComponent(username)}`);
+  }
+
+  /**
+   * Create a seat. Verified 2026-08-25 (DPRITC1, MGOLSTO, RKLEIN).
+   *
+   * ⚠ ETD mails a welcome invite to `email` and there is no suppress flag. For
+   * technicians that address is an SMS gateway, so the caller must have
+   * validated the number first.
+   */
+  async createUser(opts: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    username?: string;
+    role?: string;
+    lineManagerEmail?: string;
+    language?: string;
+  }): Promise<Json> {
+    const role = opts.role ?? ROLE_EMPLOYEE;
+    const model: any = await this.blankUser();
+    model.firstName = opts.firstName;
+    model.lastName = opts.lastName;
+    model.email = opts.email;
+    model.username = opts.username ?? opts.email;
+    model.isNew = true;
+    model.deleted = false;
+    model.isActive = true;
+    model.lineManagerEmail = opts.lineManagerEmail ?? "";
+    if (model.role && typeof model.role === "object") {
+      model.role.selectedValue = role;
+      model.role.selectedText = role === ROLE_ADMIN ? "Company Admin" : "Company Employee";
+    }
+    if (model.companyName && typeof model.companyName === "object") {
+      model.companyName.selectedValue = COMPANY_UID;
+      model.companyName.selectedText = COMPANY_NAME;
+    }
+    if (model.preferredLanguage && typeof model.preferredLanguage === "object") {
+      model.preferredLanguage.selectedValue = opts.language ?? DEFAULT_LANGUAGE;
+    }
+    return this.post("/api/identity/create", model);
+  }
+
+  /**
+   * Change an existing user's email (that is, their phone) or name.
+   *
+   * ⛔ This MUST go to /api/identity/update. Posting an edit model back to
+   * /api/identity/create is rejected with "Username is already in use" even
+   * with isNew:false, which reads like a duplicate-account bug and is not one.
+   * Measured 2026-08-25.
+   */
+  async updateUser(username: string, changes: { email?: string; firstName?: string; lastName?: string }): Promise<Json> {
+    const model: any = await this.readUser(username);
+    if (changes.email !== undefined) model.email = changes.email;
+    if (changes.firstName !== undefined) model.firstName = changes.firstName;
+    if (changes.lastName !== undefined) model.lastName = changes.lastName;
+    model.isNameOrEmailChanged = true;
+    return this.post("/api/identity/update", model);
   }
 
   // ----------------------------------------------------------------- journeys
