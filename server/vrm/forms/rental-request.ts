@@ -3315,7 +3315,12 @@ async function sendExtensionEmail(
       + `  Reservation / RA #:   ${resNo}\n`
       + `  Additional days:      ${days}\n`
       + (vendor ? `  Rental company:       ${vendor}\n` : "")
-      + `\nApproved by Sears Fleet (${actor}). Please reply to this email with any questions.\n\n`
+      // Never "reply to this email" — the from-address is a send-only
+      // notifications box and a reply there is a dead letter. Questions go
+      // to the two people always CC'd above (Tyler Morgan / Rob Anderson —
+      // Rob's corporate address is under Howard).
+      + `\nApproved by Sears Fleet (${actor}). For any questions, please email Tyler Morgan `
+      + `(tyler.morgan@transformco.com) or Rob Anderson (howard.anderson@transformco.com).\n\n`
       + `Thank you,\nSears Fleet Management`;
 
     if (!extensionEmailLive()) {
