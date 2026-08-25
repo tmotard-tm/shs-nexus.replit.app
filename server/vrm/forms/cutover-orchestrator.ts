@@ -2313,6 +2313,17 @@ export async function confirmIntent(params: {
 }): Promise<{ status: string; failures?: EligibilityFailure[] }> {
   const intent = await loadIntent(params.intentId);
   if (intent.status !== "preview_ready") {
+    // BSOKOLO intent #162 (2026-08-25): Approve and "Book it now" both drive the
+    // inline chain, and the two confirms raced 200ms apart. Confirming a preview
+    // that is ALREADY confirmed — same version — is not an error, it is the other
+    // caller having won a race to do the identical thing. Report success and let
+    // the winner's chain carry the booking.
+    if (
+      intent.status === "confirmed" &&
+      Number(intent.confirmed_preview_version) === Number(params.previewVersion)
+    ) {
+      return { status: "confirmed" };
+    }
     throw new OrchestratorError("bad_state", `confirm in status ${intent.status}`, 409);
   }
   // Master kill switch: a live intent created while armed cannot advance once
@@ -2329,11 +2340,14 @@ export async function confirmIntent(params: {
   });
   const gate = evaluateEligibility(facts);
   if (!gate.ok) {
+    // Guarded like the CAS-loss handler below: if a racing confirm has already
+    // moved this intent past preview_ready, a drift verdict computed against the
+    // pre-confirm read must not demote it.
     await touchIntent(intent.id, {
       status: "preview_required",
       eligibility: { facts: publicFacts(facts), failures: gate.failures, checkedAt: new Date().toISOString() },
       last_error: "eligibility drift at confirm",
-    });
+    }, { statusIn: ["preview_ready"] });
     await mirrorCutoverSummary(intent.id);
     return { status: "preview_required", failures: gate.failures };
   }
@@ -2366,7 +2380,7 @@ export async function confirmIntent(params: {
     await touchIntent(intent.id, {
       status: "preview_required",
       last_error: `input drift at confirm: ${drifts.slice(0, 6).join("; ")}`,
-    });
+    }, { statusIn: ["preview_ready"] });
     await mirrorCutoverSummary(intent.id);
     return { status: "preview_required", failures: drifts.map((d) => ({ code: "input_drift", detail: d })) };
   }
@@ -2386,13 +2400,29 @@ export async function confirmIntent(params: {
   `);
   if ((rows as any[]).length === 0) {
     const now = await loadIntent(params.intentId);
+    // Same race, later window: the row was preview_ready when this call loaded it
+    // and another caller confirmed it during the gate re-runs. The old handler
+    // knocked the intent back to preview_required UNCONDITIONALLY — demoting the
+    // freshly-CONFIRMED intent, so the winner's book lane found nothing to claim
+    // and the technician got no car (BSOKOLO, 2026-08-25). A confirm-CAS loss must
+    // never move an intent that is no longer preview_ready.
+    if (
+      now.status === "confirmed" &&
+      Number(now.confirmed_preview_version) === Number(params.previewVersion)
+    ) {
+      return { status: "confirmed" };
+    }
     const reason =
       Number(now.preview_version) !== Number(params.previewVersion)
         ? "preview_version mismatch (preview changed since you loaded it)"
         : now.preview_expires_at && new Date(now.preview_expires_at) <= new Date()
           ? "preview expired"
           : `status ${now.status}`;
-    await touchIntent(params.intentId, { status: "preview_required", last_error: `confirm rejected: ${reason}` });
+    await touchIntent(
+      params.intentId,
+      { status: "preview_required", last_error: `confirm rejected: ${reason}` },
+      { statusIn: ["preview_ready"] },
+    );
     await mirrorCutoverSummary(params.intentId);
     return { status: "preview_required", failures: [{ code: "confirm_cas_failed", detail: reason }] };
   }

@@ -231,6 +231,45 @@ describe("confirmIntent safety", () => {
       (e: any) => /bad_state|confirm in status/i.test(String(e?.message ?? e)),
     );
   });
+
+  test("a second confirm of the SAME preview version is idempotent success, never a demote", async () => {
+    // BSOKOLO intent #162 (2026-08-25): Approve and "Book it now" both drove the
+    // inline chain; the loser of the 200ms confirm race knocked the freshly
+    // CONFIRMED intent back to preview_required and the booking was lost.
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}CONF3`, status: "confirmed", preview_version: 2 });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET confirmed_at = now(), confirmed_by = 'first-caller', confirmed_preview_version = 2
+      WHERE id = ${id}
+    `);
+
+    const res = await confirmIntent({ intentId: id, previewVersion: 2, confirmedBy: "second-caller" });
+    assert.equal(res.status, "confirmed", "the loser must report the winner's success, not a failure");
+
+    const { rows } = await db.execute(sql`
+      SELECT status, confirmed_by, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `);
+    const r = (rows as any[])[0];
+    assert.equal(r.status, "confirmed", "an already-confirmed intent must NEVER be demoted");
+    assert.equal(r.confirmed_by, "first-caller", "the winner's stamp must survive the loser's call");
+    assert.equal(r.last_error, null, "no error may be written for a benign race");
+  });
+
+  test("a confirm carrying a DIFFERENT version still 409s on a confirmed intent — and never demotes it", async () => {
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}CONF4`, status: "confirmed", preview_version: 2 });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET confirmed_at = now(), confirmed_by = 'first-caller', confirmed_preview_version = 2
+      WHERE id = ${id}
+    `);
+    await assert.rejects(
+      () => confirmIntent({ intentId: id, previewVersion: 1, confirmedBy: "stale-caller" }),
+      (e: any) => /bad_state|confirm in status/i.test(String(e?.message ?? e)),
+      "a stale-version confirm is a real refusal, not an idempotent success",
+    );
+    const { rows } = await db.execute(sql`SELECT status FROM vrm_rental_workflow_intents WHERE id = ${id}`);
+    assert.equal((rows as any[])[0].status, "confirmed", "the refusal must leave the confirmed intent untouched");
+  });
 });
 
 // ---------------------------------------------------------------------------

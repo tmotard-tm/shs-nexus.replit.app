@@ -3026,7 +3026,32 @@ async function releaseInlineAutobookClaim(intentId: number): Promise<void> {
   }
 }
 
+/**
+ * One inline booking chain per request per process. Approve fires this chain
+ * and the "Book it now" button fires it again; on 2026-08-25 (BSOKOLO, request
+ * #117) a staffer did exactly what the UI offers — approved, then clicked Book —
+ * and the two chains raced their confirms 200ms apart. The loser's failure
+ * handling then knocked the freshly confirmed intent back to preview_required
+ * and the booking was lost. The orchestrator's confirm is idempotent now, but
+ * there is no reason to run the 20-30s quote chain twice at all: the second
+ * caller joins the outcome of the first by simply not starting.
+ */
+const autoBookInFlight = new Set<number>();
+
 async function autoBookApprovedRequest(requestNo: number): Promise<void> {
+  if (autoBookInFlight.has(requestNo)) {
+    console.log(`[rental-request] auto-book #${requestNo} already in flight; not starting a second chain`);
+    return;
+  }
+  autoBookInFlight.add(requestNo);
+  try {
+    await autoBookApprovedRequestInner(requestNo);
+  } finally {
+    autoBookInFlight.delete(requestNo);
+  }
+}
+
+async function autoBookApprovedRequestInner(requestNo: number): Promise<void> {
   let inlineIntentId: number | null = null;
   const fail = async (stage: string, detail: string) => {
     await db.execute(sql`
