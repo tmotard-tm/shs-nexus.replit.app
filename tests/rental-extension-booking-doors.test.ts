@@ -39,6 +39,7 @@ import {
   registerRentalRequestAdminRoutes,
   liveRequestGuard,
 } from "../server/vrm/forms/rental-request";
+import { getDirectBillingStandingForLdap } from "../server/vrm/holman-rental-po-storage";
 import {
   WORKFLOW_REQUEST,
   createIntent,
@@ -326,6 +327,114 @@ describe("type-aware liveRequestGuard semantics", () => {
     const guard = await liveRequestGuard(ldap);
     assert.ok(guard.blockExtension, "an in-flight new request means there is no rental to extend yet");
     assert.equal(Number(guard.blockExtension!.requestNo), newNo);
+  });
+});
+
+/**
+ * VOID — the administrative eraser for an extension that entered the queue
+ * incorrectly (e.g. filed by a Holman-book-only tech who needs the cutover
+ * first). Pins the four facts that make it safe:
+ *   1. it is extension-only and note-mandatory (server-enforced, not just UI);
+ *   2. it closes the row SILENTLY — no SMS, no Enterprise email state;
+ *   3. a voided row blocks nothing — the tech can file again;
+ *   4. a voided row never displaces a BOOKED request in the shared
+ *      new-system standing predicate (which picks the LATEST non-denied row —
+ *      without the exclusion a fresh void would flip 'booked' to 'none').
+ */
+describe("VOID decision on extension requests", () => {
+  test("VOID closes an extension silently: status voided, note stamped, nothing sent", async () => {
+    const no = await insertRequest({ ldap: `${LDAP_PREFIX}V1`, request_type: "extension", status: "pending" });
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "VOID", note: "Holman-billed only — needs the cutover first" }),
+    });
+    assert.equal(res.status, 200);
+    const { rows } = await db.execute(sql`
+      SELECT status, decision_note, decided_at, ext_email_state, approval_sms_body
+      FROM vrm_rental_request WHERE request_no = ${no}
+    `);
+    const row = (rows as any[])[0];
+    assert.equal(row.status, "voided");
+    assert.equal(row.decision_note, "Holman-billed only — needs the cutover first");
+    assert.ok(row.decided_at, "the decision must be stamped for the audit trail");
+    assert.equal(row.ext_email_state, null, "voiding must never touch the Enterprise email");
+    assert.equal(row.approval_sms_body ?? null, null, "voiding must never write an SMS body");
+  });
+
+  test("VOID refuses a NEW request — deny/send-back are the real doors there", async () => {
+    const no = await insertRequest({ ldap: `${LDAP_PREFIX}V2`, request_type: "new", status: "pending" });
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "VOID", note: "wrong door" }),
+    });
+    assert.equal(res.status, 400);
+    const row = await readRow(no);
+    assert.equal(row.status, "pending", "a refused VOID must leave the row untouched");
+  });
+
+  test("VOID refuses a blank note — a silently vanished request needs a recorded why", async () => {
+    const no = await insertRequest({ ldap: `${LDAP_PREFIX}V3`, request_type: "extension", status: "pending" });
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "VOID", note: "   " }),
+    });
+    assert.equal(res.status, 400);
+    assert.equal((await readRow(no)).status, "pending");
+  });
+
+  test("a voided extension blocks NOTHING — the tech can file again immediately", async () => {
+    const ldap = `${LDAP_PREFIX}V4`;
+    await insertRequest({ ldap, request_type: "extension", status: "voided" });
+    const guard = await liveRequestGuard(ldap);
+    assert.equal(guard.blockExtension, null, "voided must not block the corrected re-file");
+    assert.equal(guard.blockNew, null, "voided must not block a new request either");
+  });
+
+  test("VOID refuses an already-APPROVED extension — the Enterprise email may be in flight", async () => {
+    const no = await insertRequest({ ldap: `${LDAP_PREFIX}V6`, request_type: "extension", status: "approved" });
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "VOID", note: "changed my mind" }),
+    });
+    assert.equal(res.status, 409);
+    const { rows } = await db.execute(sql`
+      SELECT status, ext_email_state FROM vrm_rental_request WHERE request_no = ${no}
+    `);
+    assert.equal((rows as any[])[0].status, "approved",
+      "the refusal must leave the approved row exactly as it was");
+  });
+
+  test("voided rows disappear from the /stats KPIs (frozen auto_decision must not count forever)", async () => {
+    const read = async () => {
+      const r = await fetch(`${baseUrl}${B}/stats`);
+      assert.equal(r.status, 200);
+      return r.json();
+    };
+    const beforeStats = await read();
+    await insertRequest({ ldap: `${LDAP_PREFIX}V7`, request_type: "extension", status: "voided" });
+    const afterStats = await read();
+    assert.equal(Number(afterStats.total), Number(beforeStats.total),
+      "a voided row must not move the total");
+    assert.equal(Number(afterStats.needs_review ?? 0), Number(beforeStats.needs_review ?? 0),
+      "a voided row must not sit in 'needs review' forever");
+  });
+
+  test("a voided extension never displaces a BOOKED request in the standing predicate", async () => {
+    const ldap = `${LDAP_PREFIX}V5`;
+    const bookedNo = await insertRequest({ ldap, request_type: "new", status: "booked" });
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+      SET etd_reference = 'ZZVOIDREF1', created_at = now() - interval '1 hour'
+      WHERE request_no = ${bookedNo}
+    `);
+    // The wrongly-filed extension arrives LATER — without the voided
+    // exclusion it becomes the "latest non-denied" row and flips the
+    // standing to none, hiding a real reservation from the Holman queue
+    // badge and the denial SMS branch.
+    await insertRequest({ ldap, request_type: "extension", status: "voided" });
+    const standing = await getDirectBillingStandingForLdap(ldap);
+    assert.equal(standing.standing, "booked");
+    assert.equal(standing.etdReference, "ZZVOIDREF1");
   });
 });
 

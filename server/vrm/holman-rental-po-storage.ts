@@ -426,7 +426,7 @@ const NEW_SYSTEM_LATERALS = (ldapRef: string) => `
     LEFT JOIN LATERAL (
       SELECT r.request_no, r.status, r.etd_reference
       FROM vrm_rental_request r
-      WHERE UPPER(r.ldap) = UPPER(${ldapRef}) AND r.status <> 'denied'
+      WHERE UPPER(r.ldap) = UPPER(${ldapRef}) AND r.status NOT IN ('denied', 'voided')
       ORDER BY r.created_at DESC
       LIMIT 1
     ) rq ON TRUE`;

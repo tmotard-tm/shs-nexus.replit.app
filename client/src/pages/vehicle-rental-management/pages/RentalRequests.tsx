@@ -274,6 +274,9 @@ const DECISION_TONE: Record<string, [string, string]> = {
   // "we cannot book this yet", which is a different fact from "no", and the
   // denial-mix number is only worth reporting if the two stay separate.
   REVIEW: [colors.accent, colors.accentLight],
+  // Administrative eraser for an extension that entered the queue wrongly.
+  // Muted, never red: nothing is sent to anyone and it is not a "no".
+  VOID: [colors.inkMuted, colors.surface],
 };
 
 // The ONE column approvers read. Four states, loud on purpose — the engine's
@@ -284,6 +287,9 @@ const STATUS_TONE: Record<string, [string, string]> = {
   approved: [colors.green, colors.greenLight],
   denied: [colors.red, colors.redLight],
   booked: [colors.accent, colors.accentLight],
+  // Administratively erased (extension filed into the wrong queue). Muted on
+  // purpose — it is not a denial and must not read like one in the list.
+  voided: [colors.inkMuted, colors.background],
 };
 
 function makeSortComparator<T>(accessor: (r: T) => unknown, dir: SortDir) {
@@ -2388,6 +2394,31 @@ export default function RentalRequests() {
                                fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.accent, padding: "8px 0 0" }}>
                 Or send it back for more information…
               </button>
+              {/* VOID — the administrative eraser for an extension that came
+                  through incorrectly (Holman-billed only and needs the
+                  cutover first, duplicate, wrong tech). Deliberately NOT in
+                  the decision row: it is not a verdict on the technician's
+                  situation, nothing is sent to them or Enterprise, and the
+                  note requirement (mirrored server-side) is the friction
+                  that keeps it from becoming a casual dismiss. */}
+              {isExt(detail) && ["pending", "deferred", "returned", "denied"].includes(detail.status) && (
+                <button type="button" disabled={decide.isPending}
+                        data-testid="ext-void-button"
+                        title="Removes this extension request without telling the tech or Enterprise anything. For requests that entered this queue incorrectly. Requires a note."
+                        onClick={() => {
+                          if (!note.trim()) {
+                            setActionErr("Add a note first — say why this extension is being voided (e.g. Holman-billed only, run the cutover first). Nothing is sent to the tech.");
+                            return;
+                          }
+                          decide.mutate({ requestNo: detail.request_no, decision: "VOID", note });
+                        }}
+                        style={{ background: "transparent", border: "none",
+                                 cursor: decide.isPending ? "not-allowed" : "pointer",
+                                 fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted,
+                                 padding: "8px 0 0", marginLeft: 16, textDecoration: "underline" }}>
+                  Void this request (came through incorrectly — sends nothing)
+                </button>
+              )}
             </div>
           </div>
         </div>

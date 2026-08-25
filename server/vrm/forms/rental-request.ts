@@ -1212,7 +1212,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       const { rows: recent } = await db.execute(sql`
         SELECT count(*)::int AS n FROM vrm_rental_request
         WHERE ldap = ${ldap}
-          AND status <> 'returned'
+          AND status NOT IN ('returned', 'voided')
           AND (created_at AT TIME ZONE 'America/New_York')::date
             = (now()      AT TIME ZONE 'America/New_York')::date
       `);
@@ -1347,7 +1347,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       const { rows: today } = await db.execute(sql`
         SELECT count(*)::int AS n FROM vrm_rental_request
         WHERE ldap = ${ldap}
-          AND status <> 'returned'
+          AND status NOT IN ('returned', 'voided')
           AND (created_at AT TIME ZONE 'America/New_York')::date
             = (now()      AT TIME ZONE 'America/New_York')::date
       `);
@@ -2100,6 +2100,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
           round(100.0 * count(*) FILTER (WHERE auto_decision <> 'APPROVE')
                 / NULLIF(count(*), 0), 0)                                 AS pct_resolved_without_rental
         FROM vrm_rental_request
+        -- Voided rows were filed into the wrong queue and administratively
+        -- erased — counting them (their auto_decision is frozen at submit)
+        -- would inflate "needs review" and the resolved-without-rental rate
+        -- forever. They stay visible in the list; they just are not KPIs.
+        WHERE status <> 'voided'
       `);
       res.json(rows[0] || {});
     } catch (e: any) {
@@ -2586,8 +2591,8 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
   router.post("/forms/rental-request/:requestNo/decide", async (req, res) => {
     try {
       const decision = String(req.body?.decision || "").toUpperCase();
-      if (!["APPROVE", "DENY", "DEFER", "RETURN"].includes(decision)) {
-        return res.status(400).json({ message: "decision must be APPROVE, DENY, DEFER or RETURN" });
+      if (!["APPROVE", "DENY", "DEFER", "RETURN", "VOID"].includes(decision)) {
+        return res.status(400).json({ message: "decision must be APPROVE, DENY, DEFER, RETURN or VOID" });
       }
       const note = String(req.body?.note || "").trim();
       // Fleet's pickup override. Only meaningful on APPROVE: the reservation
@@ -2681,6 +2686,26 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // concepts, so they are ignored rather than validated here.
       const isExtensionRow = String(cur?.request_type ?? "new") === "extension";
 
+      // VOID is the administrative eraser for an extension that should never
+      // have entered this queue (filed by a Holman-book-only tech who needs
+      // the cutover first, duplicate, wrong tech). It is NOT a denial: the
+      // technician keeps whatever rental they hold and hears NOTHING — no
+      // SMS, no Enterprise email — because the request itself was the
+      // mistake, not their situation. Extension-only: a wrong NEW request
+      // already has DENY (a real "no") and RETURN (send back) with the
+      // booking chain built around them. The note is mandatory — a silently
+      // vanished request with no recorded reason is a mystery a week later.
+      if (decision === "VOID" && !isExtensionRow) {
+        return res.status(400).json({
+          message: "VOID is for extension requests only. Deny or send back a new request instead.",
+        });
+      }
+      if (decision === "VOID" && !note) {
+        return res.status(400).json({
+          message: "Say why this extension is being voided (e.g. Holman-billed only — needs the cutover first).",
+        });
+      }
+
       // Blocked exactly when the reservation number is missing: the approval
       // AUTO-SENDS the Enterprise email, and an email without their key is a
       // dead letter. Enforced server-side so API callers can't approve past it.
@@ -2761,6 +2786,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         decision === "APPROVE" ? "approved"
         : decision === "DENY" ? "denied"
         : decision === "RETURN" ? "returned"
+        : decision === "VOID" ? "voided"
         : "deferred";
       // Resolved BEFORE the UPDATE so the row records the exact words sent —
       // the approver's edit when one arrived, the SHARED policy default
@@ -2833,9 +2859,24 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
               FOR UPDATE) old
         WHERE vrm_rental_request.request_no = old.prev_rn
           AND vrm_rental_request.status <> 'booked'
+          -- VOID is refused once the row is APPROVED, and the refusal lives
+          -- INSIDE the same locked UPDATE that decides everything else: the
+          -- approve path schedules the Enterprise email after its own commit,
+          -- and sendExtensionEmail's status re-check leaves a read-then-send
+          -- window a post-approve void could slip through. Racing decides
+          -- serialize on the FOR UPDATE row lock, so whichever lands first
+          -- wins and the loser gets a clean refusal, never a half-state.
+          ${decision === "VOID" ? sql`AND vrm_rental_request.status <> 'approved'` : sql``}
         RETURNING vrm_rental_request.request_no, old.prev_status
       `);
       if (!(upd as any[]).length) {
+        if (decision === "VOID") {
+          return res.status(409).json({
+            message: "Too late to void — this extension is already approved and the Enterprise "
+                   + "email may already be on its way. Deny it instead, or sort it out with "
+                   + "Enterprise directly.",
+          });
+        }
         return res.status(409).json({
           message: "This request is already BOOKED. Cancel the reservation in ETD first; "
                  + "changing the decision here would leave a live rental on a denied request.",
@@ -2863,7 +2904,11 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
           : `Sears Fleet: we are holding your rental request until you have a confirmed shop `
             + `appointment.${note ? ` ${note}` : ""} Start a new request once the shop gives you a date: `
             + PUBLIC_REQUEST_URL;
-      void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
+      // A VOID tells the technician NOTHING by design — the request was the
+      // mistake (wrong queue, duplicate), not their situation, and "your
+      // request was voided" reads like a denial to the person holding the
+      // car. Fleet reaches out manually when there is something to say.
+      if (decision !== "VOID") void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
 
       // A preview quoted before this decision carries the OLD pickup time, and the
       // booking chain commits from the stored preview, never re-deriving from the
