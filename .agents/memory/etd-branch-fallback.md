@@ -25,3 +25,13 @@ description: Request-lane booking address ladder (approved_branch wins, guard of
 ## Test recipe
 - Client-walk tests use a REAL EtdClient with instance-level monkey-patched transport methods (resolvePlace/createJourney/wizard/closestBranches/carClasses) — fakeEtd stubs quote() wholesale so it can't exercise the iteration. Python equivalent: `object.__new__(EtdClient)` + lambda attrs.
 - tests/etd-executor-unit.test.ts has a WALL-CLOCK FLAKE: the same-day request test asserts pickupDate == today, but after ~19:00 ET the notBeforeNowET floor legitimately rolls to tomorrow — evening runs fail it on clean code.
+
+## Placeholder shop fields (2026-08-25)
+Technicians type "Na"/"N/A" into the shop fields when there is no shop; a
+joined "Na, PA" is non-empty, so it used to beat a fully locatable reported
+branch and geocode overseas until the US guard refused. Both lanes now scrub
+whole-field placeholder tokens (`scrubPlaceholder` in executor.ts,
+`_scrub_placeholder` + `_initial_booking_address` in book_request.py — change
+both or neither); all free-text shop fields empty = no-shop request → reported
+branch, which keeps the LGONZ15 locatability refusal (now in the Python lane
+too — it was server-only before). State dropdown stays trusted for wantState.
