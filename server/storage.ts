@@ -132,6 +132,7 @@ import { randomUUID, createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, vehicleNumberVariants } from "./vehicle-number-utils";
 import { expandVehicleNumberVariants, pickLatestPerVehicle, resolveNexusVehicleNumber } from "./vehicle-nexus-normalization";
+import { normalizeFleetDistrict } from "./district-normalization";
 
 function deepMergeAutomationDetail(existing: AutomationDetail, patch: Partial<AutomationDetail>): AutomationDetail {
   const result: AutomationDetail = { ...existing };
@@ -3985,19 +3986,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertAllTech(tech: InsertAllTech): Promise<AllTech> {
+    const normalizedTech = {
+      ...tech,
+      districtNo: normalizeFleetDistrict(tech.districtNo),
+    };
     const result = await db.insert(allTechs)
-      .values(tech)
+      .values(normalizedTech)
       .onConflictDoUpdate({
         target: allTechs.employeeId,
         set: {
-          techRacfid: tech.techRacfid,
-          techName: tech.techName,
-          firstName: tech.firstName,
-          lastName: tech.lastName,
-          jobTitle: tech.jobTitle,
-          districtNo: tech.districtNo,
-          planningAreaName: tech.planningAreaName,
-          employmentStatus: tech.employmentStatus,
+          techRacfid: normalizedTech.techRacfid,
+          techName: normalizedTech.techName,
+          firstName: normalizedTech.firstName,
+          lastName: normalizedTech.lastName,
+          jobTitle: normalizedTech.jobTitle,
+          districtNo: normalizedTech.districtNo,
+          planningAreaName: normalizedTech.planningAreaName,
+          employmentStatus: normalizedTech.employmentStatus,
           syncedAt: new Date(),
           updatedAt: new Date(),
         },
@@ -4013,7 +4018,11 @@ export class DatabaseStorage implements IStorage {
     // stale-roster sweep's `synced_at < runStart` predicate compares Node-clock
     // timestamps on both paths instead of relying on the DB defaultNow().
     const now = new Date();
-    const values = techs.map(t => ({ ...t, syncedAt: now }));
+    const values = techs.map(t => ({
+      ...t,
+      districtNo: normalizeFleetDistrict(t.districtNo),
+      syncedAt: now,
+    }));
     
     const result = await db.insert(allTechs)
       .values(values)
@@ -4056,8 +4065,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined> {
+    const normalizedUpdates = {
+      ...updates,
+      ...(Object.prototype.hasOwnProperty.call(updates, "districtNo")
+        ? { districtNo: normalizeFleetDistrict(updates.districtNo) }
+        : {}),
+    };
     const result = await db.update(allTechs)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...normalizedUpdates, updatedAt: new Date() })
       .where(eq(allTechs.id, id))
       .returning();
     return result[0];
@@ -4191,14 +4206,21 @@ export class DatabaseStorage implements IStorage {
       .values({
         ...assignment,
         techRacfid: assignment.techRacfid.toUpperCase(),
+        districtNo: normalizeFleetDistrict(assignment.districtNo),
       })
       .returning();
     return result[0];
   }
 
   async updateTechVehicleAssignment(id: string, updates: Partial<TechVehicleAssignment>): Promise<TechVehicleAssignment | undefined> {
+    const normalizedUpdates = {
+      ...updates,
+      ...(Object.prototype.hasOwnProperty.call(updates, "districtNo")
+        ? { districtNo: normalizeFleetDistrict(updates.districtNo) }
+        : {}),
+    };
     const result = await db.update(techVehicleAssignments)
-      .set({ ...updates, updatedAt: new Date() })
+      .set({ ...normalizedUpdates, updatedAt: new Date() })
       .where(eq(techVehicleAssignments.id, id))
       .returning();
     return result[0];
@@ -4271,16 +4293,20 @@ export class DatabaseStorage implements IStorage {
     // [TPMS-CACHE-FREEZE 2026-06-17] tpms_cached_assignments retired as a board source; reads now
     // hit tpms_tech_profiles. Disabled to stop feeding the legacy cache. Revert: delete next 2 lines.
     const FREEZE_TPMS_CACHE_WRITES: boolean = true;
-    if (FREEZE_TPMS_CACHE_WRITES) return data as unknown as TpmsCachedAssignment;
-    const lookupKey = data.lookupKey.toUpperCase();
+    const normalizedData = {
+      ...data,
+      districtNo: normalizeFleetDistrict(data.districtNo),
+    };
+    if (FREEZE_TPMS_CACHE_WRITES) return normalizedData as unknown as TpmsCachedAssignment;
+    const lookupKey = normalizedData.lookupKey.toUpperCase();
     const existing = await this.getTpmsCachedAssignment(lookupKey);
     
     if (existing) {
       const result = await db.update(tpmsCachedAssignments)
         .set({
-          ...data,
+          ...normalizedData,
           lookupKey,
-          enterpriseId: data.enterpriseId?.toUpperCase(),
+          enterpriseId: normalizedData.enterpriseId?.toUpperCase(),
           updatedAt: new Date(),
         })
         .where(eq(tpmsCachedAssignments.lookupKey, lookupKey))
@@ -4289,9 +4315,9 @@ export class DatabaseStorage implements IStorage {
     } else {
       const result = await db.insert(tpmsCachedAssignments)
         .values({
-          ...data,
+          ...normalizedData,
           lookupKey,
-          enterpriseId: data.enterpriseId?.toUpperCase(),
+          enterpriseId: normalizedData.enterpriseId?.toUpperCase(),
         })
         .returning();
       return result[0];

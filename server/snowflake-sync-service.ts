@@ -9,6 +9,7 @@ import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCa
 import { getInitialToolsTaskStatusAsync, TOOLS_OWNER } from './byov-utils';
 import { sendToolAuditNotification } from './notification-service';
 import { toDisplayNumber, toCanonical, toSnowflakeRef } from './vehicle-number-utils';
+import { normalizeFleetDistrict } from './district-normalization';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -810,7 +811,13 @@ export class SnowflakeSyncService {
           TRIM(SPLIT_PART(r.EMPL_NAME, ',', 2)) AS FIRST_NAME,
           TRIM(SPLIT_PART(r.EMPL_NAME, ',', 1)) AS LAST_NAME,
           r.JOBTITLE AS JOB_TITLE,
-          NULLIF(LTRIM(COALESCE(tn.DISTRICT, tl.DISTRICT), '0'), '') AS DISTRICT_NO,
+           CASE
+             WHEN REGEXP_REPLACE(TRIM(COALESCE(tn.DISTRICT, tl.DISTRICT)), '^0+', '') = '3132'
+               THEN '7084'
+             WHEN REGEXP_REPLACE(TRIM(COALESCE(tn.DISTRICT, tl.DISTRICT)), '^0+', '') = '3580'
+               THEN '7323'
+             ELSE NULLIF(LTRIM(COALESCE(tn.DISTRICT, tl.DISTRICT), '0'), '')
+           END AS DISTRICT_NO,
           r.PLANNING_AREA_NAME AS PLANNING_AREA_NM,
           r.DERIVED_STATUS AS EMPLOYMENT_STATUS,
           TO_VARCHAR(r.EFF_DT) AS EFFDT,
@@ -860,7 +867,7 @@ export class SnowflakeSyncService {
             firstName: row.FIRST_NAME || null,
             lastName: row.LAST_NAME || null,
             jobTitle: row.JOB_TITLE || null,
-            districtNo: row.DISTRICT_NO || null,
+             districtNo: normalizeFleetDistrict(row.DISTRICT_NO),
             planningAreaName: row.PLANNING_AREA_NM || null,
             employmentStatus: row.EMPLOYMENT_STATUS || null,
             effectiveDate: this.formatDateForDB(row.EFFDT ?? null),

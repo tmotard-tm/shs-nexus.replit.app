@@ -58,6 +58,7 @@ import DOMPurify from "isomorphic-dompurify";
 import bcrypt from "bcrypt";
 import { checkPasswordCompromised, validatePasswordRequirements } from "./password-screening";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
+import { normalizeFleetDistrict } from "./district-normalization";
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
@@ -12980,7 +12981,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             enterpriseId: eid,
             firstName: techInfo.firstName || null,
             lastName: techInfo.lastName || null,
-            districtNo: techInfo.districtNo || null,
+            districtNo: normalizeFleetDistrict(techInfo.districtNo),
             pdcNo: (techInfo as any).pdcNo || null,
             techManagerLdapId: (techInfo.techManagerLdapId || (techInfo as any).managerEntId || "").trim() || null,
             techManagerName: (techInfo as any).techManagerName || (techInfo as any).managerName || null,
@@ -16181,7 +16182,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         techId: profile.techId || null,
         firstName: profile.firstName || null,
         lastName: profile.lastName || null,
-        districtNo: profile.districtNo || null,
+         districtNo: normalizeFleetDistrict(profile.districtNo),
         mobilePhone: profile.mobilePhone || null,
         email: profile.email || null,
         shippingAddresses: profile.shippingAddresses || [],
@@ -16194,7 +16195,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           techId: profile.techId || null,
           firstName: profile.firstName || null,
           lastName: profile.lastName || null,
-          districtNo: profile.districtNo || null,
+           districtNo: normalizeFleetDistrict(profile.districtNo),
           mobilePhone: profile.mobilePhone || null,
           email: profile.email || null,
           shippingAddresses: profile.shippingAddresses || [],
@@ -16810,7 +16811,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
                 enterpriseId: row.enterpriseId.trim().toUpperCase(),
                 firstName: row.firstName || raw.firstName || null,
                 lastName: row.lastName || raw.lastName || null,
-                districtNo: row.districtNo || raw.districtNo || null,
+                districtNo: normalizeFleetDistrict(row.districtNo || raw.districtNo),
                 techManagerLdapId: raw.managerEntId?.trim() || null,
                 techManagerName: raw.managerName || null,
                 truckNo: row.truckNo || raw.truckNo || null,
@@ -16860,7 +16861,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           enterpriseId: (tech.ldapId?.trim() || "").toUpperCase(),
           firstName: tech.firstName || null,
           lastName: tech.lastName || null,
-          districtNo: tech.districtNo || null,
+           districtNo: normalizeFleetDistrict(tech.districtNo),
           techManagerLdapId: tech.techManagerLdapId?.trim() || null,
           techManagerName: tech.techManagerName?.trim() || tech.managerName?.trim() || null,
           truckNo: tech.truckNo?.trim() || null,
@@ -16953,7 +16954,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             enterpriseId: (tech.ldapId?.trim() || "").toUpperCase(),
             firstName: tech.firstName || null,
             lastName: tech.lastName || null,
-            districtNo: tech.districtNo || null,
+             districtNo: normalizeFleetDistrict(tech.districtNo),
             techManagerLdapId: tech.techManagerLdapId?.trim() || null,
             truckNo: tech.truckNo?.trim() || null,
             mobilePhone: tech.contactNo || null,
@@ -17119,7 +17120,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
               enterpriseId: row.enterpriseId.trim().toUpperCase(),
               firstName: row.firstName || raw.firstName || null,
               lastName: row.lastName || raw.lastName || null,
-              districtNo: row.districtNo || raw.districtNo || null,
+               districtNo: normalizeFleetDistrict(row.districtNo || raw.districtNo),
               techManagerLdapId: raw.managerEntId?.trim() || null,
               techManagerName: raw.managerName || null,
               truckNo: row.truckNo || raw.truckNo || null,
