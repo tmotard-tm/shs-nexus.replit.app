@@ -15,14 +15,14 @@ district with default cost center `0`+last4 via `onConflictDoNothing`.
 (`triggerDistrictCostCenterSeed` → `runDistrictCostCenterSeed(force:true)`).
 
 **Why:** there is NO denylist, so any district admins delete reappears on the
-next seed. Dirty roster data (invalid districts 3132/3580) kept getting
-promoted into the cost-center mapping and flowed into fleet reconciliation,
-which pushed guessed cost centers. Cost centers change rarely, so automatic
-seeding is not worth the resurrection risk.
+next seed. Dirty roster data (invalid districts 3132/3580) was promoted into
+the cost-center mapping and flowed into fleet reconciliation, which pushed
+guessed cost centers. The upstream roster was corrected on 2026-08-25, but
+current caches and historical rows can still contain old values. Cost centers
+change rarely, so automatic seeding is not worth the resurrection risk.
 
 **How to apply:** never re-enable the flag (or re-derive districts on a
-schedule) without first adding an exclusion/denylist. The dirty 3132/3580
-values still live in the roster source caches and will keep re-syncing from
-upstream TPMS — turning off auto-seed is exactly what stops them being
-promoted. Missing mappings are safe downstream: `getDistrictCostCenter`
-returns null → reconciliation flags "no mapping" rather than guessing.
+schedule) without first adding an exclusion/denylist. Treat canonical 3132 and
+3580 (including zero-padded forms) as cost centers, not districts. Missing
+mappings are safe downstream: `getDistrictCostCenter` returns null →
+reconciliation flags "no mapping" rather than guessing.

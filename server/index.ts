@@ -290,6 +290,22 @@ async function patchStoredRolePermissions() {
  * the server starts listening is safe.
  */
 async function runStartupBootstrap() {
+  // Repair cost-center values that were historically stored as employee
+  // districts before DRIVELINE_ALL_TECHS was corrected. This is a small,
+  // idempotent post-listen repair; audit/history rows remain untouched.
+  try {
+    const { repairCurrentEmployeeDistricts } = await import("./employee-district-repair");
+    const result = await repairCurrentEmployeeDistricts();
+    if (result.totalUpdated > 0 || result.removedInvalidMappings > 0) {
+      log(
+        `✅ Employee district repair: ${result.totalUpdated} current rows updated, ` +
+        `${result.removedInvalidMappings} invalid cost-center mappings removed`,
+      );
+    }
+  } catch (error: any) {
+    console.error("⚠️ Employee district repair failed (continuing):", error?.message || error);
+  }
+
   // ONE-TIME DATA PATCH — 088279 VIN duplicate fix
   // 088279 (VIN 1G1ZD5ST1RF136317) registered in TPMS and WMS but NOT in Holman.
   // 088277 is the canonical vehicle. This patch marks the 088279 audit row as

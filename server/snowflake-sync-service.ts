@@ -9,7 +9,7 @@ import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCa
 import { getInitialToolsTaskStatusAsync, TOOLS_OWNER } from './byov-utils';
 import { sendToolAuditNotification } from './notification-service';
 import { toDisplayNumber, toCanonical, toSnowflakeRef } from './vehicle-number-utils';
-import { normalizeFleetDistrict } from './district-normalization';
+import { resolveRosterDistrict } from './roster-district-resolution';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -18,7 +18,8 @@ interface SnowflakeAllTechRow {
   FIRST_NAME?: string;
   LAST_NAME?: string;
   JOB_TITLE?: string;
-  DISTRICT_NO?: string;
+  TPMS_DISTRICT_NO?: string;
+  ROSTER_DISTRICT_NO?: string;
   PLANNING_AREA_NM?: string;
   EMPLOYMENT_STATUS?: string;
   EFFDT?: string; // Effective date - used to identify termed employees
@@ -740,18 +741,18 @@ export class SnowflakeSyncService {
 
       console.log('[Sync] Fetching all techs from Snowflake with contact info and TPMS assignments...');
       // Roster of record derived from the IT_ANALYTICS HR rosters (2026-07-11).
-      // DRIVELINE_ALL_TECHS was retired as the source: it is a stale downstream
-      // copy that produced false terminations (48 active techs mismarked on the
-      // day of the swap). Reconciliation rule (Tyler):
+      // DRIVELINE_ALL_TECHS was retired as the roster-status source because it
+      // produced false terminations (48 active techs mismarked on the day of the
+      // swap). Reconciliation rule (Tyler):
       //   1. Active roster first (EMPL_STATUS A/L/P/S) — authoritative, carries
       //      its own LAST_HIRE_DT; no other source consulted for these techs.
       //   2. Term roster marks a tech 'T' ONLY if not on the active roster AND
       //      not superseded by a later hire (rehire: LAST_HIRE_DT > term date;
       //      LAST_DATE_WORKED is the tiebreak inside TERM_DT).
-      // DISTRICT deliberately comes from TPMS, NOT the HR views: the HR DISTRICT
-      // column holds the finance COST CENTER (e.g. 3132), not the fleet district
-      // (e.g. 7084). TPMS is the only source with the true fleet district;
-      // values are LTRIMmed to the unpadded form the app already stores.
+      // District: TPMS wins when it has the employee. The corrected
+      // DRIVELINE_ALL_TECHS district is an EMPL_ID-scoped fallback for employees
+      // absent from TPMS. Never join this fallback only by enterprise ID because
+      // reused IDs can have multiple employee rows and conflicting districts.
       const query = `
         WITH active AS (
           SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
@@ -791,6 +792,12 @@ export class SnowflakeSyncService {
             WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
           ) WHERE rn = 1
         ),
+        driveline_district AS (
+          SELECT TRIM(EMPL_ID) AS EMPLID, MAX(DISTRICT_NO) AS DISTRICT_NO
+          FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
+          WHERE EMPL_ID IS NOT NULL AND TRIM(EMPL_ID) <> ''
+          GROUP BY 1
+        ),
         roster AS (
           SELECT EMPLID, EID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
                  EMPL_STATUS AS DERIVED_STATUS, LAST_HIRE_DT AS EFF_DT, LAST_DATE_WORKED
@@ -811,13 +818,8 @@ export class SnowflakeSyncService {
           TRIM(SPLIT_PART(r.EMPL_NAME, ',', 2)) AS FIRST_NAME,
           TRIM(SPLIT_PART(r.EMPL_NAME, ',', 1)) AS LAST_NAME,
           r.JOBTITLE AS JOB_TITLE,
-           CASE
-             WHEN REGEXP_REPLACE(TRIM(COALESCE(tn.DISTRICT, tl.DISTRICT)), '^0+', '') = '3132'
-               THEN '7084'
-             WHEN REGEXP_REPLACE(TRIM(COALESCE(tn.DISTRICT, tl.DISTRICT)), '^0+', '') = '3580'
-               THEN '7323'
-             ELSE NULLIF(LTRIM(COALESCE(tn.DISTRICT, tl.DISTRICT), '0'), '')
-           END AS DISTRICT_NO,
+          COALESCE(tn.DISTRICT, tl.DISTRICT) AS TPMS_DISTRICT_NO,
+          dd.DISTRICT_NO AS ROSTER_DISTRICT_NO,
           r.PLANNING_AREA_NAME AS PLANNING_AREA_NM,
           r.DERIVED_STATUS AS EMPLOYMENT_STATUS,
           TO_VARCHAR(r.EFF_DT) AS EFFDT,
@@ -837,6 +839,7 @@ export class SnowflakeSyncService {
           ON r.EMPLID = c.EMPLID
         LEFT JOIN tpms_now tn ON r.EID = tn.EID
         LEFT JOIN tpms_last tl ON r.EID = tl.EID
+        LEFT JOIN driveline_district dd ON TRIM(r.EMPLID) = dd.EMPLID
       `;
 
       const rawRows = await snowflake.executeQuery(query) as SnowflakeAllTechRow[];
@@ -867,7 +870,10 @@ export class SnowflakeSyncService {
             firstName: row.FIRST_NAME || null,
             lastName: row.LAST_NAME || null,
             jobTitle: row.JOB_TITLE || null,
-             districtNo: normalizeFleetDistrict(row.DISTRICT_NO),
+             districtNo: resolveRosterDistrict(
+               row.TPMS_DISTRICT_NO,
+               row.ROSTER_DISTRICT_NO,
+             ),
             planningAreaName: row.PLANNING_AREA_NM || null,
             employmentStatus: row.EMPLOYMENT_STATUS || null,
             effectiveDate: this.formatDateForDB(row.EFFDT ?? null),
