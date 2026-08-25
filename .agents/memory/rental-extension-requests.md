@@ -47,3 +47,8 @@ pin is audit-only; the staff list re-computes live for undecided rows.
 `ack_snapshot` (canonical `ACK_TEXTS`, required keys only, signer + policy
 version + timestamp). Legacy rows render from booleans with a
 "current wording, signed under version X" caveat.
+
+## VOID status (added 2026-08-25)
+Extensions gained a fifth decision, VOID → status 'voided': administrative eraser for a request filed into the wrong queue (e.g. Holman-book-only tech needing the cutover first). Extension-only, note mandatory, sends NOTHING (no SMS, no Enterprise email), and refused atomically once the row is 'approved' (inside the locked decide UPDATE) — that refusal is what closes the race with the fire-and-forget approval email.
+**Why:** 'voided' is a status-vocabulary change, and the dangerous consumer is any "latest non-denied request" predicate: the NEW_SYSTEM_LATERALS rq lateral picks the newest row, so a fresh voided extension would displace an older BOOKED row and flip the shared standing predicate booked→none.
+**How to apply:** any new status added to vrm_rental_request must be swept through: the standing lateral (holman-rental-po-storage), liveRequestGuard, the two daily-cap queries, and the /stats KPIs (which aggregate frozen auto_decision over all rows — erased rows must be WHERE'd out or they inflate KPIs forever).
