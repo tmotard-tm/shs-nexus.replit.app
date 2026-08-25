@@ -37,3 +37,14 @@ All confirmed by direct code reading + architect review; **none fixed yet**. Che
 ## CONFIRMED in prod (2026-08-24): orphaned intent holds the live-lock
 The resubmit flow DELETEs a deferred/returned request row for the same ldap+type, but never cancels the deleted request's workflow intent. The orphaned nonterminal intent (preview_required after e.g. a zero-classes quote) keeps holding vrm_workflow_intents_live_nonterminal_uq — one live intent per LDAP — so the NEW request's auto-book dies with "another live nonterminal intent already exists". The AROTTER fix exempted orphans in the ELIGIBILITY query only; the DB unique index has no such exemption, and with the source request gone there is no drawer to cancel from.
 **How to apply:** symptom = etd_error "auto-book: another live nonterminal intent already exists for this LDAP" while the tech's older request no longer exists. Repair = CAS-cancel the orphan (status='cancelled', guard on old status+ldap, backup row first) via PROD_DATABASE_URL script, then staff re-books from the drawer. Real fix = resubmit deletion (and any request-delete path) must cancel live intents whose source row it removes.
+## Confirm race materialized and fixed (2026-08-25)
+The "no booking claim/lease" debt bit for real: Approve and "Book it now" both
+fire the inline auto-book chain, the two confirms raced, and the loser's CAS
+failure handler demoted the winner's freshly confirmed intent → booking lost
+with last_error "confirm rejected: status confirmed". Fixed three ways:
+confirmIntent is idempotent for a same-version re-confirm, every
+preview_required knock-back in it is guarded statusIn:['preview_ready'] (a
+lost race may never move state it doesn't own), and the inline chain is
+single-flighted per request per process. Durable rule: a fire-and-forget UI
+action pair sharing one chain must single-flight, and a CAS-loss handler must
+re-read and never write over a state that has advanced past the one it lost on.
