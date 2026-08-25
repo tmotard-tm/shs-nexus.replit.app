@@ -139,6 +139,10 @@ interface Payload {
     stale: boolean;
   };
   rows: Row[];
+  /** Server served its last-good payload after a transient DB failure (cold-boot
+      contention, 2026-08-25 incident). Bounded at 15 min server-side. */
+  stale?: boolean;
+  staleAsOf?: string;
 }
 
 const VAN_STATUS_LABEL: Record<string, string> = {
@@ -575,6 +579,20 @@ export default function CutoverTracking() {
     );
   }
 
+  // Transient-failure fallback (2026-08-25): the server may serve its last
+  // good payload while the DB rides out a cold-boot blip. Say so quietly —
+  // the next 60s refetch clears it — rather than blanking the scoreboard.
+  const staleNote = data?.stale ? (
+    <div data-testid="cutover-stale-note"
+         style={{ margin: "12px 24px 0", padding: "8px 12px", borderRadius: 8,
+                  background: colors.amberLight, color: colors.amber,
+                  fontFamily: fonts.dmSans, fontSize: 13 }}>
+      Showing last known data
+      {data.staleAsOf ? ` from ${new Date(data.staleAsOf).toLocaleTimeString()}` : ""} — the
+      database hiccuped; this refreshes automatically.
+    </div>
+  ) : null;
+
   const kpis = [
     { label: "Booked reservations", value: rows.length, icon: CheckCircle2, tone: colors.blue,
       sub: "every ETD cutover booking on file" },
@@ -625,6 +643,8 @@ export default function CutoverTracking() {
         Complete records only: a technician appears here once their Enterprise reservation is
         booked and their route block is filed. Until both happen, they are not on this page.
       </p>
+
+      {staleNote}
 
       {/* The book column is only as truthful as the snapshot behind it — the
           Enterprise sync has gapped 3–6 days. Say WHEN the book was last read,

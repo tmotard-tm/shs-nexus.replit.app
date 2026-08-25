@@ -23,6 +23,11 @@ import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
 import { requireCronOrStaff, requireStaffSession } from "./cutover-intents-routes";
 import { registerCutoverIntentRoutes } from "./cutover-intents-routes";
 import { buildCutoverBlockArgs } from "./cutover-block-args";
+import { rootDbErrorMessage } from "./db-errors";
+import {
+  serveCutoverStatusPayload,
+  invalidateCutoverStatusCache,
+} from "./cutover-status-cache";
 import { anchorCutoverRow } from "./cutover-anchor";
 import { runMsg1ConfirmationBackfill } from "./msg1-confirmation-backfill";
 import { ensureCutoverConfirmationGuards, type Msg1AdoptionSummary } from "./cutover-orchestrator";
@@ -1764,14 +1769,13 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * the survey table (LEFT JOIN to tracking) so every surveyed tech appeared
    * as "surveyed only" — that pool view was never the intent of this page.
    * "Who is surveyed but not yet reserved" is the reservation queue's job.
+   *
+   * Serving rides serveCutoverStatusPayload (retry-once + bounded last-good
+   * fallback) — see its comment for the 2026-08-25 cold-boot incident.
    */
   router.get("/forms/rental-survey/cutover-status", async (_req, res) => {
-    try {
-      res.json(await buildCutoverStatusPayload());
-    } catch (error: any) {
-      console.error("[survey] cutover-status failed:", error?.message || error);
-      res.status(500).json({ message: error?.message || "cutover-status failed" });
-    }
+    const served = await serveCutoverStatusPayload(() => buildCutoverStatusPayload());
+    res.status(served.status).json(served.body);
   });
 
   /**
@@ -1841,6 +1845,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         }
         console.log(`[survey] direct-billing stamp UNVOIDED for ${ldap} by ${actor}: ${reason}`);
       }
+      // The scoreboard's last-good fallback must never mask this write.
+      invalidateCutoverStatusCache(`billing-${action} ${ldap}`);
       res.json({ ok: true, ldap, action });
     } catch (error: any) {
       console.error("[survey] billing-void failed:", error?.message || error);
@@ -1926,6 +1932,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
         }
         console.log(`[survey] book override CLEARED for ${ldap} by ${actor}: ${reason}`);
       }
+      // The scoreboard's last-good fallback must never mask this write.
+      invalidateCutoverStatusCache(`book-override ${action} ${ldap}`);
       res.json({ ok: true, ldap, action });
     } catch (error: any) {
       console.error("[survey] book-override failed:", error?.message || error);
@@ -1943,8 +1951,11 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     try {
       res.json(await buildDirectOffPagePayload());
     } catch (error: any) {
-      console.error("[survey] direct-offpage failed:", error?.message || error);
-      res.status(500).json({ message: error?.message || "direct-offpage failed" });
+      // Same lesson as cutover-status: never surface drizzle's SQL-dump
+      // wrapper message to the page — summarize the root cause instead.
+      const msg = rootDbErrorMessage(error);
+      console.error("[survey] direct-offpage failed:", msg);
+      res.status(500).json({ message: `direct-offpage failed: ${msg}` });
     }
   });
 

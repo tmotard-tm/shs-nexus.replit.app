@@ -44,6 +44,12 @@ import {
   msg1AdoptionSourceId,
 } from "../server/vrm/forms/cutover-orchestrator";
 import { buildCutoverStatusPayload } from "../server/vrm/forms/survey";
+import {
+  serveCutoverStatusPayload,
+  invalidateCutoverStatusCache,
+  __resetCutoverStatusLastGoodForTests,
+} from "../server/vrm/forms/cutover-status-cache";
+import { rootDbErrorMessage } from "../server/vrm/forms/db-errors";
 
 const PREFIX = "ZQM1";
 const LDAPS = {
@@ -381,5 +387,143 @@ describe("cutover msg1 adoption lane (task #793)", () => {
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+});
+
+/**
+ * 2026-08-25 incident: prod cold boot + startup sync made the ~9s cutover
+ * scoreboard query fail transiently, and the page rendered drizzle's
+ * "Failed query: <18KB of SQL>" wrapper as the error banner. Two contracts:
+ *
+ *   · rootDbErrorMessage NEVER surfaces the SQL dump — it walks e.cause for
+ *     the real pg error (drizzle-wrapping lesson) and stays short;
+ *   · serveCutoverStatusPayload retries the build once, then serves the
+ *     bounded last-good payload (marked stale), and only 500s — concisely —
+ *     when there is nothing else to serve.
+ */
+describe("cutover-status serving shell (transient-failure resilience)", () => {
+  const wrapped = (rootMsg: string, code?: string) => {
+    const root: any = new Error(rootMsg);
+    if (code) root.code = code;
+    const wrapper: any = new Error(`Failed query: SELECT c.ldap, ${"x".repeat(18_000)}`);
+    wrapper.cause = root;
+    return wrapper;
+  };
+
+  test("rootDbErrorMessage: the pg root cause wins; the SQL dump never leaks", () => {
+    const msg = rootDbErrorMessage(wrapped("canceling statement due to statement timeout", "57014"));
+    assert.equal(msg, "canceling statement due to statement timeout [57014]");
+    assert.ok(msg.length < 400, "summary must stay banner-sized");
+    assert.ok(!/SELECT c\.ldap/.test(msg), "SQL text must never surface");
+  });
+
+  test("rootDbErrorMessage: a Neon drop (empty root message) maps to the generic line, not the dump", () => {
+    const msg = rootDbErrorMessage(wrapped(""));
+    assert.ok(/connection dropped|no underlying cause/.test(msg), msg);
+    assert.ok(!/Failed query/.test(msg));
+    // And a bare unwrapped error still reads through.
+    assert.equal(rootDbErrorMessage(new Error("boom")), "boom");
+  });
+
+  test("serve: success records last-good and returns 200 with the payload untouched", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    const payload = { total: 3, rows: [{ ldap: "ZQSRV1" }] };
+    const served = await serveCutoverStatusPayload(async () => payload, { retryDelayMs: 0 });
+    assert.equal(served.status, 200);
+    assert.deepEqual(served.body, payload);
+    assert.equal(served.body.stale, undefined, "a fresh build must not be marked stale");
+  });
+
+  test("serve: first failure retries once — a boot blip never reaches the page", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    let calls = 0;
+    const served = await serveCutoverStatusPayload(async () => {
+      calls++;
+      if (calls === 1) throw wrapped("terminating connection due to administrator command", "57P01");
+      return { total: 1, rows: [] };
+    }, { retryDelayMs: 0 });
+    assert.equal(calls, 2, "the build must be attempted exactly twice");
+    assert.equal(served.status, 200);
+    assert.equal(served.body.total, 1);
+  });
+
+  test("serve: both attempts fail → last-good within the bound is served, marked stale", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    let t = 1_000_000;
+    const now = () => t;
+    const good = { total: 7, rows: [{ ldap: "ZQSRV2" }] };
+    await serveCutoverStatusPayload(async () => good, { retryDelayMs: 0, now });
+    t += 5 * 60_000; // 5 min later — inside the 15-min bound
+    const served = await serveCutoverStatusPayload(async () => {
+      throw wrapped("canceling statement due to statement timeout", "57014");
+    }, { retryDelayMs: 0, now });
+    assert.equal(served.status, 200);
+    assert.equal(served.body.total, 7, "last-good payload must ride through");
+    assert.equal(served.body.stale, true);
+    assert.equal(served.body.staleAsOf, new Date(1_000_000).toISOString());
+    assert.deepEqual(good, { total: 7, rows: [{ ldap: "ZQSRV2" }] }, "cached value must not be mutated");
+  });
+
+  test("serve: expired last-good never serves — 500 with the ROOT cause, never the SQL", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    let t = 2_000_000;
+    const now = () => t;
+    await serveCutoverStatusPayload(async () => ({ total: 2, rows: [] }), { retryDelayMs: 0, now });
+    t += 16 * 60_000; // past the 15-min bound — stale data must NOT masquerade as live
+    const served = await serveCutoverStatusPayload(async () => {
+      throw wrapped("canceling statement due to statement timeout", "57014");
+    }, { retryDelayMs: 0, now });
+    assert.equal(served.status, 500);
+    assert.ok(/statement timeout/.test(served.body.message), served.body.message);
+    assert.ok(served.body.message.length < 400, "error body must stay banner-sized");
+    assert.ok(!/SELECT c\.ldap/.test(served.body.message), "SQL text must never surface");
+  });
+
+  test("serve: cold instance (no last-good) with persistent failure → concise 500", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    const served = await serveCutoverStatusPayload(async () => {
+      throw wrapped("", undefined); // Neon-drop shape: empty root message
+    }, { retryDelayMs: 0 });
+    assert.equal(served.status, 500);
+    assert.ok(/connection dropped|no underlying cause/.test(served.body.message), served.body.message);
+    assert.ok(!/Failed query/.test(served.body.message));
+  });
+
+  test("serve: concurrent callers coalesce onto ONE build/retry sequence (review finding)", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    // A 9-second query on a degraded DB must not multiply: N requests + the
+    // client's 5xx retry ride the same in-flight build, never 2N queries.
+    let builds = 0;
+    let release!: (v: any) => void;
+    const gate = new Promise((r) => { release = r; });
+    const build = async () => { builds++; await gate; return { total: 42, rows: [] }; };
+    const a = serveCutoverStatusPayload(build, { retryDelayMs: 0 });
+    const b = serveCutoverStatusPayload(build, { retryDelayMs: 0 });
+    const c = serveCutoverStatusPayload(build, { retryDelayMs: 0 });
+    release({});
+    const [ra, rb, rc] = await Promise.all([a, b, c]);
+    assert.equal(builds, 1, "three concurrent requests must run the build exactly once");
+    assert.equal(ra.status, 200);
+    assert.deepEqual(ra.body, rb.body);
+    assert.deepEqual(rb.body, rc.body);
+    // The flight is detached after settling: a later call builds fresh.
+    const later = await serveCutoverStatusPayload(async () => ({ total: 43, rows: [] }), { retryDelayMs: 0 });
+    assert.equal(later.body.total, 43);
+  });
+
+  test("serve: a mutation's invalidate beats the last-good fallback — pre-write data never masks the write (review finding)", async () => {
+    __resetCutoverStatusLastGoodForTests();
+    let t = 3_000_000;
+    const now = () => t;
+    // A page load caches the PRE-mutation payload...
+    await serveCutoverStatusPayload(async () => ({ total: 5, rows: [] }), { retryDelayMs: 0, now });
+    // ...then billing-void / book-override / the direct import succeeds:
+    invalidateCutoverStatusCache("test mutation");
+    t += 1_000; // well inside the 15-min bound — ONLY the invalidate protects here
+    const served = await serveCutoverStatusPayload(async () => {
+      throw wrapped("canceling statement due to statement timeout", "57014");
+    }, { retryDelayMs: 0, now });
+    assert.equal(served.status, 500, "stale pre-mutation data must NOT serve after an invalidate");
+    assert.ok(!served.body.stale, "no stale payload after an invalidate");
   });
 });

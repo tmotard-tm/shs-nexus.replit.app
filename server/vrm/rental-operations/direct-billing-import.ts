@@ -42,6 +42,7 @@ import {
 } from "./ingest";
 import type { IdentityResolution, TruckTech, CandidateEvidence } from "./identity-resolver";
 import type { CutoverAnchorRetryResult } from "../forms/cutover-anchor";
+import { invalidateCutoverStatusCache } from "../forms/cutover-status-cache";
 
 // ── raw OOXML parsing ────────────────────────────────────────────────────────
 
@@ -1337,6 +1338,9 @@ export async function importDirectBillingReport(input: {
     switchoverUnmatchedLdaps = st.unmatched;
     switchoverStampStatus = "ok";
     console.log(`[VRM/RentalOps] direct import: billing switchover stamped on ${st.stamped} cutover row(s) (${st.techs} resolved tech(s) on the report${st.unmatched.length ? `; NO cutover row for: ${st.unmatched.join(", ")}` : ""})`);
+    // The scoreboard's last-good fallback must never mask fresh stamps or
+    // last-seen sightings (a sighting alone can supersede a void).
+    invalidateCutoverStatusCache(`direct import: ${st.stamped} stamp(s), ${st.techs} tech(s) sighted`);
   } catch (e: any) {
     console.warn("[VRM/RentalOps] direct import: cutover switchover stamp failed (non-fatal):", e?.message || e);
   }
