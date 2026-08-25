@@ -731,8 +731,7 @@ export function recordUserMapping(ldap: string, username: string): void {
   if (current[key] === val) return;
   const next = { ...current, [key]: val };
   try {
-    fs.writeFileSync(MAPPING_PATH, JSON.stringify(next, null, 2) + "
-", "utf-8");
+    fs.writeFileSync(MAPPING_PATH, JSON.stringify(next, null, 2), "utf-8");
     mappingCache = next;
     console.log(`[etd-user] mapping recorded ${key} -> ${val}`);
   } catch (err) {

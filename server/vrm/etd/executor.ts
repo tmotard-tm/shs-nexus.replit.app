@@ -1295,9 +1295,11 @@ async function runBook(
   // and those are tasks for a human, not booking failures - so the reason text
   // says which one it is rather than repeating "no ETD user".
   let etdUsername: string;
+  let user: Record<string, any>;
   try {
     const ensured = await ensureEtdUser(etd, ldap, mapping);
     etdUsername = ensured.username;
+    user = ensured.record;
   } catch (err) {
     const reason = clip(errText(err), 200);
     await post("op_result", { outcome: "aborted_before_open", evidence: { reason } });

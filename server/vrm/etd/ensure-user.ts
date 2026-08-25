@@ -35,6 +35,8 @@ export interface EnsuredUser {
   created: boolean;
   /** Where the identity came from, for the audit row. */
   source: "existing" | "existing-shs" | "tpms";
+  /** The ETD user row. The booking needs its userId for boboId and setDriver. */
+  record: Record<string, any>;
 }
 
 /**
@@ -87,18 +89,20 @@ export async function ensureEtdUser(
   if (!id) throw new Error("ensureEtdUser called with an empty LDAP");
 
   const mapped = mapping[id] || id;
-  if (await etd.findUserByUsername(mapped)) {
-    return { username: mapped, created: false, source: "existing" };
+  const existing = await etd.findUserByUsername(mapped);
+  if (existing) {
+    return { username: mapped, created: false, source: "existing", record: existing as Record<string, any> };
   }
 
   // A seat can exist under the collision name while the mapping file is behind,
   // which is exactly how 29 profiles went invisible to the roster audit. Look
   // before creating a duplicate, and write the mapping down when we find one.
   const shs = `SHS-${id}`;
-  if (mapped !== shs && (await etd.findUserByUsername(shs))) {
+  const existingShs = mapped === shs ? null : await etd.findUserByUsername(shs);
+  if (existingShs) {
     recordUserMapping(id, shs);
     await audit(`${id}: found existing ${shs}, mapping repaired`, 0, 0);
-    return { username: shs, created: false, source: "existing-shs" };
+    return { username: shs, created: false, source: "existing-shs", record: existingShs as Record<string, any> };
   }
 
   let tech: any;
@@ -154,5 +158,5 @@ export async function ensureEtdUser(
 
   console.log(`[etd-user] created ${username} (${first} ${last}, ${email}) from live TPMS`);
   await audit(`${id}: created ${username} <${email}> from live TPMS`, 1, 0);
-  return { username, created: true, source: "tpms" };
+  return { username, created: true, source: "tpms", record: back as Record<string, any> };
 }
