@@ -31,7 +31,7 @@
 - Consumes: normalized LDAP from existing public open/token routes.
 - Produces: `factsFor(ldap)` returns exactly one current active technician, `null` for no active match, or throws a typed ambiguity error for multiple current active rows.
 
-- [ ] **Step 1: Write the failing route regressions**
+- [x] **Step 1: Write the failing route regressions**
 
 Use the in-process Express/real development DB fixture pattern from
 `tests/rental-open-door-refusals.test.ts`. Seed unique `ZZACT*` rows and assert:
@@ -68,7 +68,7 @@ Include one tokenized verify case proving a valid token cannot revive a
 terminated-only LDAP. Clean all `ZZACT%` token, request, event, and roster
 fixtures in `before`/`after`.
 
-- [ ] **Step 2: Run the server test and confirm RED**
+- [x] **Step 2: Run the server test and confirm RED**
 
 Run:
 
@@ -79,7 +79,7 @@ npx tsx --test --test-force-exit tests/rental-active-identity.test.ts
 Expected: active-plus-terminated returns the old fixture or an ineligible row
 returns 200; ambiguity does not return the required safe 409.
 
-- [ ] **Step 3: Implement the minimal active resolver**
+- [x] **Step 3: Implement the minimal active resolver**
 
 In `factsFor()`:
 
@@ -94,7 +94,7 @@ and throw a private typed error when the count exceeds one. Map that error to a
 safe 409 in all four public verify/submit catches. Explicitly reject `null`
 facts in both tokenized verify and submit paths.
 
-- [ ] **Step 4: Run the server test and confirm GREEN**
+- [x] **Step 4: Run the server test and confirm GREEN**
 
 Run:
 
@@ -104,7 +104,7 @@ npx tsx --test --test-force-exit tests/rental-active-identity.test.ts
 
 Expected: all active, ineligible, ambiguity, and token tests pass.
 
-- [ ] **Step 5: Run adjacent public-door suites**
+- [x] **Step 5: Run adjacent public-door suites**
 
 Run:
 
@@ -116,7 +116,7 @@ npx tsx --test --test-force-exit \
 
 Expected: zero failures.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add server/vrm/forms/rental-request.ts tests/rental-active-identity.test.ts
@@ -135,7 +135,7 @@ git commit -m "fix: match active rental technicians only"
 - Consumes: verified `Identity`.
 - Produces: explicit confirmed state; focus/scroll behavior; prefilled reported values for name, LDAP, truck, district, state, mobile; unchanged authoritative LDAP; correction summary in existing `identityCorrection`.
 
-- [ ] **Step 1: Write the failing real-page DOM regressions**
+- [x] **Step 1: Write the failing real-page DOM regressions**
 
 Use the JSDOM bootstrap/import-after-globals pattern from
 `tests/rental-approval-sms-drawer.test.ts`. Mock open start/verify, render the
@@ -164,7 +164,7 @@ test("reported identity changes are submitted for review without changing verifi
 });
 ```
 
-- [ ] **Step 2: Run the DOM test and confirm RED**
+- [x] **Step 2: Run the DOM test and confirm RED**
 
 Run:
 
@@ -175,7 +175,7 @@ npx tsx --tsconfig tsconfig.dom-tests.json --test --test-force-exit \
 
 Expected: no explicit confirmation/focus targets and missing correction inputs.
 
-- [ ] **Step 3: Implement correction state and focus behavior**
+- [x] **Step 3: Implement correction state and focus behavior**
 
 Add refs for the request-type and correction sections. Initialize reported
 values from `identity` on verification. `Correct` sets the confirmed state and
@@ -187,7 +187,7 @@ in their existing payload fields. Summarize changed name/LDAP/district/state
 plus optional free text into `identityCorrection`; never replace payload
 `ldap`, `district`, or `homeState` with reported values.
 
-- [ ] **Step 4: Run the DOM test and confirm GREEN**
+- [x] **Step 4: Run the DOM test and confirm GREEN**
 
 Run:
 
@@ -198,7 +198,7 @@ npx tsx --tsconfig tsconfig.dom-tests.json --test --test-force-exit \
 
 Expected: all confirmation, focus, field, and payload assertions pass.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add client/src/pages/rental-request-form.tsx tests/rental-request-form-identity.test.ts
@@ -216,12 +216,12 @@ git commit -m "fix: make rental identity corrections visible"
 - Consumes: completed server and client changes.
 - Produces: evidence that development `MBAILE5` resolves Martin Bailey and the application restarts cleanly.
 
-- [ ] **Step 1: Restart the application workflow**
+- [x] **Step 1: Restart the application workflow**
 
 Restart `Start application` and confirm routes register without a new startup
 error.
 
-- [ ] **Step 2: Reproduce `MBAILE5` through the development public API**
+- [x] **Step 2: Reproduce `MBAILE5` through the development public API**
 
 POST only to the development `/api/public/rental-request/open/verify` endpoint
 with `{"ldap":"MBAILE5"}`. Do not submit a rental request.
@@ -237,7 +237,7 @@ Expected identity:
 }
 ```
 
-- [ ] **Step 3: Run the complete focused verification**
+- [x] **Step 3: Run the complete focused verification**
 
 Run:
 
@@ -252,7 +252,7 @@ npx tsx --tsconfig tsconfig.dom-tests.json --test --test-force-exit \
 
 Expected: zero failures.
 
-- [ ] **Step 4: Compare TypeScript with the baseline**
+- [x] **Step 4: Compare TypeScript with the baseline**
 
 Run:
 
@@ -263,13 +263,13 @@ npm run check
 Expected: the known 224-error baseline and no diagnostics in the changed/new
 files.
 
-- [ ] **Step 5: Request independent code review**
+- [x] **Step 5: Request independent code review**
 
 Review against
 `docs/specs/2026-08-25-rental-request-active-identity-design.md`, addressing
 every Critical, High, or Medium finding before completion.
 
-- [ ] **Step 6: Mark the plan complete and commit**
+- [x] **Step 6: Mark the plan complete and commit**
 
 Check every completed plan box, run `git diff --check`, then:
 
