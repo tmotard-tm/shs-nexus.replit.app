@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, ArrowDown, ArrowUpDown, CalendarDays, ChevronRight, Search, Download, X } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
+import { raCandidatesFromCheck, type ExtRaCandidate } from "../lib/ext-ra-candidates";
 import CutoverIntentPanel from "../components/CutoverIntentPanel";
 import {
   TechSchedulePickupCheck,
@@ -532,9 +533,13 @@ export default function RentalRequests() {
   // Keyed by request number rather than a boolean: a boolean stays true when
   // the drawer closes, so the dialog would spring open on the next row clicked.
   const [scheduleFor, setScheduleFor] = useState<number | null>(null);
-  // Enterprise files extensions by reservation / RA number — which the row
-  // does not reliably hold — so the approver supplies it. Days default 7.
+  // Enterprise files extensions by reservation / RA number. For most techs we
+  // already hold it (direct-billing book / our own booking), so the drawer
+  // pre-fills it for review; the approver can overtype, and blank still
+  // blocks the approve. extResAuto remembers WHICH held number is in the
+  // field so the caption can say where it came from; any keystroke clears it.
   const [extResNo, setExtResNo] = useState("");
+  const [extResAuto, setExtResAuto] = useState<ExtRaCandidate | null>(null);
   const [extDays, setExtDays] = useState("7");
   // Approving a Holman-book-only extension requires this explicit
   // acknowledgement — the server enforces the same gate, this is the checkbox
@@ -1226,8 +1231,18 @@ export default function RentalRequests() {
                           setSmsBody("");
                         }
                         // Seed the Enterprise-email inputs from the row so a
-                        // reopen shows what was (or will be) sent.
-                        setExtResNo(r.ext_reservation_number ?? "");
+                        // reopen shows what was (or will be) sent. A stored
+                        // number always wins; when the row holds nothing yet,
+                        // pre-fill from the numbers we already hold (the
+                        // direct-billing book's RA, then our own booked
+                        // reservation) so the approver reviews instead of
+                        // transcribing.
+                        {
+                          const stored = String(r.ext_reservation_number ?? "").trim();
+                          const cand = stored ? [] : raCandidatesFromCheck(extBilling(r)?.check);
+                          setExtResNo(stored || (cand[0]?.number ?? ""));
+                          setExtResAuto(stored ? null : cand[0] ?? null);
+                        }
                         setExtDays(String(r.ext_days ?? 7));
                         setSmsEdited(false);
                         setDateEdited(false);
@@ -1993,10 +2008,54 @@ export default function RentalRequests() {
                     <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Res / RA #
                     </span>
-                    <input type="text" value={extResNo} onChange={(e) => setExtResNo(e.target.value)}
+                    <input type="text" value={extResNo}
+                           onChange={(e) => { setExtResNo(e.target.value); setExtResAuto(null); }}
                            placeholder="Enterprise reservation or RA number (required to approve)"
                            style={{ ...ctrl, flex: 1 }} data-testid="ext-res-input" />
                   </div>
+                  {/* The numbers we already hold for this tech's rental. The
+                      first one is pre-filled on open when the row had none —
+                      the approver's job is review, not transcription. Clicking
+                      a chip swaps it in; typing anything clears the caption. */}
+                  {(() => {
+                    const cands = raCandidatesFromCheck(extBilling(detail)?.check);
+                    if (!cands.length) {
+                      return extBilling(detail) ? (
+                        <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "-2px 0 8px" }}
+                             data-testid="ext-res-no-suggestion">
+                          No RA found for this technician on the direct-billing book — look it up on the rental and enter it manually.
+                        </div>
+                      ) : null;
+                    }
+                    return (
+                      <div style={{ margin: "-2px 0 8px" }} data-testid="ext-res-suggestions">
+                        {extResAuto && extResNo.trim().toUpperCase() === extResAuto.number.toUpperCase() && (
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.green, marginBottom: 4 }}
+                               data-testid="ext-res-autofill-note">
+                            Pre-filled — {extResAuto.label}. Review it, then approve.
+                          </div>
+                        )}
+                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          {cands.map((c) => {
+                            const active = extResNo.trim().toUpperCase() === c.number.toUpperCase();
+                            return (
+                              <button key={`${c.source}:${c.number}`} type="button"
+                                      onClick={() => { setExtResNo(c.number); setExtResAuto(c); }}
+                                      data-testid={`ext-res-suggestion-${c.number}`}
+                                      style={{ fontFamily: fonts.dmSans, fontSize: 11, cursor: "pointer",
+                                               padding: "3px 8px", borderRadius: 6,
+                                               border: `1px solid ${active ? colors.green : colors.rule}`,
+                                               background: active ? colors.greenLight : colors.surface,
+                                               color: active ? colors.green : colors.ink }}>
+                                {c.number}
+                                <span style={{ color: colors.inkMuted }}> · {c.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                   <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 4 }}>
                     <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                       Extra days

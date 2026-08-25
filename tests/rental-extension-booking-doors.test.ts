@@ -34,6 +34,7 @@ import { sql } from "drizzle-orm";
 
 import { db, pool } from "../server/db";
 import { initFormsSchema } from "../server/vrm/forms/schema";
+import { raCandidatesFromCheck } from "../client/src/pages/vehicle-rental-management/lib/ext-ra-candidates";
 import {
   registerRentalRequestAdminRoutes,
   liveRequestGuard,
@@ -325,5 +326,68 @@ describe("type-aware liveRequestGuard semantics", () => {
     const guard = await liveRequestGuard(ldap);
     assert.ok(guard.blockExtension, "an in-flight new request means there is no rental to extend yet");
     assert.equal(Number(guard.blockExtension!.requestNo), newNo);
+  });
+});
+
+/**
+ * RA prefill for extension approvals (pure — the drawer's candidate list).
+ *
+ * The approve gate stays untouched (blank still blocks); these pin WHAT the
+ * drawer offers: the direct-billing book's RA first, our booked reservation
+ * second, nothing from non-booked standings, and no duplicates.
+ */
+describe("extension RA prefill candidates (raCandidatesFromCheck)", () => {
+  test("direct-billing RA comes first, booked reservation second, with provenance", () => {
+    const cands = raCandidatesFromCheck({
+      standing: "booked",
+      etdReference: "1J2K3L",
+      directCases: [{ source: "enterprise_direct", ticketNumber: "884422", vehicleNumber: "021093", rentalStartDate: "2026-08-12" }],
+    });
+    assert.equal(cands.length, 2);
+    assert.deepEqual(cands.map((c) => [c.number, c.source]), [["884422", "direct"], ["1J2K3L", "booked"]]);
+    assert.match(cands[0].label, /direct-billing/i);
+    assert.match(cands[0].label, /021093/);
+    assert.match(cands[0].label, /2026-08-12/);
+  });
+
+  test("a non-booked standing NEVER offers its etd reference (failed/released cutover rows)", () => {
+    for (const standing of ["none", "unavailable", "", undefined]) {
+      const cands = raCandidatesFromCheck({ standing: standing as any, etdReference: "STALE1" });
+      assert.equal(cands.length, 0, `standing=${String(standing)} must offer nothing`);
+    }
+  });
+
+  test("blank/whitespace ticket numbers are skipped; duplicates collapse case-insensitively", () => {
+    const cands = raCandidatesFromCheck({
+      standing: "booked",
+      etdReference: "ra100",
+      directCases: [
+        { ticketNumber: "  " },
+        { ticketNumber: null },
+        { ticketNumber: "RA100", vehicleNumber: "88123" },
+        { ticketNumber: "RA100" },
+      ],
+    });
+    // The direct-book sighting wins the slot; the identical booked reference dedupes away.
+    assert.equal(cands.length, 1);
+    assert.equal(cands[0].number, "RA100");
+    assert.equal(cands[0].source, "direct");
+  });
+
+  test("no check at all (row without a billing check) offers nothing", () => {
+    assert.deepEqual(raCandidatesFromCheck(null), []);
+    assert.deepEqual(raCandidatesFromCheck(undefined), []);
+    assert.deepEqual(raCandidatesFromCheck({}), []);
+  });
+
+  test("two open direct cases (rare, but real after a truck swap) both surface, newest data intact", () => {
+    const cands = raCandidatesFromCheck({
+      directCases: [
+        { ticketNumber: "111222", vehicleNumber: "021093" },
+        { ticketNumber: "333444", rentalStartDate: "2026-07-01" },
+      ],
+    });
+    assert.deepEqual(cands.map((c) => c.number), ["111222", "333444"]);
+    assert.equal(cands.every((c) => c.source === "direct"), true);
   });
 });
