@@ -2747,7 +2747,15 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         }
       }
       if (!cur) return res.status(404).json({ message: "request not found" });
-      if (cur.auto_decision && cur.auto_decision !== decision && !note) {
+      // Extensions are deliberately auto-classified as REVIEW because Fleet
+      // must handle the existing Enterprise rental manually. APPROVE is the
+      // normal resolution of that review, not an engine-policy overrule, so it
+      // does not need a manufactured comment. Keep the note gate for every
+      // other auto-decision override (and keep VOID's separate mandatory note).
+      const isRoutineExtensionApproval =
+        decision === "APPROVE" && isExtensionRow;
+      if (cur.auto_decision && cur.auto_decision !== decision && !note
+          && !isRoutineExtensionApproval) {
         return res.status(400).json({
           message: `Overruling the engine (${cur.auto_decision} -> ${decision}) requires a note.`,
         });

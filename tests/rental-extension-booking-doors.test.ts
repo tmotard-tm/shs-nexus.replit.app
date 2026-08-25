@@ -93,6 +93,50 @@ async function readRow(no: number): Promise<any> {
   return (rows as any[])[0];
 }
 
+async function decideExtensionWithLiveEmailOff(
+  no: number,
+  body: Record<string, unknown>,
+): Promise<{ status: number; json: any }> {
+  const priorLive = process.env.RENTAL_EXTENSION_EMAIL_LIVE;
+  process.env.RENTAL_EXTENSION_EMAIL_LIVE = "false";
+  let status = -1;
+  let senderSettled = false;
+  try {
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    status = res.status;
+    const json = await res.json() as any;
+
+    if (status === 200) {
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline) {
+        const { rows } = await db.execute(sql`
+          SELECT ext_email_state
+          FROM vrm_rental_request
+          WHERE request_no = ${no}
+        `);
+        if ((rows as any[])[0]?.ext_email_state === "dry_run") {
+          senderSettled = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(senderSettled, true, "the disabled extension-email sender must settle before restoring its flag");
+    }
+    return { status, json };
+  } finally {
+    // If a 200 sender did not settle, keep live email disabled for the rest of
+    // this test process rather than racing a late external send.
+    if (status !== 200 || senderSettled) {
+      if (priorLive === undefined) delete process.env.RENTAL_EXTENSION_EMAIL_LIVE;
+      else process.env.RENTAL_EXTENSION_EMAIL_LIVE = priorLive;
+    }
+  }
+}
+
 before(async () => {
   await initFormsSchema(); // IF NOT EXISTS everywhere
   await cleanupFixtures();
@@ -327,6 +371,91 @@ describe("type-aware liveRequestGuard semantics", () => {
     const guard = await liveRequestGuard(ldap);
     assert.ok(guard.blockExtension, "an in-flight new request means there is no rental to extend yet");
     assert.equal(Number(guard.blockExtension!.requestNo), newNo);
+  });
+});
+
+describe("extension approval comment policy", () => {
+  test("APPROVE may overrule REVIEW with a blank comment when the RA is present", async () => {
+    const no = await insertRequest({
+      ldap: `${LDAP_PREFIX}N1`,
+      request_type: "extension",
+      status: "pending",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+      SET auto_decision = 'REVIEW'
+      WHERE request_no = ${no}
+    `);
+
+    const { status, json } = await decideExtensionWithLiveEmailOff(no, {
+      decision: "APPROVE",
+      note: "   ",
+      reservationNumber: "ZZ-RA-1001",
+      extensionDays: 7,
+    });
+    assert.equal(status, 200, JSON.stringify(json));
+    assert.equal(json.ok, true);
+
+    const { rows } = await db.execute(sql`
+      SELECT status, decision_note, ext_reservation_number
+      FROM vrm_rental_request
+      WHERE request_no = ${no}
+    `);
+    const row = (rows as any[])[0];
+    assert.equal(row.status, "approved");
+    assert.equal(row.decision_note, null, "a blank optional comment stays null in the audit row");
+    assert.equal(row.ext_reservation_number, "ZZ-RA-1001");
+  });
+
+  test("a supplied extension approval comment remains in the audit row", async () => {
+    const no = await insertRequest({
+      ldap: `${LDAP_PREFIX}N2`,
+      request_type: "extension",
+      status: "pending",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+      SET auto_decision = 'REVIEW'
+      WHERE request_no = ${no}
+    `);
+
+    const { status, json } = await decideExtensionWithLiveEmailOff(no, {
+      decision: "APPROVE",
+      note: "Confirmed with Enterprise",
+      reservationNumber: "ZZ-RA-1002",
+      extensionDays: 7,
+    });
+    assert.equal(status, 200, JSON.stringify(json));
+
+    const { rows } = await db.execute(sql`
+      SELECT decision_note
+      FROM vrm_rental_request
+      WHERE request_no = ${no}
+    `);
+    assert.equal((rows as any[])[0]?.decision_note, "Confirmed with Enterprise");
+  });
+
+  test("a blank comment still blocks a non-extension engine overrule", async () => {
+    const no = await insertRequest({
+      ldap: `${LDAP_PREFIX}N3`,
+      request_type: "new",
+      status: "pending",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+      SET auto_decision = 'REVIEW'
+      WHERE request_no = ${no}
+    `);
+
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "APPROVE", note: "   " }),
+    });
+    const json = await res.json() as any;
+    assert.equal(res.status, 400, JSON.stringify(json));
+    assert.match(String(json.message), /requires a note/i);
+    assert.equal((await readRow(no)).status, "pending");
   });
 });
 
