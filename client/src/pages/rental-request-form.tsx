@@ -28,7 +28,7 @@
  *
  * Both post the same fields and produce one record with one schema.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRoute } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -159,9 +159,15 @@ export default function RentalRequestForm() {
   const [result, setResult] = useState<{ decision?: string; message?: string; requestNo?: number } | null>(null);
 
   const [identityOk, setIdentityOk] = useState<"" | "yes" | "no">("");
+  const [correctedName, setCorrectedName] = useState("");
+  const [correctedLdap, setCorrectedLdap] = useState("");
   const [correctedTruck, setCorrectedTruck] = useState("");
+  const [correctedDistrict, setCorrectedDistrict] = useState("");
+  const [correctedState, setCorrectedState] = useState("");
   const [correctedPhone, setCorrectedPhone] = useState("");
   const [identityCorrection, setIdentityCorrection] = useState("");
+  const correctionSectionRef = useRef<HTMLDivElement>(null);
+  const requestTypeSectionRef = useRef<HTMLDivElement>(null);
 
   // New rental vs extension of the current one. Defaulted from what the
   // system detects (an open rental-ops case => extension), but the technician
@@ -235,7 +241,14 @@ export default function RentalRequestForm() {
     mutationFn: () => postJson(`${api}/verify`, { ldap }),
     onSuccess: (d: any) => {
       setVerifyError("");
-      setIdentity(d.identity);
+      const verifiedIdentity = d.identity as Identity;
+      setIdentity(verifiedIdentity);
+      setCorrectedName(verifiedIdentity.techName || "");
+      setCorrectedLdap(verifiedIdentity.ldap || "");
+      setCorrectedTruck(verifiedIdentity.truckNumber || "");
+      setCorrectedDistrict(verifiedIdentity.district || "");
+      setCorrectedState(verifiedIdentity.homeState || "");
+      setCorrectedPhone(verifiedIdentity.mobilePhone || "");
       // Detection drives the DEFAULT choice only. A tech with an open rental
       // case defaults to Extension; without one, to New. A resumed send-back
       // is a new-rental continuation, so it defaults to New regardless.
@@ -284,6 +297,33 @@ export default function RentalRequestForm() {
   /** ETD needs an hour, not just a day. */
   const appointmentAt = appointmentDate ? `${appointmentDate}T08:00` : "";
 
+  const reportedIdentityCorrection = () => {
+    const changed = (before: string | undefined, after: string) =>
+      String(before || "").trim() !== after.trim();
+    const parts: string[] = [];
+    if (changed(identity?.techName, correctedName)) {
+      parts.push(`name: ${identity?.techName || "none"} -> ${correctedName.trim() || "none"}`);
+    }
+    if (changed(identity?.ldap, correctedLdap)) {
+      parts.push(`LDAP: ${identity?.ldap || "none"} -> ${correctedLdap.trim() || "none"}`);
+    }
+    if (changed(identity?.district, correctedDistrict)) {
+      parts.push(`district: ${identity?.district || "none"} -> ${correctedDistrict.trim() || "none"}`);
+    }
+    if (changed(identity?.homeState, correctedState)) {
+      parts.push(`state: ${identity?.homeState || "none"} -> ${correctedState.trim() || "none"}`);
+    }
+    if (identityCorrection.trim()) parts.push(identityCorrection.trim());
+    return parts.join("; ");
+  };
+
+  const focusSection = (ref: { current: HTMLDivElement | null }) => {
+    requestAnimationFrame(() => {
+      ref.current?.focus({ preventScroll: true });
+      ref.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
   const validate = () => {
     const e: Record<string, string> = {};
     if (!identityOk) e.identityOk = "Please confirm your details.";
@@ -300,8 +340,8 @@ export default function RentalRequestForm() {
       if (correctedPhone.trim() && digits.length !== 10) e.correctedPhone = "Enter a 10-digit mobile number.";
       const tChanged = correctedTruck.trim() !== String(identity?.truckNumber || "").trim();
       const pChanged = digits !== String(identity?.mobilePhone || "").replace(/[^0-9]/g, "");
-      if (!tChanged && !pChanged && !identityCorrection.trim()) {
-        e.identityCorrection = "Update your truck or mobile number, or tell us what else is wrong.";
+      if (!tChanged && !pChanged && !reportedIdentityCorrection()) {
+        e.identityCorrection = "Update a detail below, or tell us what is wrong.";
       }
     }
     if (!problemCategory) e.problemCategory = "Please choose what is going on.";
@@ -344,7 +384,7 @@ export default function RentalRequestForm() {
       typeMismatchExplanation: typeMismatch ? typeMismatchExplanation.trim() : null,
       district: identity?.district, homeState: identity?.homeState,
       identityCorrected: identityOk === "no",
-      identityCorrection,
+      identityCorrection: reportedIdentityCorrection(),
       correctedTruck, correctedPhone,
       problemCategory, symptom, isTowed, areYouOkay,
       isOver21,
@@ -367,8 +407,8 @@ export default function RentalRequestForm() {
       if (correctedPhone.trim() && digits.length !== 10) e.correctedPhone = "Enter a 10-digit mobile number.";
       const tChanged = correctedTruck.trim() !== String(identity?.truckNumber || "").trim();
       const pChanged = digits !== String(identity?.mobilePhone || "").replace(/[^0-9]/g, "");
-      if (!tChanged && !pChanged && !identityCorrection.trim()) {
-        e.identityCorrection = "Update your truck or mobile number, or tell us what else is wrong.";
+      if (!tChanged && !pChanged && !reportedIdentityCorrection()) {
+        e.identityCorrection = "Update a detail below, or tell us what is wrong.";
       }
     }
     if (typeMismatch && !typeMismatchExplanation.trim()) {
@@ -392,7 +432,7 @@ export default function RentalRequestForm() {
       typeMismatchExplanation: typeMismatch ? typeMismatchExplanation.trim() : null,
       district: identity?.district, homeState: identity?.homeState,
       identityCorrected: identityOk === "no",
-      identityCorrection,
+      identityCorrection: reportedIdentityCorrection(),
       correctedTruck, correctedPhone,
       extRepairStatus, extLastShopContact, extShopSaid,
       extExpectedCompletion: extExpectedCompletion || null,
@@ -532,29 +572,82 @@ export default function RentalRequestForm() {
                 <div className="grid grid-cols-2 items-end gap-3">
                   <Button type="button" variant={identityOk === "yes" ? "default" : "outline"}
                           className={identityOk === "yes" ? "bg-[#00529B] hover:bg-[#003A70]" : ""}
-                          onClick={() => { setIdentityOk("yes"); clearErr("identityOk"); }}>Correct</Button>
+                          onClick={() => {
+                            setIdentityOk("yes");
+                            setCorrectedName(identity?.techName || "");
+                            setCorrectedLdap(identity?.ldap || "");
+                            setCorrectedTruck(identity?.truckNumber || "");
+                            setCorrectedDistrict(identity?.district || "");
+                            setCorrectedState(identity?.homeState || "");
+                            setCorrectedPhone(identity?.mobilePhone || "");
+                            setIdentityCorrection("");
+                            clearErr("identityOk");
+                            clearErr("identityCorrection");
+                            focusSection(requestTypeSectionRef);
+                          }}>Correct</Button>
                   <Button type="button" variant={identityOk === "no" ? "default" : "outline"}
                           className={identityOk === "no" ? "bg-[#00529B] hover:bg-[#003A70]" : ""}
                           onClick={() => {
                             setIdentityOk("no");
                             // Hand them their own values to EDIT, not a blank prose box.
-                            setCorrectedTruck((c) => c || identity?.truckNumber || "");
-                            setCorrectedPhone((c) => c || identity?.mobilePhone || "");
+                            if (identityOk !== "no") {
+                              setCorrectedName(identity?.techName || "");
+                              setCorrectedLdap(identity?.ldap || "");
+                              setCorrectedTruck(identity?.truckNumber || "");
+                              setCorrectedDistrict(identity?.district || "");
+                              setCorrectedState(identity?.homeState || "");
+                              setCorrectedPhone(identity?.mobilePhone || "");
+                            }
                             clearErr("identityOk");
+                            focusSection(correctionSectionRef);
                           }}>Something&apos;s wrong</Button>
                 </div>
+                {identityOk === "yes" && (
+                  <p role="status" className="rounded-md bg-emerald-50 p-2 text-sm font-medium text-emerald-800">
+                    Details confirmed. Continue below.
+                  </p>
+                )}
                 {fieldErrors.identityOk && <p className="text-sm text-red-600">{fieldErrors.identityOk}</p>}
                 {identityOk === "no" && (
-                  <div className="space-y-3 rounded-lg border border-[#D8E2EE] bg-[#F4F8FC] p-3">
+                  <div
+                    ref={correctionSectionRef}
+                    data-testid="identity-correction-section"
+                    tabIndex={-1}
+                    aria-label="Report identity corrections"
+                    className="space-y-3 rounded-lg border border-[#D8E2EE] bg-[#F4F8FC] p-3 outline-none focus:ring-2 focus:ring-[#00529B]"
+                  >
                     <p className="text-sm font-medium text-slate-700">Fix what is wrong below.</p>
-                    <div className="grid grid-cols-2 items-end gap-3">
+                    <p className="text-xs text-slate-600">
+                      These changes go to Fleet for review. They do not directly change the technician roster.
+                    </p>
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-1.5">
-                        <Label htmlFor="ctruck" className="flex min-h-10 items-end">Truck number</Label>
+                        <Label htmlFor="corrected-name">Name</Label>
+                        <Input id="corrected-name" value={correctedName}
+                               onChange={(e) => { setCorrectedName(e.target.value); clearErr("identityCorrection"); }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="corrected-ldap">LDAP</Label>
+                        <Input id="corrected-ldap" autoCapitalize="characters" value={correctedLdap}
+                               onChange={(e) => { setCorrectedLdap(e.target.value); clearErr("identityCorrection"); }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="ctruck">Truck number</Label>
                         <Input id="ctruck" inputMode="numeric" value={correctedTruck}
                                onChange={(e) => { setCorrectedTruck(e.target.value); clearErr("identityCorrection"); }} />
                       </div>
                       <div className="space-y-1.5">
-                        <Label htmlFor="cphone" className="flex min-h-10 items-end">Mobile number</Label>
+                        <Label htmlFor="corrected-district">District</Label>
+                        <Input id="corrected-district" value={correctedDistrict}
+                               onChange={(e) => { setCorrectedDistrict(e.target.value); clearErr("identityCorrection"); }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="corrected-state">State</Label>
+                        <Input id="corrected-state" maxLength={2} autoCapitalize="characters" value={correctedState}
+                               onChange={(e) => { setCorrectedState(e.target.value); clearErr("identityCorrection"); }} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="cphone">Mobile number</Label>
                         <Input id="cphone" inputMode="tel" value={correctedPhone}
                                onChange={(e) => { setCorrectedPhone(e.target.value); clearErr("correctedPhone"); clearErr("identityCorrection"); }} />
                         {fieldErrors.correctedPhone && <p className="text-sm text-red-600">{fieldErrors.correctedPhone}</p>}
@@ -575,7 +668,13 @@ export default function RentalRequestForm() {
                 they already hold. Defaulted from detection, but the technician
                 decides: the rental-ops feed can lag, so a contradiction warns
                 and asks for one line instead of blocking. */}
-            <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
+            <div
+              ref={requestTypeSectionRef}
+              data-testid="request-type-section"
+              tabIndex={-1}
+              className="outline-none focus:ring-2 focus:ring-[#00529B]"
+            >
+              <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
               <CardHeader>
                 <CardTitle className="text-base">What do you need?</CardTitle>
                 <CardDescription>
@@ -633,7 +732,8 @@ export default function RentalRequestForm() {
                   </div>
                 )}
               </CardContent>
-            </Card>
+              </Card>
+            </div>
 
             {requestType === "new" && (<>
             {/* Enterprise will not rent to a driver under 21, so this is asked
