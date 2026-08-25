@@ -307,12 +307,39 @@ async function loadToken(token: string) {
  * sees the string, which strips Ds out of phone numbers and leaves every dash
  * in place. Proven on the box 2026-08-12; do not reintroduce the shorthand.
  */
+const ACTIVE_ROSTER_MISSING_MESSAGE =
+  "We could not find that LDAP on the active technician roster. Check the spelling, "
+  + "or contact Fleet if you have just started.";
+const ACTIVE_ROSTER_AMBIGUOUS_MESSAGE =
+  "More than one active technician record matches that LDAP. Contact Fleet so we can correct the roster before you continue.";
+
+class AmbiguousActiveRentalIdentityError extends Error {
+  constructor() {
+    super("multiple active current roster rows matched the rental LDAP");
+    this.name = "AmbiguousActiveRentalIdentityError";
+  }
+}
+
+function handleAmbiguousActiveRentalIdentity(
+  res: any,
+  error: unknown,
+  outcomeKey: "verified" | "success",
+): boolean {
+  if (!(error instanceof AmbiguousActiveRentalIdentityError)) return false;
+  res.status(409).json({
+    [outcomeKey]: false,
+    message: ACTIVE_ROSTER_AMBIGUOUS_MESSAGE,
+  });
+  return true;
+}
+
 async function factsFor(ldap: string) {
   const { rows } = await db.execute(sql`
     SELECT a.employment_status,
+           count(*) OVER ()                                  AS active_match_count,
            a.district_no,
            a.home_state,
-           upper(a.tech_racfid) AS ldap,
+           upper(btrim(a.tech_racfid)) AS ldap,
            COALESCE(NULLIF(btrim(a.tech_name), ''),
                     NULLIF(btrim(COALESCE(a.first_name,'') || ' ' || COALESCE(a.last_name,'')), ''))
                                                         AS tech_name,
@@ -332,11 +359,11 @@ async function factsFor(ldap: string) {
            NULLIF(regexp_replace(COALESCE(a.cell_phone,''),    '[^0-9]', '', 'g'), '') AS cell_phone,
            NULLIF(regexp_replace(COALESCE(a.main_phone,''),    '[^0-9]', '', 'g'), '') AS main_phone,
            (SELECT count(*) FROM vrm_byov_status v
-             WHERE v.ldap = upper(a.tech_racfid)
+              WHERE upper(btrim(v.ldap)) = upper(btrim(a.tech_racfid))
                AND upper(coalesce(v.status,'')) = 'ENROLLED') AS byov_count,
            (SELECT max(synced_at) FROM vrm_byov_status)        AS byov_synced_at,
            (SELECT count(*) FROM vrm_byov_status v2
-             WHERE v2.ldap = upper(a.tech_racfid))              AS byov_row_present,
+              WHERE upper(btrim(v2.ldap)) = upper(btrim(a.tech_racfid))) AS byov_row_present,
            (SELECT count(*) FROM vrm_rental_operations_cases c
               JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
              WHERE c.present_in_latest AND upper(c.ticket_status) = 'OPEN'
@@ -349,15 +376,24 @@ async function factsFor(ldap: string) {
     LEFT JOIN LATERAL (
       SELECT tpp.truck_no, tpp.mobile_phone
       FROM tpms_tech_profiles tpp
-      WHERE upper(tpp.enterprise_id) = upper(a.tech_racfid)
+      WHERE upper(btrim(tpp.enterprise_id)) = upper(btrim(a.tech_racfid))
       ORDER BY (NULLIF(regexp_replace(COALESCE(tpp.mobile_phone,''), '[^0-9]', '', 'g'), '') IS NULL),
                NULLIF(regexp_replace(COALESCE(tpp.mobile_phone,''), '[^0-9]', '', 'g'), '')
       LIMIT 1
     ) tp ON true
-    WHERE upper(a.tech_racfid) = upper(${ldap})
+    WHERE upper(btrim(a.tech_racfid)) = upper(btrim(${ldap}))
+      AND upper(btrim(COALESCE(a.employment_status, ''))) = 'A'
+      AND a.dropped_from_source_at IS NULL
+    ORDER BY a.effective_date DESC NULLS LAST,
+             a.synced_at DESC NULLS LAST,
+             a.employee_id
     LIMIT 1
   `);
-  return (rows as any[])[0] ?? null;
+  const row = (rows as any[])[0] ?? null;
+  if (Number(row?.active_match_count ?? 0) > 1) {
+    throw new AmbiguousActiveRentalIdentityError();
+  }
+  return row;
 }
 
 /** First ten-digit number we hold for this technician, or null. */
@@ -874,6 +910,12 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   await ensureByovFresh();
 
   const facts = await factsFor(ldap);
+  if (!facts) {
+    return {
+      code: 403,
+      json: { success: false, message: ACTIVE_ROSTER_MISSING_MESSAGE },
+    };
+  }
   const isByov = Number(facts?.byov_count ?? 0) > 0;
 
   // The engine screens NEW requests only. An extension has no problem category
@@ -1058,8 +1100,8 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     ) VALUES (
       ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
       ${truckFinal},
-      ${s(b.district, 20) || ctx.identity.district},
-      ${s(b.homeState, 2) || homeState},
+      ${ctx.identity.district ?? facts.district_no ?? null},
+      ${homeState},
       ${phoneFinal},
       ${corrected}, ${corrParts.length ? corrParts.join("; ").slice(0, 400) : null}, ${isByov},
       ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)}, ${bool(b.areYouOkay)},
@@ -1174,8 +1216,8 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
    *
    * This is the check the tokenised path ran too; the token was never what
    * established identity, it only decided who had been handed a link. LDAP has
-   * to exist and be ACTIVE-adjacent (roster status is judged by rule 6, not
-   * here) and the truck has to match something we hold for that person.
+   * to resolve to exactly one current active roster row. Historical or dropped
+   * rows are never identity fallbacks.
    */
   app.post("/api/public/rental-request/open/verify", async (req, res) => {
     try {
@@ -1190,8 +1232,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         logEvent("verify_fail", { ldap, outcome: "not_on_roster", ip });
         return res.status(403).json({
           verified: false,
-          message: "We could not find that LDAP on the technician roster. Check the spelling, "
-                 + "or contact Fleet if you have just started.",
+          message: ACTIVE_ROSTER_MISSING_MESSAGE,
         });
       }
 
@@ -1309,6 +1350,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       });
       logEvent("verify_ok", { ldap, ip });
     } catch (e: any) {
+      if (handleAmbiguousActiveRentalIdentity(res, e, "verified")) return;
       console.error("[rental-request] open verify failed:", e?.message || e);
       res.status(500).json({ verified: false, message: "Something went wrong. Please try again." });
     }
@@ -1321,7 +1363,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       if (!ldap) return res.status(400).json({ success: false, message: "Missing LDAP." });
 
       const f = await factsFor(ldap);
-      if (!f) return res.status(403).json({ success: false, message: "We could not find that LDAP on the roster." });
+      if (!f) return res.status(403).json({ success: false, message: ACTIVE_ROSTER_MISSING_MESSAGE });
 
       // Re-check the in-flight guard at submit time, not just at verify time.
       // Two tabs, or a double-tap on a slow phone, would otherwise each pass
@@ -1382,6 +1424,7 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       }
       res.status(out.code).json(out.json);
     } catch (e: any) {
+      if (handleAmbiguousActiveRentalIdentity(res, e, "success")) return;
       // Either unique index firing here means a genuine race, not a bug.
       if (isUniqueViolationOn(e,
         "vrm_rental_request_open_live_uniq",
@@ -1441,6 +1484,12 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 
       // Section A is CONFIRMED, not typed. Send back what we already hold.
       const f = await factsFor(ldap);
+      if (!f) {
+        return res.status(403).json({
+          verified: false,
+          message: ACTIVE_ROSTER_MISSING_MESSAGE,
+        });
+      }
 
       // Same detection the open door returns, so the tokenized form can
       // default New vs Extension and show the current rental too.
@@ -1466,15 +1515,16 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         blocking: { new: null, extension: guard.blockExtension },
         identity: {
           ldap,
-          techName: row.tech_name || "",
-          truckNumber: onFile || truck,
-          district: f?.district_no ?? "",
-          homeState: f?.home_state ?? "",
-          mobilePhone: row.phone || "",
-          isByov: Number(f?.byov_count ?? 0) > 0,
+          techName: f.tech_name || row.tech_name || "",
+          truckNumber: String(f.truck_number || onFile || truck),
+          district: f.district_no ?? "",
+          homeState: f.home_state ?? "",
+          mobilePhone: phoneFor(f) || row.phone || "",
+          isByov: Number(f.byov_count ?? 0) > 0,
         },
       });
     } catch (e: any) {
+      if (handleAmbiguousActiveRentalIdentity(res, e, "verified")) return;
       console.error("[rental-request] verify failed:", e?.message || e);
       res.status(500).json({ verified: false, message: "Something went wrong. Please try again." });
     }
@@ -1490,6 +1540,16 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       const ldap = String(b.ldap || "").trim().toUpperCase();
       if (!ldap || (row.ldap && ldap !== String(row.ldap).trim().toUpperCase())) {
         return res.status(403).json({ success: false, message: "That LDAP does not match this link." });
+      }
+      // Resolve current active identity before reading request state for this
+      // LDAP. An inactive or ambiguous token holder must not learn the number
+      // or status of another request associated with the reused identifier.
+      const facts0 = await factsFor(ldap);
+      if (!facts0) {
+        return res.status(403).json({
+          success: false,
+          message: ACTIVE_ROSTER_MISSING_MESSAGE,
+        });
       }
       // Type-aware guard on the token door too, for extensions only. A Fleet
       // link may deliberately duplicate a NEW request, but a second pending
@@ -1508,24 +1568,26 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         }
       }
 
-      const facts0 = await factsFor(ldap);
       const ip0 = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
       const out = await screenAndRecord({
         tokenRow: row,
         ldap,
         source: "form",
         identity: {
-          techName: row.tech_name || facts0?.tech_name || null,
-          truckNumber: row.truck_number || (facts0?.truck_number ? String(facts0.truck_number) : null),
-          district: facts0?.district_no ?? null,
-          homeState: facts0?.home_state ?? null,
-          mobilePhone: row.phone || phoneFor(facts0),
+          techName: facts0.tech_name || row.tech_name || null,
+          truckNumber: facts0.truck_number
+            ? String(facts0.truck_number)
+            : row.truck_number || null,
+          district: facts0.district_no ?? null,
+          homeState: facts0.home_state ?? null,
+          mobilePhone: phoneFor(facts0) || row.phone || null,
         },
         body: b,
         ip: ip0,
       });
       return res.status(out.code).json(out.json);
     } catch (e: any) {
+      if (handleAmbiguousActiveRentalIdentity(res, e, "success")) return;
       // The extension dedupe index firing here is a genuine race (two tabs,
       // two links), not a bug — answer it like the guard above would have.
       if (isUniqueViolationOn(e, "vrm_rental_request_ext_pending_uniq")) {

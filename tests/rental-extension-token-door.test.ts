@@ -59,6 +59,10 @@ async function cleanupFixtures() {
     DELETE FROM vrm_form_tokens
     WHERE token LIKE ${TOKEN_PREFIX + "%"} OR upper(COALESCE(ldap, '')) LIKE ${LDAP_PREFIX + "%"}
   `);
+  await db.execute(sql`
+    DELETE FROM all_techs
+    WHERE upper(COALESCE(tech_racfid, '')) LIKE ${LDAP_PREFIX + "%"}
+  `);
 }
 
 async function insertRequest(over: Partial<Record<string, unknown>> = {}): Promise<number> {
@@ -80,6 +84,25 @@ async function insertRequest(over: Partial<Record<string, unknown>> = {}): Promi
 
 async function mintToken(ldap: string): Promise<string> {
   const token = `${TOKEN_PREFIX}${crypto.randomBytes(12).toString("hex")}`;
+  const employeeId = `ZT${crypto.createHash("sha1").update(ldap).digest("hex").slice(0, 9)}`;
+  await db.execute(sql`
+    INSERT INTO all_techs (
+      employee_id, tech_racfid, tech_name, employment_status,
+      district_no, home_state, effective_date, synced_at, dropped_from_source_at
+    ) VALUES (
+      ${employeeId}, ${ldap}, 'Zz Token Door Fixture', 'A',
+      '8220', 'MI', '2026-08-16'::date, now(), NULL
+    )
+    ON CONFLICT (employee_id) DO UPDATE SET
+      tech_racfid = EXCLUDED.tech_racfid,
+      tech_name = EXCLUDED.tech_name,
+      employment_status = 'A',
+      district_no = EXCLUDED.district_no,
+      home_state = EXCLUDED.home_state,
+      effective_date = EXCLUDED.effective_date,
+      synced_at = now(),
+      dropped_from_source_at = NULL
+  `);
   await db.execute(sql`
     INSERT INTO vrm_form_tokens (token, form_type, ldap, tech_name, expires_at)
     VALUES (${token}, 'rental_request', ${ldap}, 'Zz Token Door Fixture', now() + interval '1 day')

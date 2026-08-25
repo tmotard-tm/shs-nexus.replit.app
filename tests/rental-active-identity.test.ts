@@ -22,6 +22,7 @@ const VERIFY = "/api/public/rental-request/open/verify";
 let server: any;
 let baseUrl = "";
 let employeeSequence = 0;
+let savedAlertPhones: string | undefined;
 
 async function cleanupFixtures() {
   await db.execute(sql`
@@ -38,7 +39,7 @@ async function cleanupFixtures() {
   `);
   await db.execute(sql`
     DELETE FROM all_techs
-    WHERE upper(tech_racfid) LIKE ${LDAP_PREFIX + "%"}
+    WHERE upper(btrim(tech_racfid)) LIKE ${LDAP_PREFIX + "%"}
   `);
 }
 
@@ -50,6 +51,7 @@ async function seedRoster(input: {
   state: string;
   dropped?: boolean;
   effectiveDate?: string;
+  storedLdap?: string;
 }) {
   employeeSequence += 1;
   const employeeId = `ZZACT${String(employeeSequence).padStart(6, "0")}`;
@@ -59,7 +61,7 @@ async function seedRoster(input: {
       employment_status, district_no, home_state, effective_date,
       synced_at, dropped_from_source_at
     ) VALUES (
-      ${employeeId}, ${input.ldap}, ${input.name}, ${input.name.split(" ")[0]},
+      ${employeeId}, ${input.storedLdap ?? input.ldap}, ${input.name}, ${input.name.split(" ")[0]},
       ${input.name.split(" ").slice(1).join(" ")}, ${input.status},
       ${input.district}, ${input.state},
       ${input.effectiveDate ?? (input.status === "A" ? "2026-08-16" : "2018-05-26")}::date,
@@ -91,9 +93,29 @@ async function post(path: string, body: Record<string, unknown>) {
   };
 }
 
+function validNewBody(ldap: string): Record<string, unknown> {
+  return {
+    ldap,
+    requestType: "new",
+    problemCategory: "breakdown",
+    symptom: "Van died on the highway; will not restart.",
+    isOver21: "yes",
+    ackNotMaintenance: true,
+    ackCannotDriveSafely: true,
+    ackReturnOneDay: true,
+    ackAccurate: true,
+    ackWorkingHoursOnly: true,
+    ackReturnBeforeTimeOff: true,
+    ackExtensionWeekly: true,
+    ackDiscipline: true,
+  };
+}
+
 before(async () => {
   await initFormsSchema();
   await cleanupFixtures();
+  savedAlertPhones = process.env.RENTAL_REQUEST_ALERT_PHONES;
+  process.env.RENTAL_REQUEST_ALERT_PHONES = "";
   const app = express();
   app.use(express.json());
   registerRentalRequestPublicRoutes(app);
@@ -105,6 +127,8 @@ before(async () => {
 
 after(async () => {
   server?.close();
+  if (savedAlertPhones === undefined) delete process.env.RENTAL_REQUEST_ALERT_PHONES;
+  else process.env.RENTAL_REQUEST_ALERT_PHONES = savedAlertPhones;
   await cleanupFixtures().catch(() => {});
   await pool.end().catch(() => {});
   const { fsPool } = await import("../server/fleet-scope-db");
@@ -137,6 +161,24 @@ describe("public rental request active technician identity", () => {
     assert.equal(json.identity.techName, "Current Person");
     assert.equal(json.identity.district, "8220");
     assert.equal(json.identity.homeState, "MI");
+  });
+
+  test("stored LDAP whitespace and case are normalized before matching", async () => {
+    const ldap = `${LDAP_PREFIX}H`;
+    await seedRoster({
+      ldap,
+      storedLdap: `  ${ldap.toLowerCase()}  `,
+      name: "Current Person",
+      status: "A",
+      district: "8220",
+      state: "MI",
+    });
+
+    const { status, json } = await post(VERIFY, { ldap });
+
+    assert.equal(status, 200, JSON.stringify(json));
+    assert.equal(json.identity.techName, "Current Person");
+    assert.equal(json.identity.ldap, ldap);
   });
 
   test("terminated-only LDAP is not eligible", async () => {
@@ -218,5 +260,99 @@ describe("public rental request active technician identity", () => {
     assert.equal(status, 403, JSON.stringify(json));
     assert.equal(json.verified, false);
     assert.match(String(json.message), /active.*roster|roster.*active/i);
+  });
+
+  test("token submit rejects ambiguous identity before exposing a blocking request", async () => {
+    const ldap = `${LDAP_PREFIX}I`;
+    const token = "zzact-ambiguous-submit-token";
+    await seedRoster({
+      ldap,
+      name: "Current Person",
+      status: "A",
+      district: "8220",
+      state: "MI",
+    });
+    await seedRoster({
+      ldap,
+      name: "Other Person",
+      status: "A",
+      district: "7330",
+      state: "OH",
+    });
+    await seedToken(ldap, token);
+    await db.execute(sql`
+      INSERT INTO vrm_rental_request (
+        ldap, tech_name, request_type, status, home_state
+      ) VALUES (
+        ${ldap}, 'Blocking Request', 'extension', 'pending', 'MI'
+      )
+    `);
+
+    const { status, json } = await post(
+      `/api/public/rental-request/${token}/submit`,
+      { ldap, requestType: "extension" },
+    );
+
+    assert.equal(status, 409, JSON.stringify(json));
+    assert.equal(json.success, false);
+    assert.equal(json.requestNo, undefined);
+    assert.match(String(json.message), /more than one active.*contact Fleet/i);
+    assert.doesNotMatch(String(json.message), /Current Person|Other Person|Blocking Request/);
+  });
+
+  test("token identity uses the current roster instead of its stale snapshot", async () => {
+    const ldap = `${LDAP_PREFIX}F`;
+    const token = "zzact-current-token";
+    await seedRoster({
+      ldap,
+      name: "Current Person",
+      status: "A",
+      district: "8220",
+      state: "MI",
+    });
+    await seedToken(ldap, token);
+
+    const { status, json } = await post(
+      `/api/public/rental-request/${token}/verify`,
+      { ldap },
+    );
+
+    assert.equal(status, 200, JSON.stringify(json));
+    assert.equal(json.identity.techName, "Current Person");
+    assert.equal(json.identity.district, "8220");
+    assert.equal(json.identity.homeState, "MI");
+  });
+
+  test("submit records authoritative roster district and state, not client replacements", async () => {
+    const ldap = `${LDAP_PREFIX}G`;
+    await seedRoster({
+      ldap,
+      name: "Current Person",
+      status: "A",
+      district: "8220",
+      state: "MI",
+    });
+
+    const { status, json } = await post(
+      "/api/public/rental-request/open/submit",
+      {
+        ...validNewBody(ldap),
+        district: "8319",
+        homeState: "WV",
+        identityCorrected: true,
+        identityCorrection: "Reported district 8319 and state WV",
+      },
+    );
+
+    assert.equal(status, 200, JSON.stringify(json));
+    const { rows } = await db.execute(sql`
+      SELECT district, home_state, identity_correction
+      FROM vrm_rental_request
+      WHERE request_no = ${Number(json.requestNo)}
+    `);
+    const row = (rows as any[])[0];
+    assert.equal(row.district, "8220");
+    assert.equal(row.home_state, "MI");
+    assert.match(String(row.identity_correction), /Reported district 8319 and state WV/);
   });
 });
