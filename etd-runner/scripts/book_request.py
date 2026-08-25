@@ -293,6 +293,61 @@ def _floor_start(start_s: str, end_s: str, lead_minutes: int = 90):
             (floor + span).strftime("%Y-%m-%dT%H:%M:%S"))
 
 
+def _scrub_placeholder(raw) -> str:
+    """A field whose ENTIRE content is a placeholder token ("Na", "N/A",
+    "none", "unknown", "x", "-") is an answer of no answer. Anchored
+    whole-field so real places survive: "Natrona Heights" is not "na",
+    "Xenia" is not "x". Mirrors `scrubPlaceholder` in
+    server/vrm/etd/executor.ts - change both or neither."""
+    s = str(raw or "").strip()
+    if re.fullmatch(r"(?i)n/?a|n\.a\.?|none|null|unknown|unk|tbd|x+|-+|\?+|\.+", s):
+        return ""
+    return s
+
+
+def _initial_booking_address(r: dict) -> str:
+    """approved_branch -> scrubbed shop address -> LOCATABLE reported branch.
+
+    Mirrors `intentAddress` in server/vrm/etd/executor.ts - change both or
+    neither.
+
+    BSOKOLO request b17c091a (2026-08-25): street "Na", city "Na", state PA -
+    the technician's "not applicable" (truck taken off the road, no shop).
+    Joined, "Na, PA" geocoded to the Balearic Islands and the US guard
+    stopped the booking even though his reported branch was fully locatable.
+    A placeholder is an answer of NO answer, and a state alone names no
+    place: with every free-text shop field scrubbed empty, this is a no-shop
+    request and the reported branch is the location.
+
+    The reported branch keeps the LGONZ15 rule (previously enforced only in
+    the server lane): "Enterprise" alone geocoded to Boston Logan and booked
+    a California technician a car 3,000 miles away on 2026-08-19. No street
+    number, no ZIP and no state names no place on earth - refuse rather than
+    let the geocoder pick.
+    """
+    fleet_branch = str(r.get("approved_branch") or "").strip()
+    if fleet_branch:
+        return fleet_branch
+    street = _scrub_placeholder(r.get("shop_address"))
+    city = _scrub_placeholder(r.get("shop_city"))
+    if street or city:
+        return _join_address(street, city, r.get("shop_state"))
+    reported = str(r.get("tech_reported_branch") or "").strip()
+    if not reported:
+        raise RuntimeError(
+            "no location to book from. Set a branch on the approval "
+            "(Fleet branch) and this will book.")
+    locatable = bool(re.search(r"\d", reported)) or \
+        bool(re.search(r"(^|[\s,])[A-Z]{2}([\s,]|$)", reported.upper()))
+    if not locatable:
+        raise RuntimeError(
+            f"the technician's reported branch ({reported!r}) names no location "
+            "- no street number, ZIP or state - and there is no shop address to "
+            "fall back on. Set a branch on the approval (Fleet branch) and this "
+            "will book.")
+    return reported
+
+
 def _join_address(*parts) -> str:
     """Join address parts without repeating a segment the technician already typed.
 
@@ -499,19 +554,7 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
     # behaviour Tyler asked to remove on 2026-08-20.
     fleet_branch = str(r.get("approved_branch") or "").strip()
 
-    address = fleet_branch
-    if not address:
-        address = _join_address(r.get("shop_address"), r.get("shop_city"),
-                                r.get("shop_state"))
-    if not address:
-        # A no-van request (new hire awaiting a vehicle) and a BYOV technician
-        # both legitimately have no shop: BYOV means there is no company van to
-        # be in one. The technician's reported branch IS the location then.
-        address = str(r.get("tech_reported_branch") or "").strip()
-    if not address:
-        raise RuntimeError(
-            "no location to book from. Set a branch on the approval "
-            "(Fleet branch) and this will book.")
+    address = _initial_booking_address(r)
 
     # ETD will not quote a start that has already passed: it answers with an EMPTY
     # class list, at every duration and from every address, which reads exactly like

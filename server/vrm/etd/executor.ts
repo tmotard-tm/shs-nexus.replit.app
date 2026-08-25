@@ -393,7 +393,20 @@ export function intentAddress(item: QueueItem): {
   if (fleetBranch) {
     return { address: fleetBranch, code: "", wantState: "" };
   }
-  let address = joinAddress([rs.shopAddress, rs.shopCity, rs.shopState, rs.shopPostal]);
+  // BSOKOLO request b17c091a (2026-08-25): street "Na", city "Na", state PA —
+  // the technician's way of writing "not applicable" (truck taken off the
+  // road, no shop). Joined, "Na, PA" geocoded to the Balearic Islands and the
+  // US guard stopped the booking — even though his reported branch
+  // ("Enterprise 300 pinewood dr Warrendale pa 15086") was fully locatable.
+  // A placeholder is an answer of NO answer, and a state alone names no
+  // place: with every free-text shop field scrubbed empty this is a NO-SHOP
+  // request, so fall through to the reported branch like one.
+  const shopStreet = scrubPlaceholder(rs.shopAddress);
+  const shopCity = scrubPlaceholder(rs.shopCity);
+  const shopPostal = scrubPlaceholder(rs.shopPostal);
+  let address = (shopStreet || shopCity || shopPostal)
+    ? joinAddress([shopStreet, shopCity, rs.shopState, shopPostal])
+    : "";
   if (!address) {
     // No shop: a new hire awaiting a vehicle. Their typed branch is all we have, and it
     // is free text - LGONZ15 typed the single word "Enterprise", which geocoded to
@@ -427,6 +440,17 @@ export function intentAddress(item: QueueItem): {
  * surfaced as four unrelated-looking failures. Trim each part, drop empties, and drop
  * any part already contained in what came before it.
  */
+/**
+ * A field whose ENTIRE content is a placeholder token is an answer of no
+ * answer. Matched whole-field and anchored so real places survive: "Natrona
+ * Heights" is not "na", "Xenia" is not "x". Mirrors `_scrub_placeholder` in
+ * etd-runner/scripts/book_request.py — change both or neither.
+ */
+export function scrubPlaceholder(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  return /^(?:n\/?a|n\.a\.?|none|null|unknown|unk|tbd|x+|-+|\?+|\.+)$/i.test(s) ? "" : s;
+}
+
 export function joinAddress(parts: Array<unknown>): string {
   const out: string[] = [];
   for (const raw of parts) {

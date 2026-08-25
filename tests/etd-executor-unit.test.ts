@@ -50,6 +50,7 @@ import {
   POSSIBLE_UNLINKED_CAP,
   parseConfirmation,
   intentAddress,
+  scrubPlaceholder,
   classForIntent,
   quoteWithReportedFallback,
   redactedShape,
@@ -509,6 +510,49 @@ describe("intent addressing", () => {
       facts: { requestSeed: { approvedBranch: "7440 W Cactus Rd, Peoria, AZ" } },
     }));
     assert.equal(got.address, "7440 W Cactus Rd, Peoria, AZ");
+  });
+
+  test("placeholder shop fields fall through to a locatable reported branch", () => {
+    // BSOKOLO request b17c091a (2026-08-25): street "Na", city "Na", state PA
+    // — truck taken off the road, no shop. "Na, PA" geocoded to the Balearic
+    // Islands and the US guard stopped the booking, even though the reported
+    // branch was fully locatable. A placeholder is an answer of NO answer.
+    const got = intentAddress(item({
+      facts: { requestSeed: {
+        shopAddress: "Na", shopCity: "Na", shopState: "PA",
+        reportedBranch: "Enterprise 300 pinewood dr Warrendale pa 15086",
+      } },
+    }));
+    assert.equal(got.address, "Enterprise 300 pinewood dr Warrendale pa 15086");
+    assert.equal(got.wantState, "PA", "the wrong-geocode guard stays ON for a reported branch");
+  });
+
+  test("placeholder shop + unlocatable reported branch still refuses (LGONZ15 rule holds)", () => {
+    assert.throws(
+      () => intentAddress(item({ facts: { requestSeed: {
+        shopAddress: "N/A", shopCity: "n/a", shopState: "CA",
+        reportedBranch: "Enterprise",
+      } } })),
+      /names no location/,
+    );
+  });
+
+  test("one real shop field survives scrubbing and still quotes the shop", () => {
+    const got = intentAddress(item({ facts: { requestSeed: {
+      shopAddress: "na", shopCity: "Pittsburgh", shopState: "PA",
+      reportedBranch: "Enterprise 300 pinewood dr Warrendale pa 15086",
+    } } }));
+    assert.equal(got.address, "Pittsburgh, PA", "a real city beats the fallback");
+    assert.equal(got.wantState, "PA");
+  });
+
+  test("scrubPlaceholder: tokens go, places stay", () => {
+    for (const junk of ["Na", "N/A", "n/a", "N.A.", "none", "NULL", "Unknown", "unk", "TBD", "x", "XXX", "-", "--", "?", "..."]) {
+      assert.equal(scrubPlaceholder(junk), "", `${JSON.stringify(junk)} is a placeholder`);
+    }
+    for (const real of ["Natrona Heights", "Xenia", "Nowhere Rd 5", "300 Pinewood Dr", "Nampa"]) {
+      assert.equal(scrubPlaceholder(real), real, `${JSON.stringify(real)} is a real answer`);
+    }
   });
 });
 
