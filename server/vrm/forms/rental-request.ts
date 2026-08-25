@@ -26,6 +26,8 @@ import {
   requestBookingInFlight,
   invalidateRequestPreviews,
   createIntent,
+  OrchestratorError,
+  retireRequestIntentsBeforeSourceRemoval,
   requestPreview,
   confirmIntent,
   verifyRequestOnCommitEvidence,
@@ -1067,18 +1069,49 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     if (note) corrParts.push(note);
   }
 
-  if (tokenRow) {
-    await db.execute(sql`
-      DELETE FROM vrm_rental_request WHERE token_id = ${tokenRow.id} AND status = 'deferred'
-    `);
-  } else {
-    // Same-type only: an extension submission must not eat a returned NEW
-    // request the technician was told to come back and finish (or vice versa).
-    await db.execute(sql`
-      DELETE FROM vrm_rental_request
-      WHERE ldap = ${ldap} AND token_id IS NULL AND status IN ('deferred','returned')
-        AND COALESCE(request_type, 'new') = ${requestType}
-    `);
+  try {
+    await db.transaction(async (tx) => {
+      const { rows: superseded } = tokenRow
+        ? await tx.execute(sql`
+            SELECT request_no, id
+            FROM vrm_rental_request
+            WHERE token_id = ${tokenRow.id} AND status = 'deferred'
+            FOR UPDATE
+          `)
+        : await tx.execute(sql`
+            SELECT request_no, id
+            FROM vrm_rental_request
+            WHERE ldap = ${ldap} AND token_id IS NULL AND status IN ('deferred','returned')
+              AND COALESCE(request_type, 'new') = ${requestType}
+            FOR UPDATE
+          `);
+
+      for (const old of superseded as any[]) {
+        await retireRequestIntentsBeforeSourceRemoval({
+          requestNo: Number(old.request_no),
+          requestId: String(old.id),
+          retiredBy: `rental-request submitter ${ldap}`,
+          reason: "superseded by a new submission",
+        }, tx);
+        await tx.execute(sql`
+          DELETE FROM vrm_rental_request
+          WHERE request_no = ${Number(old.request_no)}
+        `);
+      }
+    });
+  } catch (e: any) {
+    if (e instanceof OrchestratorError && e.code === "orphan_manual_review") {
+      return {
+        code: e.httpStatus,
+        json: {
+          success: false,
+          code: e.code,
+          message: e.message,
+          intentId: e.extra?.intentId ?? null,
+        },
+      };
+    }
+    throw e;
   }
 
   const { rows: ins } = await db.execute(sql`
@@ -2852,6 +2885,75 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
             requiresBillingAcknowledgement: true,
           });
         }
+      }
+
+      if (decision === "VOID") {
+        const no = Number(req.params.requestNo);
+        try {
+          await db.transaction(async (tx) => {
+            const { rows: lockedRows } = await tx.execute(sql`
+              SELECT id, request_no, COALESCE(request_type, 'new') AS request_type, status
+              FROM vrm_rental_request
+              WHERE request_no = ${no}
+              FOR UPDATE
+            `);
+            const locked = (lockedRows as any[])[0];
+            if (!locked) {
+              throw new OrchestratorError("request_not_found", "request not found", 404);
+            }
+            if (String(locked.request_type) !== "extension") {
+              throw new OrchestratorError(
+                "void_new_request",
+                "VOID is for extension requests only. Deny or send back a new request instead.",
+                400,
+              );
+            }
+            if (["approved", "booked"].includes(String(locked.status))) {
+              throw new OrchestratorError(
+                "void_too_late",
+                "Too late to void — this extension is already approved and the Enterprise email may already be on its way. "
+                  + "Deny it instead, or sort it out with Enterprise directly.",
+                409,
+              );
+            }
+
+            await retireRequestIntentsBeforeSourceRemoval({
+              requestNo: no,
+              requestId: String(locked.id),
+              retiredBy: actor,
+              reason: `request voided: ${note}`,
+            }, tx);
+
+            const { rows: voided } = await tx.execute(sql`
+              UPDATE vrm_rental_request
+              SET status = 'voided',
+                  decided_by = ${actor},
+                  decided_at = now(),
+                  decision_note = ${note},
+                  updated_at = now()
+              WHERE request_no = ${no}
+                AND status NOT IN ('approved','booked')
+              RETURNING request_no
+            `);
+            if (!(voided as any[]).length) {
+              throw new OrchestratorError(
+                "void_conflict",
+                "The request changed while it was being voided. Reload it for manual review.",
+                409,
+              );
+            }
+          });
+        } catch (e: any) {
+          if (e instanceof OrchestratorError) {
+            return res.status(e.httpStatus).json({
+              message: e.message,
+              code: e.code,
+              intentId: e.extra?.intentId ?? null,
+            });
+          }
+          throw e;
+        }
+        return res.json({ ok: true, decision });
       }
 
       // Never overwrite a booked row. Denying one would leave a live ETD

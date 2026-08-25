@@ -93,6 +93,40 @@ async function readRow(no: number): Promise<any> {
   return (rows as any[])[0];
 }
 
+async function seedLegacyLiveIntentForRequest(
+  no: number,
+  ldap: string,
+  outcome?: string | null,
+): Promise<number> {
+  const { rows } = await db.execute(sql`
+    INSERT INTO vrm_rental_workflow_intents
+      (workflow_type, source_id, source_revision, execution_mode, ldap, status,
+       reservation_state, block_state)
+    VALUES
+      (${WORKFLOW_REQUEST}, ${String(no)}, 0, 'live', ${ldap}, 'created',
+       'pending', 'not_applicable')
+    RETURNING id
+  `);
+  const id = Number((rows as any[])[0].id);
+  if (outcome !== undefined) {
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, finished_at)
+      VALUES
+        (${id}, 'etd_booking', 1, 0, ${outcome},
+         ${outcome == null ? null : sql`now()`})
+    `);
+  }
+  return id;
+}
+
+async function readIntentStatus(id: number): Promise<string> {
+  const { rows } = await db.execute(sql`
+    SELECT status FROM vrm_rental_workflow_intents WHERE id = ${id}
+  `);
+  return String((rows as any[])[0]?.status ?? "");
+}
+
 async function decideExtensionWithLiveEmailOff(
   no: number,
   body: Record<string, unknown>,
@@ -488,6 +522,36 @@ describe("VOID decision on extension requests", () => {
     assert.ok(row.decided_at, "the decision must be stamped for the audit trail");
     assert.equal(row.ext_email_state, null, "voiding must never touch the Enterprise email");
     assert.equal(row.approval_sms_body ?? null, null, "voiding must never write an SMS body");
+  });
+
+  test("VOID abandons a harmless legacy nonterminal intent instead of stranding its lock", async () => {
+    const ldap = `${LDAP_PREFIX}V8`;
+    const no = await insertRequest({ ldap, request_type: "extension", status: "pending" });
+    const intentId = await seedLegacyLiveIntentForRequest(no, ldap);
+
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "VOID", note: "legacy duplicate" }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await readRow(no)).status, "voided");
+    assert.equal(await readIntentStatus(intentId), "abandoned");
+  });
+
+  test("VOID fails closed when a legacy intent has an open booking attempt", async () => {
+    const ldap = `${LDAP_PREFIX}V9`;
+    const no = await insertRequest({ ldap, request_type: "extension", status: "pending" });
+    const intentId = await seedLegacyLiveIntentForRequest(no, ldap, null);
+
+    const res = await fetch(`${baseUrl}${B}/${no}/decide`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ decision: "VOID", note: "legacy duplicate" }),
+    });
+    const json = await res.json() as any;
+    assert.equal(res.status, 409, JSON.stringify(json));
+    assert.match(String(json.message), /manual review/i);
+    assert.equal((await readRow(no)).status, "pending", "ambiguous evidence must keep the source row visible");
+    assert.equal(await readIntentStatus(intentId), "created", "ambiguous evidence keeps the live lock");
   });
 
   test("VOID refuses a NEW request — deny/send-back are the real doors there", async () => {

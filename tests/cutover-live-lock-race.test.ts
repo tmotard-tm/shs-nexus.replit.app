@@ -1,25 +1,15 @@
 /**
- * createIntent must answer a live-lock duplicate-key RACE with the friendly
- * 409 (live_lock_held), never a generic 500.
+ * createIntent must reclaim a deleted request's harmless live-lock owner
+ * before inserting the replacement intent, without weakening the one-live-
+ * workflow safety rule.
  *
- * The eligibility pre-check in fetchEligibilityFacts scans live nonterminal
- * intents by upper(ldap), but deliberately SKIPS a rental_request intent
- * whose source request no longer exists (the orphan-skip clause — intent #37
- * / AROTTER). The vrm_workflow_intents_live_nonterminal_uq partial index has
- * no such carve-out: it fires on ANY live nonterminal row for the LDAP. An
- * orphaned live intent is therefore invisible to the gate but still trips
- * the index at insert time — exactly the pre-check-passed / index-fired
- * shape of two concurrent creators, deterministically and without timing.
+ * Reclaim is deliberately evidence-gated:
+ *   - the source request must truly be gone;
+ *   - reservation_state must prove no booking exists;
+ *   - every attempt must prove no external effect can be in flight.
  *
- * That thrown error is drizzle-wrapped ("Failed query: <sql>"; the
- * constraint name lives only on e.cause), so the original handler matching
- * e.message never fired and the race surfaced as an unhandled rethrow → 500.
- * This suite pins the fixed handler (isUniqueViolationOn walks the cause
- * chain) against the REAL index.
- *
- * A control LDAP with an identical fixture and no conflicting intent proves
- * the fixture passes the full eligibility gate — so the race case's 409 can
- * only come from the index handler, never from eligibility_failed.
+ * Open or unknown attempts fail closed for manual review, and a legitimate
+ * live intent whose source request still exists keeps the lock.
  *
  * VRM_CONTRACT_BLOCK_ENABLED is armed IN-PROCESS only (node --test runs each
  * file in its own child process): the live lock only exists for
@@ -76,18 +66,39 @@ async function seedEligibleRequest(ldap: string, employeeId: string): Promise<nu
   return Number((rows as any[])[0].request_no);
 }
 
-/** The conflicting row: a LIVE nonterminal intent for the same LDAP whose
- *  rental_request source does not exist. The orphan-skip clause hides it from
- *  the eligibility pre-check; the partial unique index still fires. */
-async function seedOrphanLiveIntent(ldap: string): Promise<number> {
+async function requestIdFor(no: number): Promise<string> {
+  const { rows } = await db.execute(sql`
+    SELECT id FROM vrm_rental_request WHERE request_no = ${no}
+  `);
+  return String((rows as any[])[0].id);
+}
+
+/** A LIVE nonterminal intent whose rental_request source does not exist. */
+async function seedOrphanLiveIntent(
+  ldap: string,
+  over: { reservationState?: string; reservationEvidence?: Record<string, unknown> | null } = {},
+): Promise<number> {
   const { rows } = await db.execute(sql`
     INSERT INTO vrm_rental_workflow_intents
-      (workflow_type, source_id, source_revision, execution_mode, ldap, status)
+      (workflow_type, source_id, source_revision, execution_mode, ldap, status,
+       reservation_state, reservation_evidence)
     VALUES
-      (${WORKFLOW_REQUEST}, ${crypto.randomUUID()}, 0, 'live', ${ldap}, 'created')
+      (${WORKFLOW_REQUEST}, ${crypto.randomUUID()}, 0, 'live', ${ldap}, 'created',
+       ${over.reservationState ?? "pending"},
+       ${over.reservationEvidence ? JSON.stringify(over.reservationEvidence) : null}::jsonb)
     RETURNING id
   `);
   return Number((rows as any[])[0].id);
+}
+
+async function seedBookingAttempt(intentId: number, outcome: string | null): Promise<void> {
+  await db.execute(sql`
+    INSERT INTO vrm_workflow_attempts
+      (intent_id, phase, attempt_no, fencing_token, outcome, finished_at)
+    VALUES
+      (${intentId}, 'etd_booking', 1, 0, ${outcome},
+       ${outcome == null ? null : sql`now()`})
+  `);
 }
 
 async function intentCountFor(ldap: string): Promise<number> {
@@ -95,6 +106,15 @@ async function intentCountFor(ldap: string): Promise<number> {
     SELECT count(*)::int AS n FROM vrm_rental_workflow_intents WHERE upper(ldap) = ${ldap.toUpperCase()}
   `);
   return Number((rows as any[])[0].n);
+}
+
+async function readIntent(id: number): Promise<any> {
+  const { rows } = await db.execute(sql`
+    SELECT id, status, reservation_state, last_error
+    FROM vrm_rental_workflow_intents
+    WHERE id = ${id}
+  `);
+  return (rows as any[])[0];
 }
 
 before(async () => {
@@ -117,7 +137,7 @@ after(async () => {
 
 // ---------------------------------------------------------------------------
 
-describe("live-lock duplicate-key race in createIntent", () => {
+describe("deleted-request live-lock recovery in createIntent", () => {
   test("control: the fixture passes the full eligibility gate and creates a LIVE intent", async () => {
     const ldap = `${LDAP_PREFIX}C1`;
     const no = await seedEligibleRequest(ldap, "ZZ731C1");
@@ -133,55 +153,136 @@ describe("live-lock duplicate-key race in createIntent", () => {
     assert.equal(String(intent.status), "created");
   });
 
-  test("an orphaned live intent (invisible to the gate, visible to the index) surfaces as live_lock_held 409, not a rethrown 500", async () => {
+  test("an orphan with pending reservation state and no attempts is abandoned before the replacement intent is created", async () => {
     const ldap = `${LDAP_PREFIX}R1`;
     const no = await seedEligibleRequest(ldap, "ZZ731R1");
-    await seedOrphanLiveIntent(ldap);
+    const orphanId = await seedOrphanLiveIntent(ldap);
     assert.equal(await intentCountFor(ldap), 1);
+
+    const { intent, created } = await createIntent({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: String(no),
+      executionMode: "live",
+      createdBy: "zzllk-test",
+    });
+
+    assert.equal(created, true);
+    assert.notEqual(Number(intent.id), orphanId);
+    const orphan = await readIntent(orphanId);
+    assert.equal(orphan.status, "abandoned", "the missing source's harmless intent must release the live lock");
+    assert.match(String(orphan.last_error), /source request.*no longer exists/i);
+    assert.equal(await intentCountFor(ldap), 2, "history is retained: one abandoned orphan plus the replacement");
+  });
+
+  test("an orphan with an open or unknown booking attempt fails closed for manual review", async () => {
+    for (const [suffix, outcome] of [["O", null], ["U", "timeout"]] as const) {
+      const ldap = `${LDAP_PREFIX}R2${suffix}`;
+      const no = await seedEligibleRequest(ldap, `ZZ732${suffix}`);
+      const orphanId = await seedOrphanLiveIntent(ldap);
+      await seedBookingAttempt(orphanId, outcome);
+
+      await assert.rejects(
+        () =>
+          createIntent({
+            workflowType: WORKFLOW_REQUEST,
+            sourceId: String(no),
+            executionMode: "live",
+            createdBy: "zzllk-test",
+          }),
+        (e: any) => {
+          assert.ok(e instanceof OrchestratorError);
+          assert.equal(e.code, "orphan_manual_review");
+          assert.equal(e.httpStatus, 409);
+          assert.match(String(e.message), /manual review/i);
+          assert.equal(Number(e.extra?.intentId), orphanId);
+          return true;
+        },
+      );
+
+      assert.equal((await readIntent(orphanId)).status, "created", "ambiguous evidence must keep the lock");
+      assert.equal(await intentCountFor(ldap), 1, "no replacement intent may be inserted over ambiguity");
+    }
+  });
+
+  test("a legitimate active prior request is never mistaken for an orphan", async () => {
+    const ldap = `${LDAP_PREFIX}R3`;
+    const priorNo = await seedEligibleRequest(ldap, "ZZ733A");
+    const prior = await createIntent({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: String(priorNo),
+      executionMode: "live",
+      createdBy: "zzllk-test",
+    });
+    // Free the request-table open-door slot without deleting the source. The
+    // workflow is still legitimately live and must keep its own stronger lock.
+    await db.execute(sql`
+      UPDATE vrm_rental_request SET status = 'returned' WHERE request_no = ${priorNo}
+    `);
+    const nextNo = await seedEligibleRequest(ldap, "ZZ733B");
 
     await assert.rejects(
       () =>
         createIntent({
           workflowType: WORKFLOW_REQUEST,
-          sourceId: String(no),
+          sourceId: String(nextNo),
           executionMode: "live",
           createdBy: "zzllk-test",
         }),
       (e: any) => {
-        // The race answer, not the raw drizzle wrapper. A rethrow here would
-        // be an Error whose message starts "Failed query:" with no code.
-        assert.ok(e instanceof OrchestratorError, `expected OrchestratorError, got ${e?.constructor?.name}: ${e?.message}`);
-        assert.equal(e.code, "live_lock_held", `expected live_lock_held, got ${e.code}: ${e.message}`);
-        assert.equal(e.httpStatus, 409, "the race must answer 409, never a generic 500");
+        assert.equal(e?.code, "eligibility_failed");
         assert.ok(
-          !String(e.message).startsWith("Failed query:"),
-          "the friendly message, not the drizzle wrapper",
+          Array.isArray(e?.extra?.failures)
+            && e.extra.failures.some((f: any) => f?.code === "intent_conflict"),
+          `expected the legitimate live-intent gate, got ${JSON.stringify(e?.extra)}`,
         );
         return true;
       },
     );
 
-    assert.equal(await intentCountFor(ldap), 1, "the violating insert must not leave a second row behind");
+    assert.equal((await readIntent(Number(prior.intent.id))).status, "created");
+    assert.equal(await intentCountFor(ldap), 1);
   });
 
-  test("case-insensitive: a lowercase orphan holds the lock for the uppercase LDAP too (index is on upper(ldap))", async () => {
-    const ldap = `${LDAP_PREFIX}R2`;
-    const no = await seedEligibleRequest(ldap, "ZZ731R2");
-    await seedOrphanLiveIntent(ldap.toLowerCase());
+  test("UUID-backed request intents block while their source exists and reclaim only after it is deleted", async () => {
+    const ldap = `${LDAP_PREFIX}R4`;
+    const priorNo = await seedEligibleRequest(ldap, "ZZ734A");
+    const priorId = await requestIdFor(priorNo);
+    const prior = await createIntent({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: priorId,
+      executionMode: "live",
+      createdBy: "zzllk-test",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_request SET status = 'returned' WHERE request_no = ${priorNo}
+    `);
+    const nextNo = await seedEligibleRequest(ldap, "ZZ734B");
 
     await assert.rejects(
       () =>
         createIntent({
           workflowType: WORKFLOW_REQUEST,
-          sourceId: String(no),
+          sourceId: String(nextNo),
           executionMode: "live",
           createdBy: "zzllk-test",
         }),
       (e: any) => {
-        assert.equal(e?.code, "live_lock_held", `expected live_lock_held, got ${e?.code}: ${e?.message}`);
+        assert.equal(e?.code, "eligibility_failed");
+        assert.ok(e?.extra?.failures?.some((f: any) => f?.code === "intent_conflict"));
         return true;
       },
     );
-    assert.equal(await intentCountFor(ldap), 1);
+    assert.equal((await readIntent(Number(prior.intent.id))).status, "created");
+
+    await db.execute(sql`DELETE FROM vrm_rental_request WHERE request_no = ${priorNo}`);
+    const replacement = await createIntent({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: String(nextNo),
+      executionMode: "live",
+      createdBy: "zzllk-test",
+    });
+
+    assert.equal(replacement.created, true);
+    assert.equal((await readIntent(Number(prior.intent.id))).status, "abandoned");
   });
 });

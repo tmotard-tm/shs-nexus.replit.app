@@ -867,7 +867,8 @@ export async function fetchEligibilityFacts(params: {
         -- survey and is not the same shape, so leave that lock strict.
         AND (i.workflow_type <> 'rental_request'
              OR EXISTS (SELECT 1 FROM vrm_rental_request r
-                         WHERE r.request_no::text = i.source_id::text))
+                         WHERE r.request_no::text = i.source_id::text
+                            OR r.id::text = i.source_id::text))
       LIMIT 1
     `);
     otherNonterminalIntentId = (rows as any[])[0]?.id ?? null;
@@ -1251,6 +1252,218 @@ async function loadIntent(intentId: number): Promise<any> {
   return row;
 }
 
+const NO_BOOKING_RESERVATION_STATES = new Set(["pending", "failed"]);
+const PROVEN_CLEAN_ATTEMPT_OUTCOMES = new Set([
+  "failed_clean",
+  "no_reservation_found",
+  "aborted_before_open",
+  "dry_run_validated",
+]);
+
+type RequestIntentRetirementParams = {
+  requestNo: number;
+  requestId?: string | null;
+  retiredBy: string;
+  reason: string;
+};
+
+function reservationEvidenceMayNameBooking(raw: unknown): boolean {
+  if (!raw || typeof raw !== "object") return false;
+  const evidence = raw as Record<string, any>;
+  const candidates = [
+    evidence.confirmation,
+    evidence.reservationId,
+    evidence.journeyId,
+    evidence.bookedAt,
+    evidence.verifiedAt,
+    evidence.raw?.confirmation,
+    evidence.raw?.reservationId,
+    evidence.raw?.journeyId,
+    evidence.raw?.journeyUId,
+  ];
+  return candidates.some((v) => v != null && String(v).trim() !== "");
+}
+
+function requestIntentRetirementBlocker(intent: any, attempts: any[]): string | null {
+  const reservationState = String(intent?.reservation_state ?? "");
+  if (!NO_BOOKING_RESERVATION_STATES.has(reservationState)) {
+    return `reservation state is ${reservationState || "missing"}`;
+  }
+  if (reservationEvidenceMayNameBooking(intent?.reservation_evidence)) {
+    return "reservation evidence names a possible booking";
+  }
+  const unsafeAttempt = attempts.find((attempt) => {
+    const outcome = attempt?.outcome == null ? null : String(attempt.outcome);
+    return outcome == null || !PROVEN_CLEAN_ATTEMPT_OUTCOMES.has(outcome);
+  });
+  if (unsafeAttempt) {
+    return unsafeAttempt.outcome == null
+      ? `${String(unsafeAttempt.phase ?? "external")} attempt ${Number(unsafeAttempt.attempt_no ?? 0)} is still open`
+      : `${String(unsafeAttempt.phase ?? "external")} attempt ${Number(unsafeAttempt.attempt_no ?? 0)} has unknown outcome ${String(unsafeAttempt.outcome)}`;
+  }
+  return null;
+}
+
+async function abandonRequestIntentsForRemovedSource(
+  executor: any,
+  params: RequestIntentRetirementParams,
+): Promise<number[]> {
+  const requestNo = String(params.requestNo);
+  const requestId = params.requestId ? String(params.requestId) : null;
+  const { rows } = await executor.execute(sql`
+    SELECT *
+    FROM vrm_rental_workflow_intents
+    WHERE workflow_type = ${WORKFLOW_REQUEST}
+      AND execution_mode = 'live'
+      AND status NOT IN ('completed','cancelled','abandoned')
+      AND (
+        source_id = ${requestNo}
+        OR (${requestId}::text IS NOT NULL AND source_id = ${requestId})
+      )
+    ORDER BY id
+    FOR UPDATE
+  `);
+
+  const abandoned: number[] = [];
+  for (const intent of rows as any[]) {
+    // openBookingAttempt authorizes its ledger INSERT by first updating this
+    // same intent row. Holding FOR UPDATE while reading attempts therefore
+    // closes the check-then-abandon race with an external call starting.
+    const attemptResult = await executor.execute(sql`
+      SELECT phase, attempt_no, outcome
+      FROM vrm_workflow_attempts
+      WHERE intent_id = ${Number(intent.id)}
+      ORDER BY phase, attempt_no
+    `);
+    const blocker = requestIntentRetirementBlocker(intent, attemptResult.rows as any[]);
+    if (blocker) {
+      throw new OrchestratorError(
+        "orphan_manual_review",
+        `Workflow intent #${intent.id} may still own an Enterprise operation (${blocker}). `
+          + "Manual review is required before this rental request can be removed or replaced.",
+        409,
+        {
+          intentId: Number(intent.id),
+          sourceId: String(intent.source_id),
+          reservationState: String(intent.reservation_state ?? ""),
+          blocker,
+        },
+      );
+    }
+
+    const { rows: retired } = await executor.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET status = 'abandoned',
+          last_error = ${`source request ${params.requestNo} removed by ${params.retiredBy}: ${params.reason}`},
+          claimed_by = NULL,
+          lease_expires_at = NULL,
+          next_retry_at = NULL,
+          updated_at = now()
+      WHERE id = ${Number(intent.id)}
+        AND status = ${String(intent.status)}
+      RETURNING id
+    `);
+    if (!(retired as any[]).length) {
+      throw new OrchestratorError(
+        "intent_changed",
+        `Workflow intent #${intent.id} changed while its source request was being removed. Manual review is required.`,
+        409,
+        { intentId: Number(intent.id), sourceId: String(intent.source_id) },
+      );
+    }
+    abandoned.push(Number(intent.id));
+  }
+  return abandoned;
+}
+
+/**
+ * Retire live request intents before their source row is deleted or voided.
+ * Callers already in a transaction pass it so the source-row lock and intent
+ * evidence check commit atomically; standalone callers get a transaction here.
+ */
+export async function retireRequestIntentsBeforeSourceRemoval(
+  params: RequestIntentRetirementParams,
+  transaction?: any,
+): Promise<number[]> {
+  if (transaction) return abandonRequestIntentsForRemovedSource(transaction, params);
+  return db.transaction((tx) => abandonRequestIntentsForRemovedSource(tx, params));
+}
+
+async function reclaimDeletedRequestLiveLock(params: {
+  ldap: string;
+  replacementSourceId: string;
+  createdBy?: string | null;
+}): Promise<number | null> {
+  return db.transaction(async (tx) => {
+    const { rows } = await tx.execute(sql`
+      SELECT *
+      FROM vrm_rental_workflow_intents
+      WHERE upper(ldap) = ${params.ldap.toUpperCase()}
+        AND execution_mode = 'live'
+        AND status NOT IN ('completed','cancelled','abandoned')
+      ORDER BY id DESC
+      LIMIT 1
+      FOR UPDATE
+    `);
+    const conflict = (rows as any[])[0];
+    if (!conflict || conflict.workflow_type !== WORKFLOW_REQUEST) return null;
+
+    const { rows: sourceRows } = await tx.execute(sql`
+      SELECT 1
+      FROM vrm_rental_request
+      WHERE request_no::text = ${String(conflict.source_id)}
+         OR id::text = ${String(conflict.source_id)}
+      LIMIT 1
+    `);
+    if ((sourceRows as any[]).length) return null;
+
+    const { rows: attempts } = await tx.execute(sql`
+      SELECT phase, attempt_no, outcome
+      FROM vrm_workflow_attempts
+      WHERE intent_id = ${Number(conflict.id)}
+      ORDER BY phase, attempt_no
+    `);
+    const blocker = requestIntentRetirementBlocker(conflict, attempts as any[]);
+    if (blocker) {
+      throw new OrchestratorError(
+        "orphan_manual_review",
+        `Orphaned workflow intent #${conflict.id} has no source request, but ${blocker}. `
+          + `Manual review is required before booking request ${params.replacementSourceId}.`,
+        409,
+        {
+          intentId: Number(conflict.id),
+          sourceId: String(conflict.source_id),
+          replacementSourceId: params.replacementSourceId,
+          reservationState: String(conflict.reservation_state ?? ""),
+          blocker,
+        },
+      );
+    }
+
+    const { rows: abandoned } = await tx.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET status = 'abandoned',
+          last_error = ${`auto-abandoned by ${params.createdBy ?? "auto-book"}: source request ${conflict.source_id} no longer exists and no booking attempt may be in flight`},
+          claimed_by = NULL,
+          lease_expires_at = NULL,
+          next_retry_at = NULL,
+          updated_at = now()
+      WHERE id = ${Number(conflict.id)}
+        AND status = ${String(conflict.status)}
+      RETURNING id
+    `);
+    if (!(abandoned as any[]).length) {
+      throw new OrchestratorError(
+        "intent_changed",
+        `Orphaned workflow intent #${conflict.id} changed during recovery. Manual review is required.`,
+        409,
+        { intentId: Number(conflict.id), sourceId: String(conflict.source_id) },
+      );
+    }
+    return Number(conflict.id);
+  });
+}
+
 async function touchIntent(
   intentId: number,
   patch: Record<string, unknown>,
@@ -1514,6 +1727,19 @@ export async function createIntent(params: {
   const gate = evaluateEligibility(facts);
   if (!gate.ok) {
     throw new OrchestratorError("eligibility_failed", "eligibility gate failed", 422, { failures: gate.failures });
+  }
+
+  // The request gate deliberately ignores a live intent whose source request
+  // was deleted, but the DB live-lock index cannot. Reclaim that orphan only
+  // after proving both halves of "nothing external happened" while holding
+  // the intent row lock. Unknown/open evidence remains nonterminal and gets a
+  // manual-review error rather than a second booking.
+  if (params.workflowType === WORKFLOW_REQUEST && mode === "live") {
+    await reclaimDeletedRequestLiveLock({
+      ldap: facts.ldap,
+      replacementSourceId: params.sourceId,
+      createdBy: params.createdBy,
+    });
   }
 
   // Revision: reuse an existing nonterminal intent for this identity, or bump
