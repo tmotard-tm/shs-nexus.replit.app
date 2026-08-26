@@ -1389,6 +1389,116 @@ export async function retireRequestIntentsBeforeSourceRemoval(
   return db.transaction((tx) => abandonRequestIntentsForRemovedSource(tx, params));
 }
 
+type TokenBackedDuplicateRequest = {
+  id: string;
+  request_no: string | number;
+  token_id: string;
+  created_at: string | Date;
+};
+
+async function deleteStartupDuplicateRequest(executor: any, request: TokenBackedDuplicateRequest): Promise<void> {
+  const { rows } = await executor.execute(sql`
+    DELETE FROM vrm_rental_request
+    WHERE id = ${String(request.id)}::uuid
+      AND request_no = ${Number(request.request_no)}
+    RETURNING request_no
+  `);
+  if ((rows as any[]).length !== 1) {
+    throw new OrchestratorError(
+      "startup_duplicate_changed",
+      `Rental request ${request.request_no} changed while startup was deduplicating its token. Manual review is required.`,
+      409,
+      { requestNo: Number(request.request_no), requestId: String(request.id) },
+    );
+  }
+}
+
+/**
+ * Repair pre-index token duplicates without ever orphaning a LIVE request
+ * intent. The newest request remains the default survivor. If an older source
+ * fails the normal evidence-gated retirement check, that protected source
+ * becomes the survivor and the harmless newer row is retired instead.
+ *
+ * The advisory xact lock covers both cleanup and index creation, so concurrent
+ * application instances cannot choose different survivors or observe a gap
+ * between dedupe and the uniqueness guard.
+ */
+export async function ensureTokenBackedRequestUniquenessForStartup(): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.execute(sql`
+      SELECT pg_advisory_xact_lock(hashtext('vrm_rental_request_token_dedupe'))
+    `);
+
+    const { rows } = await tx.execute(sql`
+      SELECT r.id, r.request_no, r.token_id, r.created_at
+      FROM vrm_rental_request r
+      JOIN (
+        SELECT token_id
+        FROM vrm_rental_request
+        WHERE token_id IS NOT NULL
+        GROUP BY token_id
+        HAVING count(*) > 1
+      ) duplicate_tokens ON duplicate_tokens.token_id = r.token_id
+      ORDER BY r.token_id, r.created_at DESC, r.request_no DESC
+      FOR UPDATE OF r
+    `);
+
+    const groups = new Map<string, TokenBackedDuplicateRequest[]>();
+    for (const raw of rows as any[]) {
+      const request = raw as TokenBackedDuplicateRequest;
+      const tokenId = String(request.token_id);
+      const group = groups.get(tokenId);
+      if (group) group.push(request);
+      else groups.set(tokenId, [request]);
+    }
+
+    for (const requests of Array.from(groups.values())) {
+      let survivor = requests[0];
+      let survivorIsProtected = false;
+
+      for (const candidate of requests.slice(1)) {
+        try {
+          await abandonRequestIntentsForRemovedSource(tx, {
+            requestNo: Number(candidate.request_no),
+            requestId: String(candidate.id),
+            retiredBy: "startup token dedupe",
+            reason: `duplicate of rental request ${survivor.request_no}`,
+          });
+        } catch (error: any) {
+          if (!(error instanceof OrchestratorError) || error.code !== "orphan_manual_review") {
+            throw error;
+          }
+          if (survivorIsProtected) {
+            throw error;
+          }
+
+          // The candidate may own an in-flight/unknown booking, so preserve it
+          // and prove the default survivor is harmless before deleting that row
+          // instead. If both are ambiguous, this throws and the whole cleanup
+          // rolls back for manual review.
+          await abandonRequestIntentsForRemovedSource(tx, {
+            requestNo: Number(survivor.request_no),
+            requestId: String(survivor.id),
+            retiredBy: "startup token dedupe",
+            reason: `duplicate of protected rental request ${candidate.request_no}`,
+          });
+          await deleteStartupDuplicateRequest(tx, survivor);
+          survivor = candidate;
+          survivorIsProtected = true;
+          continue;
+        }
+
+        await deleteStartupDuplicateRequest(tx, candidate);
+      }
+    }
+
+    await tx.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_token_uniq
+        ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL
+    `);
+  });
+}
+
 async function reclaimDeletedRequestLiveLock(params: {
   ldap: string;
   replacementSourceId: string;

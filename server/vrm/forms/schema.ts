@@ -229,7 +229,9 @@ export async function initFormsSchema(): Promise<void> {
   // and create two real reservations. Without the unique index a technician
   // who double-taps Submit gets two rows from one token, which becomes two ETD
   // bookings. Duplicates are collapsed first (newest wins) so the index can be
-  // created on an existing table.
+  // created on an existing table. The collapse now runs after the workflow
+  // intent + attempt tables exist below: deleting a source before those
+  // evidence checks are available can strand a live booking lock.
   await db.execute(sql`
     ALTER TABLE vrm_rental_request
       ADD COLUMN IF NOT EXISTS claimed_at timestamptz,
@@ -270,18 +272,6 @@ export async function initFormsSchema(): Promise<void> {
     ALTER TABLE vrm_rental_request
       ADD COLUMN IF NOT EXISTS approved_branch text;
   `);
-  await db.execute(sql`
-    DELETE FROM vrm_rental_request a
-    USING vrm_rental_request b
-    WHERE a.token_id IS NOT NULL
-      AND a.token_id = b.token_id
-      AND a.created_at < b.created_at;
-  `);
-  await db.execute(sql`
-    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_token_uniq
-      ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL;
-  `);
-
   // Request TYPE: 'new' (a vehicle they do not have) vs 'extension' (more time
   // on the rental they already hold). An extension is NOT a different-vehicle
   // request — it is the weekly re-up the acknowledgements promise, and it
@@ -939,6 +929,14 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_workflow_attempts (intent_id, phase)
       WHERE outcome IS NULL;
   `);
+
+  // Install the one-row-per-token guard only after the intent + attempt ledger
+  // exists. The repair is serialized across concurrent boots and routes every
+  // source deletion through the same evidence gate used by normal request
+  // retirement. A duplicate that may own a booking survives for manual review;
+  // a harmless sibling is removed instead.
+  const { ensureTokenBackedRequestUniquenessForStartup } = await import("./cutover-orchestrator");
+  await ensureTokenBackedRequestUniquenessForStartup();
 
   // Message send guard. UNIQUE(intent, workflow, moment, mode) is the
   // idempotency key for both texts: a reclaiming worker re-running the message

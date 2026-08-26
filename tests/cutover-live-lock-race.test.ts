@@ -46,6 +46,7 @@ async function cleanupFixtures() {
        OR source_id IN (SELECT request_no::text FROM vrm_rental_request WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"})
   `);
   await db.execute(sql`DELETE FROM vrm_rental_request WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM vrm_form_tokens WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
   await db.execute(sql`DELETE FROM all_techs WHERE upper(tech_racfid) LIKE ${LDAP_PREFIX + "%"}`);
 }
 
@@ -284,5 +285,83 @@ describe("deleted-request live-lock recovery in createIntent", () => {
 
     assert.equal(replacement.created, true);
     assert.equal((await readIntent(Number(prior.intent.id))).status, "abandoned");
+  });
+
+  test("concurrent startup dedupe preserves a duplicate source with ambiguous booking evidence", async () => {
+    const ldap = `${LDAP_PREFIX}S1`;
+    const token = `zzllk-startup-${crypto.randomUUID()}`;
+    const { rows: tokenRows } = await db.execute(sql`
+      INSERT INTO vrm_form_tokens (token, form_type, ldap, tech_name, expires_at)
+      VALUES (${token}, 'rental_request', ${ldap}, 'Zz Live Lock Fixture', now() + interval '1 day')
+      RETURNING id
+    `);
+    const tokenId = String((tokenRows as any[])[0].id);
+
+    // Recreate the pre-index legacy shape that startup is responsible for
+    // repairing. The older request already owns an ambiguous LIVE intent; the
+    // newer duplicate is harmless and may be discarded instead.
+    await db.execute(sql`DROP INDEX vrm_rental_request_token_uniq`);
+    const { rows: olderRows } = await db.execute(sql`
+      INSERT INTO vrm_rental_request
+        (token_id, ldap, tech_name, request_type, status, home_state, created_at)
+      VALUES
+        (${tokenId}::uuid, ${ldap}, 'Zz Live Lock Fixture', 'new', 'approved', 'PA',
+         now() - interval '2 minutes')
+      RETURNING request_no
+    `);
+    const olderNo = Number((olderRows as any[])[0].request_no);
+    const { rows: newerRows } = await db.execute(sql`
+      INSERT INTO vrm_rental_request
+        (token_id, ldap, tech_name, request_type, status, home_state, created_at)
+      VALUES
+        (${tokenId}::uuid, ${ldap}, 'Zz Live Lock Fixture', 'new', 'approved', 'PA',
+         now() - interval '1 minute')
+      RETURNING request_no
+    `);
+    const newerNo = Number((newerRows as any[])[0].request_no);
+
+    const { rows: intentRows } = await db.execute(sql`
+      INSERT INTO vrm_rental_workflow_intents
+        (workflow_type, source_id, source_revision, execution_mode, ldap, status, reservation_state)
+      VALUES
+        (${WORKFLOW_REQUEST}, ${String(olderNo)}, 0, 'live', ${ldap}, 'created', 'pending')
+      RETURNING id
+    `);
+    const intentId = Number((intentRows as any[])[0].id);
+    await seedBookingAttempt(intentId, "timeout");
+
+    // Two instances may initialize the same database together during a deploy.
+    await Promise.all([initFormsSchema(), initFormsSchema()]);
+
+    const { rows: requestRows } = await db.execute(sql`
+      SELECT request_no
+      FROM vrm_rental_request
+      WHERE token_id = ${tokenId}::uuid
+      ORDER BY request_no
+    `);
+    assert.deepEqual(
+      (requestRows as any[]).map((row) => Number(row.request_no)),
+      [olderNo],
+      "startup must keep the ambiguous intent's source and remove only the safe duplicate",
+    );
+    assert.notEqual(olderNo, newerNo);
+
+    const intent = await readIntent(intentId);
+    assert.equal(intent.status, "created", "ambiguous evidence must keep the live intent for manual review");
+    const { rows: sourceRows } = await db.execute(sql`
+      SELECT 1
+      FROM vrm_rental_request
+      WHERE request_no::text = (
+        SELECT source_id FROM vrm_rental_workflow_intents WHERE id = ${intentId}
+      )
+    `);
+    assert.equal((sourceRows as any[]).length, 1, "startup cleanup must never leave a source-less live lock");
+
+    const { rows: indexRows } = await db.execute(sql`
+      SELECT 1 FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname = 'vrm_rental_request_token_uniq'
+    `);
+    assert.equal((indexRows as any[]).length, 1, "startup must restore the token uniqueness guard");
   });
 });
