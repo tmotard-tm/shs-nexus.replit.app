@@ -12,6 +12,7 @@
  * else is a read or a draft journey (invisible in My Journeys, nothing billed).
  */
 import { getEtdToken } from "./token";
+import { isTruckBranch, type TruckVerdict } from "./truck-locations";
 
 export const API_BASE = "https://prd-we-api.etd.ehi.com";
 
@@ -297,6 +298,23 @@ export type QuoteResult = {
   branch_fallback_from_code?: string;
   branch_fallback_from_name?: string;
   branch_fallback_tried?: number;
+  /**
+   * Branches that were nearer but are Enterprise TRUCK RENTAL counters, in the order
+   * they were skipped. Present whenever at least one was dropped, so the drawer can
+   * explain why the technician is being sent past a closer Enterprise sign.
+   */
+  branch_truck_skipped?: {
+    code: string;
+    name: string;
+    address: string;
+    distance: string;
+    reason: string;
+  }[];
+  /**
+   * True when `preferBranchCode` pinned a branch that IS a truck counter. The pin is
+   * honoured (see quote()) but the caller must surface this.
+   */
+  branch_pinned_is_truck?: boolean;
 };
 
 export type EtdCallLog = { method: string; path: string; status: number; ms: number };
@@ -786,14 +804,56 @@ export class EtdClient {
     });
     if (!branches.length) throw new EtdError(`no Enterprise branch near '${opts.address}'`);
 
-    let branch = branches[0];
+    // Enterprise TRUCK RENTAL counters come back in this list looking exactly like car
+    // branches - same brand 'ET', same shape, no type field anywhere (see
+    // truck-locations.ts). They rent box trucks. Tyler, 2026-08-26: "we aren't supposed
+    // to use the truck locations right now." Three of the sixteen branches around the
+    // Athens shop on request #148 were truck yards, including the SECOND NEAREST, which
+    // is the one an operator would have reached for when the nearest ran out of cars.
+    const truckSkipped: NonNullable<QuoteResult["branch_truck_skipped"]> = [];
+    const truckOf = new Map<Json, TruckVerdict>();
+    const bookable: Json[] = [];
+    for (const b of branches) {
+      const v = isTruckBranch(b);
+      truckOf.set(b, v);
+      if (v.isTruck) {
+        truckSkipped.push({
+          code: String(b?.branchCode ?? ""),
+          name: String(b?.customerFacingBranchName ?? ""),
+          address: String(b?.fullAddress ?? ""),
+          distance: String(b?.calculatedDistance ?? ""),
+          reason: String(v.reason ?? ""),
+        });
+      } else {
+        bookable.push(b);
+      }
+    }
+    // Every branch in range being a truck yard is a real answer, not a bug. Say so
+    // plainly rather than falling back to one, because a technician sent to a box-truck
+    // counter is turned away at the desk and we find out hours later.
+    if (!bookable.length) {
+      throw new EtdError(
+        `every Enterprise branch near '${opts.address}' is a TRUCK RENTAL location ` +
+          `(${truckSkipped.map((t) => `${t.code} ${t.name}`).join(", ")}). ` +
+          `Book by hand or add an allow entry to etd-runner/reference/branch_policy_overrides.json.`,
+      );
+    }
+
+    let branch = bookable[0];
     let pinned = false;
+    let pinnedIsTruck = false;
     if (opts.preferBranchCode) {
       const want = String(opts.preferBranchCode).trim().replace(/^0+/, "");
+      // A pin is searched across ALL branches, truck ones included, and it is HONOURED.
+      // A pin means a contract branch already holding this technician's vehicle, so
+      // refusing it would strand a swap that is already in motion; ~20 of our historical
+      // cutover bookings sit at truck addresses. It is reported instead, via
+      // branch_pinned_is_truck, and the caller decides.
       for (const b of branches) {
         if (String(b?.branchCode ?? "").trim().replace(/^0+/, "") === want) {
           branch = b;
           pinned = true;
+          pinnedIsTruck = Boolean(truckOf.get(b)?.isTruck);
           break;
         }
       }
@@ -821,7 +881,9 @@ export class EtdClient {
     let fallbackFrom: Json | null = null;
     let fallbackTried = 0;
     if (!classes.length && opts.nearbyOnEmpty && !opts.preferBranchCode) {
-      for (const b of branches) {
+      // `bookable`, not `branches`: the ladder must not rescue an empty car branch by
+      // adopting a truck yard, which is the exact move it would have made in Athens.
+      for (const b of bookable) {
         if (b === branch) continue;
         if (fallbackTried >= NEARBY_FALLBACK_MAX_CANDIDATES) break;
         // `calculatedDistance` is documented as km on the feed; an absent value is
@@ -871,6 +933,8 @@ export class EtdClient {
             branch_fallback_tried: fallbackTried,
           }
         : {}),
+      ...(truckSkipped.length ? { branch_truck_skipped: truckSkipped } : {}),
+      ...(pinnedIsTruck ? { branch_pinned_is_truck: true } : {}),
     };
   }
 

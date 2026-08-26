@@ -1,0 +1,3495 @@
+[
+ {
+  "state": "Alabama",
+  "city": "Birmingham",
+  "address": "101 W Park Dr",
+  "station_id": "E15507",
+  "branch_code": "5507"
+ },
+ {
+  "state": "Alabama",
+  "city": "Dothan",
+  "address": "439 Ross Clark Cir",
+  "station_id": "E1554Z",
+  "branch_code": "554Z"
+ },
+ {
+  "state": "Alabama",
+  "city": "Madison",
+  "address": "9300 Madison Blvd",
+  "station_id": "E15506",
+  "branch_code": "5506"
+ },
+ {
+  "state": "Alabama",
+  "city": "Mobile",
+  "address": "850 West Interstate",
+  "station_id": "E1555T",
+  "branch_code": "555T"
+ },
+ {
+  "state": "Alabama",
+  "city": "Montgomery",
+  "address": "701 Enterprise Ct",
+  "station_id": "E1556T",
+  "branch_code": "556T"
+ },
+ {
+  "state": "Alaska",
+  "city": "Anchorage",
+  "address": "6211 Old Seward Hwy",
+  "station_id": "E145CT",
+  "branch_code": "45CT"
+ },
+ {
+  "state": "Alaska",
+  "city": "Fairbanks",
+  "address": "4960 Dale Rd",
+  "station_id": "E1458T",
+  "branch_code": "458T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Avondale",
+  "address": "10625 W Roosevelt St",
+  "station_id": "E1502T",
+  "branch_code": "502T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Glendale",
+  "address": "4864 W Glendale Ave",
+  "station_id": "E150GT",
+  "branch_code": "50GT"
+ },
+ {
+  "state": "Arizona",
+  "city": "Kingman",
+  "address": "4310 Stockton Hill Rd",
+  "station_id": "E150KT",
+  "branch_code": "50KT"
+ },
+ {
+  "state": "Arizona",
+  "city": "Mesa",
+  "address": "132 E Baseline Rd",
+  "station_id": "E1506T",
+  "branch_code": "506T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Phoenix",
+  "address": "24333 N 19th Ave",
+  "station_id": "E1504T",
+  "branch_code": "504T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Phoenix",
+  "address": "330 N 24th St",
+  "station_id": "E1508T",
+  "branch_code": "508T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Scottsdale",
+  "address": "1723 N Scottsdale Rd",
+  "station_id": "E1500T",
+  "branch_code": "500T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Tempe",
+  "address": "8201 S Priest Dr",
+  "station_id": "E1501T",
+  "branch_code": "501T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Tucson",
+  "address": "6657 S Tucson Blvd",
+  "station_id": "E1503T",
+  "branch_code": "503T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Tucson",
+  "address": "6811 N Thornydale Rd",
+  "station_id": "E1507T",
+  "branch_code": "507T"
+ },
+ {
+  "state": "Arizona",
+  "city": "Yuma",
+  "address": "2811 S Avenue 2 1/2 E",
+  "station_id": "E150YU",
+  "branch_code": "50YU"
+ },
+ {
+  "state": "Arkansas",
+  "city": "Little Rock",
+  "address": "2508 E Roosevelt Rd",
+  "station_id": "E151J4",
+  "branch_code": "51J4"
+ },
+ {
+  "state": "Arkansas",
+  "city": "Rogers",
+  "address": "851 W Post Rd",
+  "station_id": "E151J9",
+  "branch_code": "51J9"
+ },
+ {
+  "state": "California",
+  "city": "Antioch",
+  "address": "1730 W 10th St",
+  "station_id": "E1236X",
+  "branch_code": "236X"
+ },
+ {
+  "state": "California",
+  "city": "Bakersfield",
+  "address": "2911 Brundage Ln",
+  "station_id": "E1306T",
+  "branch_code": "306T"
+ },
+ {
+  "state": "California",
+  "city": "Campbell",
+  "address": "1506 White Oaks Rd",
+  "station_id": "E123M6",
+  "branch_code": "23M6"
+ },
+ {
+  "state": "California",
+  "city": "Chico",
+  "address": "2540 Cohasset Rd",
+  "station_id": "E130CT",
+  "branch_code": "30CT"
+ },
+ {
+  "state": "California",
+  "city": "Colton",
+  "address": "1205 W Valley Blvd",
+  "station_id": "E132LU",
+  "branch_code": "32LU"
+ },
+ {
+  "state": "California",
+  "city": "Concord",
+  "address": "2550 Monument Blvd",
+  "station_id": "E123X3",
+  "branch_code": "23X3"
+ },
+ {
+  "state": "California",
+  "city": "Corona",
+  "address": "265 Jason Ct",
+  "station_id": "E132LC",
+  "branch_code": "32LC"
+ },
+ {
+  "state": "California",
+  "city": "Elk Grove",
+  "address": "8420 Elk Grove Blvd",
+  "station_id": "E130GT",
+  "branch_code": "30GT"
+ },
+ {
+  "state": "California",
+  "city": "Folsom",
+  "address": "340 Plaza Dr",
+  "station_id": "E130FT",
+  "branch_code": "30FT"
+ },
+ {
+  "state": "California",
+  "city": "Fremont",
+  "address": "5591 Cushing Pkwy",
+  "station_id": "E1238X",
+  "branch_code": "238X"
+ },
+ {
+  "state": "California",
+  "city": "Fresno",
+  "address": "1122 N Abby St",
+  "station_id": "E1302T",
+  "branch_code": "302T"
+ },
+ {
+  "state": "California",
+  "city": "Fresno",
+  "address": "2691 S East Ave",
+  "station_id": "E130ET",
+  "branch_code": "30ET"
+ },
+ {
+  "state": "California",
+  "city": "Gardena",
+  "address": "313 W Gardena Blvd",
+  "station_id": "E132LT",
+  "branch_code": "32LT"
+ },
+ {
+  "state": "California",
+  "city": "La Mesa",
+  "address": "8323 Hercules St",
+  "station_id": "E132B8",
+  "branch_code": "32B8"
+ },
+ {
+  "state": "California",
+  "city": "La Puente",
+  "address": "14544 Valley Blvd",
+  "station_id": "E132LD",
+  "branch_code": "32LD"
+ },
+ {
+  "state": "California",
+  "city": "Laguna Niguel",
+  "address": "28112 Camino Capistrano",
+  "station_id": "E132B7",
+  "branch_code": "32B7"
+ },
+ {
+  "state": "California",
+  "city": "Lancaster",
+  "address": "805 W Ave K",
+  "station_id": "E132LR",
+  "branch_code": "32LR"
+ },
+ {
+  "state": "California",
+  "city": "Lathrop",
+  "address": "12715 S Manthey Rd",
+  "station_id": "E1307T",
+  "branch_code": "307T"
+ },
+ {
+  "state": "California",
+  "city": "Long Beach",
+  "address": "3366 Cherry Ave",
+  "station_id": "E132QT",
+  "branch_code": "32QT"
+ },
+ {
+  "state": "California",
+  "city": "Los Angeles",
+  "address": "1633 Riverside Dr",
+  "station_id": "E132LV",
+  "branch_code": "32LV"
+ },
+ {
+  "state": "California",
+  "city": "Los Angeles",
+  "address": "8734 Bellanca Ave",
+  "station_id": "E132L9",
+  "branch_code": "32L9"
+ },
+ {
+  "state": "California",
+  "city": "Merced",
+  "address": "1311 W Main St",
+  "station_id": "E130MT",
+  "branch_code": "30MT"
+ },
+ {
+  "state": "California",
+  "city": "Modesto",
+  "address": "707 7th St",
+  "station_id": "E1304T",
+  "branch_code": "304T"
+ },
+ {
+  "state": "California",
+  "city": "Montclair",
+  "address": "5462 Holt Blvd",
+  "station_id": "E132LS",
+  "branch_code": "32LS"
+ },
+ {
+  "state": "California",
+  "city": "Montebello",
+  "address": "1528 Washington Blvd",
+  "station_id": "E132B6",
+  "branch_code": "32B6"
+ },
+ {
+  "state": "California",
+  "city": "Murrieta",
+  "address": "26528 Kelvin Ct",
+  "station_id": "E132L6",
+  "branch_code": "32L6"
+ },
+ {
+  "state": "California",
+  "city": "National City",
+  "address": "3000 National City Blvd",
+  "station_id": "E132L4",
+  "branch_code": "32L4"
+ },
+ {
+  "state": "California",
+  "city": "Ontario",
+  "address": "4960 Vanderbilt St",
+  "station_id": "E132B9",
+  "branch_code": "32B9"
+ },
+ {
+  "state": "California",
+  "city": "Orange",
+  "address": "1045 N Batavia St",
+  "station_id": "E132LZ",
+  "branch_code": "32LZ"
+ },
+ {
+  "state": "California",
+  "city": "Panorama City",
+  "address": "8230 Sepulveda Blvd",
+  "station_id": "E132LG",
+  "branch_code": "32LG"
+ },
+ {
+  "state": "California",
+  "city": "Pleasanton",
+  "address": "2 California Ave",
+  "station_id": "E123M1",
+  "branch_code": "23M1"
+ },
+ {
+  "state": "California",
+  "city": "Redding",
+  "address": "217 E Cypress Ave",
+  "station_id": "E130DT",
+  "branch_code": "30DT"
+ },
+ {
+  "state": "California",
+  "city": "Richmond",
+  "address": "2200 Central St",
+  "station_id": "E123M3",
+  "branch_code": "23M3"
+ },
+ {
+  "state": "California",
+  "city": "Roseville",
+  "address": "222 Harding Blvd",
+  "station_id": "E130HT",
+  "branch_code": "30HT"
+ },
+ {
+  "state": "California",
+  "city": "Sacramento",
+  "address": "4535 Auburn Blvd",
+  "station_id": "E1301T",
+  "branch_code": "301T"
+ },
+ {
+  "state": "California",
+  "city": "Salinas",
+  "address": "280 Mortensen Ave",
+  "station_id": "E123M2",
+  "branch_code": "23M2"
+ },
+ {
+  "state": "California",
+  "city": "San Diego",
+  "address": "6330 Marindustry Dr",
+  "station_id": "E132LQ",
+  "branch_code": "32LQ"
+ },
+ {
+  "state": "California",
+  "city": "San Francisco",
+  "address": "45 Charter Oak Ave",
+  "station_id": "E123X1",
+  "branch_code": "23X1"
+ },
+ {
+  "state": "California",
+  "city": "San Jose",
+  "address": "1505 N 4th St",
+  "station_id": "E123X2",
+  "branch_code": "23X2"
+ },
+ {
+  "state": "California",
+  "city": "San Leandro",
+  "address": "575 Marina Blvd",
+  "station_id": "E123XX",
+  "branch_code": "23XX"
+ },
+ {
+  "state": "California",
+  "city": "Santa Ana",
+  "address": "3324 S Susan St",
+  "station_id": "E132QS",
+  "branch_code": "32QS"
+ },
+ {
+  "state": "California",
+  "city": "Santa Cruz",
+  "address": "919a Ocean St",
+  "station_id": "E1235X",
+  "branch_code": "235X"
+ },
+ {
+  "state": "California",
+  "city": "Santa Fe Springs",
+  "address": "12940 Firestone Blvd",
+  "station_id": "E132LP",
+  "branch_code": "32LP"
+ },
+ {
+  "state": "California",
+  "city": "Santa Maria",
+  "address": "2691 Santa Maria Way",
+  "station_id": "E132B4",
+  "branch_code": "32B4"
+ },
+ {
+  "state": "California",
+  "city": "Santa Rosa",
+  "address": "3155 Santa Rosa Ave",
+  "station_id": "E123X4",
+  "branch_code": "23X4"
+ },
+ {
+  "state": "California",
+  "city": "Stockton",
+  "address": "3003 Auto Center Cir",
+  "station_id": "E130AT",
+  "branch_code": "30AT"
+ },
+ {
+  "state": "California",
+  "city": "Sunnyvale",
+  "address": "815 E El Camino Real",
+  "station_id": "E123M4",
+  "branch_code": "23M4"
+ },
+ {
+  "state": "California",
+  "city": "Union City",
+  "address": "30319 Union City Blvd",
+  "station_id": "E123M5",
+  "branch_code": "23M5"
+ },
+ {
+  "state": "California",
+  "city": "Vacaville",
+  "address": "777 Elmira Rd",
+  "station_id": "E123M7",
+  "branch_code": "23M7"
+ },
+ {
+  "state": "California",
+  "city": "Vallejo",
+  "address": "3271 Sonoma Blvd",
+  "station_id": "E1237X",
+  "branch_code": "237X"
+ },
+ {
+  "state": "California",
+  "city": "Ventura",
+  "address": "1144 Arundell Avenue",
+  "station_id": "E132B5",
+  "branch_code": "32B5"
+ },
+ {
+  "state": "California",
+  "city": "Vernon",
+  "address": "3810 S Santa Fe Ave",
+  "station_id": "E132L7",
+  "branch_code": "32L7"
+ },
+ {
+  "state": "California",
+  "city": "Victorville",
+  "address": "14673 Civic Dr",
+  "station_id": "E132L3",
+  "branch_code": "32L3"
+ },
+ {
+  "state": "California",
+  "city": "Visalia",
+  "address": "9500 W Airport Dr",
+  "station_id": "E130VT",
+  "branch_code": "30VT"
+ },
+ {
+  "state": "California",
+  "city": "Vista",
+  "address": "875 W Vista Way",
+  "station_id": "E132LX",
+  "branch_code": "32LX"
+ },
+ {
+  "state": "California",
+  "city": "West Sacramento",
+  "address": "3006 Evergreen Ave",
+  "station_id": "E1303T",
+  "branch_code": "303T"
+ },
+ {
+  "state": "California",
+  "city": "Yuba City",
+  "address": "1255 Colusa Ave",
+  "station_id": "E130YT",
+  "branch_code": "30YT"
+ },
+ {
+  "state": "Colorado",
+  "city": "Centennial",
+  "address": "7201 S Fulton St",
+  "station_id": "E112Z5",
+  "branch_code": "12Z5"
+ },
+ {
+  "state": "Colorado",
+  "city": "Colorado Springs",
+  "address": "508 Don Juan St",
+  "station_id": "E112Z3",
+  "branch_code": "12Z3"
+ },
+ {
+  "state": "Colorado",
+  "city": "Commerce City",
+  "address": "5375 Newport St",
+  "station_id": "E112Z1",
+  "branch_code": "12Z1"
+ },
+ {
+  "state": "Colorado",
+  "city": "Fort Collins",
+  "address": "3321 E Mulberry St",
+  "station_id": "E112Z4",
+  "branch_code": "12Z4"
+ },
+ {
+  "state": "Colorado",
+  "city": "Lakewood",
+  "address": "8200 W Colfax Ave",
+  "station_id": "E112Z2",
+  "branch_code": "12Z2"
+ },
+ {
+  "state": "Colorado",
+  "city": "Pueblo West",
+  "address": "589 E Industrial Blvd",
+  "station_id": "E112ZA",
+  "branch_code": "12ZA"
+ },
+ {
+  "state": "Colorado",
+  "city": "Thornton",
+  "address": "2390 W 104th Ave",
+  "station_id": "E112Z7",
+  "branch_code": "12Z7"
+ },
+ {
+  "state": "Connecticut",
+  "city": "Berlin",
+  "address": "153 Webster Square Rd",
+  "station_id": "E1484T",
+  "branch_code": "484T"
+ },
+ {
+  "state": "Connecticut",
+  "city": "Danbury",
+  "address": "2 Prindle Ln",
+  "station_id": "E124BH",
+  "branch_code": "24BH"
+ },
+ {
+  "state": "Connecticut",
+  "city": "East Granby",
+  "address": "153 Rainbow Rd",
+  "station_id": "E148B1",
+  "branch_code": "48B1"
+ },
+ {
+  "state": "Connecticut",
+  "city": "East Hartford",
+  "address": "298 Governor St",
+  "station_id": "E1482T",
+  "branch_code": "482T"
+ },
+ {
+  "state": "Connecticut",
+  "city": "Old Saybrook",
+  "address": "360 Boston Post Rd",
+  "station_id": "E148B4",
+  "branch_code": "48B4"
+ },
+ {
+  "state": "Connecticut",
+  "city": "Stamford",
+  "address": "11 Brown House Rd",
+  "station_id": "E124B6",
+  "branch_code": "24B6"
+ },
+ {
+  "state": "Connecticut",
+  "city": "Wolcott",
+  "address": "1261 Meriden Rd",
+  "station_id": "E148B3",
+  "branch_code": "48B3"
+ },
+ {
+  "state": "Delaware",
+  "city": "Dover",
+  "address": "635 S Bay Rd",
+  "station_id": "E117ZD",
+  "branch_code": "17ZD"
+ },
+ {
+  "state": "Delaware",
+  "city": "New Castle",
+  "address": "190 S Dupont Hwy",
+  "station_id": "E1172T",
+  "branch_code": "172T"
+ },
+ {
+  "state": "Florida",
+  "city": "Boynton Beach",
+  "address": "501 Industrial Way",
+  "station_id": "E1412Z",
+  "branch_code": "412Z"
+ },
+ {
+  "state": "Florida",
+  "city": "Brooksville",
+  "address": "7464 B W Stevenson Rd",
+  "station_id": "E142BT",
+  "branch_code": "42BT"
+ },
+ {
+  "state": "Florida",
+  "city": "Cape Coral",
+  "address": "331 Ne Pine Island Rd",
+  "station_id": "E1351T",
+  "branch_code": "351T"
+ },
+ {
+  "state": "Florida",
+  "city": "Clermont",
+  "address": "1700 S Grand Hwy",
+  "station_id": "E107CT",
+  "branch_code": "07CT"
+ },
+ {
+  "state": "Florida",
+  "city": "Davenport",
+  "address": "2460 Access Rd",
+  "station_id": "E142DV",
+  "branch_code": "42DV"
+ },
+ {
+  "state": "Florida",
+  "city": "Daytona Beach",
+  "address": "1700 Mason Ave",
+  "station_id": "E107BT",
+  "branch_code": "07BT"
+ },
+ {
+  "state": "Florida",
+  "city": "Eustis",
+  "address": "355 Plaza Dr Unit 2",
+  "station_id": "E107ET",
+  "branch_code": "07ET"
+ },
+ {
+  "state": "Florida",
+  "city": "Fort Lauderdale",
+  "address": "2601 S Federal Hwy",
+  "station_id": "E141Z3",
+  "branch_code": "41Z3"
+ },
+ {
+  "state": "Florida",
+  "city": "Fort Myers",
+  "address": "10100 Daniels Pkwy",
+  "station_id": "E1356T",
+  "branch_code": "356T"
+ },
+ {
+  "state": "Florida",
+  "city": "Fort Pierce",
+  "address": "5400 S Us Highway 1",
+  "station_id": "E1411Z",
+  "branch_code": "411Z"
+ },
+ {
+  "state": "Florida",
+  "city": "Gainesville",
+  "address": "3920 Ne Waldo Rd",
+  "station_id": "E1433T",
+  "branch_code": "433T"
+ },
+ {
+  "state": "Florida",
+  "city": "Hialeah Gardens",
+  "address": "10200 N.W. 77th Avenue",
+  "station_id": "E141Z2",
+  "branch_code": "41Z2"
+ },
+ {
+  "state": "Florida",
+  "city": "Holiday",
+  "address": "3415 Us-19",
+  "station_id": "E1421T",
+  "branch_code": "421T"
+ },
+ {
+  "state": "Florida",
+  "city": "Homestead",
+  "address": "27455 S Dixie Hwy",
+  "station_id": "E1414Z",
+  "branch_code": "414Z"
+ },
+ {
+  "state": "Florida",
+  "city": "Jacksonville",
+  "address": "1705 Cassat Ave",
+  "station_id": "E1431T",
+  "branch_code": "431T"
+ },
+ {
+  "state": "Florida",
+  "city": "Jacksonville",
+  "address": "10777 Philips Hwy",
+  "station_id": "E1432T",
+  "branch_code": "432T"
+ },
+ {
+  "state": "Florida",
+  "city": "Jacksonville",
+  "address": "11645 Main St N",
+  "station_id": "E143Z1",
+  "branch_code": "43Z1"
+ },
+ {
+  "state": "Florida",
+  "city": "Kissimmee",
+  "address": "2793 N Orange Blossom Trail",
+  "station_id": "E107KT",
+  "branch_code": "07KT"
+ },
+ {
+  "state": "Florida",
+  "city": "Lakeland",
+  "address": "1950 W Memorial Blvd",
+  "station_id": "E1425T",
+  "branch_code": "425T"
+ },
+ {
+  "state": "Florida",
+  "city": "Lauderdale Lakes",
+  "address": "2200 N State Road 7",
+  "station_id": "E141Z1",
+  "branch_code": "41Z1"
+ },
+ {
+  "state": "Florida",
+  "city": "Melbourne",
+  "address": "235 S Wickham Rd",
+  "station_id": "E107MT",
+  "branch_code": "07MT"
+ },
+ {
+  "state": "Florida",
+  "city": "Miami",
+  "address": "3011 Nw 36th St",
+  "station_id": "E141Z9",
+  "branch_code": "41Z9"
+ },
+ {
+  "state": "Florida",
+  "city": "Ocala",
+  "address": "4810 Sw 60th Ave",
+  "station_id": "E1434T",
+  "branch_code": "434T"
+ },
+ {
+  "state": "Florida",
+  "city": "Orlando",
+  "address": "2156 Jetport Dr",
+  "station_id": "E1071T",
+  "branch_code": "071T"
+ },
+ {
+  "state": "Florida",
+  "city": "Orlando",
+  "address": "4185 N John Young Pkwy",
+  "station_id": "E1072T",
+  "branch_code": "072T"
+ },
+ {
+  "state": "Florida",
+  "city": "Panama City",
+  "address": "339 E 15th St",
+  "station_id": "E1552Z",
+  "branch_code": "552Z"
+ },
+ {
+  "state": "Florida",
+  "city": "Pensacola",
+  "address": "6300 Pensacola Blvd",
+  "station_id": "E1558T",
+  "branch_code": "558T"
+ },
+ {
+  "state": "Florida",
+  "city": "Pinellas Park",
+  "address": "8391 Us Hwy 19 N",
+  "station_id": "E1428T",
+  "branch_code": "428T"
+ },
+ {
+  "state": "Florida",
+  "city": "Pompano Beach",
+  "address": "1730 N Powerline Rd",
+  "station_id": "E141Z7",
+  "branch_code": "41Z7"
+ },
+ {
+  "state": "Florida",
+  "city": "Port Charlotte",
+  "address": "4509 Tamiami Trl",
+  "station_id": "E1355T",
+  "branch_code": "355T"
+ },
+ {
+  "state": "Florida",
+  "city": "Riviera Beach",
+  "address": "4910 Dyer Blvd",
+  "station_id": "E141Z5",
+  "branch_code": "41Z5"
+ },
+ {
+  "state": "Florida",
+  "city": "Sanford",
+  "address": "4316 Fl-46",
+  "station_id": "E1073T",
+  "branch_code": "073T"
+ },
+ {
+  "state": "Florida",
+  "city": "Sarasota",
+  "address": "1003 N Washington Blvd",
+  "station_id": "E1353T",
+  "branch_code": "353T"
+ },
+ {
+  "state": "Florida",
+  "city": "Tallahassee",
+  "address": "5761 W Tennessee St",
+  "station_id": "E1559Z",
+  "branch_code": "559Z"
+ },
+ {
+  "state": "Florida",
+  "city": "Tampa",
+  "address": "110 S Us Highway 301",
+  "station_id": "E1426T",
+  "branch_code": "426T"
+ },
+ {
+  "state": "Florida",
+  "city": "Tampa",
+  "address": "4912 W Spruce St",
+  "station_id": "E1427T",
+  "branch_code": "427T"
+ },
+ {
+  "state": "Florida",
+  "city": "West Palm Beach",
+  "address": "1805 Belvedere Rd",
+  "station_id": "E141Z8",
+  "branch_code": "41Z8"
+ },
+ {
+  "state": "Georgia",
+  "city": "Albany",
+  "address": "5727 Newton Rd",
+  "station_id": "E1555Z",
+  "branch_code": "555Z"
+ },
+ {
+  "state": "Georgia",
+  "city": "Athens",
+  "address": "4760 Atlanta Hwy",
+  "station_id": "E1035K",
+  "branch_code": "035K"
+ },
+ {
+  "state": "Georgia",
+  "city": "Atlanta",
+  "address": "2224 James Jackson Pkwy Nw",
+  "station_id": "E1032T",
+  "branch_code": "032T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Atlanta",
+  "address": "3084 Chestnut Dr",
+  "station_id": "E1031T",
+  "branch_code": "031T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Augusta",
+  "address": "1884 Gordon Hwy",
+  "station_id": "E126G2",
+  "branch_code": "26G2"
+ },
+ {
+  "state": "Georgia",
+  "city": "Brunswick",
+  "address": "4445 Altama Ave",
+  "station_id": "E126G9",
+  "branch_code": "26G9"
+ },
+ {
+  "state": "Georgia",
+  "city": "Buford",
+  "address": "4083 S Lee St",
+  "station_id": "E1031K",
+  "branch_code": "031K"
+ },
+ {
+  "state": "Georgia",
+  "city": "Columbus",
+  "address": "3902 Veterans Pkwy",
+  "station_id": "E1554T",
+  "branch_code": "554T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Dalton",
+  "address": "1507 E Walnut Ave",
+  "station_id": "E156WG",
+  "branch_code": "56WG"
+ },
+ {
+  "state": "Georgia",
+  "city": "Fairburn",
+  "address": "450 Senoia Rd",
+  "station_id": "E1032K",
+  "branch_code": "032K"
+ },
+ {
+  "state": "Georgia",
+  "city": "Forest Park",
+  "address": "249 Forest Pkwy",
+  "station_id": "E1033T",
+  "branch_code": "033T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Garden City",
+  "address": "1025 Us Highway 80 W Ste A",
+  "station_id": "E126G1",
+  "branch_code": "26G1"
+ },
+ {
+  "state": "Georgia",
+  "city": "Kennesaw",
+  "address": "2202 Cobb Parkway North",
+  "station_id": "E1035T",
+  "branch_code": "035T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Lawrenceville",
+  "address": "489 Hurricane Shoals Rd Ne",
+  "station_id": "E1034T",
+  "branch_code": "034T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Macon",
+  "address": "2460 Riverside Dr",
+  "station_id": "E1553T",
+  "branch_code": "553T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Marietta",
+  "address": "190 Freys Gin Rd Se",
+  "station_id": "E1039T",
+  "branch_code": "039T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Mcdonough",
+  "address": "444 Industrial Blvd",
+  "station_id": "E1037K",
+  "branch_code": "037K"
+ },
+ {
+  "state": "Georgia",
+  "city": "Roswell",
+  "address": "10889 Alpharetta Hwy",
+  "station_id": "E1036T",
+  "branch_code": "036T"
+ },
+ {
+  "state": "Georgia",
+  "city": "Snellville",
+  "address": "3761 Stone Mountain Hwy",
+  "station_id": "E1036K",
+  "branch_code": "036K"
+ },
+ {
+  "state": "Hawaii",
+  "city": "Hilo",
+  "address": "10 Halekauila St",
+  "station_id": "E1362T",
+  "branch_code": "362T"
+ },
+ {
+  "state": "Hawaii",
+  "city": "Honolulu",
+  "address": "3055 N Nimitz Hwy",
+  "station_id": "E1361T",
+  "branch_code": "361T"
+ },
+ {
+  "state": "Hawaii",
+  "city": "Kahului",
+  "address": "40 Hana Hwy",
+  "station_id": "E1363T",
+  "branch_code": "363T"
+ },
+ {
+  "state": "Hawaii",
+  "city": "Lihue",
+  "address": "3073 Aukele St",
+  "station_id": "E1364T",
+  "branch_code": "364T"
+ },
+ {
+  "state": "Idaho",
+  "city": "Boise",
+  "address": "6854 W Fairview Ave",
+  "station_id": "E147Y4",
+  "branch_code": "47Y4"
+ },
+ {
+  "state": "Idaho",
+  "city": "Coeur D Alene",
+  "address": "704 Northwest Blvd",
+  "station_id": "E145HT",
+  "branch_code": "45HT"
+ },
+ {
+  "state": "Idaho",
+  "city": "Idaho Falls",
+  "address": "898 Northgate Mile",
+  "station_id": "E147Y7",
+  "branch_code": "47Y7"
+ },
+ {
+  "state": "Illinois",
+  "city": "Aurora",
+  "address": "2424 E New York St",
+  "station_id": "E115B5",
+  "branch_code": "15B5"
+ },
+ {
+  "state": "Illinois",
+  "city": "Bolingbrook",
+  "address": "80 Old Chicago Dr",
+  "station_id": "E115B9",
+  "branch_code": "15B9"
+ },
+ {
+  "state": "Illinois",
+  "city": "Elmhurst",
+  "address": "896 N. York Road",
+  "station_id": "E115B1",
+  "branch_code": "15B1"
+ },
+ {
+  "state": "Illinois",
+  "city": "Mokena",
+  "address": "8450 W 191st St Ste 16",
+  "station_id": "E115B4",
+  "branch_code": "15B4"
+ },
+ {
+  "state": "Illinois",
+  "city": "Morton",
+  "address": "203 W Ashland St",
+  "station_id": "E1626Z",
+  "branch_code": "626Z"
+ },
+ {
+  "state": "Illinois",
+  "city": "Mount Prospect",
+  "address": "400 Dempster St",
+  "station_id": "E115B6",
+  "branch_code": "15B6"
+ },
+ {
+  "state": "Illinois",
+  "city": "O Fallon",
+  "address": "909 W Highway 50",
+  "station_id": "E101Z7",
+  "branch_code": "01Z7"
+ },
+ {
+  "state": "Illinois",
+  "city": "Palatine",
+  "address": "2234 N Rand Rd",
+  "station_id": "E115BF",
+  "branch_code": "15BF"
+ },
+ {
+  "state": "Illinois",
+  "city": "Rockdale",
+  "address": "705 S Larkin Ave",
+  "station_id": "E115BA",
+  "branch_code": "15BA"
+ },
+ {
+  "state": "Illinois",
+  "city": "Rockford",
+  "address": "3909 Sandy Hollow Rd",
+  "station_id": "E1627Z",
+  "branch_code": "627Z"
+ },
+ {
+  "state": "Illinois",
+  "city": "Summit",
+  "address": "7230 W. 63rd Street",
+  "station_id": "E115B2",
+  "branch_code": "15B2"
+ },
+ {
+  "state": "Indiana",
+  "city": "Anderson",
+  "address": "4129 S Scatterfield Rd",
+  "station_id": "E108ET",
+  "branch_code": "08ET"
+ },
+ {
+  "state": "Indiana",
+  "city": "Elkhart",
+  "address": "919 N Nappanee St",
+  "station_id": "E1087T",
+  "branch_code": "087T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Evansville",
+  "address": "6331 Flightline Dr",
+  "station_id": "E1586T",
+  "branch_code": "586T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Fort Wayne",
+  "address": "5210 Industrial Rd",
+  "station_id": "E1084T",
+  "branch_code": "084T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Franklin",
+  "address": "2770 N Morton St",
+  "station_id": "E108AT",
+  "branch_code": "08AT"
+ },
+ {
+  "state": "Indiana",
+  "city": "Indianapolis",
+  "address": "7111 W Washington St",
+  "station_id": "E1082T",
+  "branch_code": "082T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Indianapolis",
+  "address": "3414 N Shadeland Ave",
+  "station_id": "E1083T",
+  "branch_code": "083T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Indianapolis",
+  "address": "7217 Woodland Dr",
+  "station_id": "E108FT",
+  "branch_code": "08FT"
+ },
+ {
+  "state": "Indiana",
+  "city": "Lafayette",
+  "address": "1411 Sagamore Pkwy N",
+  "station_id": "E1086T",
+  "branch_code": "086T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Merrillville",
+  "address": "8224 Wright St",
+  "station_id": "E115B8",
+  "branch_code": "15B8"
+ },
+ {
+  "state": "Indiana",
+  "city": "Mishawaka",
+  "address": "703 W Edison Rd",
+  "station_id": "E1085T",
+  "branch_code": "085T"
+ },
+ {
+  "state": "Indiana",
+  "city": "New Albany",
+  "address": "3800 Payne Koehler Rd",
+  "station_id": "E1588T",
+  "branch_code": "588T"
+ },
+ {
+  "state": "Indiana",
+  "city": "Terre Haute",
+  "address": "2550 Wabash Ave",
+  "station_id": "E108CT",
+  "branch_code": "08CT"
+ },
+ {
+  "state": "Iowa",
+  "city": "Cedar Rapids",
+  "address": "1800 Dodge Rd Ne",
+  "station_id": "E1625Z",
+  "branch_code": "625Z"
+ },
+ {
+  "state": "Iowa",
+  "city": "Davenport",
+  "address": "4437 N Brady St",
+  "station_id": "E1627T",
+  "branch_code": "627T"
+ },
+ {
+  "state": "Iowa",
+  "city": "Des Moines",
+  "address": "1545 E Euclid Ave",
+  "station_id": "E1622T",
+  "branch_code": "622T"
+ },
+ {
+  "state": "Iowa",
+  "city": "Urbandale",
+  "address": "2551 100th St",
+  "station_id": "E1625T",
+  "branch_code": "625T"
+ },
+ {
+  "state": "Kansas",
+  "city": "Olathe",
+  "address": "700 N Rogers Rd",
+  "station_id": "E1051T",
+  "branch_code": "051T"
+ },
+ {
+  "state": "Kansas",
+  "city": "Topeka",
+  "address": "2009 Sw Westport Dr",
+  "station_id": "E1052T",
+  "branch_code": "052T"
+ },
+ {
+  "state": "Kansas",
+  "city": "Wichita",
+  "address": "1333 S Tyler Rd",
+  "station_id": "E151J6",
+  "branch_code": "51J6"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Bowling Green",
+  "address": "2314 Russellville Rd",
+  "station_id": "E158CT",
+  "branch_code": "58CT"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Erlanger",
+  "address": "615 Rodeo Dr",
+  "station_id": "E1382X",
+  "branch_code": "382X"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Lexington",
+  "address": "1140 Winchester Rd",
+  "station_id": "E1584T",
+  "branch_code": "584T"
+ },
+ {
+  "state": "Kentucky",
+  "city": "London",
+  "address": "151 Marketplace Spur",
+  "station_id": "E158DT",
+  "branch_code": "58DT"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Louisville",
+  "address": "4400 Bishop Ln Ste 115",
+  "station_id": "E1583T",
+  "branch_code": "583T"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Louisville",
+  "address": "10700 Plantside Dr",
+  "station_id": "E158BT",
+  "branch_code": "58BT"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Nicholasville",
+  "address": "160 Hope Ct",
+  "station_id": "E158FT",
+  "branch_code": "58FT"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Owensboro",
+  "address": "2101 E Parrish Ave",
+  "station_id": "E158ET",
+  "branch_code": "58ET"
+ },
+ {
+  "state": "Kentucky",
+  "city": "Paducah",
+  "address": "3210 Coleman Rd",
+  "station_id": "E158GT",
+  "branch_code": "58GT"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Baton Rouge",
+  "address": "6255 Siegen Ln",
+  "station_id": "E1145T",
+  "branch_code": "145T"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Harvey",
+  "address": "1452 Westbank Expy",
+  "station_id": "E1149T",
+  "branch_code": "149T"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Houma",
+  "address": "1606 Prospect Blvd",
+  "station_id": "E1146T",
+  "branch_code": "146T"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Metairie",
+  "address": "3529 N I 10 Service Rd W",
+  "station_id": "E1141T",
+  "branch_code": "141T"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Scott",
+  "address": "109 Tas St",
+  "station_id": "E1144T",
+  "branch_code": "144T"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Shreveport",
+  "address": "1205 Mercedes-Benz Dr",
+  "station_id": "E151J5",
+  "branch_code": "51J5"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Slidell",
+  "address": "1889 Old Spanish Trail",
+  "station_id": "E114B1",
+  "branch_code": "14B1"
+ },
+ {
+  "state": "Louisiana",
+  "city": "Sulphur",
+  "address": "4145 E Napoleon St",
+  "station_id": "E1148T",
+  "branch_code": "148T"
+ },
+ {
+  "state": "Maine",
+  "city": "Bangor",
+  "address": "1222 Hammond St",
+  "station_id": "E1106T",
+  "branch_code": "106T"
+ },
+ {
+  "state": "Maine",
+  "city": "Westbrook",
+  "address": "140 Larrabee Rd",
+  "station_id": "E1102T",
+  "branch_code": "102T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Arbutus",
+  "address": "1400 Benson Ct",
+  "station_id": "E1182T",
+  "branch_code": "182T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Fallston",
+  "address": "1612a Belair Rd",
+  "station_id": "E1188T",
+  "branch_code": "188T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Frederick",
+  "address": "5841 Urbana Pike",
+  "station_id": "E116Z5",
+  "branch_code": "16Z5"
+ },
+ {
+  "state": "Maryland",
+  "city": "Gaithersburg",
+  "address": "7650 Airpark Rd",
+  "station_id": "E116Z3",
+  "branch_code": "16Z3"
+ },
+ {
+  "state": "Maryland",
+  "city": "Glen Burnie",
+  "address": "500 Crain Hwy N",
+  "station_id": "E1181T",
+  "branch_code": "181T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Hagerstown",
+  "address": "340 Dual Hwy",
+  "station_id": "E116Z8",
+  "branch_code": "16Z8"
+ },
+ {
+  "state": "Maryland",
+  "city": "Jessup",
+  "address": "8530 Washington Blvd",
+  "station_id": "E1185T",
+  "branch_code": "185T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Lanham",
+  "address": "7998 Annapolis Rd",
+  "station_id": "E116Z1",
+  "branch_code": "16Z1"
+ },
+ {
+  "state": "Maryland",
+  "city": "Laurel",
+  "address": "13605 Baltimore Ave",
+  "station_id": "E116B3",
+  "branch_code": "16B3"
+ },
+ {
+  "state": "Maryland",
+  "city": "Marlow Heights",
+  "address": "5201 Auth Rd",
+  "station_id": "E116Z6",
+  "branch_code": "16Z6"
+ },
+ {
+  "state": "Maryland",
+  "city": "Owings Mills",
+  "address": "10216 S Dolfield Rd",
+  "station_id": "E1187T",
+  "branch_code": "187T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Rosedale",
+  "address": "6991 Golden Ring Rd",
+  "station_id": "E1184T",
+  "branch_code": "184T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Salisbury",
+  "address": "8307 Dickerson Ln",
+  "station_id": "E1186T",
+  "branch_code": "186T"
+ },
+ {
+  "state": "Maryland",
+  "city": "Waldorf",
+  "address": "3375 Leonardtown Rd",
+  "station_id": "E116Z7",
+  "branch_code": "16Z7"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Chelsea",
+  "address": "324 Marginal St",
+  "station_id": "E110CT",
+  "branch_code": "10CT"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Chicopee",
+  "address": "70 Fuller Rd",
+  "station_id": "E148B2",
+  "branch_code": "48B2"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Fall River",
+  "address": "775 Pleasant St",
+  "station_id": "E1485T",
+  "branch_code": "485T"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Foxboro",
+  "address": "59 Washington St",
+  "station_id": "E110FT",
+  "branch_code": "10FT"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Leominster",
+  "address": "143 Mill St",
+  "station_id": "E110LT",
+  "branch_code": "10LT"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "N Attleboro",
+  "address": "110 E Washington St",
+  "station_id": "E1483T",
+  "branch_code": "483T"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "W Wareham",
+  "address": "2196 Cranberry Hwy",
+  "station_id": "E1105T",
+  "branch_code": "105T"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "West Bridgewater",
+  "address": "405 West St",
+  "station_id": "E1103T",
+  "branch_code": "103T"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Woburn",
+  "address": "248 Mishawum Rd",
+  "station_id": "E1101T",
+  "branch_code": "101T"
+ },
+ {
+  "state": "Massachusetts",
+  "city": "Worcester",
+  "address": "126 Sw Cutoff",
+  "station_id": "E1104T",
+  "branch_code": "104T"
+ },
+ {
+  "state": "Michigan",
+  "city": "Flint",
+  "address": "2372 Austins Pkwy",
+  "station_id": "E1205Z",
+  "branch_code": "205Z"
+ },
+ {
+  "state": "Michigan",
+  "city": "Grand Rapids",
+  "address": "2720 28th St Se",
+  "station_id": "E1205T",
+  "branch_code": "205T"
+ },
+ {
+  "state": "Michigan",
+  "city": "Kalamazoo",
+  "address": "3651 East Cork Street",
+  "station_id": "E120Q2",
+  "branch_code": "20Q2"
+ },
+ {
+  "state": "Michigan",
+  "city": "Lansing",
+  "address": "6001 S Cedar St",
+  "station_id": "E1208T",
+  "branch_code": "208T"
+ },
+ {
+  "state": "Michigan",
+  "city": "Marquette",
+  "address": "2274 Us-41",
+  "station_id": "E120Q3",
+  "branch_code": "20Q3"
+ },
+ {
+  "state": "Michigan",
+  "city": "Romulus",
+  "address": "11375 Middlebelt Rd",
+  "station_id": "E1204T",
+  "branch_code": "204T"
+ },
+ {
+  "state": "Michigan",
+  "city": "Saginaw",
+  "address": "3071 Bay Rd",
+  "station_id": "E1207T",
+  "branch_code": "207T"
+ },
+ {
+  "state": "Michigan",
+  "city": "Southfield",
+  "address": "23811 Telegraph Rd",
+  "station_id": "E1206Z",
+  "branch_code": "206Z"
+ },
+ {
+  "state": "Michigan",
+  "city": "Traverse City",
+  "address": "1789 S Garfield Ave",
+  "station_id": "E120Q4",
+  "branch_code": "20Q4"
+ },
+ {
+  "state": "Michigan",
+  "city": "Warren",
+  "address": "7830 Convention Blvd",
+  "station_id": "E1203T",
+  "branch_code": "203T"
+ },
+ {
+  "state": "Michigan",
+  "city": "Wixom",
+  "address": "31060 S Wixom Rd",
+  "station_id": "E1206T",
+  "branch_code": "206T"
+ },
+ {
+  "state": "Minnesota",
+  "city": "Brooklyn Park",
+  "address": "8232 Lakeland Ave N",
+  "station_id": "E119K3",
+  "branch_code": "19K3"
+ },
+ {
+  "state": "Minnesota",
+  "city": "Eagan",
+  "address": "2905 Lexington Ave S",
+  "station_id": "E119K1",
+  "branch_code": "19K1"
+ },
+ {
+  "state": "Minnesota",
+  "city": "Rochester",
+  "address": "1515 W Frontage Rd",
+  "station_id": "E119K5",
+  "branch_code": "19K5"
+ },
+ {
+  "state": "Minnesota",
+  "city": "Roseville",
+  "address": "2755 Long Lake Rd",
+  "station_id": "E119K2",
+  "branch_code": "19K2"
+ },
+ {
+  "state": "Minnesota",
+  "city": "Shakopee",
+  "address": "1107 1st Ave E",
+  "station_id": "E119K4",
+  "branch_code": "19K4"
+ },
+ {
+  "state": "Mississippi",
+  "city": "Gulfport",
+  "address": "535 Pass Rd",
+  "station_id": "E155GT",
+  "branch_code": "55GT"
+ },
+ {
+  "state": "Mississippi",
+  "city": "Hattiesburg",
+  "address": "221 Thornhill Dr",
+  "station_id": "E1556Z",
+  "branch_code": "556Z"
+ },
+ {
+  "state": "Mississippi",
+  "city": "Richland",
+  "address": "881 Hwy 49 South",
+  "station_id": "E1559T",
+  "branch_code": "559T"
+ },
+ {
+  "state": "Missouri",
+  "city": "Bridgeton",
+  "address": "4664 Crossroads Industrial Dr",
+  "station_id": "E101Z1",
+  "branch_code": "01Z1"
+ },
+ {
+  "state": "Missouri",
+  "city": "Cape Girardeau",
+  "address": "2080 Rusmar St",
+  "station_id": "E101ZG",
+  "branch_code": "01ZG"
+ },
+ {
+  "state": "Missouri",
+  "city": "Chesterfield",
+  "address": "17909 Chesterfield Airport Rd",
+  "station_id": "E101ZC",
+  "branch_code": "01ZC"
+ },
+ {
+  "state": "Missouri",
+  "city": "Columbia",
+  "address": "8900 Columbus",
+  "station_id": "E101Z9",
+  "branch_code": "01Z9"
+ },
+ {
+  "state": "Missouri",
+  "city": "Dardenne Prairie",
+  "address": "80 Hubble",
+  "station_id": "E101Z8",
+  "branch_code": "01Z8"
+ },
+ {
+  "state": "Missouri",
+  "city": "Farmington",
+  "address": "1501 Weber Rd",
+  "station_id": "E101ZF",
+  "branch_code": "01ZF"
+ },
+ {
+  "state": "Missouri",
+  "city": "North Kansas City",
+  "address": "1412 Burlington St",
+  "station_id": "E1053T",
+  "branch_code": "053T"
+ },
+ {
+  "state": "Missouri",
+  "city": "Saint Louis",
+  "address": "2233 Washington Ave",
+  "station_id": "E101Z5",
+  "branch_code": "01Z5"
+ },
+ {
+  "state": "Missouri",
+  "city": "Saint Louis",
+  "address": "9916 Watson Rd",
+  "station_id": "E101Z2",
+  "branch_code": "01Z2"
+ },
+ {
+  "state": "Missouri",
+  "city": "Springfield",
+  "address": "2561 N Patterson Ave",
+  "station_id": "E151J8",
+  "branch_code": "51J8"
+ },
+ {
+  "state": "Missouri",
+  "city": "St. Joseph",
+  "address": "3417 1/2 S Belt Hwy",
+  "station_id": "E1054T",
+  "branch_code": "054T"
+ },
+ {
+  "state": "Montana",
+  "city": "Billings",
+  "address": "5044 Midland Rd Ste A",
+  "station_id": "E1631T",
+  "branch_code": "631T"
+ },
+ {
+  "state": "Montana",
+  "city": "Bozeman",
+  "address": "4780 W Babcock St",
+  "station_id": "E1634T",
+  "branch_code": "634T"
+ },
+ {
+  "state": "Montana",
+  "city": "Columbia Falls",
+  "address": "4785 Us-2",
+  "station_id": "E1635T",
+  "branch_code": "635T"
+ },
+ {
+  "state": "Montana",
+  "city": "Missoula",
+  "address": "7910 Thornton Dr",
+  "station_id": "E1633T",
+  "branch_code": "633T"
+ },
+ {
+  "state": "Nebraska",
+  "city": "Lincoln",
+  "address": "7100 Husker Cir",
+  "station_id": "E1626T",
+  "branch_code": "626T"
+ },
+ {
+  "state": "Nebraska",
+  "city": "Ralston",
+  "address": "7505 L St",
+  "station_id": "E1624T",
+  "branch_code": "624T"
+ },
+ {
+  "state": "Nevada",
+  "city": "Carson City",
+  "address": "3246 N Carson Street",
+  "station_id": "E154M6",
+  "branch_code": "54M6"
+ },
+ {
+  "state": "Nevada",
+  "city": "Elko",
+  "address": "975 Terminal Way",
+  "station_id": "E154M9",
+  "branch_code": "54M9"
+ },
+ {
+  "state": "Nevada",
+  "city": "Henderson",
+  "address": "1050 W Warm Springs Rd",
+  "station_id": "E154M3",
+  "branch_code": "54M3"
+ },
+ {
+  "state": "Nevada",
+  "city": "Las Vegas",
+  "address": "6640 Rafael Rivera Wy",
+  "station_id": "E154M1",
+  "branch_code": "54M1"
+ },
+ {
+  "state": "Nevada",
+  "city": "Las Vegas",
+  "address": "5070 E Cartier Ave",
+  "station_id": "E154M2",
+  "branch_code": "54M2"
+ },
+ {
+  "state": "Nevada",
+  "city": "Las Vegas",
+  "address": "5750 Sky Pointe Dr",
+  "station_id": "E154M7",
+  "branch_code": "54M7"
+ },
+ {
+  "state": "Nevada",
+  "city": "Las Vegas",
+  "address": "75 E Warm Springs Rd",
+  "station_id": "E154M8",
+  "branch_code": "54M8"
+ },
+ {
+  "state": "Nevada",
+  "city": "Reno",
+  "address": "3005 Mill St",
+  "station_id": "E154M4",
+  "branch_code": "54M4"
+ },
+ {
+  "state": "New Hampshire",
+  "city": "Manchester",
+  "address": "1050 Gold St",
+  "station_id": "E110NT",
+  "branch_code": "10NT"
+ },
+ {
+  "state": "New Hampshire",
+  "city": "Salem",
+  "address": "286 N Broadway",
+  "station_id": "E1107T",
+  "branch_code": "107T"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Edison",
+  "address": "2134 State Route 27",
+  "station_id": "E124B1",
+  "branch_code": "24B1"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Newark",
+  "address": "2052 Mccarter Hwy",
+  "station_id": "E124BV",
+  "branch_code": "24BV"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Pennsauken",
+  "address": "9345 N Crescent Blvd",
+  "station_id": "E1171T",
+  "branch_code": "171T"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Swedesboro",
+  "address": "617 Auburn Ave",
+  "station_id": "E117Z1",
+  "branch_code": "17Z1"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Toms River",
+  "address": "1772 Lakewood Rd",
+  "station_id": "E124BT",
+  "branch_code": "24BT"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Wayne",
+  "address": "1562 Nj-23",
+  "station_id": "E124BW",
+  "branch_code": "24BW"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Williamstown",
+  "address": "2063 N Black Horse Pike",
+  "station_id": "E117Z2",
+  "branch_code": "17Z2"
+ },
+ {
+  "state": "New Jersey",
+  "city": "Windsor",
+  "address": "1379 Us-130",
+  "station_id": "E117Z4",
+  "branch_code": "17Z4"
+ },
+ {
+  "state": "New Mexico",
+  "city": "Albuquerque",
+  "address": "3500 Coors Blvd Nw",
+  "station_id": "E134Z1",
+  "branch_code": "34Z1"
+ },
+ {
+  "state": "New Mexico",
+  "city": "Albuquerque",
+  "address": "5700 San Mateo Blvd Ne",
+  "station_id": "E134Z4",
+  "branch_code": "34Z4"
+ },
+ {
+  "state": "New Mexico",
+  "city": "Hobbs",
+  "address": "6324 W Carlsbad Hwy",
+  "station_id": "E134Z6",
+  "branch_code": "34Z6"
+ },
+ {
+  "state": "New Mexico",
+  "city": "Las Cruces",
+  "address": "1340 S Valley Dr",
+  "station_id": "E134Z5",
+  "branch_code": "34Z5"
+ },
+ {
+  "state": "New York",
+  "city": "Bohemia",
+  "address": "1589 Lakeland Ave",
+  "station_id": "E124BL",
+  "branch_code": "24BL"
+ },
+ {
+  "state": "New York",
+  "city": "Buffalo",
+  "address": "3900 Broadway St",
+  "station_id": "E1294T",
+  "branch_code": "294T"
+ },
+ {
+  "state": "New York",
+  "city": "Canandaigua",
+  "address": "2552 Rochester Rd",
+  "station_id": "E129CT",
+  "branch_code": "29CT"
+ },
+ {
+  "state": "New York",
+  "city": "Henrietta",
+  "address": "420 Summit Point Dr",
+  "station_id": "E1291T",
+  "branch_code": "291T"
+ },
+ {
+  "state": "New York",
+  "city": "Latham",
+  "address": "70b Sicker Rd",
+  "station_id": "E124B7",
+  "branch_code": "24B7"
+ },
+ {
+  "state": "New York",
+  "city": "Long Island City",
+  "address": "4750 Van Dam St",
+  "station_id": "E124B3",
+  "branch_code": "24B3"
+ },
+ {
+  "state": "New York",
+  "city": "Mount Vernon",
+  "address": "770 S Columbus Ave",
+  "station_id": "E124BM",
+  "branch_code": "24BM"
+ },
+ {
+  "state": "New York",
+  "city": "Newburgh",
+  "address": "63 Route 17k",
+  "station_id": "E124B5",
+  "branch_code": "24B5"
+ },
+ {
+  "state": "New York",
+  "city": "North Syracuse",
+  "address": "5721 E Taft Rd",
+  "station_id": "E1293T",
+  "branch_code": "293T"
+ },
+ {
+  "state": "New York",
+  "city": "Rochester",
+  "address": "1795 E Ridge Rd",
+  "station_id": "E129BT",
+  "branch_code": "29BT"
+ },
+ {
+  "state": "New York",
+  "city": "Vestal",
+  "address": "2909 Vestal Rd",
+  "station_id": "E1297T",
+  "branch_code": "297T"
+ },
+ {
+  "state": "New York",
+  "city": "Watertown",
+  "address": "18941 Us-11",
+  "station_id": "E129WT",
+  "branch_code": "29WT"
+ },
+ {
+  "state": "New York",
+  "city": "Yorkville",
+  "address": "5140 Commercial Dr",
+  "station_id": "E1298T",
+  "branch_code": "298T"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Asheville",
+  "address": "168 Smokey Park Hwy",
+  "station_id": "E153Z8",
+  "branch_code": "53Z8"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Charlotte",
+  "address": "5029 Equipment Drive",
+  "station_id": "E153Z1",
+  "branch_code": "53Z1"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Charlotte",
+  "address": "4226 South Blvd",
+  "station_id": "E1534T",
+  "branch_code": "534T"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Durham",
+  "address": "3730 Durham Chapel Hill Blvd",
+  "station_id": "E1534K",
+  "branch_code": "534K"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Fayetteville",
+  "address": "2498 Gillespie St",
+  "station_id": "E1534I",
+  "branch_code": "534I"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Gastonia",
+  "address": "4101 E Franklin Blvd",
+  "station_id": "E1538Z",
+  "branch_code": "538Z"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Greensboro",
+  "address": "3828 Gate City Blvd",
+  "station_id": "E1534Z",
+  "branch_code": "534Z"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Greenville",
+  "address": "1641 Greenville Blvd Se",
+  "station_id": "E153ZG",
+  "branch_code": "53ZG"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Hickory",
+  "address": "1708 8th St Dr Se",
+  "station_id": "E153ZH",
+  "branch_code": "53ZH"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Jacksonville",
+  "address": "500 N Marine Blvd",
+  "station_id": "E153JT",
+  "branch_code": "53JT"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Mooresville",
+  "address": "456 River Hwy",
+  "station_id": "E1534U",
+  "branch_code": "534U"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Pineville",
+  "address": "943 N Polk St",
+  "station_id": "E153Z7",
+  "branch_code": "53Z7"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Raleigh",
+  "address": "9009 Glenwood Ave",
+  "station_id": "E153Z2",
+  "branch_code": "53Z2"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Raleigh",
+  "address": "5401 Hillsborough St",
+  "station_id": "E1534D",
+  "branch_code": "534D"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Raleigh",
+  "address": "2901 Spring Forest Rd",
+  "station_id": "E1531Z",
+  "branch_code": "531Z"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Wilmington",
+  "address": "4124 Market St",
+  "station_id": "E1534E",
+  "branch_code": "534E"
+ },
+ {
+  "state": "North Carolina",
+  "city": "Winston Salem",
+  "address": "1364 Peters Creek Pkwy",
+  "station_id": "E1534P",
+  "branch_code": "534P"
+ },
+ {
+  "state": "North Dakota",
+  "city": "West Fargo",
+  "address": "610 Main Ave W",
+  "station_id": "E1632T",
+  "branch_code": "632T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Boardman",
+  "address": "5712 West Market St",
+  "station_id": "E139Z6",
+  "branch_code": "39Z6"
+ },
+ {
+  "state": "Ohio",
+  "city": "Brook Park",
+  "address": "5280 Smith Rd",
+  "station_id": "E139Z1",
+  "branch_code": "39Z1"
+ },
+ {
+  "state": "Ohio",
+  "city": "Canton",
+  "address": "5020 Whipple Ave Nw",
+  "station_id": "E139ZC",
+  "branch_code": "39ZC"
+ },
+ {
+  "state": "Ohio",
+  "city": "Cincinnati",
+  "address": "10034 Cincinnati Dayton Rd",
+  "station_id": "E1381T",
+  "branch_code": "381T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Cincinnati",
+  "address": "10134 Princeton Glendale Rd",
+  "station_id": "E1387T",
+  "branch_code": "387T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Cincinnati",
+  "address": "555 E Galbraith Rd",
+  "station_id": "E1383X",
+  "branch_code": "383X"
+ },
+ {
+  "state": "Ohio",
+  "city": "Columbus",
+  "address": "2345 E Dublin Granville Rd",
+  "station_id": "E1388T",
+  "branch_code": "388T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Columbus",
+  "address": "5210 Trabue Road",
+  "station_id": "E1381X",
+  "branch_code": "381X"
+ },
+ {
+  "state": "Ohio",
+  "city": "Dayton",
+  "address": "2705 Needmore Rd",
+  "station_id": "E1383T",
+  "branch_code": "383T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Dublin",
+  "address": "5560 Shier Rings Rd",
+  "station_id": "E1382T",
+  "branch_code": "382T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Euclid",
+  "address": "25080 Lakeland Blvd",
+  "station_id": "E139ZE",
+  "branch_code": "39ZE"
+ },
+ {
+  "state": "Ohio",
+  "city": "Findlay",
+  "address": "240 Stanford Pkwy",
+  "station_id": "E139ZF",
+  "branch_code": "39ZF"
+ },
+ {
+  "state": "Ohio",
+  "city": "Mansfield",
+  "address": "1512 W 4th St",
+  "station_id": "E139Z7",
+  "branch_code": "39Z7"
+ },
+ {
+  "state": "Ohio",
+  "city": "Maumee",
+  "address": "1373 Conant St",
+  "station_id": "E139Z5",
+  "branch_code": "39Z5"
+ },
+ {
+  "state": "Ohio",
+  "city": "Medina",
+  "address": "1197 Medina Rd",
+  "station_id": "E139Z3",
+  "branch_code": "39Z3"
+ },
+ {
+  "state": "Ohio",
+  "city": "Monroeville",
+  "address": "3706 Us-20",
+  "station_id": "E139ZM",
+  "branch_code": "39ZM"
+ },
+ {
+  "state": "Ohio",
+  "city": "Obetz",
+  "address": "2161 Williams Rd",
+  "station_id": "E1384T",
+  "branch_code": "384T"
+ },
+ {
+  "state": "Ohio",
+  "city": "Saint Clairsville",
+  "address": "51660 National Rd E",
+  "station_id": "E140K5",
+  "branch_code": "40K5"
+ },
+ {
+  "state": "Oklahoma",
+  "city": "Broken Arrow",
+  "address": "1185 S Aspen Ave",
+  "station_id": "E151J3",
+  "branch_code": "51J3"
+ },
+ {
+  "state": "Oklahoma",
+  "city": "Oklahoma City",
+  "address": "3200 S Meridian Ave",
+  "station_id": "E151J1",
+  "branch_code": "51J1"
+ },
+ {
+  "state": "Oklahoma",
+  "city": "Oklahoma City",
+  "address": "324 W Memorial Rd",
+  "station_id": "E151J7",
+  "branch_code": "51J7"
+ },
+ {
+  "state": "Oregon",
+  "city": "Beaverton",
+  "address": "10625 Sw Canyon Rd",
+  "station_id": "E146MN",
+  "branch_code": "46MN"
+ },
+ {
+  "state": "Oregon",
+  "city": "Bend",
+  "address": "2300 Ne Division St",
+  "station_id": "E146MI",
+  "branch_code": "46MI"
+ },
+ {
+  "state": "Oregon",
+  "city": "Eugene",
+  "address": "980 Garfield",
+  "station_id": "E146MD",
+  "branch_code": "46MD"
+ },
+ {
+  "state": "Oregon",
+  "city": "Medford",
+  "address": "610 N Central Ave",
+  "station_id": "E146MF",
+  "branch_code": "46MF"
+ },
+ {
+  "state": "Oregon",
+  "city": "Portland",
+  "address": "1924 Ne Columbia Blvd",
+  "station_id": "E146MC",
+  "branch_code": "46MC"
+ },
+ {
+  "state": "Oregon",
+  "city": "Portland",
+  "address": "20132 Se Stark St",
+  "station_id": "E146MJ",
+  "branch_code": "46MJ"
+ },
+ {
+  "state": "Oregon",
+  "city": "Salem",
+  "address": "1980 Front St Ne",
+  "station_id": "E146MH",
+  "branch_code": "46MH"
+ },
+ {
+  "state": "Oregon",
+  "city": "Tualatin",
+  "address": "20400 Sw Teton Ave",
+  "station_id": "E146MA",
+  "branch_code": "46MA"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Allentown",
+  "address": "1713 Lehigh St",
+  "station_id": "E157Z3",
+  "branch_code": "57Z3"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Altoona",
+  "address": "412 Aldrich Ave",
+  "station_id": "E1406T",
+  "branch_code": "406T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Canonsburg",
+  "address": "24 Fyda Dr",
+  "station_id": "E1404T",
+  "branch_code": "404T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Cranberry",
+  "address": "41b Dutilh Road",
+  "station_id": "E1403T",
+  "branch_code": "403T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "East Petersburg",
+  "address": "5169 Main St",
+  "station_id": "E157Z2",
+  "branch_code": "57Z2"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Erie",
+  "address": "1101 Greengarden Blvd",
+  "station_id": "E1407T",
+  "branch_code": "407T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Glenshaw",
+  "address": "1608 William Flinn Hwy",
+  "station_id": "E1405T",
+  "branch_code": "405T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Harrisburg",
+  "address": "2222 Paxton St",
+  "station_id": "E157Z1",
+  "branch_code": "57Z1"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Hatfield",
+  "address": "2500 Bethlehem Pike",
+  "station_id": "E117Z3",
+  "branch_code": "17Z3"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Levittown",
+  "address": "7015 Bristol Pike",
+  "station_id": "E1174T",
+  "branch_code": "174T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Monroeville",
+  "address": "4845 William Penn Hwy",
+  "station_id": "E1402T",
+  "branch_code": "402T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Philadelphia",
+  "address": "7500 Holstein Ave",
+  "station_id": "E1179T",
+  "branch_code": "179T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Pittsburgh",
+  "address": "4485 Campbells Run Rd",
+  "station_id": "E1401T",
+  "branch_code": "401T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Plymouth Meeting",
+  "address": "1101 E Ridge Pike",
+  "station_id": "E1173T",
+  "branch_code": "173T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Reading",
+  "address": "1801 Centre Ave",
+  "station_id": "E1577T",
+  "branch_code": "577T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Stroudsburg",
+  "address": "1425 N 9th Street",
+  "station_id": "E1576T",
+  "branch_code": "576T"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Warrington",
+  "address": "35 Easton Rd",
+  "station_id": "E117Z5",
+  "branch_code": "17Z5"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Wilkes Barre",
+  "address": "400 Kidder St",
+  "station_id": "E157Z4",
+  "branch_code": "57Z4"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "Williamsport",
+  "address": "1960 E 3rd St",
+  "station_id": "E157Z5",
+  "branch_code": "57Z5"
+ },
+ {
+  "state": "Pennsylvania",
+  "city": "York",
+  "address": "2150 S Queen St",
+  "station_id": "E157ZY",
+  "branch_code": "57ZY"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Bayamon",
+  "address": "Carr #2, Km. 14.8",
+  "station_id": "E1P17T",
+  "branch_code": "P17T"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Caguas",
+  "address": "33 Av. Jose Mercado",
+  "station_id": "E1P14T",
+  "branch_code": "P14T"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Carolina",
+  "address": "2484 Marginal Celestial",
+  "station_id": "E1P11T",
+  "branch_code": "P11T"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Fajardo",
+  "address": "4227 Calle Marginal # 3",
+  "station_id": "E1P12T",
+  "branch_code": "P12T"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Hatillo",
+  "address": "Bo. Carrizales, Carr Pr-2",
+  "station_id": "E1P1HT",
+  "branch_code": "P1HT"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Mayaguez",
+  "address": "Carretera 2, Km. 158.9",
+  "station_id": "E1P16T",
+  "branch_code": "P16T"
+ },
+ {
+  "state": "Puerto Rico",
+  "city": "Ponce",
+  "address": "1023 Ave La Ceiba",
+  "station_id": "E1P15T",
+  "branch_code": "P15T"
+ },
+ {
+  "state": "Rhode Island",
+  "city": "Johnston",
+  "address": "1674 Hartford Ave",
+  "station_id": "E1481T",
+  "branch_code": "481T"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Anderson",
+  "address": "4116 Clemson Blvd",
+  "station_id": "E126U2",
+  "branch_code": "26U2"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Columbia",
+  "address": "1616 Bluff Rd",
+  "station_id": "E12611",
+  "branch_code": "2611"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Florence",
+  "address": "2639 W Palmetto St",
+  "station_id": "E126FT",
+  "branch_code": "26FT"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Greenville",
+  "address": "531 Woodruff Rd",
+  "station_id": "E12615",
+  "branch_code": "2615"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Myrtle Beach",
+  "address": "911 Jason Blvd",
+  "station_id": "E1261M",
+  "branch_code": "261M"
+ },
+ {
+  "state": "South Carolina",
+  "city": "North Charleston",
+  "address": "7291 Cross County Rd",
+  "station_id": "E12612",
+  "branch_code": "2612"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Rock Hill",
+  "address": "1020 N Anderson Rd",
+  "station_id": "E1537Z",
+  "branch_code": "537Z"
+ },
+ {
+  "state": "South Carolina",
+  "city": "Spartanburg",
+  "address": "1089 Asheville Hwy",
+  "station_id": "E126U1",
+  "branch_code": "26U1"
+ },
+ {
+  "state": "South Dakota",
+  "city": "Sioux Falls",
+  "address": "5300 N 7th Ave",
+  "station_id": "E1628T",
+  "branch_code": "628T"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Chattanooga",
+  "address": "305 W 20th Street",
+  "station_id": "E156W6",
+  "branch_code": "56W6"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Clarksville",
+  "address": "174 Terminal Rd",
+  "station_id": "E156W4",
+  "branch_code": "56W4"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Franklin",
+  "address": "284 Mallory Station Rd",
+  "station_id": "E156WF",
+  "branch_code": "56WF"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Jackson",
+  "address": "1657 North Pkwy",
+  "station_id": "E156W8",
+  "branch_code": "56W8"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Johnson City",
+  "address": "358 Bob Jobe Rd",
+  "station_id": "E156WT",
+  "branch_code": "56WT"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Knoxville",
+  "address": "8819 Kingston Pike",
+  "station_id": "E156W3",
+  "branch_code": "56W3"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Memphis",
+  "address": "1885 E Brooks Rd",
+  "station_id": "E156W2",
+  "branch_code": "56W2"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Memphis",
+  "address": "2001 Covington Pike",
+  "station_id": "E156W5",
+  "branch_code": "56W5"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Murfreesboro",
+  "address": "3019 Franklin Rd",
+  "station_id": "E156W7",
+  "branch_code": "56W7"
+ },
+ {
+  "state": "Tennessee",
+  "city": "Nashville",
+  "address": "1411 Lebanon Pike",
+  "station_id": "E156W1",
+  "branch_code": "56W1"
+ },
+ {
+  "state": "Texas",
+  "city": "Abilene",
+  "address": "1510 S Clack St",
+  "station_id": "E1653T",
+  "branch_code": "653T"
+ },
+ {
+  "state": "Texas",
+  "city": "Amarillo",
+  "address": "4520 Canyon Dr",
+  "station_id": "E1654T",
+  "branch_code": "654T"
+ },
+ {
+  "state": "Texas",
+  "city": "Angleton",
+  "address": "2900 N Highway 288",
+  "station_id": "E106K1",
+  "branch_code": "06K1"
+ },
+ {
+  "state": "Texas",
+  "city": "Arlington",
+  "address": "1108 E Division St",
+  "station_id": "E1093Z",
+  "branch_code": "093Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Austin",
+  "address": "8321 Lazy Ln",
+  "station_id": "E165M1",
+  "branch_code": "65M1"
+ },
+ {
+  "state": "Texas",
+  "city": "Austin",
+  "address": "4210 S Congress Ave",
+  "station_id": "E165M3",
+  "branch_code": "65M3"
+ },
+ {
+  "state": "Texas",
+  "city": "Austin",
+  "address": "10907 N Fm 620",
+  "station_id": "E1652T",
+  "branch_code": "652T"
+ },
+ {
+  "state": "Texas",
+  "city": "Baytown",
+  "address": "6624 Garth Rd",
+  "station_id": "E106GT",
+  "branch_code": "06GT"
+ },
+ {
+  "state": "Texas",
+  "city": "Beaumont",
+  "address": "3990 W Lucas Dr",
+  "station_id": "E106R1",
+  "branch_code": "06R1"
+ },
+ {
+  "state": "Texas",
+  "city": "Boerne",
+  "address": "31240 I-10",
+  "station_id": "E152ZB",
+  "branch_code": "52ZB"
+ },
+ {
+  "state": "Texas",
+  "city": "Brenham",
+  "address": "1820 Hwy 290 W",
+  "station_id": "E106BT",
+  "branch_code": "06BT"
+ },
+ {
+  "state": "Texas",
+  "city": "Bryan",
+  "address": "1700 S Texas Ave",
+  "station_id": "E1651T",
+  "branch_code": "651T"
+ },
+ {
+  "state": "Texas",
+  "city": "Conroe",
+  "address": "303 Ark Dr",
+  "station_id": "E106CT",
+  "branch_code": "06CT"
+ },
+ {
+  "state": "Texas",
+  "city": "Corinth",
+  "address": "5150 I-35e",
+  "station_id": "E1099Z",
+  "branch_code": "099Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Corpus Christi",
+  "address": "5701 Agnes St",
+  "station_id": "E152Z5",
+  "branch_code": "52Z5"
+ },
+ {
+  "state": "Texas",
+  "city": "Dallas",
+  "address": "8200 John Carpenter Freeway",
+  "station_id": "E1091Z",
+  "branch_code": "091Z"
+ },
+ {
+  "state": "Texas",
+  "city": "El Paso",
+  "address": "8000 Gateway Blvd E",
+  "station_id": "E134Z2",
+  "branch_code": "34Z2"
+ },
+ {
+  "state": "Texas",
+  "city": "El Paso",
+  "address": "4115 N Mesa St",
+  "station_id": "E134Z3",
+  "branch_code": "34Z3"
+ },
+ {
+  "state": "Texas",
+  "city": "Farmers Branch",
+  "address": "13210 Senlac Dr",
+  "station_id": "E1094Z",
+  "branch_code": "094Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Fort Worth",
+  "address": "2554 Ne 28th St",
+  "station_id": "E1092Z",
+  "branch_code": "092Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Fort Worth",
+  "address": "685 John B Sias Memorial Pkwy",
+  "station_id": "E1095T",
+  "branch_code": "095T"
+ },
+ {
+  "state": "Texas",
+  "city": "Garland",
+  "address": "3220 S Jupiter Rd",
+  "station_id": "E1095Z",
+  "branch_code": "095Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Grand Prairie",
+  "address": "1850 W Trinity Blvd",
+  "station_id": "E1096T",
+  "branch_code": "096T"
+ },
+ {
+  "state": "Texas",
+  "city": "Grapevine",
+  "address": "1800 S Main St",
+  "station_id": "E1096Z",
+  "branch_code": "096Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Harlingen",
+  "address": "7800 W Expressway 83",
+  "station_id": "E152Z6",
+  "branch_code": "52Z6"
+ },
+ {
+  "state": "Texas",
+  "city": "Houston",
+  "address": "12230 Hempstead Rd",
+  "station_id": "E106H9",
+  "branch_code": "06H9"
+ },
+ {
+  "state": "Texas",
+  "city": "Houston",
+  "address": "9811 Gulf Fwy",
+  "station_id": "E106U5",
+  "branch_code": "06U5"
+ },
+ {
+  "state": "Texas",
+  "city": "Houston",
+  "address": "3305 W Sam Houston Pkwy N",
+  "station_id": "E106V9",
+  "branch_code": "06V9"
+ },
+ {
+  "state": "Texas",
+  "city": "Houston",
+  "address": "2965 S Sam Houston Pkwy E",
+  "station_id": "E1062U",
+  "branch_code": "062U"
+ },
+ {
+  "state": "Texas",
+  "city": "Houston",
+  "address": "18400 Us-59",
+  "station_id": "E106M6",
+  "branch_code": "06M6"
+ },
+ {
+  "state": "Texas",
+  "city": "Huntsville",
+  "address": "1524 11th St",
+  "station_id": "E106HT",
+  "branch_code": "06HT"
+ },
+ {
+  "state": "Texas",
+  "city": "Katy",
+  "address": "28355 W Ten Blvd.",
+  "station_id": "E106KT",
+  "branch_code": "06KT"
+ },
+ {
+  "state": "Texas",
+  "city": "Killeen",
+  "address": "900 S W S Young Dr",
+  "station_id": "E1655T",
+  "branch_code": "655T"
+ },
+ {
+  "state": "Texas",
+  "city": "La Porte",
+  "address": "501 Highway 146 South",
+  "station_id": "E106LP",
+  "branch_code": "06LP"
+ },
+ {
+  "state": "Texas",
+  "city": "Laredo",
+  "address": "3119 E Saunders St",
+  "station_id": "E152ZL",
+  "branch_code": "52ZL"
+ },
+ {
+  "state": "Texas",
+  "city": "Lewisville",
+  "address": "301 Huffines Plz",
+  "station_id": "E1094T",
+  "branch_code": "094T"
+ },
+ {
+  "state": "Texas",
+  "city": "Longview",
+  "address": "5010 West 281 Loop",
+  "station_id": "E1511T",
+  "branch_code": "511T"
+ },
+ {
+  "state": "Texas",
+  "city": "Lubbock",
+  "address": "2311 S Loop 289",
+  "station_id": "E165M7",
+  "branch_code": "65M7"
+ },
+ {
+  "state": "Texas",
+  "city": "Mc Kinney",
+  "address": "426 Metro Park Dr",
+  "station_id": "E1098Z",
+  "branch_code": "098Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Mesquite",
+  "address": "3848 I-30",
+  "station_id": "E1097T",
+  "branch_code": "097T"
+ },
+ {
+  "state": "Texas",
+  "city": "Midland",
+  "address": "1216 S Midland Dr",
+  "station_id": "E1656T",
+  "branch_code": "656T"
+ },
+ {
+  "state": "Texas",
+  "city": "Midland",
+  "address": "9506 La Force Blvd",
+  "station_id": "E1657T",
+  "branch_code": "657T"
+ },
+ {
+  "state": "Texas",
+  "city": "New Braunfels",
+  "address": "4831 S Interstate 35",
+  "station_id": "E152Z7",
+  "branch_code": "52Z7"
+ },
+ {
+  "state": "Texas",
+  "city": "Odessa",
+  "address": "2604 E 8th St",
+  "station_id": "E165M6",
+  "branch_code": "65M6"
+ },
+ {
+  "state": "Texas",
+  "city": "Pharr",
+  "address": "615 W Expy 83",
+  "station_id": "E152Z4",
+  "branch_code": "52Z4"
+ },
+ {
+  "state": "Texas",
+  "city": "Plano",
+  "address": "4434 W Plano Pkwy",
+  "station_id": "E1097Z",
+  "branch_code": "097Z"
+ },
+ {
+  "state": "Texas",
+  "city": "Richmond",
+  "address": "23301 Fm 1093",
+  "station_id": "E1063A",
+  "branch_code": "063A"
+ },
+ {
+  "state": "Texas",
+  "city": "Roanoke",
+  "address": "508 Byron Nelson Blvd",
+  "station_id": "E1092T",
+  "branch_code": "092T"
+ },
+ {
+  "state": "Texas",
+  "city": "San Antonio",
+  "address": "10150 Mcallister Fwy",
+  "station_id": "E152Z1",
+  "branch_code": "52Z1"
+ },
+ {
+  "state": "Texas",
+  "city": "San Antonio",
+  "address": "8422 Lakeside Pkwy",
+  "station_id": "E152Z9",
+  "branch_code": "52Z9"
+ },
+ {
+  "state": "Texas",
+  "city": "San Antonio",
+  "address": "236 S Ww White Rd",
+  "station_id": "E152Z8",
+  "branch_code": "52Z8"
+ },
+ {
+  "state": "Texas",
+  "city": "Spring",
+  "address": "21503 Spring Plaza Drive",
+  "station_id": "E106M4",
+  "branch_code": "06M4"
+ },
+ {
+  "state": "Texas",
+  "city": "Stafford",
+  "address": "11925 Southwest Fwy",
+  "station_id": "E106K2",
+  "branch_code": "06K2"
+ },
+ {
+  "state": "Texas",
+  "city": "Texarkana",
+  "address": "1621 N Bishop Rd",
+  "station_id": "E1512T",
+  "branch_code": "512T"
+ },
+ {
+  "state": "Texas",
+  "city": "Tomball",
+  "address": "27607 Tx-249",
+  "station_id": "E106ET",
+  "branch_code": "06ET"
+ },
+ {
+  "state": "Texas",
+  "city": "Victoria",
+  "address": "4401 N Navarro St",
+  "station_id": "E152ZT",
+  "branch_code": "52ZT"
+ },
+ {
+  "state": "Texas",
+  "city": "Waco",
+  "address": "3325 S Jack Kultgen Expy",
+  "station_id": "E1658T",
+  "branch_code": "658T"
+ },
+ {
+  "state": "Utah",
+  "city": "Draper",
+  "address": "655 W 12300 S",
+  "station_id": "E147Y6",
+  "branch_code": "47Y6"
+ },
+ {
+  "state": "Utah",
+  "city": "Orem",
+  "address": "1447 N State St",
+  "station_id": "E147Y5",
+  "branch_code": "47Y5"
+ },
+ {
+  "state": "Utah",
+  "city": "Riverdale",
+  "address": "4560 900 W",
+  "station_id": "E147Y3",
+  "branch_code": "47Y3"
+ },
+ {
+  "state": "Utah",
+  "city": "Saint George",
+  "address": "16 N 1100 E St",
+  "station_id": "E147Y2",
+  "branch_code": "47Y2"
+ },
+ {
+  "state": "Utah",
+  "city": "West Valley City",
+  "address": "1925 W 3500 S",
+  "station_id": "E147Y1",
+  "branch_code": "47Y1"
+ },
+ {
+  "state": "Virginia",
+  "city": "Arlington",
+  "address": "2804 Richmond Hwy",
+  "station_id": "E116B2",
+  "branch_code": "16B2"
+ },
+ {
+  "state": "Virginia",
+  "city": "Chesapeake",
+  "address": "716 Woodlake Dr",
+  "station_id": "E1218T",
+  "branch_code": "218T"
+ },
+ {
+  "state": "Virginia",
+  "city": "Fredericksbg",
+  "address": "4601 Lassen Ln",
+  "station_id": "E116Z9",
+  "branch_code": "16Z9"
+ },
+ {
+  "state": "Virginia",
+  "city": "Harrisonburg",
+  "address": "3311 S Main St",
+  "station_id": "E121Z8",
+  "branch_code": "21Z8"
+ },
+ {
+  "state": "Virginia",
+  "city": "Henrico",
+  "address": "8000 W Broad St",
+  "station_id": "E121Z1",
+  "branch_code": "21Z1"
+ },
+ {
+  "state": "Virginia",
+  "city": "Henrico",
+  "address": "1109 E Nine Mile Rd",
+  "station_id": "E1212Y",
+  "branch_code": "212Y"
+ },
+ {
+  "state": "Virginia",
+  "city": "Lynchburg",
+  "address": "3502 Mayflower Dr",
+  "station_id": "E121Z7",
+  "branch_code": "21Z7"
+ },
+ {
+  "state": "Virginia",
+  "city": "Manassas",
+  "address": "9018 Centreville Rd",
+  "station_id": "E116B4",
+  "branch_code": "16B4"
+ },
+ {
+  "state": "Virginia",
+  "city": "Newport News",
+  "address": "618 J Clyde Morris Blvd",
+  "station_id": "E121Z6",
+  "branch_code": "21Z6"
+ },
+ {
+  "state": "Virginia",
+  "city": "Norfolk",
+  "address": "7436 N Military Hwy",
+  "station_id": "E121Z2",
+  "branch_code": "21Z2"
+ },
+ {
+  "state": "Virginia",
+  "city": "Richmond",
+  "address": "9401 Midlothian Tpke",
+  "station_id": "E1217T",
+  "branch_code": "217T"
+ },
+ {
+  "state": "Virginia",
+  "city": "Roanoke",
+  "address": "4064 Franklin Rd Sw",
+  "station_id": "E121Z3",
+  "branch_code": "21Z3"
+ },
+ {
+  "state": "Virginia",
+  "city": "Sterling",
+  "address": "22035 Railcar Dr",
+  "station_id": "E116Z4",
+  "branch_code": "16Z4"
+ },
+ {
+  "state": "Virginia",
+  "city": "Virginia Beach",
+  "address": "1112 Lynnhaven Pkwy",
+  "station_id": "E121Z9",
+  "branch_code": "21Z9"
+ },
+ {
+  "state": "Virginia",
+  "city": "Winchester",
+  "address": "202 Mcghee Rd",
+  "station_id": "E116B1",
+  "branch_code": "16B1"
+ },
+ {
+  "state": "Virginia",
+  "city": "Woodbridge",
+  "address": "14655 Richmond Hwy",
+  "station_id": "E116Z2",
+  "branch_code": "16Z2"
+ },
+ {
+  "state": "Washington",
+  "city": "Everett",
+  "address": "13210 Hwy 99",
+  "station_id": "E1456T",
+  "branch_code": "456T"
+ },
+ {
+  "state": "Washington",
+  "city": "Fife",
+  "address": "2602 Pacific Hwy E",
+  "station_id": "E1452T",
+  "branch_code": "452T"
+ },
+ {
+  "state": "Washington",
+  "city": "Kent",
+  "address": "22201 68th Ave S",
+  "station_id": "E1451T",
+  "branch_code": "451T"
+ },
+ {
+  "state": "Washington",
+  "city": "Longview",
+  "address": "864 Commerce Ave",
+  "station_id": "E146ML",
+  "branch_code": "46ML"
+ },
+ {
+  "state": "Washington",
+  "city": "Mount Vernon",
+  "address": "111 Stewart Rd",
+  "station_id": "E145VT",
+  "branch_code": "45VT"
+ },
+ {
+  "state": "Washington",
+  "city": "Olympia",
+  "address": "2400 Carriage Loop Sw",
+  "station_id": "E1455T",
+  "branch_code": "455T"
+ },
+ {
+  "state": "Washington",
+  "city": "Pasco",
+  "address": "4302 N Swallow Ave",
+  "station_id": "E1459T",
+  "branch_code": "459T"
+ },
+ {
+  "state": "Washington",
+  "city": "Seattle",
+  "address": "3413 4th Ave S",
+  "station_id": "E1453T",
+  "branch_code": "453T"
+ },
+ {
+  "state": "Washington",
+  "city": "Shoreline",
+  "address": "14825 Aurora Ave N",
+  "station_id": "E1457T",
+  "branch_code": "457T"
+ },
+ {
+  "state": "Washington",
+  "city": "Spokane",
+  "address": "4300 S Geiger Blvd",
+  "station_id": "E1454T",
+  "branch_code": "454T"
+ },
+ {
+  "state": "Washington",
+  "city": "Vancouver",
+  "address": "11516 Ne 66th St",
+  "station_id": "E146MG",
+  "branch_code": "46MG"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Beaver",
+  "address": "176 Airport Cir",
+  "station_id": "E140K4",
+  "branch_code": "40K4"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Bridgeport",
+  "address": "2000 Aviation Way",
+  "station_id": "E140K7",
+  "branch_code": "40K7"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Charleston",
+  "address": "320 Maccorkle Ave Se",
+  "station_id": "E140K1",
+  "branch_code": "40K1"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Huntington",
+  "address": "100 3rd Ave",
+  "station_id": "E140K2",
+  "branch_code": "40K2"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Morgantown",
+  "address": "88 Asturias Ln",
+  "station_id": "E140K3",
+  "branch_code": "40K3"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Parkersburg",
+  "address": "1456 Seventh St",
+  "station_id": "E140K6",
+  "branch_code": "40K6"
+ },
+ {
+  "state": "West Virginia",
+  "city": "Princeton",
+  "address": "207 Glenwood Park Rd",
+  "station_id": "E140K8",
+  "branch_code": "40K8"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Altoona",
+  "address": "2103 S Hastings Way",
+  "station_id": "E144ET",
+  "branch_code": "44ET"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Appleton",
+  "address": "4500 W College Ave",
+  "station_id": "E1444T",
+  "branch_code": "444T"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Howard",
+  "address": "2666 N Packerland Dr",
+  "station_id": "E1446T",
+  "branch_code": "446T"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Madison",
+  "address": "200 W Beltline Hwy",
+  "station_id": "E1443T",
+  "branch_code": "443T"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Oak Creek",
+  "address": "561 W College Ave",
+  "station_id": "E1445T",
+  "branch_code": "445T"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Racine",
+  "address": "9501 Washington Ave",
+  "station_id": "E1447T",
+  "branch_code": "447T"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Waukesha",
+  "address": "S17w22650 Lincoln Ave",
+  "station_id": "E1448T",
+  "branch_code": "448T"
+ },
+ {
+  "state": "Wisconsin",
+  "city": "Wauwatosa",
+  "address": "1750 N Mayfair Rd",
+  "station_id": "E1441T",
+  "branch_code": "441T"
+ }
+]

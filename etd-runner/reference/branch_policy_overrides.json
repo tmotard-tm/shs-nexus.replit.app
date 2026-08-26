@@ -1,0 +1,6 @@
+{
+  "_doc": "Fleet's manual branch policy for ETD booking. deny wins over allow. Codes are ETD branchCode, 4 chars, case-insensitive. Edit here instead of code when the public truck-rental list is wrong or out of date.",
+  "_updated": "2026-08-26",
+  "allow": [],
+  "deny": []
+}
