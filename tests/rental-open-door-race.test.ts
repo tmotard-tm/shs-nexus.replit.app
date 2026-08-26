@@ -48,8 +48,10 @@ import { sql } from "drizzle-orm";
 import { db, pool } from "../server/db";
 import { initFormsSchema } from "../server/vrm/forms/schema";
 import { registerRentalRequestPublicRoutes } from "../server/vrm/forms/rental-request";
+import { WORKFLOW_REQUEST } from "../server/vrm/forms/cutover-orchestrator";
 
 const LDAP_PREFIX = "ZZOPND";
+const INSERT_FAILURE_LDAP = `${LDAP_PREFIX}R`;
 
 let server: any;
 let baseUrl = "";
@@ -58,6 +60,14 @@ const SUBMIT = "/api/public/rental-request/open/submit";
 let savedAlertPhones: string | undefined;
 
 async function cleanupFixtures() {
+  await db.execute(sql`
+    DROP TRIGGER IF EXISTS zzopnd_fail_replacement_insert ON vrm_rental_request;
+    DROP FUNCTION IF EXISTS zzopnd_fail_replacement_insert();
+  `);
+  await db.execute(sql`
+    DELETE FROM vrm_rental_workflow_intents
+    WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}
+  `);
   await db.execute(sql`DELETE FROM vrm_rental_request WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
   await db.execute(sql`DELETE FROM all_techs WHERE upper(tech_racfid) LIKE ${LDAP_PREFIX + "%"}`);
 }
@@ -90,6 +100,55 @@ async function countRows(ldap: string): Promise<number> {
     SELECT count(*)::int AS n FROM vrm_rental_request WHERE ldap = ${ldap}
   `);
   return Number((rows as any[])[0].n);
+}
+
+async function seedReplaceableRequestWithIntent(ldap: string): Promise<{
+  requestNo: number;
+  intentId: number;
+}> {
+  const { rows: requests } = await db.execute(sql`
+    INSERT INTO vrm_rental_request
+      (ldap, tech_name, request_type, status, home_state, source)
+    VALUES
+      (${ldap}, 'Zz Open Door Fixture', 'new', 'returned', 'PA', 'self_serve')
+    RETURNING request_no
+  `);
+  const requestNo = Number((requests as any[])[0].request_no);
+  const { rows: intents } = await db.execute(sql`
+    INSERT INTO vrm_rental_workflow_intents
+      (workflow_type, source_id, source_revision, execution_mode, ldap, status,
+       reservation_state, block_state)
+    VALUES
+      (${WORKFLOW_REQUEST}, ${String(requestNo)}, 0, 'live', ${ldap}, 'created',
+       'pending', 'not_applicable')
+    RETURNING id
+  `);
+  return {
+    requestNo,
+    intentId: Number((intents as any[])[0].id),
+  };
+}
+
+async function installReplacementInsertFailure(): Promise<void> {
+  await db.execute(sql`
+    CREATE OR REPLACE FUNCTION zzopnd_fail_replacement_insert()
+    RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+    BEGIN
+      IF upper(NEW.ldap) = 'ZZOPNDR' AND NEW.status = 'pending' THEN
+        RAISE EXCEPTION 'injected replacement insert failure';
+      END IF;
+      RETURN NEW;
+    END;
+    $$;
+  `);
+  await db.execute(sql`
+    CREATE TRIGGER zzopnd_fail_replacement_insert
+      BEFORE INSERT ON vrm_rental_request
+      FOR EACH ROW
+      EXECUTE FUNCTION zzopnd_fail_replacement_insert();
+  `);
 }
 
 /** A body that passes EVERY screenAndRecord validation for a NEW request:
@@ -234,5 +293,40 @@ describe("open door: POST /open/submit answers a duplicate race politely", () =>
     assert.equal(json.requestNo, undefined, "race branch, not the guard branch");
 
     assert.equal(await countRows(ldap), 1, "the violating insert must not leave a row behind");
+  });
+
+  test("a failed replacement insert preserves the returned request and its live intent", async () => {
+    const ldap = INSERT_FAILURE_LDAP;
+    await seedRoster(ldap);
+    const { requestNo, intentId } = await seedReplaceableRequestWithIntent(ldap);
+    await installReplacementInsertFailure();
+
+    let response: Awaited<ReturnType<typeof submit>>;
+    try {
+      response = await submit(validNewBody(ldap));
+    } finally {
+      await db.execute(sql`
+        DROP TRIGGER IF EXISTS zzopnd_fail_replacement_insert ON vrm_rental_request;
+        DROP FUNCTION IF EXISTS zzopnd_fail_replacement_insert();
+      `);
+    }
+
+    assert.equal(response.status, 500, `injected insert failure must surface as 500: ${JSON.stringify(response.json)}`);
+    assert.equal(await countRows(ldap), 1, "the returned source request must roll back instead of being lost");
+
+    const { rows: requests } = await db.execute(sql`
+      SELECT status
+      FROM vrm_rental_request
+      WHERE request_no = ${requestNo}
+    `);
+    assert.equal((requests as any[])[0]?.status, "returned", "the exact prior request must remain returned");
+
+    const { rows: intents } = await db.execute(sql`
+      SELECT status, last_error
+      FROM vrm_rental_workflow_intents
+      WHERE id = ${intentId}
+    `);
+    assert.equal((intents as any[])[0]?.status, "created", "the live intent retirement must roll back");
+    assert.equal((intents as any[])[0]?.last_error, null, "the intent must remain byte-for-byte unretired");
   });
 });

@@ -1069,8 +1069,9 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     if (note) corrParts.push(note);
   }
 
+  let requestNo: number | null = null;
   try {
-    await db.transaction(async (tx) => {
+    requestNo = await db.transaction(async (tx) => {
       const { rows: superseded } = tokenRow
         ? await tx.execute(sql`
             SELECT request_no, id
@@ -1098,6 +1099,60 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
           WHERE request_no = ${Number(old.request_no)}
         `);
       }
+
+      const { rows: ins } = await tx.execute(sql`
+        INSERT INTO vrm_rental_request (
+          token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
+          identity_corrected, identity_correction, is_byov,
+          problem_category, symptom, is_drivable, is_safe_to_drive, is_towed, accident_ok, occurred_at,
+          jobs_affected, what_was_tried,
+          shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
+          tech_reported_branch,
+          has_appointment, appointment_at, shop_estimated_days,
+          policy_version, policy_acknowledged_at, policy_ip,
+          ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
+          ack_return_one_day, ack_accurate,
+          ack_working_hours_only, ack_return_before_time_off, ack_extension_weekly, ack_discipline,
+          approved_vehicle_class, reason_code, region_owner,
+          is_over_21,
+          request_type, ext_repair_status, ext_last_shop_contact_at, ext_shop_said,
+          ext_expected_completion, ext_time_needed,
+          detected_open_rentals, type_mismatch, type_mismatch_explanation,
+          current_rental, ack_snapshot,
+          ext_billing_verdict, ext_billing_evidence, ext_billing_checked_at,
+          status, auto_decision, auto_reason, auto_rule, source
+        ) VALUES (
+          ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
+          ${truckFinal},
+          ${ctx.identity.district ?? facts.district_no ?? null},
+          ${homeState},
+          ${phoneFinal},
+          ${corrected}, ${corrParts.length ? corrParts.join("; ").slice(0, 400) : null}, ${isByov},
+          ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)}, ${bool(b.areYouOkay)},
+          ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
+          ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
+          ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
+          ${s(b.nearestBranch, 200)},
+          ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
+          ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
+          ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
+          ${acks.ack_return_one_day}, ${acks.ack_accurate},
+          ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_extension_weekly}, ${acks.ack_discipline},
+          ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
+          ${over21},
+          ${requestType}, ${extRepairStatus}, ${extLastShopContact}::date, ${extShopSaid},
+          ${extExpectedCompletion}::date, ${extTimeNeeded},
+          ${detectedOpenRentals}, ${typeMismatch}, ${typeMismatchExplanation},
+          ${currentRental ? JSON.stringify(currentRental) : null}::jsonb,
+          ${JSON.stringify(ackSnapshot)}::jsonb,
+          ${extBilling?.verdict ?? null},
+          ${extBilling ? JSON.stringify(extBilling) : null}::jsonb,
+          ${extBilling?.checkedAt ?? null}::timestamptz,
+          ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
+        )
+        RETURNING request_no
+      `);
+      return (ins as any[])[0]?.request_no ?? null;
     });
   } catch (e: any) {
     if (e instanceof OrchestratorError && e.code === "orphan_manual_review") {
@@ -1113,60 +1168,6 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     }
     throw e;
   }
-
-  const { rows: ins } = await db.execute(sql`
-    INSERT INTO vrm_rental_request (
-      token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
-      identity_corrected, identity_correction, is_byov,
-      problem_category, symptom, is_drivable, is_safe_to_drive, is_towed, accident_ok, occurred_at,
-      jobs_affected, what_was_tried,
-      shop_name, shop_address, shop_city, shop_state, shop_postal, shop_phone,
-      tech_reported_branch,
-      has_appointment, appointment_at, shop_estimated_days,
-      policy_version, policy_acknowledged_at, policy_ip,
-      ack_not_maintenance, ack_cannot_drive_safely, ack_has_appointment,
-      ack_return_one_day, ack_accurate,
-      ack_working_hours_only, ack_return_before_time_off, ack_extension_weekly, ack_discipline,
-      approved_vehicle_class, reason_code, region_owner,
-      is_over_21,
-      request_type, ext_repair_status, ext_last_shop_contact_at, ext_shop_said,
-      ext_expected_completion, ext_time_needed,
-      detected_open_rentals, type_mismatch, type_mismatch_explanation,
-      current_rental, ack_snapshot,
-      ext_billing_verdict, ext_billing_evidence, ext_billing_checked_at,
-      status, auto_decision, auto_reason, auto_rule, source
-    ) VALUES (
-      ${tokenRow?.id ?? null}, ${ldap}, ${ctx.identity.techName},
-      ${truckFinal},
-      ${ctx.identity.district ?? facts.district_no ?? null},
-      ${homeState},
-      ${phoneFinal},
-      ${corrected}, ${corrParts.length ? corrParts.join("; ").slice(0, 400) : null}, ${isByov},
-      ${category}, ${s(b.symptom, 1000)}, ${bool(b.isDrivable)}, ${bool(b.isSafeToDrive)}, ${bool(b.isTowed)}, ${bool(b.areYouOkay)},
-      ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
-      ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
-      ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
-      ${s(b.nearestBranch, 200)},
-      ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
-      ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
-      ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},
-      ${acks.ack_return_one_day}, ${acks.ack_accurate},
-      ${acks.ack_working_hours_only}, ${acks.ack_return_before_time_off}, ${acks.ack_extension_weekly}, ${acks.ack_discipline},
-      ${verdict.vehicleClass ?? null}, ${verdict.reason}, ${regionOwner},
-      ${over21},
-      ${requestType}, ${extRepairStatus}, ${extLastShopContact}::date, ${extShopSaid},
-      ${extExpectedCompletion}::date, ${extTimeNeeded},
-      ${detectedOpenRentals}, ${typeMismatch}, ${typeMismatchExplanation},
-      ${currentRental ? JSON.stringify(currentRental) : null}::jsonb,
-      ${JSON.stringify(ackSnapshot)}::jsonb,
-      ${extBilling?.verdict ?? null},
-      ${extBilling ? JSON.stringify(extBilling) : null}::jsonb,
-      ${extBilling?.checkedAt ?? null}::timestamptz,
-      ${status}, ${verdict.decision}, ${verdict.reason}, ${verdict.rule}, ${ctx.source}
-    )
-    RETURNING request_no
-  `);
-  const requestNo = (ins as any[])[0]?.request_no ?? null;
 
   // A DEFER tells the technician to go book an appointment and come back.
   // Consuming the token here would make that instruction impossible to
