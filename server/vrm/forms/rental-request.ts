@@ -1275,6 +1275,9 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         });
       }
 
+      // Retire any request whose rental is already back, so the constraint
+      // underneath the door agrees with the guard above it.
+      await closeSettledRequests(ldap);
       // Type-aware in-flight guard. A hard 409 only when NEITHER door is open:
       // a technician whose new request is BOOKED is exactly the person who
       // files an extension, so the booked row must not turn them away here.
@@ -1412,6 +1415,10 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       // Enforced PER TYPE: a booked new request blocks another new request,
       // not the extension asking for more time on it.
       const submitType = String(req.body?.requestType ?? "new") === "extension" ? "extension" : "new";
+      // Same retire-before-decide as verify: two tabs, or a form left open
+      // across the return, must not reach the INSERT with a stale booked row
+      // still holding vrm_rental_request_open_live_uniq.
+      await closeSettledRequests(ldap);
       const guard = await liveRequestGuard(ldap);
       const blocked = submitType === "extension" ? guard.blockExtension : guard.blockNew;
       if (blocked) {
@@ -3440,33 +3447,178 @@ function buildAckSnapshot(opts: {
  *   - An APPROVED extension is settled: Fleet extends with Enterprise
  *     manually and the row never books, so it must not block next week's
  *     extension request. Extensions only count as live while 'pending'.
+ *
+ * SETTLED BOOKED ROWS (2026-08-26). `booked` used to be the end of the request
+ * lifecycle: nothing ever moved a row off it when the vehicle went back, so a
+ * technician who returned a rental stayed locked out of the front door until
+ * the 30-day window above aged their row out. Measured the day this was added,
+ * 113 of 143 new requests sat at `booked` and 18 technicians with ZERO open
+ * rentals could not file. The visible symptom was a form reading "Our records
+ * do not show a current rental for you" directly above a DISABLED New option,
+ * because that sentence reads the rental book while the button read this table.
+ *
+ * A booked row is SETTLED, and blocks nothing, only on POSITIVE evidence of
+ * return: no open rental case AND one of the technician's cases dropped out of
+ * the Enterprise book AFTER this request was created. Absence alone is never
+ * enough. The Open RA report is a morning snapshot that lags a booking by up to
+ * a day, so "not on the book" by itself would hand a second vehicle to someone
+ * who collected one an hour ago. A technician with no case at all keeps
+ * blocking and needs a human Close on the Fleet review screen.
  */
 export async function liveRequestGuard(ldap: string): Promise<{
   liveNew: any | null;
   liveExt: any | null;
   blockNew: { requestNo: number; status: string } | null;
   blockExtension: { requestNo: number; status: string } | null;
+  settled: Array<{ requestNo: number; status: string; droppedAt: string | null }>;
 }> {
   const { rows } = await db.execute(sql`
-    SELECT request_no, status, COALESCE(request_type, 'new') AS request_type
-    FROM vrm_rental_request
-    WHERE ldap = ${ldap} AND status IN ('pending','approved','booked')
-      AND created_at > now() - interval '30 days'
-    ORDER BY created_at DESC
+    WITH book AS (
+      SELECT
+        count(*) FILTER (
+          WHERE c.present_in_latest AND upper(c.ticket_status) = 'OPEN'
+        )::int                      AS open_n,
+        max(c.dropped_from_feed_at) AS last_drop
+      FROM all_techs a
+      JOIN vrm_rental_identity_resolutions ir
+        ON COALESCE(ir.override_employee_id, ir.resolved_employee_id) = a.employee_id
+      JOIN vrm_rental_operations_cases c
+        ON c.case_key = ir.case_key
+      WHERE upper(btrim(a.tech_racfid)) = upper(btrim(${ldap}))
+        AND upper(btrim(COALESCE(a.employment_status, ''))) = 'A'
+        AND a.dropped_from_source_at IS NULL
+    )
+    SELECT r.request_no,
+           r.status,
+           COALESCE(r.request_type, 'new') AS request_type,
+           -- ::int everywhere, never a raw boolean. The pool driver mis-reads
+           -- booleans if poolQueryViaFetch is ever switched on, and these
+           -- values decide whether a technician may file at all. See
+           -- .agents/memory/neon-http-driver-boolean-pitfall.md.
+           COALESCE(b.open_n, 0)::int AS open_n,
+           (CASE WHEN b.last_drop IS NOT NULL AND b.last_drop > r.created_at
+                 THEN 1 ELSE 0 END)::int AS dropped_after_create,
+           to_char(b.last_drop AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS dropped_at
+    FROM vrm_rental_request r
+    CROSS JOIN book b
+    WHERE r.ldap = ${ldap} AND r.status IN ('pending','approved','booked')
+      AND r.created_at > now() - interval '30 days'
+    ORDER BY r.created_at DESC
   `);
   const all = rows as any[];
-  const liveNew = all.find((r) => r.request_type !== "extension") ?? null;
+  // book-level, identical on every row (CROSS JOIN of a bare aggregate)
+  const openRentals = all.length ? Number(all[0].open_n ?? 0) : 0;
+
+  // A booked NEW row is SETTLED once the vehicle is demonstrably back: no open
+  // rental case, AND a case dropped off the Enterprise book AFTER this request
+  // was created. A settled row is a finished rental, not an in-flight request,
+  // so it blocks nothing.
+  const isSettled = (r: any) =>
+    r.status === "booked" &&
+    r.request_type !== "extension" &&
+    openRentals === 0 &&
+    Number(r.dropped_after_create ?? 0) === 1;
+
+  const liveNew = all.find((r) => r.request_type !== "extension" && !isSettled(r)) ?? null;
   const liveExt = all.find((r) => r.request_type === "extension" && r.status === "pending") ?? null;
   const asRef = (r: any) => (r ? { requestNo: r.request_no, status: r.status } : null);
   const newInProgress = all.find(
     (r) => r.request_type !== "extension" && (r.status === "pending" || r.status === "approved"),
   ) ?? null;
+
+  const settledRows = all.filter(isSettled);
+
+  // A pending extension bars a NEW request as a rule — Fleet's "one car
+  // conversation at a time" (tests/rental-extension-booking-doors.test.ts G2).
+  // The ONE exception is a settled booked row sitting beside it, which is
+  // positive proof the rental that extension was about is already back.
+  // Without the exception the settled-row fix above is dead on arrival: a
+  // technician shut out of the New option files the extension the form still
+  // offers, and that extension becomes the new lock the moment the booking
+  // settles. Real case 2026-08-26 — #53 settled and #155, filed in its place
+  // the same morning, took over. A technician with no settled row keeps
+  // blocking exactly as before.
+  const extBlocksNew = settledRows.length > 0 ? null : liveExt;
+
   return {
     liveNew,
     liveExt,
-    blockNew: asRef(liveNew ?? liveExt),
+    blockNew: asRef(liveNew ?? extBlocksNew),
     blockExtension: asRef(liveExt ?? newInProgress),
+    settled: settledRows.map((r) => ({
+      requestNo: r.request_no,
+      status: r.status,
+      droppedAt: r.dropped_at ?? null,
+    })),
   };
+}
+
+/**
+ * Retire the request rows whose rental is demonstrably back.
+ *
+ * The read-side guard stops a settled row BLOCKING, but the row itself still
+ * sits at `booked`, and `vrm_rental_request_open_live_uniq` — UNIQUE (ldap)
+ * WHERE token_id IS NULL AND request_type='new' AND status IN
+ * ('pending','approved','booked') — is a database constraint that does not
+ * care what the guard decided. Without this step the technician sails past
+ * the door and the INSERT dies on a duplicate key instead. There is no manual
+ * escape either: /decide refuses any row already at 'booked', so no amount of
+ * clicking in the Fleet UI frees the index.
+ *
+ * `closed` is deliberately a NEW status, not the existing `returned`, which on
+ * this table already means "Fleet sent it back to the technician for more
+ * detail". Reusing it would make those two states indistinguishable in every
+ * report. `closed` is outside the index predicate, so retiring the row frees
+ * the LDAP for the next request.
+ *
+ * Called on the open door before the guard, so a technician who returns a
+ * vehicle and walks straight back to the form is cleared in that same request
+ * rather than waiting for a sweep. The evidence is re-tested inside the UPDATE
+ * itself, so two tabs racing cannot close a row whose rental is still out.
+ * Never throws: a failure here degrades to the old blocked-door behaviour.
+ */
+export async function closeSettledRequests(ldap: string): Promise<number[]> {
+  try {
+    const { rows } = await db.execute(sql`
+      WITH book AS (
+        SELECT
+          count(*) FILTER (
+            WHERE c.present_in_latest AND upper(c.ticket_status) = 'OPEN'
+          )::int                      AS open_n,
+          max(c.dropped_from_feed_at) AS last_drop
+        FROM all_techs a
+        JOIN vrm_rental_identity_resolutions ir
+          ON COALESCE(ir.override_employee_id, ir.resolved_employee_id) = a.employee_id
+        JOIN vrm_rental_operations_cases c
+          ON c.case_key = ir.case_key
+        WHERE upper(btrim(a.tech_racfid)) = upper(btrim(${ldap}))
+          AND upper(btrim(COALESCE(a.employment_status, ''))) = 'A'
+          AND a.dropped_from_source_at IS NULL
+      )
+      UPDATE vrm_rental_request r
+         SET status = 'closed',
+             decision_note = COALESCE(NULLIF(btrim(r.decision_note), '') || ' | ', '')
+               || 'auto-closed: vehicle back, off the Enterprise book '
+               || to_char(b.last_drop AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
+             updated_at = now()
+        FROM book b
+       WHERE r.ldap = ${ldap}
+         AND r.status = 'booked'
+         AND COALESCE(r.request_type, 'new') <> 'extension'
+         AND COALESCE(b.open_n, 0) = 0
+         AND b.last_drop IS NOT NULL
+         AND b.last_drop > r.created_at
+      RETURNING r.request_no
+    `);
+    const closed = (rows as any[]).map((r) => Number(r.request_no));
+    if (closed.length) {
+      console.log(`[rental-request] auto-closed returned rental request(s) for ${ldap}: #${closed.join(", #")}`);
+    }
+    return closed;
+  } catch (e: any) {
+    console.error(`[rental-request] closeSettledRequests(${ldap}) failed:`, e?.message || e);
+    return [];
+  }
 }
 
 /**

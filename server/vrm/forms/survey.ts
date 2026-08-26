@@ -694,6 +694,23 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       const baseUrl = String(req.body?.baseUrl || "https://SHS-Nexus.replit.app").replace(/\/+$/, "");
       const limit = Math.min(Number(req.body?.limit) || 1000, 1000);
       const batch = String(req.body?.batch || "").trim() || null;
+      // Scope to an explicit list. Without this the route ALWAYS picks its own
+      // recipients from vrm_rental_operations_cases, which is the Snowflake feed
+      // and runs a day or more behind the emailed Holman file. On 2026-08-26 that
+      // sent 63 surveys of which 53 had already moved to direct billing days
+      // earlier, and only 2 were on the list the operator actually asked for.
+      //
+      // The empty-array case is a 400, never "everybody". file-route-blocks has
+      // the opposite behaviour and a lost body there filed the whole fleet.
+      const ldapsGiven = req.body?.ldaps !== undefined;
+      const onlyLdaps: string[] = Array.isArray(req.body?.ldaps)
+        ? req.body.ldaps.map((x: any) => String(x).trim().toUpperCase()).filter(Boolean)
+        : [];
+      if (ldapsGiven && !onlyLdaps.length) {
+        return res.status(400).json({
+          message: "ldaps was supplied but empty. Refusing to fall back to the whole pool.",
+        });
+      }
 
       const { rows } = await db.execute(sql`
         SELECT DISTINCT ON (upper(a.tech_racfid))
@@ -779,6 +796,16 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             WHERE ft.form_type = 'rental_tech_survey'
               AND upper(ft.ldap) = upper(a.tech_racfid)
           )
+          -- A survey ROW with no token exists whenever an answer arrived through
+          -- some other channel. The token check above cannot see those, so five
+          -- technicians who had already answered were issued a fresh link on
+          -- 2026-08-26. Never ask someone a question they have already answered.
+          AND NOT EXISTS (
+            SELECT 1 FROM vrm_rental_tech_survey vs
+            WHERE upper(vs.ldap) = upper(a.tech_racfid)
+          )
+          AND (${onlyLdaps.length === 0}
+               OR upper(a.tech_racfid) = ANY(string_to_array(${onlyLdaps.join(",")}, ',')))
         ORDER BY upper(a.tech_racfid), c.days_open DESC NULLS LAST, c.vehicle_number
         LIMIT ${limit}
       `);
