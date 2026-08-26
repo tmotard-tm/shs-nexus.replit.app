@@ -59,3 +59,17 @@ time. Nothing errored; the field was just blank on one surface.
 Normalise server-side first: `String(v).replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00")`
 then `toISOString()`. If two read paths serve the same row to one component, normalise in
 the shared mapper so both spellings converge.
+
+## Never round-trip a microsecond timestamp through JavaScript for CAS
+Do not use a `timestamptz` read into JavaScript and passed back as an equality predicate
+to prove that a row is unchanged. JavaScript `Date` carries milliseconds, while Postgres
+stores microseconds, so a value such as `.512765` comes back as `.512` and the guarded
+UPDATE matches zero rows even though nothing changed.
+
+**Why:** a locked operational repair re-read a row and immediately compared its
+`updated_at` through node-postgres; the update falsely lost its CAS because the final
+765 microseconds were gone.
+
+**How to apply:** keep the read and write in one transaction with `FOR UPDATE`, or compare
+an exact database-side row version such as `xmin`. Never weaken the guard to a blind
+timestamp-free UPDATE just because a JavaScript timestamp equality check missed.

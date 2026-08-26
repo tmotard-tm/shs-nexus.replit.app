@@ -1267,6 +1267,41 @@ type RequestIntentRetirementParams = {
   reason: string;
 };
 
+export type DeletedRequestLockAttemptAudit = {
+  phase: string;
+  attemptNo: number;
+  outcome: string | null;
+  startedAt: unknown;
+  finishedAt: unknown;
+};
+
+export type DeletedRequestLockStateAudit = {
+  status: string;
+  reservationState: string;
+  reservationEvidence: unknown;
+  lastError: string | null;
+  claimedBy: string | null;
+  leaseExpiresAt: unknown;
+  nextRetryAt: unknown;
+  updatedAt: unknown;
+  attempts: DeletedRequestLockAttemptAudit[];
+};
+
+export type DeletedRequestLockRecoveryAudit = {
+  intentId: number;
+  sourceId: string | null;
+  decision:
+    | "retired"
+    | "manual_review"
+    | "source_present"
+    | "not_live_request_intent"
+    | "already_terminal"
+    | "not_found";
+  reason: string;
+  before: DeletedRequestLockStateAudit | null;
+  after: DeletedRequestLockStateAudit | null;
+};
+
 function reservationEvidenceMayNameBooking(raw: unknown): boolean {
   if (!raw || typeof raw !== "object") return false;
   const evidence = raw as Record<string, any>;
@@ -1302,6 +1337,159 @@ function requestIntentRetirementBlocker(intent: any, attempts: any[]): string | 
       : `${String(unsafeAttempt.phase ?? "external")} attempt ${Number(unsafeAttempt.attempt_no ?? 0)} has unknown outcome ${String(unsafeAttempt.outcome)}`;
   }
   return null;
+}
+
+function deletedRequestLockStateAudit(intent: any, attempts: any[]): DeletedRequestLockStateAudit {
+  return {
+    status: String(intent.status ?? ""),
+    reservationState: String(intent.reservation_state ?? ""),
+    reservationEvidence: intent.reservation_evidence ?? null,
+    lastError: intent.last_error == null ? null : String(intent.last_error),
+    claimedBy: intent.claimed_by == null ? null : String(intent.claimed_by),
+    leaseExpiresAt: intent.lease_expires_at ?? null,
+    nextRetryAt: intent.next_retry_at ?? null,
+    updatedAt: intent.updated_at ?? null,
+    attempts: attempts.map((attempt) => ({
+      phase: String(attempt.phase ?? ""),
+      attemptNo: Number(attempt.attempt_no ?? 0),
+      outcome: attempt.outcome == null ? null : String(attempt.outcome),
+      startedAt: attempt.started_at ?? null,
+      finishedAt: attempt.finished_at ?? null,
+    })),
+  };
+}
+
+/**
+ * Explicit, audited recovery for known deleted-request lock candidates.
+ *
+ * Every supplied ID is judged separately under its own transaction and intent
+ * row lock. That keeps one ambiguous row from rolling back a proven-clean
+ * retirement, while the exact-ID predicate prevents a status-wide cleanup.
+ * The source-existence and attempt-ledger checks happen after the lock is held,
+ * immediately before the guarded retirement.
+ */
+export async function recoverDeletedRequestLiveLocks(params: {
+  intentIds: number[];
+  recoveredBy: string;
+  reason: string;
+}, deps?: {
+  /** Test seam at the exact negative-source predicate race window. */
+  afterSourceAbsenceRead?: (intentId: number) => Promise<void>;
+}): Promise<DeletedRequestLockRecoveryAudit[]> {
+  if (params.intentIds.length > 100) {
+    throw new OrchestratorError("too_many_intents", "at most 100 explicit intent IDs may be recovered at once", 400);
+  }
+
+  const audit: DeletedRequestLockRecoveryAudit[] = [];
+  for (const rawIntentId of params.intentIds) {
+    const intentId = Number(rawIntentId);
+    if (!Number.isSafeInteger(intentId) || intentId <= 0) {
+      throw new OrchestratorError("bad_intent_id", `invalid intent ID ${String(rawIntentId)}`, 400);
+    }
+
+    const result = await db.transaction(async (tx) => {
+      // A negative row lookup cannot itself be FOR UPDATE-locked. SHARE blocks
+      // the ROW EXCLUSIVE table lock every request INSERT/UPDATE/DELETE takes,
+      // so once this lock is granted the source cannot be recreated between
+      // the absence read and retirement. This exact-ID operational repair is
+      // intentionally short; all evidence reads and the one guarded UPDATE run
+      // in the same transaction before the table lock is released.
+      await tx.execute(sql`LOCK TABLE vrm_rental_request IN SHARE MODE`);
+      const { rows } = await tx.execute(sql`
+        SELECT *
+        FROM vrm_rental_workflow_intents
+        WHERE id = ${intentId}
+        FOR UPDATE
+      `);
+      const intent = (rows as any[])[0];
+      if (!intent) {
+        return {
+          intentId,
+          sourceId: null,
+          decision: "not_found",
+          reason: "intent no longer exists",
+          before: null,
+          after: null,
+        } satisfies DeletedRequestLockRecoveryAudit;
+      }
+
+      const { rows: attempts } = await tx.execute(sql`
+        SELECT phase, attempt_no, outcome, started_at, finished_at
+        FROM vrm_workflow_attempts
+        WHERE intent_id = ${intentId}
+        ORDER BY phase, attempt_no
+      `);
+      const before = deletedRequestLockStateAudit(intent, attempts as any[]);
+      const unchanged = (
+        decision: DeletedRequestLockRecoveryAudit["decision"],
+        reason: string,
+      ): DeletedRequestLockRecoveryAudit => ({
+        intentId,
+        sourceId: String(intent.source_id ?? ""),
+        decision,
+        reason,
+        before,
+        after: before,
+      });
+
+      if (intent.workflow_type !== WORKFLOW_REQUEST || intent.execution_mode !== "live") {
+        return unchanged("not_live_request_intent", "intent is not a live rental-request workflow");
+      }
+      if (TERMINAL_STATUSES.has(String(intent.status))) {
+        return unchanged("already_terminal", `intent is already terminal (${String(intent.status)})`);
+      }
+
+      const { rows: sourceRows } = await tx.execute(sql`
+        SELECT 1
+        FROM vrm_rental_request
+        WHERE request_no::text = ${String(intent.source_id)}
+           OR id::text = ${String(intent.source_id)}
+        LIMIT 1
+      `);
+      if ((sourceRows as any[]).length) {
+        return unchanged("source_present", `source request ${String(intent.source_id)} still exists`);
+      }
+      if (deps?.afterSourceAbsenceRead) await deps.afterSourceAbsenceRead(intentId);
+
+      const blocker = requestIntentRetirementBlocker(intent, attempts as any[]);
+      if (blocker) {
+        return unchanged("manual_review", blocker);
+      }
+
+      const { rows: retiredRows } = await tx.execute(sql`
+        UPDATE vrm_rental_workflow_intents
+        SET status = 'abandoned',
+            last_error = ${`explicit recovery by ${params.recoveredBy}: source request ${String(intent.source_id)} no longer exists; ${params.reason}`},
+            claimed_by = NULL,
+            lease_expires_at = NULL,
+            next_retry_at = NULL,
+            updated_at = now()
+        WHERE id = ${intentId}
+          AND status = ${String(intent.status)}
+        RETURNING *
+      `);
+      const retired = (retiredRows as any[])[0];
+      if (!retired) {
+        throw new OrchestratorError(
+          "intent_changed",
+          `Workflow intent #${intentId} changed during explicit recovery. Manual review is required.`,
+          409,
+          { intentId, sourceId: String(intent.source_id) },
+        );
+      }
+
+      return {
+        intentId,
+        sourceId: String(intent.source_id ?? ""),
+        decision: "retired",
+        reason: "source request is absent and all booking evidence is proven clean",
+        before,
+        after: deletedRequestLockStateAudit(retired, attempts as any[]),
+      } satisfies DeletedRequestLockRecoveryAudit;
+    });
+    audit.push(result);
+  }
+  return audit;
 }
 
 async function abandonRequestIntentsForRemovedSource(

@@ -33,6 +33,7 @@ import {
   createIntent,
   OrchestratorError,
 } from "../server/vrm/forms/cutover-orchestrator";
+import * as cutoverOrchestrator from "../server/vrm/forms/cutover-orchestrator";
 
 const LDAP_PREFIX = "ZZLLK";
 const FLAG = "VRM_CONTRACT_BLOCK_ENABLED";
@@ -118,6 +119,15 @@ async function readIntent(id: number): Promise<any> {
   return (rows as any[])[0];
 }
 
+async function sourceIdForIntent(id: number): Promise<string> {
+  const { rows } = await db.execute(sql`
+    SELECT source_id
+    FROM vrm_rental_workflow_intents
+    WHERE id = ${id}
+  `);
+  return String((rows as any[])[0].source_id);
+}
+
 before(async () => {
   await initFormsSchema(); // IF NOT EXISTS everywhere
   await cleanupFixtures();
@@ -139,6 +149,109 @@ after(async () => {
 // ---------------------------------------------------------------------------
 
 describe("deleted-request live-lock recovery in createIntent", () => {
+  test("explicit recovery audits each named intent, retires only proven-clean orphans, and leaves ambiguity locked", async () => {
+    const recoverDeletedRequestLiveLocks = (cutoverOrchestrator as any).recoverDeletedRequestLiveLocks;
+    assert.equal(
+      typeof recoverDeletedRequestLiveLocks,
+      "function",
+      "the explicit, audited orphan-recovery API must exist",
+    );
+
+    const cleanId = await seedOrphanLiveIntent(`${LDAP_PREFIX}A1`);
+    const ambiguousId = await seedOrphanLiveIntent(`${LDAP_PREFIX}A2`);
+    const unlistedId = await seedOrphanLiveIntent(`${LDAP_PREFIX}A3`);
+    await seedBookingAttempt(ambiguousId, "timeout");
+
+    const sourceLdap = `${LDAP_PREFIX}A4`;
+    const sourceNo = await seedEligibleRequest(sourceLdap, "ZZ730A4");
+    const sourceIntent = await createIntent({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: String(sourceNo),
+      executionMode: "live",
+      createdBy: "zzllk-test",
+    });
+    const sourceIntentId = Number(sourceIntent.intent.id);
+
+    const audit = await recoverDeletedRequestLiveLocks({
+      intentIds: [cleanId, ambiguousId, sourceIntentId],
+      recoveredBy: "zzllk-test",
+      reason: "explicit orphan recovery regression",
+    });
+
+    assert.deepEqual(audit.map((row) => row.intentId), [cleanId, ambiguousId, sourceIntentId]);
+
+    const clean = audit[0];
+    assert.equal(clean.decision, "retired");
+    assert.equal(clean.reason, "source request is absent and all booking evidence is proven clean");
+    assert.equal(clean.before?.status, "created");
+    assert.equal(clean.before?.reservationState, "pending");
+    assert.equal(clean.before?.lastError, null);
+    assert.deepEqual(clean.before?.attempts, []);
+    assert.equal(clean.after?.status, "abandoned");
+    assert.equal(
+      clean.after?.lastError,
+      "explicit recovery by zzllk-test: source request "
+        + `${clean.sourceId} no longer exists; explicit orphan recovery regression`,
+    );
+
+    const ambiguous = audit[1];
+    assert.equal(ambiguous.decision, "manual_review");
+    assert.match(ambiguous.reason, /unknown outcome timeout/i);
+    assert.equal(ambiguous.before?.status, "created");
+    assert.equal(ambiguous.after?.status, "created");
+    assert.equal(ambiguous.after?.attempts[0]?.outcome, "timeout");
+
+    const sourcePresent = audit[2];
+    assert.equal(sourcePresent.decision, "source_present");
+    assert.match(sourcePresent.reason, /still exists/i);
+    assert.equal(sourcePresent.before?.status, "created");
+    assert.equal(sourcePresent.after?.status, "created");
+
+    assert.equal((await readIntent(unlistedId)).status, "created", "unnamed rows must never be bulk-retired");
+  });
+
+  test("a source recreation cannot land between the absence read and retirement", async () => {
+    const ldap = `${LDAP_PREFIX}A5`;
+    const intentId = await seedOrphanLiveIntent(ldap);
+    const sourceId = await sourceIdForIntent(intentId);
+    let hookRan = false;
+    let rivalSettled = false;
+    let rivalInsert: Promise<unknown> | null = null;
+
+    const audit = await (cutoverOrchestrator as any).recoverDeletedRequestLiveLocks({
+      intentIds: [intentId],
+      recoveredBy: "zzllk-race-test",
+      reason: "source recreation serialization regression",
+    }, {
+      afterSourceAbsenceRead: async () => {
+        hookRan = true;
+        rivalInsert = db.execute(sql`
+          INSERT INTO vrm_rental_request
+            (id, ldap, tech_name, request_type, status, home_state, mobile_phone)
+          VALUES
+            (${sourceId}, ${ldap}, 'Zz Live Lock Fixture', 'new', 'approved', 'PA', '555-000-1234')
+        `).finally(() => {
+          rivalSettled = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 75));
+        assert.equal(
+          rivalSettled,
+          false,
+          "request-table serialization must hold a concurrent source insert until retirement commits",
+        );
+      },
+    });
+
+    assert.equal(hookRan, true, "the race seam must run after the negative source read");
+    assert.equal(audit[0]?.decision, "retired");
+    await rivalInsert;
+    assert.equal((await readIntent(intentId)).status, "abandoned");
+    const { rows: recreated } = await db.execute(sql`
+      SELECT id FROM vrm_rental_request WHERE id = ${sourceId}
+    `);
+    assert.equal((recreated as any[]).length, 1, "the rival insert proceeds only after recovery releases its lock");
+  });
+
   test("control: the fixture passes the full eligibility gate and creates a LIVE intent", async () => {
     const ldap = `${LDAP_PREFIX}C1`;
     const no = await seedEligibleRequest(ldap, "ZZ731C1");

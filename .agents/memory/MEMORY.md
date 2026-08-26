@@ -4,7 +4,7 @@
 - [VIN auto-decode on Create Vehicle](vin-decode-create-vehicle.md) — NHTSA vPIC fills Year/Make/Model/AssetType; AssetType is a constrained-6 heuristic that returns "" when uncertain; spinner uses a seq ref, not a cancelled flag.
 - [Vehicle district update](vehicle-district-update.md) — per-vehicle district fan-out to TPMS/WMS/Holman; Holman prefix=last-4 on UPDATE (not create-flow's full district); only mirror cache when all 3 succeed.
 - [BYOV/vehicle number reservation](byov-number-reservation.md) — create reserves number via active-row + partial-unique-index before fan-out; VIN discriminates retry vs collision; stale reclaim MUST be CAS, not blind id update.
-- [Neon driver deserialization quirks](neon-http-driver-boolean-pitfall.md) — one-shot neon() HTTP misreads booleans (use app pool driver); app pool returns DATE as 'YYYY-MM-DD' strings, so slice(0,10) date math is safe.
+- [Neon/pg deserialization quirks](neon-http-driver-boolean-pitfall.md) — HTTP can misread booleans; DATE strings are stable; JS Date timestamp CAS loses Postgres microseconds.
 - [Drizzle pg array params](drizzle-pg-array-params.md) — raw sql `= ANY(${jsArray})` via the pg pool driver → runtime "malformed array literal"; bind per-element with sql.join IN-list.
 - [communication_logs.sent_by FK trap](communication-logs-sentby-fk.md) — system sends must pass sentBy=null (actor→metadata.sender); a non-user string throws after the email sent, silently losing the log + *_sent_at → daily re-fire.
 - [Holman 202 ≠ applied](holman-assignment-verification.md) — 202/errorCount-0 = queued not applied; district verified ONLY via fleet sync (frozen cache); submit payload traps in holman-district-payload.md.
