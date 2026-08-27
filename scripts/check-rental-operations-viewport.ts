@@ -63,6 +63,20 @@ runViewportGuard({
     await failIfOnLoginPage(page);
     await page.waitForTimeout(1000);
 
+    const visibleRows = await page.locator(".ro-table-wrap tbody tr").count();
+    const paginationStatus = (await page.locator('[data-testid="rental-ops-pagination-status"]').textContent())?.trim() ?? "";
+    const totalMatch = paginationStatus.match(/of\s+(\d+)$/);
+    rec.assert(
+      visibleRows <= 50,
+      `rental-row-page-cap@${label}`,
+      `${visibleRows} table row(s) rendered; maximum is 50`,
+    );
+    rec.assert(
+      !!totalMatch && Number(totalMatch[1]) >= visibleRows,
+      `rental-pagination-count@${label}`,
+      `pagination status "${paginationStatus}" reports the complete result count`,
+    );
+
     await assertNoPageScroll(rec, page, `no-page-scroll@${label}`);
     await assertNoHorizontalScroll(rec, page, `no-horizontal-scroll@${label}`);
     await assertPaneBottomWindow(

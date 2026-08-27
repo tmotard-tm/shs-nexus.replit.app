@@ -30,7 +30,7 @@
 - Consumes: the existing `sorted: MasterRow[]` result after all filters and sorting.
 - Produces: a 50-row render slice, global row offsets, and `data-testid` hooks for the pagination status and controls.
 
-- [ ] **Step 1: Write the failing real-component test**
+- [x] **Step 1: Write the failing real-component test**
 
 Add a 55-row fixture test that expects:
 
@@ -44,7 +44,7 @@ assert.equal(tableRows().length, 1);
 assert.match(tableRows()[0].textContent || "", /71055/);
 ```
 
-- [ ] **Step 2: Run the component test and confirm RED**
+- [x] **Step 2: Run the component test and confirm RED**
 
 Run:
 
@@ -54,7 +54,7 @@ npx tsx --tsconfig tsconfig.dom-tests.json --test --test-force-exit tests/rental
 
 Expected: the new test fails because all 55 rows render and no pagination controls exist.
 
-- [ ] **Step 3: Implement 50-row pagination**
+- [x] **Step 3: Implement 50-row pagination**
 
 In `RentalOperations.tsx`:
 
@@ -65,7 +65,7 @@ In `RentalOperations.tsx`:
 - add Previous/Next controls and visible-range text;
 - reset page state when search, filters, cohort, or sort criteria change.
 
-- [ ] **Step 4: Run the component test and confirm GREEN**
+- [x] **Step 4: Run the component test and confirm GREEN**
 
 Run:
 
@@ -75,13 +75,13 @@ npx tsx --tsconfig tsconfig.dom-tests.json --test --test-force-exit tests/rental
 
 Expected: all tests pass.
 
-- [ ] **Step 5: Add a browser performance guard**
+- [x] **Step 5: Add a browser performance guard**
 
 Extend `scripts/check-rental-operations-viewport.ts` to assert that the initial
 table renders no more than 50 data rows and that its pagination status reports
 the full result count. Keep the existing layout and overlay assertions.
 
-- [ ] **Step 6: Verify the live behavior and repository baseline**
+- [x] **Step 6: Verify the live behavior and repository baseline**
 
 Run:
 
@@ -93,7 +93,7 @@ npm run check
 Then rerun the authenticated search benchmark used during diagnosis and compare
 its per-update timings to the 100–132 ms search / 367 ms restore baseline.
 
-- [ ] **Step 7: Request code review and commit**
+- [x] **Step 7: Request code review and commit**
 
 Review the completed diff against
 `docs/specs/2026-08-27-vrm-rental-search-performance-design.md`, fix any Critical

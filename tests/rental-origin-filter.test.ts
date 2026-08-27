@@ -139,13 +139,14 @@ const HOLMAN_A = mkRow("70001", "enterprise");            // Holman book (ECARS)
 const HOLMAN_B = mkRow("70002", "holman_non_enterprise"); // Holman book (non-Enterprise)
 const DIRECT_1 = mkRow("70003", "enterprise_direct");     // direct billing
 const UNKNOWN_1 = mkRow("70004", "tpms");                 // legacy/unknown origin
-const ROWS = [HOLMAN_A, HOLMAN_B, DIRECT_1, UNKNOWN_1];
+const DEFAULT_ROWS = [HOLMAN_A, HOLMAN_B, DIRECT_1, UNKNOWN_1];
+let rowsFixture = DEFAULT_ROWS;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
 
 const BASE_MODEL = {
-  total: ROWS.length,
+  total: DEFAULT_ROWS.length,
   cohorts: {}, identityStates: {}, categories: {}, amsBuckets: {},
   mismatchCount: 0, costOverCount: 0, pendedCount: 0,
   sourceHealth: { clocks: [], lastSyncAt: null, lastImportAt: null, lastFileDate: null },
@@ -154,12 +155,14 @@ const BASE_MODEL = {
 
 function route(method: string, url: URL): Response {
   const p = url.pathname;
-  if (p.endsWith("/rental-operations/master")) return json({ ...BASE_MODEL, rows: ROWS });
+  if (p.endsWith("/rental-operations/master")) {
+    return json({ ...BASE_MODEL, total: rowsFixture.length, rows: rowsFixture });
+  }
   if (p.endsWith("/rental-operations/by-region")) {
     return json({
-      ...BASE_MODEL, rows: ROWS,
+      ...BASE_MODEL, total: rowsFixture.length, rows: rowsFixture,
       regions: [
-        { region: "east", label: "East", owner: null, caseCount: ROWS.length, districtCount: 1, dailyCostTotal: 120 },
+        { region: "east", label: "East", owner: null, caseCount: rowsFixture.length, districtCount: 1, dailyCostTotal: 120 },
         { region: "central", label: "Central", owner: null, caseCount: 0, districtCount: 0, dailyCostTotal: 0 },
         { region: "west", label: "West", owner: null, caseCount: 0, districtCount: 0, dailyCostTotal: 0 },
       ],
@@ -233,6 +236,7 @@ async function cleanup(): Promise<void> {
   container?.remove();
   container = null;
   queryClient.clear();
+  rowsFixture = DEFAULT_ROWS;
 }
 afterEach(cleanup);
 
@@ -255,6 +259,21 @@ async function pick(sel: HTMLSelectElement, value: string): Promise<void> {
     sel.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
   });
   await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+}
+
+async function typeSearch(value: string): Promise<void> {
+  const input = dom.window.document.querySelector<HTMLInputElement>('input[placeholder^="filter truck"]');
+  assert.ok(input, "rental search input renders");
+  const setter = Object.getOwnPropertyDescriptor(dom.window.HTMLInputElement.prototype, "value")!.set!;
+  await act(async () => {
+    setter.call(input, value);
+    input.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+  await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+}
+
+function rentalTableRows(): HTMLTableRowElement[] {
+  return [...dom.window.document.querySelectorAll<HTMLTableRowElement>(".ro-table-wrap tbody tr")];
 }
 
 const bodyText = () => dom.window.document.body.textContent || "";
@@ -303,6 +322,29 @@ test("RentalOperations: holman facet excludes the unknown-origin row too", async
   // Back to all: everything returns.
   await pick(originSelect(), "");
   assert.ok(bodyText().includes("4 shown"), "clearing the facet restores the full board");
+});
+
+test("RentalOperations: renders 50-row pages while search still covers every rental", async () => {
+  rowsFixture = Array.from({ length: 55 }, (_, i) => mkRow(String(71001 + i), "enterprise"));
+  await renderPage(RentalOperations);
+
+  assert.equal(rentalTableRows().length, 50, "the first page renders at most 50 rental rows");
+  const status = dom.window.document.querySelector<HTMLElement>('[data-testid="rental-ops-pagination-status"]');
+  assert.ok(status, "pagination status renders");
+  assert.match(status.textContent || "", /1–50 of 55/, "status preserves the complete match count");
+
+  const next = dom.window.document.querySelector<HTMLButtonElement>('[data-testid="rental-ops-pagination-next"]');
+  assert.ok(next, "Next control renders");
+  await act(async () => next.click());
+  await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
+
+  assert.equal(rentalTableRows().length, 5, "the second page renders the five remaining rentals");
+  assert.equal(rentalTableRows()[0]?.querySelector("td")?.textContent?.trim(), "51", "row numbering remains global");
+
+  await typeSearch("71055");
+  assert.equal(rentalTableRows().length, 1, "search narrows the complete dataset, not only the current page");
+  assert.match(rentalTableRows()[0]?.textContent || "", /71055/, "an initially off-page rental is searchable");
+  assert.match(status.textContent || "", /1–1 of 1/, "search resets pagination to the first result page");
 });
 
 // ── Cases by Region board ────────────────────────────────────────────────────

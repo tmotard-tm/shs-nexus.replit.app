@@ -151,3 +151,4 @@
 - [ETD branch addressing & nearby fallback](etd-branch-fallback.md) — approved_branch wins w/ guard off; nearbyOnEmpty walk never moves a pin; Number(null)=0 / float('nan') mirror traps; retry calls must forward new quote opts.
 - [Cutover scoreboard serve shell](cutover-status-serve-shell.md) — single-flight + bounded last-good; new payload-changing mutations MUST invalidate; rootDbErrorMessage for banners; compiled-SQL prod-replay diagnostic.
 - [Rollback test fixture fidelity](rollback-test-fixture-fidelity.md) — rollback tests must match production selectors; plausible literals can false-green preservation assertions.
+- [VRM Rental Operations row budget](vrm-rental-ops-row-budget.md) — search lag was dense unbounded DOM, not API; filter all rows but render 50 per page.

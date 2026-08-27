@@ -29,6 +29,8 @@ import { TechTextModal } from "../components/tech-text-modal";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
+const RENTAL_ROWS_PER_PAGE = 50;
+
 // ── types ────────────────────────────────────────────────────────────────────
 // The MasterRow field contract lives in ../lib/case-model (ONE definition
 // shared with Cases by Region — a field added for one board is added for
@@ -523,6 +525,7 @@ export default function RentalOperations() {
   const [newHireOnly, setNewHireOnly] = useState(false);
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
+  const [page, setPage] = useState(0);
   const [panelKey, setPanelKey] = useState<string | null>(null);
   const [phoneEdit, setPhoneEdit] = useState<ShopPhoneEditTarget | null>(null);
   // Weekly extension-reminder panel (arm switch + ledger). Collapsed by
@@ -697,6 +700,17 @@ export default function RentalOperations() {
     const cmp = sort.col ? makeSortComparator(acc[sort.col] ?? ((r) => (r as any)[sort.col!]), sort.dir) : null;
     return cmp ? [...filtered].sort(cmp) : filtered;
   }, [filtered, sort]);
+  const pageCount = Math.max(1, Math.ceil(sorted.length / RENTAL_ROWS_PER_PAGE));
+  const currentPage = Math.min(page, pageCount - 1);
+  const pageStart = currentPage * RENTAL_ROWS_PER_PAGE;
+  const pageEnd = Math.min(pageStart + RENTAL_ROWS_PER_PAGE, sorted.length);
+  const visibleRows = useMemo(
+    () => sorted.slice(pageStart, pageEnd),
+    [sorted, pageStart, pageEnd],
+  );
+  useEffect(() => {
+    setPage(0);
+  }, [cohort, search, amsF, catF, classF, markF, originF, includePended, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, sort]);
 
   // mutations
   const markMut = useMutation({
@@ -1208,7 +1222,9 @@ export default function RentalOperations() {
         </label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire (≤9 mo)</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave</label>
-        <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{sorted.length} shown{isFetching ? " · refreshing…" : ""}</span>
+        <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>
+          {visibleRows.length} shown · {sorted.length} match{sorted.length === 1 ? "" : "es"}{isFetching ? " · refreshing…" : ""}
+        </span>
       </div>
 
       {/* LUCA Call Queue banner — the callable-shops feed handed to the LUCA agent */}
@@ -1278,7 +1294,7 @@ export default function RentalOperations() {
             </tr>
           </thead>
           <tbody>
-            {sorted.map((r, i) => {
+            {visibleRows.map((r, i) => {
               const tint = r.operator_mark === "open" ? "rgba(34,197,94,.08)" : r.operator_mark === "closed" ? "rgba(148,163,184,.10)" : r.operator_mark === "pickup" ? "rgba(234,179,8,.10)" : undefined;
               const ams = amsColor(r.ams_bucket);
               // Shop-of-record phone = the server-reconciled pick ONLY (the
@@ -1295,7 +1311,7 @@ export default function RentalOperations() {
               const origin = rentalOriginOf(r.source);
               return (
                 <tr key={r.case_key} onClick={() => setPanelKey(r.case_key)} style={{ cursor: "pointer", background: tint, opacity: r.operator_mark === "closed" ? 0.72 : 1 }}>
-                  <td style={{ ...tdStyle, textAlign: "right", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{i + 1}</td>
+                  <td style={{ ...tdStyle, textAlign: "right", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{pageStart + i + 1}</td>
                   <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
                     {r.case_key}
                     {/* Set by LUCA off a shop call, or by a lead in the Cases by
@@ -1445,6 +1461,25 @@ export default function RentalOperations() {
             {sorted.length === 0 && <tr><td colSpan={18} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
           </tbody>
         </table>
+      </div>
+      <div data-testid="rental-ops-pagination"
+        style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8, paddingTop: 8, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+        <span data-testid="rental-ops-pagination-status" style={{ marginRight: 4 }}>
+          {sorted.length > 0 ? `${pageStart + 1}–${pageEnd} of ${sorted.length}` : "0 of 0"}
+        </span>
+        <button type="button" data-testid="rental-ops-pagination-previous"
+          disabled={currentPage === 0}
+          onClick={() => setPage((p) => Math.max(0, p - 1))}
+          style={{ ...selStyle, padding: "4px 9px", cursor: currentPage === 0 ? "not-allowed" : "pointer", opacity: currentPage === 0 ? 0.5 : 1 }}>
+          Previous
+        </button>
+        <span style={{ minWidth: 76, textAlign: "center" }}>Page {currentPage + 1} of {pageCount}</span>
+        <button type="button" data-testid="rental-ops-pagination-next"
+          disabled={currentPage >= pageCount - 1}
+          onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+          style={{ ...selStyle, padding: "4px 9px", cursor: currentPage >= pageCount - 1 ? "not-allowed" : "pointer", opacity: currentPage >= pageCount - 1 ? 0.5 : 1 }}>
+          Next
+        </button>
       </div>
 
       {panelKey && <DetailPanel caseKey={panelKey} row={rows.find((r) => r.case_key === panelKey)} onClose={() => setPanelKey(null)} onMark={doMark} />}
