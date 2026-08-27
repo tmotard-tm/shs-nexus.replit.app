@@ -162,6 +162,7 @@ function validNewBody(ldap: string): Record<string, unknown> {
     requestType: "new",
     problemCategory: "breakdown",
     symptom: "Van died on the highway; will not restart.",
+    nearestBranch: "Enterprise, 2841 Airline Blvd, Portsmouth, VA",
     isOver21: "yes",
     ackNotMaintenance: true,
     ackCannotDriveSafely: true,

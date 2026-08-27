@@ -863,6 +863,16 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
   // fresh signature on the FULL acknowledgement set, every single time.
   const requestType = String(b.requestType ?? "new") === "extension" ? "extension" : "new";
   const isExtension = requestType === "extension";
+  const nearestBranch = s(b.nearestBranch, 200);
+  if (!isExtension && !nearestBranch) {
+    return {
+      code: 400,
+      json: {
+        success: false,
+        message: "Please enter the Enterprise pickup location where your rental should be reserved.",
+      },
+    };
+  }
 
   const category = isExtension ? null : (s(b.problemCategory, 40) ?? "");
   if (!isExtension && !PROBLEM_CATEGORIES.has(category as string)) {
@@ -1132,7 +1142,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
           ${s(b.occurredAt, 40)}::timestamptz, ${num(b.jobsAffected)}, ${s(b.whatWasTried, 1000)},
           ${s(b.shopName, 200)}, ${s(b.shopAddress, 300)}, ${s(b.shopCity, 80)},
           ${shopState}, ${s(b.shopPostal, 12)}, ${s(b.shopPhone, 30)},
-          ${s(b.nearestBranch, 200)},
+          ${nearestBranch},
           ${bool(b.hasAppointment)}, ${s(b.appointmentAt, 40)}::timestamptz, ${num(b.shopEstimatedDays)},
           ${POLICY_VERSION}, ${acksRequired ? sql`now()` : null}, ${ctx.ip || null},
           ${acks.ack_not_maintenance}, ${acks.ack_cannot_drive_safely}, ${acks.ack_has_appointment},

@@ -26,6 +26,10 @@ let savedAlertPhones: string | undefined;
 
 async function cleanupFixtures() {
   await db.execute(sql`
+    DELETE FROM vrm_byov_status
+    WHERE upper(btrim(ldap)) LIKE ${LDAP_PREFIX + "%"}
+  `);
+  await db.execute(sql`
     DELETE FROM vrm_rental_request
     WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}
   `);
@@ -70,6 +74,16 @@ async function seedRoster(input: {
   `);
 }
 
+async function seedByov(ldap: string) {
+  await db.execute(sql`
+    INSERT INTO vrm_byov_status (ldap, status, synced_at)
+    VALUES (${ldap}, 'ENROLLED', now())
+    ON CONFLICT (ldap) DO UPDATE SET
+      status = EXCLUDED.status,
+      synced_at = EXCLUDED.synced_at
+  `);
+}
+
 async function seedToken(ldap: string, token: string) {
   await db.execute(sql`
     INSERT INTO vrm_form_tokens (
@@ -99,6 +113,7 @@ function validNewBody(ldap: string): Record<string, unknown> {
     requestType: "new",
     problemCategory: "breakdown",
     symptom: "Van died on the highway; will not restart.",
+    nearestBranch: "Enterprise, 2841 Airline Blvd, Portsmouth, VA",
     isOver21: "yes",
     ackNotMaintenance: true,
     ackCannotDriveSafely: true,
@@ -321,6 +336,62 @@ describe("public rental request active technician identity", () => {
     assert.equal(json.identity.techName, "Current Person");
     assert.equal(json.identity.district, "8220");
     assert.equal(json.identity.homeState, "MI");
+  });
+
+  test("BYOV new submit rejects a blank Enterprise branch without inserting a request", async () => {
+    const ldap = `${LDAP_PREFIX}J`;
+    await seedRoster({
+      ldap,
+      name: "BYOV Technician",
+      status: "A",
+      district: "8220",
+      state: "VA",
+    });
+    await seedByov(ldap);
+    const body = validNewBody(ldap);
+    delete body.nearestBranch;
+
+    const { status, json } = await post(
+      "/api/public/rental-request/open/submit",
+      body,
+    );
+
+    assert.equal(status, 400, JSON.stringify(json));
+    assert.match(String(json.message), /Enterprise.*location|branch/i);
+    const { rows } = await db.execute(sql`
+      SELECT count(*)::int AS n
+      FROM vrm_rental_request
+      WHERE ldap = ${ldap}
+    `);
+    assert.equal(Number((rows as any[])[0]?.n ?? 0), 0);
+  });
+
+  test("BYOV new submit stores the technician's Enterprise branch", async () => {
+    const ldap = `${LDAP_PREFIX}K`;
+    const nearestBranch = "Enterprise, 2841 Airline Blvd, Portsmouth, VA";
+    await seedRoster({
+      ldap,
+      name: "BYOV Technician",
+      status: "A",
+      district: "8220",
+      state: "VA",
+    });
+    await seedByov(ldap);
+
+    const { status, json } = await post(
+      "/api/public/rental-request/open/submit",
+      { ...validNewBody(ldap), nearestBranch: `  ${nearestBranch}  ` },
+    );
+
+    assert.equal(status, 200, JSON.stringify(json));
+    const { rows } = await db.execute(sql`
+      SELECT is_byov, tech_reported_branch
+      FROM vrm_rental_request
+      WHERE request_no = ${Number(json.requestNo)}
+    `);
+    const row = (rows as any[])[0];
+    assert.equal(row.is_byov, true);
+    assert.equal(row.tech_reported_branch, nearestBranch);
   });
 
   test("submit records authoritative roster district and state, not client replacements", async () => {

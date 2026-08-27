@@ -33,7 +33,7 @@
 - Produces: `400 { success: false, message: string }` for a blank branch on `requestType: "new"`
 - Persists: normalized branch text in `vrm_rental_request.tech_reported_branch`
 
-- [ ] **Step 1: Write the failing public-route tests**
+- [x] **Step 1: Write the failing public-route tests**
 
 Add tests using the existing Express/DB harness that:
 
@@ -42,7 +42,7 @@ Add tests using the existing Express/DB harness that:
 
 Update shared “valid new request” test fixtures in the touched regression files to include that branch so they continue representing valid submissions under the approved contract.
 
-- [ ] **Step 2: Run the server test and confirm RED**
+- [x] **Step 2: Run the server test and confirm RED**
 
 Run:
 
@@ -52,7 +52,7 @@ npx tsx --test --test-force-exit tests/rental-active-identity.test.ts
 
 Expected: the blank-branch test fails because the route currently accepts the request.
 
-- [ ] **Step 3: Implement the minimal server validation**
+- [x] **Step 3: Implement the minimal server validation**
 
 In `screenAndRecord`:
 
@@ -62,7 +62,7 @@ In `screenAndRecord`:
 
 Do not apply this rule to extensions.
 
-- [ ] **Step 4: Run the server regressions and confirm GREEN**
+- [x] **Step 4: Run the server regressions and confirm GREEN**
 
 Run each command separately:
 
