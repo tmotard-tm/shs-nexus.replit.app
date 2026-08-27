@@ -85,7 +85,7 @@ Expected: all three suites pass.
 - Produces: visible branch input bound to existing `nearestBranch` state
 - Submits: `nearestBranch` in the existing public request payload
 
-- [ ] **Step 1: Write the failing real-page BYOV tests**
+- [x] **Step 1: Write the failing real-page BYOV tests**
 
 Extend the jsdom route fixture so a test can verify with `identity.isByov: true`. Through the rendered React page:
 
@@ -96,7 +96,7 @@ Extend the jsdom route fixture so a test can verify with `identity.isByov: true`
 
 Reset the identity fixture after each test so existing non-BYOV and extension tests remain isolated.
 
-- [ ] **Step 2: Run the form test and confirm RED**
+- [x] **Step 2: Run the form test and confirm RED**
 
 Run:
 
@@ -106,7 +106,7 @@ npx tsx --tsconfig tsconfig.dom-tests.json --test --test-force-exit tests/rental
 
 Expected: the BYOV branch-visibility assertion fails because the current UI hides the only applicable branch field.
 
-- [ ] **Step 3: Implement the minimal BYOV form change**
+- [x] **Step 3: Implement the minimal BYOV form change**
 
 In `rental-request-form.tsx`:
 
@@ -116,7 +116,7 @@ In `rental-request-form.tsx`:
 4. Show BYOV-specific description text while reusing the existing branch label, placeholder, warning, state binding, and inline error.
 5. Leave extensions and the non-BYOV repair-shop card unchanged.
 
-- [ ] **Step 4: Run the form test and confirm GREEN**
+- [x] **Step 4: Run the form test and confirm GREEN**
 
 Run:
 

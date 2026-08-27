@@ -74,6 +74,9 @@ const IDENTITY = {
   mobilePhone: "5175550100",
   isByov: false,
 };
+let verifiedIdentity = { ...IDENTITY };
+let verifyResume: any = null;
+let verifiedOpenRentals = 1;
 
 type CapturedRequest = { method: string; path: string; body?: any };
 const requests: CapturedRequest[] = [];
@@ -90,11 +93,14 @@ function route(method: string, url: URL): Response {
   if (method === "POST" && url.pathname.endsWith("/open/verify")) {
     return json({
       verified: true,
-      openRentals: 1,
-      currentRental: { rental_vendor: "Enterprise", veh_desc: "Sedan" },
+      openRentals: verifiedOpenRentals,
+      currentRental: verifiedOpenRentals > 0
+        ? { rental_vendor: "Enterprise", veh_desc: "Sedan" }
+        : null,
       allowed: { new: true, extension: true },
       blocking: { new: null, extension: null },
-      identity: IDENTITY,
+      identity: verifiedIdentity,
+      resume: verifyResume,
     });
   }
   if (method === "POST" && url.pathname.endsWith("/open/submit")) {
@@ -144,6 +150,9 @@ async function cleanup() {
   queryClient.clear();
   requests.length = 0;
   scrollTargets.length = 0;
+  verifiedIdentity = { ...IDENTITY };
+  verifyResume = null;
+  verifiedOpenRentals = 1;
 }
 
 afterEach(cleanup);
@@ -282,4 +291,59 @@ test("reported identity changes submit for review without replacing verified LDA
   assert.match(sent.body.identityCorrection, /name: Martin Bailey -> Martin B\./i);
   assert.match(sent.body.identityCorrection, /LDAP: MBAILE5 -> MBAILE9/i);
   assert.match(sent.body.identityCorrection, /district: 8220 -> 8333/i);
+});
+
+test("BYOV new request requires and submits the Enterprise pickup branch", async () => {
+  verifiedIdentity = { ...IDENTITY, isByov: true };
+  verifiedOpenRentals = 0;
+  verifyResume = {
+    answers: {
+      problemCategory: "breakdown",
+      symptom: "BYOV vehicle will not start.",
+      isTowed: "no",
+      isOver21: "yes",
+      nearestBranch: "",
+    },
+  };
+  await renderVerified();
+  await act(async () => button("Correct").click());
+  await settle();
+
+  const branch = container!.querySelector<HTMLInputElement>("#branch2");
+  assert.ok(branch, "BYOV new request must render the Enterprise branch input");
+
+  for (const checkbox of Array.from(container!.querySelectorAll<HTMLButtonElement>('[role="checkbox"]'))) {
+    if (checkbox.getAttribute("aria-checked") !== "true") {
+      await act(async () => checkbox.click());
+    }
+  }
+  await act(async () => button("Submit request").click());
+  await settle();
+
+  assert.equal(
+    requests.some((r) => r.method === "POST" && r.path.endsWith("/open/submit")),
+    false,
+    "blank BYOV branch must prevent submission",
+  );
+  assert.match(container!.textContent || "", /Enterprise (location|pickup location)/i);
+
+  const nearestBranch = "Enterprise, 2841 Airline Blvd, Portsmouth, VA";
+  await setValue(branch, nearestBranch);
+  assert.equal(branch.value, nearestBranch);
+  await act(async () => button("Submit request").click());
+  await settle();
+
+  const immediate = requests.find((r) => r.method === "POST" && r.path.endsWith("/open/submit"));
+  if (!immediate) {
+    const errors = Array.from(container!.querySelectorAll<HTMLElement>(".text-red-600"))
+      .map((node) => node.textContent?.trim())
+      .filter(Boolean);
+    assert.fail(`BYOV submit remained blocked after entering branch: ${errors.join(" | ")}`);
+  }
+
+  const sent = await waitFor(
+    "BYOV new submit request",
+    () => requests.find((r) => r.method === "POST" && r.path.endsWith("/open/submit")),
+  );
+  assert.equal(sent.body.nearestBranch, nearestBranch);
 });

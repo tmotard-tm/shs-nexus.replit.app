@@ -354,6 +354,9 @@ export default function RentalRequestForm() {
       if (!appointmentDate) e.appointmentAt = "When is your first day on the road?";
       if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
     }
+    if (identity?.isByov && !isNoVan && !nearestBranch.trim()) {
+      e.nearestBranch = "We need the Enterprise pickup location for your reservation. Google it if you are not sure.";
+    }
     if (!identity?.isByov && !isNoVan) {
       if (!shopName.trim()) e.shopName = "Which shop?";
       if (!shopAddress.trim()) e.shopAddress = "We need the shop's street address.";
@@ -840,23 +843,28 @@ export default function RentalRequestForm() {
               </CardContent>
             </Card>
 
-            {/* No van yet: no shop to name, but the reservation still needs a
-                start date and a location. Same columns the booking chain reads. */}
-            {isNoVan && (
+            {/* No van/BYOV: no shop to name, but the reservation still needs
+                an Enterprise pickup location. No-van also supplies its start
+                date here. Same columns the booking chain reads. */}
+            {(isNoVan || identity?.isByov) && (
               <Card className="rounded-xl border-[#D8E2EE] shadow-sm">
                 <CardHeader>
                   <CardTitle className="flex items-center text-base"><span className="mr-2.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#00529B] align-middle text-[11px] font-bold text-white">3</span>Your rental</CardTitle>
                   <CardDescription>
-                    You have no work van yet, so we just need when and where.
+                    {isNoVan
+                      ? "You have no work van yet, so we just need when and where."
+                      : "Because your work vehicle is BYOV, we need the Enterprise location where you will pick up the rental."}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {isNoVan && (<>
                   <div className="space-y-2">
                     <Label htmlFor="need">When is your first day on the road?</Label>
                     <Input id="need" type="date" value={appointmentDate}
                            onChange={(e) => { setAppointmentDate(e.target.value); clearErr("appointmentAt"); }} />
                   </div>
                   {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
+                  </>)}
                   <div className="space-y-2">
                     <Label htmlFor="branch2">Which Enterprise location do you need the reservation to be made? (no airports, if possible)</Label>
                     <Input id="branch2" value={nearestBranch}
