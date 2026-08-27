@@ -135,11 +135,11 @@ Expected: all tests pass, including BYOV visibility, blank refusal, and payload 
 - Consumes: completed server and form changes
 - Produces: evidence that the branch contract works end-to-end without new type regressions
 
-- [ ] **Step 1: Re-run all targeted tests**
+- [x] **Step 1: Re-run all targeted tests**
 
 Run the four test commands from Tasks 1 and 2 separately and confirm every suite passes.
 
-- [ ] **Step 2: Run TypeScript verification**
+- [x] **Step 2: Run TypeScript verification**
 
 Run:
 
@@ -149,12 +149,12 @@ npm run check
 
 Expected: zero new errors compared with the repository’s pre-change baseline.
 
-- [ ] **Step 3: Restart the application workflow**
+- [x] **Step 3: Restart the application workflow**
 
 Restart `Start application`, then refresh workflow and browser logs.
 
 Expected: the server starts successfully with no new branch-related runtime or browser-console error.
 
-- [ ] **Step 4: Inspect the rendered public form**
+- [x] **Step 4: Inspect the rendered public form**
 
 Capture the public rental-request page in the running app if authentication and fixture state permit. If the public flow cannot be advanced without a live technician identity, rely on the real-page jsdom test and report that limitation rather than mutating production or employee data.
