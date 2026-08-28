@@ -408,6 +408,7 @@ test("the destructive transaction uses the advisory-lock session and every inven
     "getTruckInventory",
     "getTruckInventoryByEnterpriseId",
     "getTruckInventoryByDistrict",
+    "seedDefaultDistrictCostCenters",
   ]) {
     const start = storageSource.lastIndexOf(`async ${method}(`);
     const end = storageSource.indexOf("\n  async ", start + 1);

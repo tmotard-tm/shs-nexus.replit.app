@@ -7281,7 +7281,9 @@ export class DatabaseStorage implements IStorage {
   async seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number; insertedDistricts: string[] }> {
     // Collect distinct districts from live sources
     const sources = await Promise.all([
-      db.selectDistinct({ d: truckInventory.district }).from(truckInventory),
+      db.selectDistinct({ d: truckInventory.district })
+        .from(truckInventory)
+        .where(sql`${truckInventory.extractDate} = (SELECT MAX(extract_date) FROM truck_inventory)`),
       db.selectDistinct({ d: tpmsCachedAssignments.districtNo }).from(tpmsCachedAssignments),
       db.selectDistinct({ d: techVehicleAssignments.districtNo }).from(techVehicleAssignments),
       // TPMS change log records historical district changes; pull both old and new values
