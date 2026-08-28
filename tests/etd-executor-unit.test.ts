@@ -36,7 +36,6 @@ import {
   isContractBlockLive,
   etTodayISO,
   claimBookingWork,
-  quoteWithReportedFallback,
   type QueueItem,
   type ScheduleWindow,
 } from "../server/vrm/forms/cutover-orchestrator";
@@ -52,7 +51,7 @@ import {
   intentAddress,
   scrubPlaceholder,
   classForIntent,
-  quoteWithReportedFallback,
+  quoteSelectedAddress,
   redactedShape,
 } from "../server/vrm/etd/executor";
 import { resolvePickupWindow } from "../server/vrm/etd/pickup-window";
@@ -470,6 +469,19 @@ describe("intent addressing", () => {
     assert.equal(got.wantState, "OH");
   });
 
+  test("the technician's selected branch is the first booking location before the shop", () => {
+    const got = intentAddress(item({
+      facts: { requestSeed: {
+        reportedBranch: "Enterprise, 4501 Main St, Testville, OH 44101",
+        shopAddress: "100 Repair Way",
+        shopCity: "Elsewhere",
+        shopState: "OH",
+      } },
+    }));
+    assert.equal(got.address, "Enterprise, 4501 Main St, Testville, OH 44101");
+    assert.equal(got.wantState, "OH");
+  });
+
   test("a request with no shop address REFUSES a reported branch that names no place", () => {
     // LGONZ15 typed the single word "Enterprise"; the geocoder resolved it to Boston
     // Logan and booked a California technician a car 3,000 miles away (2026-08-19).
@@ -538,12 +550,11 @@ describe("intent addressing", () => {
     );
   });
 
-  test("one real shop field survives scrubbing and still quotes the shop", () => {
+  test("one real shop field remains the fallback when no reported branch was supplied", () => {
     const got = intentAddress(item({ facts: { requestSeed: {
       shopAddress: "na", shopCity: "Pittsburgh", shopState: "PA",
-      reportedBranch: "Enterprise 300 pinewood dr Warrendale pa 15086",
     } } }));
-    assert.equal(got.address, "Pittsburgh, PA", "a real city beats the fallback");
+    assert.equal(got.address, "Pittsburgh, PA");
     assert.equal(got.wantState, "PA");
   });
 
@@ -1488,18 +1499,7 @@ describe("account additional-info is read live, never inherited from the capture
 });
 
 
-/**
- * The nearest counter is not always one we can rent from.
- *
- * Request #95 (SWICKLA, 2026-08-24) geocoded to its repair shop and took the closest
- * branch, a National-brand desk 0.29 mi nearer than the Enterprise branch that actually
- * had the approved class on the lot. The National desk answers with an EMPTY class list,
- * which surfaces as `class_unmapped` and reads as a vehicle-mapping bug, so the request
- * sat unbooked for hours. book_request.py had the fallback and rescued it; this path did
- * not. These pin the fallback and, just as importantly, pin that it stays OUT of the way
- * when the first quote is fine.
- */
-describe("reported-branch fallback", () => {
+describe("selected request branch authority", () => {
   /** A quote stub that answers differently per address, and records what it was asked. */
   function addressAwareEtd(byAddress: Record<string, CarClass[] | "throw">) {
     const asked: string[] = [];
@@ -1521,69 +1521,29 @@ describe("reported-branch fallback", () => {
     return { client: client as unknown as EtdClient, asked };
   }
 
-  const SHOP = "2521 N Clairemont Ave, EAU Claire, WI";
+  const FLEET = "7440 W Cactus Rd Ste A7, Peoria, AZ 85381";
   const REPORTED = "2103 S Hastings way Altoona Wi 54720";
-  const SOME: CarClass[] = [{
-    code: "SCAR", description: "VOLKSWAGEN JETTA OR SIMILAR", passengers: "5", bags: "3",
-    base_rate: 33.02, estimated_total: 42.01, currency: "USD", unit: null, unlimited_miles: null,
-  }];
 
-  function item(reportedBranch: string | null): QueueItem {
+  function item(reportedBranch: string | null, approvedBranch?: string | null): QueueItem {
     return {
       workflowType: WORKFLOW_REQUEST,
-      facts: { requestSeed: { reportedBranch } },
+      facts: { requestSeed: { reportedBranch, approvedBranch } },
     } as unknown as QueueItem;
   }
 
-  test("an empty class list at the shop address re-quotes from the branch the tech named", async () => {
-    const { client, asked } = addressAwareEtd({ [SHOP]: [], [REPORTED]: SOME });
-    const out = await quoteWithReportedFallback(
-      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
-    assert.equal(out.usedReported, true, "the fallback must fire on an empty list");
-    assert.equal((out.q.classes ?? []).length, 1, "and the returned quote is the one WITH cars");
-    assert.deepEqual(asked, [SHOP, REPORTED], "shop first, tech's answer only as a fallback");
-  });
-
-  test("a shop address that already offers cars is never second-guessed", async () => {
-    const { client, asked } = addressAwareEtd({ [SHOP]: SOME, [REPORTED]: SOME });
-    const out = await quoteWithReportedFallback(
-      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+  test("Fleet's approved branch never falls back to the technician branch", async () => {
+    const { client, asked } = addressAwareEtd({ [FLEET]: [], [REPORTED]: [] });
+    const out = await quoteSelectedAddress(
+      client, item(REPORTED, FLEET), FLEET, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
     assert.equal(out.usedReported, false);
-    assert.deepEqual(asked, [SHOP], "one quote only — the fallback must not cost a second call");
+    assert.deepEqual(asked, [FLEET], "nearbyOnEmpty may walk branches, but the address seed cannot change");
   });
 
-  test("a reported branch naming no place is refused, not geocoded", async () => {
-    // LGONZ15 typed the single word "Enterprise" and it resolved to Boston Logan.
-    const { client, asked } = addressAwareEtd({ [SHOP]: [], Enterprise: SOME });
-    const out = await quoteWithReportedFallback(
-      client, item("Enterprise"), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
-    assert.equal(out.usedReported, false, "no digit and no state names nowhere on earth");
-    assert.deepEqual(asked, [SHOP], "the unlocatable string must never reach the geocoder");
-  });
-
-  test("when the fallback is empty too, the original quote survives to report availability", async () => {
-    const { client, asked } = addressAwareEtd({ [SHOP]: [], [REPORTED]: [] });
-    const out = await quoteWithReportedFallback(
-      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
-    assert.equal(out.usedReported, false);
-    assert.equal((out.q.classes ?? []).length, 0, "an empty list is a real answer about the lot");
-    assert.deepEqual(asked, [SHOP, REPORTED]);
-  });
-
-  test("a fallback that throws the state guard does not turn 'no cars' into a hard abort", async () => {
-    const { client } = addressAwareEtd({ [SHOP]: [], [REPORTED]: "throw" });
-    const out = await quoteWithReportedFallback(
-      client, item(REPORTED), SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
-    assert.equal(out.usedReported, false, "the throw is swallowed");
-    assert.equal(out.q.branch_code, "4450", "and the first quote is still what comes back");
-  });
-
-  test("a cutover has no reported branch and is left entirely alone", async () => {
-    const { client, asked } = addressAwareEtd({ [SHOP]: [] });
-    const cutover = { workflowType: WORKFLOW_CUTOVER, facts: {} } as unknown as QueueItem;
-    const out = await quoteWithReportedFallback(
-      client, cutover, SHOP, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
-    assert.equal(out.usedReported, false);
-    assert.deepEqual(asked, [SHOP]);
+  test("the technician branch is quoted once, with nearby fallback handled inside the client", async () => {
+    const { client, asked } = addressAwareEtd({ [REPORTED]: [] });
+    const out = await quoteSelectedAddress(
+      client, item(REPORTED), REPORTED, "", "", "2026-08-24T11:00:00", "2026-08-31T09:00:00");
+    assert.equal(out.usedReported, true);
+    assert.deepEqual(asked, [REPORTED]);
   });
 });

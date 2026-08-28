@@ -81,6 +81,7 @@ const base = {
   occurred_at: new Date().toISOString(), jobs_affected: 2, what_was_tried: "jump",
   shop_name: "Shop", shop_address: "1 Main", shop_city: "Chicago",
   shop_state: "IL", shop_phone: "3125550101",
+  tech_reported_branch: "Enterprise, 201 W Madison St, Chicago, IL 60606",
   has_appointment: false, appointment_at: null, shop_estimated_days: 3,
   policy_complete: true, policy_version: "v1",
   approved_vehicle_class: "sedan",
@@ -259,6 +260,15 @@ test("the list shows every booking outcome without opening the drawer", async ()
   // The raw machine text never leaks into the table.
   assert.ok(!container!.textContent!.includes("aborted_before_open"),
     "the list must show outcomes, never raw machine errors");
+});
+
+test("the request ticket shows the branch selected by the technician", async () => {
+  await renderPage();
+  const drawer = await openDrawer(901);
+  assert.match(
+    drawer.textContent!,
+    /Requested branchEnterprise, 201 W Madison St, Chicago, IL 60606/,
+  );
 });
 
 test("failed booking: one consolidated card, plain language, quick action, raw error collapsed", async () => {

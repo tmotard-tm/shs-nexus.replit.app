@@ -70,9 +70,8 @@ interface Req {
   etd_booked_at?: string | null; etd_reference?: string | null;
   etd_reservation_id?: string | null; etd_error?: string | null;
   pickup_at?: string | null;
-  // The branch the technician typed on the form. Shown as the placeholder on
-  // the Fleet branch box so the reviewer can see what they said before
-  // overriding it.
+  // The branch the technician typed on the form. Shown on the request ticket
+  // and as the placeholder on Fleet's optional override.
   tech_reported_branch?: string | null;
   nearest_branch_name?: string | null;
   // What Enterprise ACTUALLY sold, off the workflow intent, plus whether the
@@ -1655,6 +1654,7 @@ export default function RentalRequests() {
                ["Pickup requested", detail.pickup_at
                  ? new Date(detail.pickup_at).toLocaleString("en-US", { timeZone: "America/New_York" }) + " ET"
                  : ""],
+                ["Requested branch", detail.tech_reported_branch],
                ["Branch", [detail.booked_facts?.branchName ?? detail.nearest_branch_name,
                            detail.booked_facts?.branchAddress].filter(Boolean).join(" — ")],
                ["Shop says days", detail.shop_estimated_days],

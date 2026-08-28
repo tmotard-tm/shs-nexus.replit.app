@@ -23,6 +23,9 @@ let server: any;
 let baseUrl = "";
 let employeeSequence = 0;
 let savedAlertPhones: string | undefined;
+let savedCommsKey: string | undefined;
+let savedCommsBaseUrl: string | undefined;
+const capturedAlertBatches: any[] = [];
 
 async function cleanupFixtures() {
   await db.execute(sql`
@@ -107,6 +110,18 @@ async function post(path: string, body: Record<string, unknown>) {
   };
 }
 
+async function waitForAlert(requestNo: number): Promise<string> {
+  const deadline = Date.now() + 2_000;
+  while (Date.now() < deadline) {
+    const message = capturedAlertBatches
+      .flatMap((batch) => batch?.messages ?? [])
+      .find((entry: any) => String(entry?.body ?? "").includes(`request #${requestNo}`));
+    if (message) return String(message.body);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`timed out waiting for Fleet alert for request #${requestNo}`);
+}
+
 function validNewBody(ldap: string): Record<string, unknown> {
   return {
     ldap,
@@ -130,20 +145,34 @@ before(async () => {
   await initFormsSchema();
   await cleanupFixtures();
   savedAlertPhones = process.env.RENTAL_REQUEST_ALERT_PHONES;
-  process.env.RENTAL_REQUEST_ALERT_PHONES = "";
+  savedCommsKey = process.env.COMMS_SEND_API_KEY;
+  savedCommsBaseUrl = process.env.COMMS_SEND_BASE_URL;
+  process.env.RENTAL_REQUEST_ALERT_PHONES = "5555550199";
+  process.env.COMMS_SEND_API_KEY = "test-only-key";
   const app = express();
   app.use(express.json());
+  app.post("/api/fs/comms/api/send-batch", (req, res) => {
+    capturedAlertBatches.push(req.body);
+    res.json({
+      results: (req.body?.messages ?? []).map(() => ({ status: "queued" })),
+    });
+  });
   registerRentalRequestPublicRoutes(app);
   await new Promise<void>((resolve) => {
     server = app.listen(0, "127.0.0.1", () => resolve());
   });
   baseUrl = `http://127.0.0.1:${(server.address() as any).port}`;
+  process.env.COMMS_SEND_BASE_URL = baseUrl;
 });
 
 after(async () => {
   server?.close();
   if (savedAlertPhones === undefined) delete process.env.RENTAL_REQUEST_ALERT_PHONES;
   else process.env.RENTAL_REQUEST_ALERT_PHONES = savedAlertPhones;
+  if (savedCommsKey === undefined) delete process.env.COMMS_SEND_API_KEY;
+  else process.env.COMMS_SEND_API_KEY = savedCommsKey;
+  if (savedCommsBaseUrl === undefined) delete process.env.COMMS_SEND_BASE_URL;
+  else process.env.COMMS_SEND_BASE_URL = savedCommsBaseUrl;
   await cleanupFixtures().catch(() => {});
   await pool.end().catch(() => {});
   const { fsPool } = await import("../server/fleet-scope-db");
@@ -392,6 +421,27 @@ describe("public rental request active technician identity", () => {
     const row = (rows as any[])[0];
     assert.equal(row.is_byov, true);
     assert.equal(row.tech_reported_branch, nearestBranch);
+  });
+
+  test("Fleet alert carries the technician's Enterprise branch", async () => {
+    const ldap = `${LDAP_PREFIX}L`;
+    const nearestBranch = "Enterprise, 2841 Airline Blvd, Portsmouth, VA";
+    await seedRoster({
+      ldap,
+      name: "Alert Branch Technician",
+      status: "A",
+      district: "8220",
+      state: "VA",
+    });
+
+    const { status, json } = await post(
+      "/api/public/rental-request/open/submit",
+      { ...validNewBody(ldap), nearestBranch },
+    );
+
+    assert.equal(status, 200, JSON.stringify(json));
+    const alert = await waitForAlert(Number(json.requestNo));
+    assert.match(alert, new RegExp(`Branch:\\s*${nearestBranch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
   });
 
   test("submit records authoritative roster district and state, not client replacements", async () => {

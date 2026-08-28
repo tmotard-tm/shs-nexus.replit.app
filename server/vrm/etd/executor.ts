@@ -362,35 +362,43 @@ export function intentAddress(item: QueueItem): {
   if (fleetBranch) {
     return { address: fleetBranch, code: "", wantState: "" };
   }
-  // BSOKOLO request b17c091a (2026-08-25): street "Na", city "Na", state PA —
-  // the technician's way of writing "not applicable" (truck taken off the
-  // road, no shop). Joined, "Na, PA" geocoded to the Balearic Islands and the
-  // US guard stopped the booking — even though his reported branch
-  // ("Enterprise 300 pinewood dr Warrendale pa 15086") was fully locatable.
-  // A placeholder is an answer of NO answer, and a state alone names no
-  // place: with every free-text shop field scrubbed empty this is a NO-SHOP
-  // request, so fall through to the reported branch like one.
-  const shopStreet = scrubPlaceholder(rs.shopAddress);
-  const shopCity = scrubPlaceholder(rs.shopCity);
-  const shopPostal = scrubPlaceholder(rs.shopPostal);
-  let address = (shopStreet || shopCity || shopPostal)
-    ? joinAddress([shopStreet, shopCity, rs.shopState, shopPostal])
-    : "";
-  if (!address) {
-    // No shop: a new hire awaiting a vehicle. Their typed branch is all we have, and it
-    // is free text - LGONZ15 typed the single word "Enterprise", which geocoded to
-    // Boston Logan International Airport and booked a California technician a car 3,000
-    // miles away on 2026-08-19. A string with no street number, no ZIP and no state
-    // names no place on earth; refuse it rather than let the geocoder pick.
-    const reported = String(rs.reportedBranch || "").trim();
+  // The form asks every technician for the Enterprise branch where they want
+  // to collect the rental. That answer is the first booking location; the
+  // repair shop is only a legacy fallback when an older request has no branch.
+  // nearbyOnEmpty owns the nearest-branch walk when this selected branch has no
+  // inventory, so starting at the shop would silently skip the technician's
+  // choice.
+  const reported = String(rs.reportedBranch || "").trim();
+  if (reported) {
+    // LGONZ15 typed the single word "Enterprise", which geocoded to Boston
+    // Logan International Airport and booked a California technician a car
+    // 3,000 miles away. A string with no street number, ZIP or state names no
+    // place on earth; refuse it rather than let the geocoder pick.
     const locatable = /\d/.test(reported) || /(^|[\s,])[A-Z]{2}([\s,]|$)/.test(reported.toUpperCase());
     if (!locatable) {
       throw new Error(
         `the technician's reported branch (${JSON.stringify(reported)}) names no location - ` +
-        "no street number, ZIP or state - and there is no shop address to fall back on",
+        "no street number, ZIP or state",
       );
     }
-    address = reported;
+    const reportedState =
+      /(?:^|[\s,])([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*$/.exec(reported.toUpperCase())?.[1] ?? "";
+    const want = String(reportedState || rs.shopState || rs.homeState || "").trim().toUpperCase();
+    return { address: reported, code: "", wantState: want.slice(0, 2) };
+  }
+
+  // Older rows can predate the required branch question. Keep the repair shop
+  // as their fallback instead of making those requests unbookable.
+  const shopStreet = scrubPlaceholder(rs.shopAddress);
+  const shopCity = scrubPlaceholder(rs.shopCity);
+  const shopPostal = scrubPlaceholder(rs.shopPostal);
+  const address = (shopStreet || shopCity || shopPostal)
+    ? joinAddress([shopStreet, shopCity, rs.shopState, shopPostal])
+    : "";
+  if (!address) {
+    throw new Error(
+      "no location to book from. Set a branch on the approval (Fleet branch) and this will book.",
+    );
   }
   // shopState first, then the technician's home state. Never empty when we know either,
   // because an empty wantState turns the wrong-geocode guard OFF entirely.
@@ -499,37 +507,13 @@ const normLabel = (s: unknown): string =>
     .toLowerCase();
 
 /**
- * The class decision the server persists verbatim, plus the raw offered class the
- * payload surgery needs (returned separately so it never reaches the database).
+ * Quote the one authoritative address selected by intentAddress.
+ *
+ * For rental requests, EtdClient's nearbyOnEmpty walk tries the next closest
+ * branches when the selected location has no inventory. Changing the address
+ * seed here would bypass a Fleet override or the technician's required answer.
  */
-/**
- * Quote, and when the shop address resolves to a branch that stocks nothing, re-quote
- * from the branch the technician named on the form.
- *
- * The NEAREST branch is not always a branch we can rent from. Request #95 (SWICKLA,
- * 2026-08-24) geocoded to its repair shop in Eau Claire and took the closest counter,
- * `44N1 EAU NATIONAL` at 5.66 mi - a National-brand desk that returns an EMPTY class
- * list on this account. The next one out, `44V6 EAU CLAIRE AIRPORT`, is Enterprise-brand
- * and returns nothing either. The real branch, `4450 EAU CLAIRE`, sits 0.29 mi further
- * at 5.94 mi with 17 classes on the lot, including the exact class that was approved.
- * An empty list surfaces as `class_unmapped`, so the request sat for hours reading like
- * a vehicle-mapping bug while a car was available the whole time.
- *
- * `book_request.py` has carried this fallback since the 8/13 cutover, and that is the
- * only reason the Python booker rescued #95 when this path could not. The technician
- * answered "which Enterprise branch is nearest you" on the form; when our own geocode
- * lands somewhere that cannot rent, their answer is the better address. Mirrors
- * `book_one`'s `used_reported` block - change both or neither.
- *
- * Deliberately NOT applied to the commit path. That one re-quotes against the branch the
- * confirmed preview already priced, so moving its address would book a different branch
- * than the one an operator approved.
- *
- * The `locatable` guard is the same one `intentAddress` uses: LGONZ15 typed the single
- * word "Enterprise", which geocoded to Boston Logan and would have sent a California
- * technician 3,000 miles. A reported branch with no digit and no state names no place.
- */
-export async function quoteWithReportedFallback(
+export async function quoteSelectedAddress(
   etd: EtdClient,
   item: QueueItem,
   address: string,
@@ -544,28 +528,12 @@ export async function quoteWithReportedFallback(
   // reservation must sit at the branch holding the Holman agreement.
   const nearby = item.workflowType === WORKFLOW_REQUEST;
   const q = await guardedQuote(etd, address, code, wantState, start, end, nearby);
-  if ((q.classes || []).length) return { q, usedReported: false };
-
   const rs = ((item.facts || {}) as Record<string, any>).requestSeed || {};
   const reported = String(rs.reportedBranch || "").trim();
-  // No seed (a cutover has none), nothing typed, or the same address we just tried.
-  if (!reported || reported.toLowerCase() === address.toLowerCase()) {
-    return { q, usedReported: false };
-  }
-  const locatable =
-    /\d/.test(reported) || /(^|[\s,])[A-Z]{2}([\s,]|$)/.test(reported.toUpperCase());
-  if (!locatable) return { q, usedReported: false };
-
-  // A failed fallback must not destroy the original quote: the first result still
-  // carries the branch and journey the caller reports on, and a thrown geocode guard
-  // here would turn "this branch has no cars" into a hard abort.
-  try {
-    const q2 = await guardedQuote(etd, reported, code, wantState, start, end);
-    if ((q2.classes || []).length) return { q: q2, usedReported: true };
-  } catch {
-    /* keep the original empty quote and let the class note report availability */
-  }
-  return { q, usedReported: false };
+  const approved = String(rs.approvedBranch || "").trim();
+  const usedReported =
+    !approved && !!reported && reported.toLowerCase() === address.toLowerCase();
+  return { q, usedReported };
 }
 
 export function classForIntent(
@@ -825,7 +793,7 @@ async function runPreview(
       const { address, code, wantState } = intentAddress(item);
       if (!address) throw new Error("no branch/shop address seed on the intent facts");
 
-      const { q, usedReported } = await quoteWithReportedFallback(
+      const { q, usedReported } = await quoteSelectedAddress(
         etd, item, address, code, wantState, start, end,
       );
       const classes = q.classes || [];

@@ -306,46 +306,48 @@ def _scrub_placeholder(raw) -> str:
 
 
 def _initial_booking_address(r: dict) -> str:
-    """approved_branch -> scrubbed shop address -> LOCATABLE reported branch.
+    """approved_branch -> LOCATABLE reported branch -> scrubbed shop fallback.
 
     Mirrors `intentAddress` in server/vrm/etd/executor.ts - change both or
     neither.
 
-    BSOKOLO request b17c091a (2026-08-25): street "Na", city "Na", state PA -
-    the technician's "not applicable" (truck taken off the road, no shop).
-    Joined, "Na, PA" geocoded to the Balearic Islands and the US guard
-    stopped the booking even though his reported branch was fully locatable.
-    A placeholder is an answer of NO answer, and a state alone names no
-    place: with every free-text shop field scrubbed empty, this is a no-shop
-    request and the reported branch is the location.
-
-    The reported branch keeps the LGONZ15 rule (previously enforced only in
-    the server lane): "Enterprise" alone geocoded to Boston Logan and booked
-    a California technician a car 3,000 miles away on 2026-08-19. No street
-    number, no ZIP and no state names no place on earth - refuse rather than
-    let the geocoder pick.
+    Every new form asks where the technician wants to collect the rental.
+    Start there; nearby-on-empty walks to the next closest Enterprise branch
+    when that location has no inventory. The repair shop remains only for
+    older rows created before the branch answer was required.
     """
     fleet_branch = str(r.get("approved_branch") or "").strip()
     if fleet_branch:
         return fleet_branch
+    reported = str(r.get("tech_reported_branch") or "").strip()
+    if reported:
+        locatable = bool(re.search(r"\d", reported)) or \
+            bool(re.search(r"(^|[\s,])[A-Z]{2}([\s,]|$)", reported.upper()))
+        if not locatable:
+            raise RuntimeError(
+                f"the technician's reported branch ({reported!r}) names no location "
+                "- no street number, ZIP or state. Set a branch on the approval "
+                "(Fleet branch) and this will book.")
+        return reported
     street = _scrub_placeholder(r.get("shop_address"))
     city = _scrub_placeholder(r.get("shop_city"))
     if street or city:
         return _join_address(street, city, r.get("shop_state"))
-    reported = str(r.get("tech_reported_branch") or "").strip()
-    if not reported:
-        raise RuntimeError(
-            "no location to book from. Set a branch on the approval "
-            "(Fleet branch) and this will book.")
-    locatable = bool(re.search(r"\d", reported)) or \
-        bool(re.search(r"(^|[\s,])[A-Z]{2}([\s,]|$)", reported.upper()))
-    if not locatable:
-        raise RuntimeError(
-            f"the technician's reported branch ({reported!r}) names no location "
-            "- no street number, ZIP or state - and there is no shop address to "
-            "fall back on. Set a branch on the approval (Fleet branch) and this "
-            "will book.")
-    return reported
+    raise RuntimeError(
+        "no location to book from. Set a branch on the approval "
+        "(Fleet branch) and this will book.")
+
+
+def _booking_want_state(r: dict) -> str:
+    """Expected state for the selected address; mirrors server intentAddress."""
+    if str(r.get("approved_branch") or "").strip():
+        return ""
+    reported = str(r.get("tech_reported_branch") or "").strip().upper()
+    if reported:
+        match = re.search(r"(?:^|[\s,])([A-Z]{2})(?:\s+\d{5}(?:-\d{4})?)?\s*$", reported)
+        if match:
+            return match.group(1)
+    return str(r.get("shop_state") or r.get("home_state") or "").strip().upper()[:2]
 
 
 def _join_address(*parts) -> str:
@@ -569,9 +571,7 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         print(f"       start floored {r['start_dt']} -> {start_dt_s} (was in the past)")
     r["start_dt"], r["end_dt"] = start_dt_s, end_dt_s
 
-    # Which state the branch has to be in. The shop's state when we have one, the
-    # technician's home state otherwise - a new hire awaiting a vehicle has no shop.
-    want_state = str(r.get("shop_state") or r.get("home_state") or "").strip().upper()[:2]
+    want_state = _booking_want_state(r)
     if fleet_branch:
         # Fleet named the branch. The state guard exists to catch a geocode that
         # wandered off an address nobody checked; this address WAS checked, by a
@@ -583,26 +583,12 @@ def book_one(etd: EtdClient, r: dict, template: dict, mapping: dict,
         etd, address, r["start_dt"], r["end_dt"], want_state)
     classes = q.get("classes") or []
 
-    # The technician told us the closest Enterprise branch when they filed.
-    # That answer is the fallback address: a shop address that geocodes badly
-    # fails HERE, hours after the technician walked away from the form, and
-    # the 8/13 cutover measured what silent branch resolution costs (14
-    # bookings at non-contract branches). Their answer anchors the quote when
-    # ours cannot.
     reported = str(r.get("tech_reported_branch") or "").strip()
-    used_reported = False
-    if not classes and reported:
-        q2, end2, short2 = quote_with_fallback(
-            etd, reported, r["start_dt"], r["end_dt"], want_state)
-        if q2.get("classes"):
-            q, booked_end, shortened = q2, end2, short2
-            classes = q.get("classes")
-            used_reported = True
+    used_reported = bool(reported and not fleet_branch)
     if not classes:
         raise RuntimeError(
-            "ETD offered no classes at any duration, from the shop address"
-            + (" or the technician's reported branch" if reported else
-               "; no reported branch on the request to fall back to"))
+            "ETD offered no classes at the selected branch or the nearby "
+            "Enterprise branches checked for this request")
 
     # Class is decided from the roster, never from the technician, and never by
     # taking classes[0] — that is a Mitsubishi Mirage and it is the single

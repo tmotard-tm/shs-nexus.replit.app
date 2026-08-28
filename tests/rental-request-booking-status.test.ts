@@ -239,6 +239,22 @@ test("row etd_error with no parked intent is a failed verdict", () => {
   assert.deepEqual(s.actions, ["edit_class"]);
 });
 
+test("aggregate preview codes explain that the submitted branch could not be quoted", () => {
+  const s = deriveBookingStatus(
+    req({
+      status: "approved",
+      decided_at: new Date(NOW - 60_000).toISOString(),
+      etd_error: "preview: quote_failed,class_unmapped,branch_zip_missing,no_date",
+    }),
+    null,
+    NOW,
+  );
+  assert.equal(s.verdict, "failed");
+  assert.match(s.summary, /selected Enterprise branch.*could not be quoted/i);
+  assert.match(s.summary, /full street address, city, state, and ZIP/i);
+  assert.ok(s.actions.includes("open_workflow"));
+});
+
 test("failed intent (preview_failed) under an approved row reads failed with a fix", () => {
   const s = deriveBookingStatus(
     req({ status: "approved", decided_at: new Date(NOW - 60_000).toISOString() }),

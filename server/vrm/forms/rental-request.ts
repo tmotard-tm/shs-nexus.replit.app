@@ -652,7 +652,7 @@ async function alertFleet(r: {
   requestNo: number | null; ldap: string; techName?: string | null; truck?: string | null;
   decision: Decision; rule: number; reason: string; category: string;
   homeState?: string | null; shopName?: string | null; appointmentAt?: string | null;
-  regionOwner?: string | null;
+  regionOwner?: string | null; nearestBranch?: string | null;
 }): Promise<void> {
   // Every request needs a person now, so every request pushes. The old filter
   // existed to keep the alert worth reading when the engine resolved most
@@ -673,6 +673,7 @@ async function alertFleet(r: {
     + `${r.category.replace(/_/g, " ")}\n`
     // The engine's opinion rides along as a hint. It decided nothing.
     + `(engine would have said ${r.decision}, rule ${r.rule}: ${r.reason})\n`
+    + (r.nearestBranch ? `Branch: ${r.nearestBranch}\n` : "")
     + (r.shopName ? `Shop: ${r.shopName}${r.appointmentAt ? ` on ${String(r.appointmentAt).slice(0, 10)}` : ""}\n` : "")
     + (r.regionOwner ? `Region: ${r.regionOwner}\n` : "")
     + `Queue: ${(process.env.PUBLIC_BASE_URL || "https://SHS-Nexus.replit.app").replace(/\/+$/, "")}`
@@ -1207,7 +1208,7 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     decision: verdict.decision, rule: verdict.rule, reason: verdict.reason,
     category: isExtension ? "rental_extension" : (category as string),
     homeState, shopName: s(b.shopName, 200), appointmentAt: s(b.appointmentAt, 40),
-    regionOwner,
+    regionOwner, nearestBranch: isExtension ? null : nearestBranch,
   });
 
   // Never hand back the engine's verdict. It decided nothing, and showing a

@@ -191,6 +191,17 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
       actions: ["open_workflow"],
     };
   }
+  if (
+    /\bquote_failed\b/i.test(inner)
+    && /\bbranch_zip_missing\b/i.test(inner)
+  ) {
+    return {
+      summary:
+        "The technician's selected Enterprise branch could not be quoted. " +
+        "Enter the full street address, city, state, and ZIP in Fleet branch, then open the booking workflow and retry.",
+      actions: ["open_workflow"],
+    };
+  }
   if (/manual_review/i.test(inner)) {
     return {
       summary: "The booking workflow is parked for a person to review — open the workflow below.",

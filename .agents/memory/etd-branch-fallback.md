@@ -5,10 +5,12 @@ description: Request-lane booking address ladder (approved_branch wins, guard of
 
 ## Address ladder (REQUEST lane, `intentAddress` in server/vrm/etd/executor.ts)
 1. **Fleet's `approvedBranch`** (seeded from `vrm_rental_request.approved_branch` via requestSeed) — wins over the shop address AND the tech-reported branch, **with the wrong-state guard OFF** and no locatable check. A human typed and checked it; second-guessing an explicit human branch is the behaviour Tyler asked removed (2026-08-20). Mirrors `book_one` in etd-runner/scripts/book_request.py.
-2. Shop address (joined parts).
-3. Locatable-guarded tech-reported branch.
+2. **Locatable-guarded tech-reported branch** — the required technician answer is the normal request booking seed; its trailing state beats a conflicting shop/home state in the geocode guard.
+3. Shop address (joined parts) — legacy fallback only for old requests that have no technician branch.
 
-**Why it exists:** the decision endpoint persisted `approved_branch` and *documented* it as an override, the Python rescue script honored it, but the in-server TS executor never read it — a documented override that one consumer silently ignores is dead code that reads like a working feature. When adding an override, grep EVERY consumer of the decision facts.
+**Why it exists:** Fleet overrides must remain authoritative; otherwise the technician's selected Enterprise branch is the best booking origin and the repair shop is only legacy context. Both executors previously changed seeds after an empty quote, which could defeat Fleet's choice.
+
+**How to apply:** select the seed once with this ladder, then let `nearbyOnEmpty` walk Enterprise branches from that seed. Never re-quote from a different seed after Fleet or the technician selected one. Keep the TS executor and Python runner in lockstep.
 
 ## nearbyOnEmpty branch walk (`quote()` in both clients)
 - Opt-in only; request lane only (`workflowType === WORKFLOW_REQUEST`). **Never fires when `preferBranchCode` is set** — a cutover's pinned contract branch must not move, and the commit lane independently pins `wantBranch = resv.branchCode` from the confirmed preview and aborts on drift, so a preview-time fallback can never book an unapproved branch.
