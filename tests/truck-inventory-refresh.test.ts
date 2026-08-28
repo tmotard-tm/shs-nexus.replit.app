@@ -387,3 +387,35 @@ test("Nexus owns a production-capable inventory timer and no longer uses empty-o
   assert.doesNotMatch(indexSource, /Auto-sync truck inventory on startup if empty/);
   assert.doesNotMatch(schedulerSource, /FLEET_AGENTS/i);
 });
+
+test("the destructive transaction uses the advisory-lock session and every inventory reader is latest-only", async () => {
+  const syncSource = await readFile(
+    new URL("../server/snowflake-sync-service.ts", import.meta.url),
+    "utf8",
+  );
+  const storageSource = await readFile(
+    new URL("../server/storage.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(
+    syncSource,
+    /replaceTruckInventorySnapshot\(\s*inventoryData,\s*\{ syncLogId, completedAt: new Date\(\) \},\s*lockClient,\s*\)/,
+  );
+  assert.match(storageSource, /drizzle\(transactionClient\)/);
+
+  for (const method of [
+    "getTruckInventory",
+    "getTruckInventoryByEnterpriseId",
+    "getTruckInventoryByDistrict",
+  ]) {
+    const start = storageSource.lastIndexOf(`async ${method}(`);
+    const end = storageSource.indexOf("\n  async ", start + 1);
+    assert.notEqual(start, -1, `${method} must exist`);
+    assert.match(
+      storageSource.slice(start, end),
+      /MAX\(extract_date\) FROM truck_inventory/,
+      `${method} must restrict rows to the global latest extract date`,
+    );
+  }
+});

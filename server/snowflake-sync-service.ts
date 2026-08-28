@@ -2073,6 +2073,7 @@ export class SnowflakeSyncService {
           result.recordsProcessed = await storage.replaceTruckInventorySnapshot(
             inventoryData,
             { syncLogId, completedAt: new Date() },
+            lockClient,
           );
           result.recordsCreated = result.recordsProcessed;
           result.duration = Date.now() - startTime;

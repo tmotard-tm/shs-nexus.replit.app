@@ -127,6 +127,8 @@ import {
   fleetOperationLog,
 } from "@shared/schema";
 import { db } from "./db";
+import { drizzle } from "drizzle-orm/node-postgres";
+import type { PoolClient } from "pg";
 import { eq, and, or, inArray, desc, sql, isNull } from "drizzle-orm";
 import {
   replaceTruckInventorySnapshotAndCompleteAtomically,
@@ -363,6 +365,7 @@ export interface IStorage {
   replaceTruckInventorySnapshot(
     items: InsertTruckInventory[],
     completion: TruckInventorySnapshotCompletion,
+    transactionClient: PoolClient,
   ): Promise<number>;
   clearTruckInventoryByExtractDate(extractDate: string): Promise<number>;
 
@@ -1558,6 +1561,7 @@ export class MemStorage implements IStorage {
   async replaceTruckInventorySnapshot(
     _items: InsertTruckInventory[],
     _completion: TruckInventorySnapshotCompletion,
+    _transactionClient: PoolClient,
   ): Promise<number> {
     throw new Error("Truck inventory not implemented in memory storage - use database storage");
   }
@@ -4199,11 +4203,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTruckInventoryByEnterpriseId(enterpriseId: string): Promise<TruckInventory[]> {
-    return await db.select().from(truckInventory).where(eq(truckInventory.enterpriseId, enterpriseId.toUpperCase()));
+    return await db.select().from(truckInventory).where(and(
+      eq(truckInventory.enterpriseId, enterpriseId.toUpperCase()),
+      sql`${truckInventory.extractDate} = (SELECT MAX(extract_date) FROM truck_inventory)`,
+    ));
   }
 
   async getTruckInventoryByDistrict(district: string): Promise<TruckInventory[]> {
-    return await db.select().from(truckInventory).where(eq(truckInventory.district, district));
+    return await db.select().from(truckInventory).where(and(
+      eq(truckInventory.district, district),
+      sql`${truckInventory.extractDate} = (SELECT MAX(extract_date) FROM truck_inventory)`,
+    ));
   }
 
   async getLatestTruckInventoryExtractDate(): Promise<string | null> {
@@ -4228,9 +4238,11 @@ export class DatabaseStorage implements IStorage {
   async replaceTruckInventorySnapshot(
     items: InsertTruckInventory[],
     completion: TruckInventorySnapshotCompletion,
+    transactionClient: PoolClient,
   ): Promise<number> {
+    const lockedDb = drizzle(transactionClient);
     return replaceTruckInventorySnapshotAndCompleteAtomically(items, completion, (work) =>
-      db.transaction(async (tx) =>
+      lockedDb.transaction(async (tx) =>
         work({
           deleteAll: async () => {
             await tx.delete(truckInventory);

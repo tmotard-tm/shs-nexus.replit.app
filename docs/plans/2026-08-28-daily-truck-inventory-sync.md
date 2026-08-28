@@ -243,7 +243,7 @@ Change `syncTruckInventory` from batch-by-batch `bulkUpsertTruckInventory` to:
 4. Map every warehouse row.
 5. Validate nonempty and one strict, real `YYYY-MM-DD` `extractDate`.
 6. Call `assertAdvisoryLockHeld` immediately before replacement.
-7. Call `storage.replaceTruckInventorySnapshot`, which replaces the rows and marks the running `sync_logs` row completed in the same transaction.
+7. Pass that same advisory-lock client to `storage.replaceTruckInventorySnapshot`; it replaces the rows and marks the running `sync_logs` row completed in one transaction on the lock-owning session.
 8. Return success only after that combined transaction commits.
 9. Mark failures as failed and rethrow or return `success:false` consistently.
 

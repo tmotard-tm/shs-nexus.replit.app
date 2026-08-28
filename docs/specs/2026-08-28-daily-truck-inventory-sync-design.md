@@ -30,6 +30,7 @@ This is intentionally best-effort under autoscale: the refresh runs at 7:00 AM w
 
 - A database-backed cross-process lock protects the refresh so overlapping autoscale instances cannot run it twice.
 - The lock covers the Snowflake read and PostgreSQL replacement.
+- The destructive PostgreSQL transaction runs on the exact database session holding the advisory lock. If that session drops, PostgreSQL rolls the transaction back before another process can acquire the released lock.
 - A caller that cannot acquire the lock exits as a non-error skip; it does not start another import.
 - Manual and automatic refreshes use the same locked implementation.
 
@@ -57,7 +58,7 @@ Treat truck inventory as a current snapshot, not an append-only history.
 
 PostgreSQL readers continue seeing the old committed snapshot while replacement is in progress. If any insert or the success-watermark update fails, the transaction rolls back and the old snapshot remains available.
 
-The inventory summary endpoint therefore continues reading one complete current snapshot and cannot add quantities from different dates together.
+Every truck-, technician-, and district-scoped inventory read also applies the mirror's global latest extract date. The inventory summary endpoint therefore continues reading one complete current snapshot and cannot add quantities from different dates together.
 
 ## Run records and errors
 
