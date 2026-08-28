@@ -30,6 +30,10 @@ export const FLEETSCOPE_SNOWFLAKE_SYNC_LOCK = "fleetscope-mirror-sync";
 // concurrent runs can never both prune fs_trucks.
 export const RENTAL_OPS_SYNC_LOCK = "rental-ops-fleet-scope-sync";
 
+// Serializes destructive replacement of the truck-inventory mirror across
+// manual routes, scheduler ticks, and autoscale instances.
+export const TRUCK_INVENTORY_SYNC_LOCK = "truck-inventory-refresh";
+
 /** Base error: a named advisory lock couldn't be acquired within the budget. */
 export class AdvisoryLockUnavailableError extends Error {
   constructor(tag: string, lockName: string) {

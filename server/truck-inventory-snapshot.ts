@@ -21,7 +21,7 @@ export function validateTruckInventorySnapshot(
     throw new Error("truck inventory snapshot contains multiple extract dates");
   }
 
-  const [extractDate] = extractDates;
+  const extractDate = Array.from(extractDates)[0];
   if (!extractDate) {
     throw new Error("truck inventory snapshot has no extract date");
   }

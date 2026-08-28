@@ -31,3 +31,57 @@ export function isDailyTruckInventoryRefreshDue(
   if (!lastCompletedAt) return true;
   return inventoryEasternClock(lastCompletedAt).day !== current.day;
 }
+
+export type TruckInventoryRefreshTrigger = "scheduler" | "startup_catchup";
+
+export interface TruckInventorySyncResult {
+  success: boolean;
+  recordsProcessed: number;
+  errors: string[];
+}
+
+export interface DailyTruckInventoryRefreshDependencies {
+  getLastCompletedAt(): Promise<Date | null>;
+  sync(trigger: TruckInventoryRefreshTrigger): Promise<TruckInventorySyncResult>;
+}
+
+export interface DailyTruckInventoryRefreshTickResult {
+  ran: boolean;
+  skippedReason?: "before_refresh_hour" | "already_completed_today";
+  result?: TruckInventorySyncResult;
+}
+
+export async function getLastCompletedTruckInventorySync(): Promise<Date | null> {
+  const { storage } = await import("./storage");
+  const log = await storage.getLatestCompletedSyncLog("truck_inventory");
+  return log?.completedAt ?? null;
+}
+
+const defaultDependencies: DailyTruckInventoryRefreshDependencies = {
+  getLastCompletedAt: getLastCompletedTruckInventorySync,
+  sync: async (trigger) => {
+    const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+    return getSnowflakeSyncService().syncTruckInventory(trigger);
+  },
+};
+
+export async function runDailyTruckInventoryRefreshTick(
+  trigger: TruckInventoryRefreshTrigger,
+  now = new Date(),
+  dependencies: DailyTruckInventoryRefreshDependencies = defaultDependencies,
+): Promise<DailyTruckInventoryRefreshTickResult> {
+  const current = inventoryEasternClock(now);
+  if (current.hour < TRUCK_INVENTORY_REFRESH_HOUR) {
+    return { ran: false, skippedReason: "before_refresh_hour" };
+  }
+
+  const lastCompletedAt = await dependencies.getLastCompletedAt();
+  if (!isDailyTruckInventoryRefreshDue(now, lastCompletedAt)) {
+    return { ran: false, skippedReason: "already_completed_today" };
+  }
+
+  return {
+    ran: true,
+    result: await dependencies.sync(trigger),
+  };
+}

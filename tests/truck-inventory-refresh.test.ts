@@ -1,14 +1,25 @@
-import test from "node:test";
+import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import {
   inventoryEasternClock,
   isDailyTruckInventoryRefreshDue,
+  runDailyTruckInventoryRefreshTick,
 } from "../server/truck-inventory-refresh";
 import {
   replaceTruckInventorySnapshotAtomically,
   type TruckInventorySnapshotWriter,
 } from "../server/truck-inventory-snapshot";
 import type { InsertTruckInventory } from "@shared/schema";
+import {
+  AdvisoryLockUnavailableError,
+  runUnderAdvisoryLock,
+  TRUCK_INVENTORY_SYNC_LOCK,
+} from "../server/fleetscope-snowflake-sync-lock";
+import { fsPool } from "../server/fleet-scope-db";
+
+after(async () => {
+  await fsPool.end();
+});
 
 test("is not due before 7 AM Eastern", () => {
   assert.equal(
@@ -174,4 +185,117 @@ test("atomic replacement rolls back to the prior snapshot when any batch fails",
     /forced insert failure/,
   );
   assert.deepEqual(harness.rows(), old);
+});
+
+test("a successful due tick runs once with the supplied scheduler trigger", async () => {
+  const calls: string[] = [];
+  const result = await runDailyTruckInventoryRefreshTick(
+    "scheduler",
+    new Date("2026-08-28T11:00:00Z"),
+    {
+      getLastCompletedAt: async () => new Date("2026-08-27T12:00:00Z"),
+      sync: async (trigger) => {
+        calls.push(trigger);
+        return { success: true, recordsProcessed: 20, errors: [] };
+      },
+    },
+  );
+
+  assert.equal(result.ran, true);
+  assert.equal(result.result?.success, true);
+  assert.deepEqual(calls, ["scheduler"]);
+});
+
+test("a failed due tick remains eligible for a later retry that day", async () => {
+  let calls = 0;
+  const deps = {
+    getLastCompletedAt: async () => new Date("2026-08-27T12:00:00Z"),
+    sync: async () => {
+      calls += 1;
+      return { success: false, recordsProcessed: 0, errors: ["warehouse unavailable"] };
+    },
+  };
+  const now = new Date("2026-08-28T15:00:00Z");
+
+  const first = await runDailyTruckInventoryRefreshTick("startup_catchup", now, deps);
+  const second = await runDailyTruckInventoryRefreshTick("scheduler", now, deps);
+
+  assert.equal(first.ran, true);
+  assert.equal(second.ran, true);
+  assert.equal(calls, 2);
+});
+
+test("a same-day completion skips without calling the sync", async () => {
+  let calls = 0;
+  const result = await runDailyTruckInventoryRefreshTick(
+    "scheduler",
+    new Date("2026-08-28T20:00:00Z"),
+    {
+      getLastCompletedAt: async () => new Date("2026-08-28T11:15:00Z"),
+      sync: async () => {
+        calls += 1;
+        return { success: true, recordsProcessed: 1, errors: [] };
+      },
+    },
+  );
+
+  assert.equal(result.ran, false);
+  assert.equal(result.skippedReason, "already_completed_today");
+  assert.equal(calls, 0);
+});
+
+test("a tick before 7 AM skips without consulting the durable watermark", async () => {
+  let watermarkReads = 0;
+  const result = await runDailyTruckInventoryRefreshTick(
+    "startup_catchup",
+    new Date("2026-08-28T10:59:59Z"),
+    {
+      getLastCompletedAt: async () => {
+        watermarkReads += 1;
+        return null;
+      },
+      sync: async () => ({ success: true, recordsProcessed: 1, errors: [] }),
+    },
+  );
+
+  assert.equal(result.ran, false);
+  assert.equal(result.skippedReason, "before_refresh_hour");
+  assert.equal(watermarkReads, 0);
+});
+
+test("the dedicated advisory lock prevents concurrent inventory replacements", async () => {
+  let releaseFirst!: () => void;
+  const releaseGate = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let firstEntered!: () => void;
+  const enteredGate = new Promise<void>((resolve) => {
+    firstEntered = resolve;
+  });
+
+  const first = runUnderAdvisoryLock(
+    TRUCK_INVENTORY_SYNC_LOCK,
+    "inventory-test-holder",
+    async () => {
+      firstEntered();
+      await releaseGate;
+    },
+    { waitMs: 0 },
+  );
+
+  await enteredGate;
+  await assert.rejects(
+    runUnderAdvisoryLock(
+      TRUCK_INVENTORY_SYNC_LOCK,
+      "inventory-test-contender",
+      async () => {
+        assert.fail("contending refresh must not enter the locked section");
+      },
+      { waitMs: 0 },
+    ),
+    AdvisoryLockUnavailableError,
+  );
+
+  releaseFirst();
+  await first;
 });

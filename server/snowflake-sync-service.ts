@@ -14,6 +14,13 @@ import {
   futureTermEmployeeIds,
   reconcileRosterRows,
 } from './roster-effective-date-reconciliation';
+import {
+  assertAdvisoryLockHeld,
+  runUnderAdvisoryLock,
+  runUnderSnowflakeSyncLock,
+  TRUCK_INVENTORY_SYNC_LOCK,
+} from './fleetscope-snowflake-sync-lock';
+import { isDailyTruckInventoryRefreshDue } from './truck-inventory-refresh';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -174,6 +181,7 @@ interface SyncResult {
   skippedEmployees: SkippedEmployee[];
   errors: string[];
   duration: number;
+  skippedReason?: string;
 }
 
 export class SnowflakeSyncService {
@@ -1960,26 +1968,35 @@ export class SnowflakeSyncService {
       return result;
     }
 
-    let syncLog;
+    let syncLogId: string | null = null;
     try {
-      syncLog = await storage.createSyncLog({
-        syncType: 'truck_inventory',
-        status: 'running',
-        triggeredBy,
-      });
-      result.syncLogId = syncLog.id;
-    } catch (error: any) {
-      result.errors.push(`Failed to create sync log: ${error.message}`);
-      result.duration = Date.now() - startTime;
-      return result;
-    }
+      await runUnderAdvisoryLock(
+        TRUCK_INVENTORY_SYNC_LOCK,
+        `truck-inventory:${triggeredBy}`,
+        async (lockClient) => {
+          if (triggeredBy === 'scheduler' || triggeredBy === 'startup_catchup') {
+            const lastCompleted = await storage.getLatestCompletedSyncLog('truck_inventory');
+            if (!isDailyTruckInventoryRefreshDue(new Date(), lastCompleted?.completedAt ?? null)) {
+              result.success = true;
+              result.skippedReason = 'already_completed_today';
+              console.log('[Sync] Truck inventory refresh skipped: already completed today');
+              return;
+            }
+          }
 
-    try {
-      const snowflake = getSnowflakeService();
-      await snowflake.connect();
+          const syncLog = await storage.createSyncLog({
+            syncType: 'truck_inventory',
+            status: 'running',
+            triggeredBy,
+          });
+          syncLogId = syncLog.id;
+          result.syncLogId = syncLogId;
 
-      console.log('[Sync] Fetching truck inventory from Snowflake...');
-      const query = `
+          const snowflake = getSnowflakeService();
+          await snowflake.connect();
+
+          console.log('[Sync] Fetching truck inventory from Snowflake...');
+          const query = `
         SELECT
           PISR.EXTRACT_DATE,
           LPAD(PISR.DISTRICT,7,0) AS DISTRICT,
@@ -2019,21 +2036,19 @@ export class SnowflakeSyncService {
           AND PISR.TRUCK != PISR.DISTRICT
       `;
 
-      const rawRows = await snowflake.executeQuery(query) as SnowflakeTruckInventoryRow[];
-      console.log(`[Sync] Retrieved ${rawRows.length} truck inventory records from Snowflake`);
+          const rawRows = await runUnderSnowflakeSyncLock(
+            'truck-inventory-refresh:snowflake-read',
+            () => snowflake.executeQuery(query) as Promise<SnowflakeTruckInventoryRow[]>,
+          );
+          console.log(`[Sync] Retrieved ${rawRows.length} truck inventory records from Snowflake`);
 
-      // Process in batches of 500 for performance
-      const BATCH_SIZE = 500;
-      const totalBatches = Math.ceil(rawRows.length / BATCH_SIZE);
-      console.log(`[Sync] Processing ${rawRows.length} records in ${totalBatches} batches of ${BATCH_SIZE}...`);
-
-      for (let i = 0; i < rawRows.length; i += BATCH_SIZE) {
-        const batch = rawRows.slice(i, i + BATCH_SIZE);
-        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-        
-        try {
-          const inventoryDataBatch: InsertTruckInventory[] = batch.map(row => ({
-            extractDate: this.formatDateForDB(row.EXTRACT_DATE) || new Date().toISOString().split('T')[0],
+          const inventoryData: InsertTruckInventory[] = rawRows.map(row => {
+            const extractDate = this.formatDateForDB(row.EXTRACT_DATE);
+            if (!extractDate) {
+              throw new Error('Snowflake truck inventory row has an invalid extract date');
+            }
+            return {
+            extractDate,
             district: row.DISTRICT || '',
             truck: row.TRUCK || '',
             techId: row.TECH_ID || undefined,
@@ -2053,38 +2068,34 @@ export class SnowflakeSyncService {
             extNsAvgCost: row.EXT_NS_AVG_COST?.toString() || undefined,
             extImCost: row.EXT_IM_COST?.toString() || undefined,
             productCategory: row.PRODUCT_CATEGORY || 'UNDEFINED',
-          }));
+            };
+          });
 
-          const upsertedCount = await storage.bulkUpsertTruckInventory(inventoryDataBatch);
-          result.recordsProcessed += upsertedCount;
-          
-          console.log(`[Sync] Batch ${batchNum}/${totalBatches}: processed ${upsertedCount} records`);
-        } catch (error: any) {
-          console.error(`[Sync] Error processing batch ${batchNum}:`, error.message);
-          result.errors.push(`Error processing batch ${batchNum}: ${error.message}`);
-        }
-      }
+          await assertAdvisoryLockHeld(lockClient);
+          result.recordsProcessed = await storage.replaceTruckInventorySnapshot(inventoryData);
+          result.recordsCreated = result.recordsProcessed;
+          result.duration = Date.now() - startTime;
 
-      result.success = true;
-      result.duration = Date.now() - startTime;
+          await storage.updateSyncLog(syncLogId, {
+            status: 'completed',
+            completedAt: new Date(),
+            recordsProcessed: result.recordsProcessed,
+            recordsCreated: result.recordsCreated,
+            recordsUpdated: 0,
+            queueItemsCreated: 0,
+            errorMessage: null,
+          });
 
-      await storage.updateSyncLog(syncLog.id, {
-        status: 'completed',
-        completedAt: new Date(),
-        recordsProcessed: result.recordsProcessed,
-        recordsCreated: result.recordsCreated,
-        recordsUpdated: result.recordsUpdated,
-        queueItemsCreated: 0,
-        errorMessage: result.errors.length > 0 ? result.errors.join('; ') : null,
-      });
-
-      console.log(`[Sync] Truck inventory sync completed: ${result.recordsProcessed} processed`);
+          result.success = true;
+          console.log(`[Sync] Truck inventory sync completed: ${result.recordsProcessed} processed`);
+        },
+      );
     } catch (error: any) {
       result.errors.push(`Sync failed: ${error.message}`);
       result.duration = Date.now() - startTime;
 
-      if (syncLog) {
-        await storage.updateSyncLog(syncLog.id, {
+      if (syncLogId) {
+        await storage.updateSyncLog(syncLogId, {
           status: 'failed',
           completedAt: new Date(),
           errorMessage: error.message,

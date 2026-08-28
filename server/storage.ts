@@ -347,6 +347,7 @@ export interface IStorage {
   getSyncLog(id: string): Promise<SyncLog | undefined>;
   getSyncLogs(): Promise<SyncLog[]>;
   getLatestSyncLog(syncType: string): Promise<SyncLog | undefined>;
+  getLatestCompletedSyncLog(syncType: string): Promise<SyncLog | undefined>;
   createSyncLog(log: InsertSyncLog): Promise<SyncLog>;
   updateSyncLog(id: string, updates: Partial<SyncLog>): Promise<SyncLog | undefined>;
 
@@ -1512,6 +1513,10 @@ export class MemStorage implements IStorage {
   }
 
   async getLatestSyncLog(_syncType: string): Promise<SyncLog | undefined> {
+    return undefined; // Not implemented in memory storage
+  }
+
+  async getLatestCompletedSyncLog(_syncType: string): Promise<SyncLog | undefined> {
     return undefined; // Not implemented in memory storage
   }
 
@@ -4145,6 +4150,17 @@ export class DatabaseStorage implements IStorage {
     const result = await db.select().from(syncLogs)
       .where(eq(syncLogs.syncType, syncType))
       .orderBy(desc(syncLogs.startedAt))
+      .limit(1);
+    return result[0];
+  }
+
+  async getLatestCompletedSyncLog(syncType: string): Promise<SyncLog | undefined> {
+    const result = await db.select().from(syncLogs)
+      .where(and(
+        eq(syncLogs.syncType, syncType),
+        eq(syncLogs.status, "completed"),
+      ))
+      .orderBy(desc(syncLogs.completedAt), desc(syncLogs.startedAt))
       .limit(1);
     return result[0];
   }
