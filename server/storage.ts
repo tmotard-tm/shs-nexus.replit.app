@@ -128,6 +128,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, inArray, desc, sql, isNull } from "drizzle-orm";
+import { replaceTruckInventorySnapshotAtomically } from "./truck-inventory-snapshot";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, vehicleNumberVariants } from "./vehicle-number-utils";
@@ -355,6 +356,7 @@ export interface IStorage {
   getTruckInventoryByDistrict(district: string): Promise<TruckInventory[]>;
   getLatestTruckInventoryExtractDate(): Promise<string | null>;
   bulkUpsertTruckInventory(items: InsertTruckInventory[]): Promise<number>;
+  replaceTruckInventorySnapshot(items: InsertTruckInventory[]): Promise<number>;
   clearTruckInventoryByExtractDate(extractDate: string): Promise<number>;
 
   // Tech Vehicle Assignments Module
@@ -1539,6 +1541,10 @@ export class MemStorage implements IStorage {
   }
 
   async bulkUpsertTruckInventory(_items: InsertTruckInventory[]): Promise<number> {
+    throw new Error("Truck inventory not implemented in memory storage - use database storage");
+  }
+
+  async replaceTruckInventorySnapshot(_items: InsertTruckInventory[]): Promise<number> {
     throw new Error("Truck inventory not implemented in memory storage - use database storage");
   }
 
@@ -4160,7 +4166,10 @@ export class DatabaseStorage implements IStorage {
   async getTruckInventory(truck: string): Promise<TruckInventory[]> {
     const variants = [...new Set([truck, toCanonical(truck), toDisplayNumber(truck), toHolmanRef(truck)])].filter(Boolean);
     return await db.select().from(truckInventory).where(
-      inArray(truckInventory.truck, variants)
+      and(
+        inArray(truckInventory.truck, variants),
+        sql`${truckInventory.extractDate} = (SELECT MAX(extract_date) FROM truck_inventory)`,
+      )
     );
   }
 
@@ -4189,6 +4198,22 @@ export class DatabaseStorage implements IStorage {
       .returning({ id: truckInventory.id });
     
     return result.length;
+  }
+
+  async replaceTruckInventorySnapshot(items: InsertTruckInventory[]): Promise<number> {
+    return replaceTruckInventorySnapshotAtomically(items, (work) =>
+      db.transaction(async (tx) =>
+        work({
+          deleteAll: async () => {
+            await tx.delete(truckInventory);
+          },
+          insertBatch: async (batch) => {
+            await tx.insert(truckInventory).values(batch);
+            return batch.length;
+          },
+        }),
+      ),
+    );
   }
 
   async clearTruckInventoryByExtractDate(extractDate: string): Promise<number> {

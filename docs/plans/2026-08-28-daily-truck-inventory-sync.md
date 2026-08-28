@@ -122,9 +122,10 @@ git commit -m "test: define daily inventory refresh timing"
 - Replacement deletes and inserts inside one Drizzle transaction, using bounded insert batches, and returns the inserted row count.
 - `getTruckInventory(truck)` returns rows only from the mirror’s global maximum `extract_date`.
 
-- [ ] **Step 1: Add failing DB-backed storage tests**
+- [ ] **Step 1: Add failing storage tests**
 
-Create uniquely prefixed fixture rows and test:
+Use an injected transaction harness so the test never deletes the shared
+development inventory table. Test:
 
 1. Two historical extract dates for one truck produce only rows from the global latest date through `getTruckInventory`.
 2. Replacing with a new complete snapshot removes prior dates.
@@ -132,7 +133,9 @@ Create uniquely prefixed fixture rows and test:
 4. Mixed-date replacement is rejected without deleting existing rows.
 5. A forced insert failure rolls the transaction back and preserves the previous snapshot.
 
-Use test cleanup in `after()` so no fixture rows remain.
+The harness must model commit/rollback over an in-memory snapshot and prove that
+the replacement callback performs delete + bounded inserts atomically. Do not
+run a destructive whole-table replacement against the shared development DB.
 
 - [ ] **Step 2: Run the focused test and confirm RED**
 
