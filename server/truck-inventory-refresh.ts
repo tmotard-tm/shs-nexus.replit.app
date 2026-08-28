@@ -29,7 +29,11 @@ export function isDailyTruckInventoryRefreshDue(
   const current = inventoryEasternClock(now);
   if (current.hour < TRUCK_INVENTORY_REFRESH_HOUR) return false;
   if (!lastCompletedAt) return true;
-  return inventoryEasternClock(lastCompletedAt).day !== current.day;
+  const lastCompleted = inventoryEasternClock(lastCompletedAt);
+  return (
+    lastCompleted.day !== current.day
+    || lastCompleted.hour < TRUCK_INVENTORY_REFRESH_HOUR
+  );
 }
 
 export type TruckInventoryRefreshTrigger = "scheduler" | "startup_catchup";

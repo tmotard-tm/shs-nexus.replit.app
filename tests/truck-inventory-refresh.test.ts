@@ -8,7 +8,10 @@ import {
 } from "../server/truck-inventory-refresh";
 import {
   replaceTruckInventorySnapshotAtomically,
+  replaceTruckInventorySnapshotAndCompleteAtomically,
+  validateTruckInventorySnapshot,
   type TruckInventorySnapshotWriter,
+  type TruckInventorySnapshotCompletionWriter,
 } from "../server/truck-inventory-snapshot";
 import type { InsertTruckInventory } from "@shared/schema";
 import {
@@ -53,6 +56,16 @@ test("a same-Eastern-day completion suppresses a second run", () => {
       new Date("2026-08-28T11:15:00Z"),
     ),
     false,
+  );
+});
+
+test("a same-day completion before 7 AM does not suppress the required 7 AM run", () => {
+  assert.equal(
+    isDailyTruckInventoryRefreshDue(
+      new Date("2026-08-28T11:00:00Z"),
+      new Date("2026-08-28T10:30:00Z"),
+    ),
+    true,
   );
 });
 
@@ -186,6 +199,62 @@ test("atomic replacement rolls back to the prior snapshot when any batch fails",
     /forced insert failure/,
   );
   assert.deepEqual(harness.rows(), old);
+});
+
+test("snapshot validation rejects impossible and noncanonical extract dates", () => {
+  assert.throws(
+    () => validateTruckInventorySnapshot([
+      inventoryRow("2026-02-30", "088129", "BAD"),
+    ]),
+    /invalid extract date/,
+  );
+  assert.throws(
+    () => validateTruckInventorySnapshot([
+      inventoryRow("08\\/28\\/2026", "088129", "BAD"),
+    ]),
+    /invalid extract date/,
+  );
+});
+
+test("snapshot rows and the completed watermark commit or roll back together", async () => {
+  const old = [inventoryRow("2025-12-30", "088129", "OLD")];
+  let committedRows = [...old];
+  let committedLogStatus = "running";
+
+  const run = async <T>(
+    work: (writer: TruckInventorySnapshotCompletionWriter) => Promise<T>,
+  ): Promise<T> => {
+    let draftRows = [...committedRows];
+    let draftLogStatus = committedLogStatus;
+    const writer: TruckInventorySnapshotCompletionWriter = {
+      deleteAll: async () => {
+        draftRows = [];
+      },
+      insertBatch: async (items) => {
+        draftRows.push(...items);
+        return items.length;
+      },
+      completeSyncLog: async () => {
+        draftLogStatus = "completed";
+        throw new Error("forced watermark write failure");
+      },
+    };
+    const result = await work(writer);
+    committedRows = draftRows;
+    committedLogStatus = draftLogStatus;
+    return result;
+  };
+
+  await assert.rejects(
+    replaceTruckInventorySnapshotAndCompleteAtomically(
+      [inventoryRow("2026-08-28", "088129", "NEW")],
+      { syncLogId: "sync-1", completedAt: new Date("2026-08-28T11:10:00Z") },
+      run,
+    ),
+    /forced watermark write failure/,
+  );
+  assert.deepEqual(committedRows, old);
+  assert.equal(committedLogStatus, "running");
 });
 
 test("a successful due tick runs once with the supplied scheduler trigger", async () => {

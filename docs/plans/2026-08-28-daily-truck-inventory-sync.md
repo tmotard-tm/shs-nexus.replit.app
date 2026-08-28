@@ -196,8 +196,9 @@ git commit -m "fix: replace truck inventory atomically"
 - Produces: `TRUCK_INVENTORY_SYNC_LOCK = "truck-inventory-refresh"` in the lock module.
 - Produces: `getLastCompletedTruckInventorySync(): Promise<Date | null>`.
 - Produces: `runDailyTruckInventoryRefreshTick(trigger: "scheduler" | "startup_catchup", now?: Date): Promise<{ ran: boolean; skippedReason?: string; result?: SyncResult }>`
-- `SnowflakeSyncService.syncTruckInventory(triggeredBy)` acquires the dedicated inventory lock, takes the shared Snowflake-read lock around the warehouse query, validates one nonempty extract date, then calls `replaceTruckInventorySnapshot`.
+- `SnowflakeSyncService.syncTruckInventory(triggeredBy)` acquires the dedicated inventory lock, takes the shared Snowflake-read lock around the warehouse query, validates one nonempty strict calendar extract date, then calls `replaceTruckInventorySnapshot`.
 - A successful `sync_logs` row is the durable daily watermark; failures and lock skips do not suppress retry.
+- Only a completion at or after 7:00 AM Eastern satisfies that day's automatic watermark, so an earlier manual run cannot suppress the scheduled refresh.
 
 - [ ] **Step 1: Add failing orchestration tests**
 
@@ -224,6 +225,7 @@ test("concurrent refresh callers do not both replace the mirror", async () => {
 ```
 
 Add a mapping-validation test proving empty and mixed-date Snowflake results never call replacement.
+Also cover impossible/noncanonical dates, a manual completion before 7:00 AM, and rollback when the completed watermark cannot be written.
 
 - [ ] **Step 2: Run the focused test and confirm RED**
 
@@ -239,10 +241,10 @@ Change `syncTruckInventory` from batch-by-batch `bulkUpsertTruckInventory` to:
 2. Enter `runUnderAdvisoryLock(TRUCK_INVENTORY_SYNC_LOCK, ...)`.
 3. Enter `runUnderSnowflakeSyncLock("truck-inventory-refresh:snowflake-read", ...)` only for `executeQuery`.
 4. Map every warehouse row.
-5. Validate nonempty and one `extractDate`.
+5. Validate nonempty and one strict, real `YYYY-MM-DD` `extractDate`.
 6. Call `assertAdvisoryLockHeld` immediately before replacement.
-7. Call `storage.replaceTruckInventorySnapshot`.
-8. Mark the log completed only after replacement commits.
+7. Call `storage.replaceTruckInventorySnapshot`, which replaces the rows and marks the running `sync_logs` row completed in the same transaction.
+8. Return success only after that combined transaction commits.
 9. Mark failures as failed and rethrow or return `success:false` consistently.
 
 Do not retain the existing `onConflictDoNothing` append behavior in the active refresh path.

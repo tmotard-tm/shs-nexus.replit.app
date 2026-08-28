@@ -21,6 +21,7 @@ import {
   TRUCK_INVENTORY_SYNC_LOCK,
 } from './fleetscope-snowflake-sync-lock';
 import { isDailyTruckInventoryRefreshDue } from './truck-inventory-refresh';
+import { normalizeTruckInventoryExtractDate } from './truck-inventory-snapshot';
 
 interface SnowflakeAllTechRow {
   EMPL_ID: string;
@@ -2043,10 +2044,7 @@ export class SnowflakeSyncService {
           console.log(`[Sync] Retrieved ${rawRows.length} truck inventory records from Snowflake`);
 
           const inventoryData: InsertTruckInventory[] = rawRows.map(row => {
-            const extractDate = this.formatDateForDB(row.EXTRACT_DATE);
-            if (!extractDate) {
-              throw new Error('Snowflake truck inventory row has an invalid extract date');
-            }
+            const extractDate = normalizeTruckInventoryExtractDate(row.EXTRACT_DATE);
             return {
             extractDate,
             district: row.DISTRICT || '',
@@ -2072,19 +2070,12 @@ export class SnowflakeSyncService {
           });
 
           await assertAdvisoryLockHeld(lockClient);
-          result.recordsProcessed = await storage.replaceTruckInventorySnapshot(inventoryData);
+          result.recordsProcessed = await storage.replaceTruckInventorySnapshot(
+            inventoryData,
+            { syncLogId, completedAt: new Date() },
+          );
           result.recordsCreated = result.recordsProcessed;
           result.duration = Date.now() - startTime;
-
-          await storage.updateSyncLog(syncLogId, {
-            status: 'completed',
-            completedAt: new Date(),
-            recordsProcessed: result.recordsProcessed,
-            recordsCreated: result.recordsCreated,
-            recordsUpdated: 0,
-            queueItemsCreated: 0,
-            errorMessage: null,
-          });
 
           result.success = true;
           console.log(`[Sync] Truck inventory sync completed: ${result.recordsProcessed} processed`);

@@ -19,9 +19,9 @@ The existing Nexus autoscale process will own the schedule. If no instance is ru
 - The existing in-process scheduler checks whether the daily inventory refresh is due.
 - A refresh is due when:
   1. The current Eastern hour is 7 or later.
-  2. There is no successfully completed `truck_inventory` sync for the current Eastern calendar day.
+  2. There is no successfully completed `truck_inventory` sync at or after 7:00 AM on the current Eastern calendar day.
 - Run the same due check shortly after application startup. This is the startup catch-up path for an autoscale instance that was asleep at 7:00 AM.
-- A completed daily run suppresses all further automatic attempts that Eastern day.
+- A completed run at or after 7:00 AM suppresses all further automatic attempts that Eastern day. A manual run before 7:00 AM does not suppress the scheduled daily refresh.
 - A failed run remains eligible for a later retry that day.
 
 This is intentionally best-effort under autoscale: the refresh runs at 7:00 AM when an instance is alive, otherwise when the application next wakes after 7:00 AM.
@@ -42,7 +42,7 @@ Use the existing Snowflake inventory query and its current business filters:
 - Exclude rows where truck equals district.
 - Preserve the category joins and current cost calculations.
 
-Before changing PostgreSQL, validate that Snowflake returned a nonempty result containing one extract date. An empty or internally inconsistent result fails closed and preserves the previous mirror.
+Before changing PostgreSQL, validate that Snowflake returned a nonempty result containing one strict `YYYY-MM-DD` calendar date. Empty, mixed-date, noncanonical, and impossible-date snapshots fail closed and preserve the previous mirror.
 
 ## Atomic mirror replacement
 
@@ -52,9 +52,10 @@ Treat truck inventory as a current snapshot, not an append-only history.
 2. Open one PostgreSQL transaction.
 3. Delete the prior `truck_inventory` mirror.
 4. Insert the complete new snapshot in bounded batches within that same transaction.
-5. Commit only after every batch succeeds.
+5. Mark the run's `sync_logs` row completed within that same transaction.
+6. Commit only after every batch and the durable success watermark update succeed.
 
-PostgreSQL readers continue seeing the old committed snapshot while replacement is in progress. If any insert fails, the transaction rolls back and the old snapshot remains available.
+PostgreSQL readers continue seeing the old committed snapshot while replacement is in progress. If any insert or the success-watermark update fails, the transaction rolls back and the old snapshot remains available.
 
 The inventory summary endpoint therefore continues reading one complete current snapshot and cannot add quantities from different dates together.
 
@@ -72,10 +73,13 @@ Automated tests will cover:
 
 - Eastern-time due logic before 7:00 AM, at 7:00 AM, after 7:00 AM, and across EDT/EST dates.
 - A successful run suppressing another automatic run on the same Eastern day.
+- A manual completion before 7:00 AM not suppressing that day's scheduled refresh.
 - A failure remaining retryable that day.
 - Startup catch-up selecting a stale nonempty mirror.
 - Concurrent callers allowing only one refresh.
 - Atomic replacement preserving the old snapshot when an insert fails.
+- Atomic replacement preserving the old snapshot when the completed watermark cannot be written.
+- Strict rejection of impossible or noncanonical extract dates.
 - A successful replacement exposing only the latest extract date.
 - Truck `088129` totals being calculated from one snapshot rather than accumulated dates.
 

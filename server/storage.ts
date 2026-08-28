@@ -128,7 +128,10 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, inArray, desc, sql, isNull } from "drizzle-orm";
-import { replaceTruckInventorySnapshotAtomically } from "./truck-inventory-snapshot";
+import {
+  replaceTruckInventorySnapshotAndCompleteAtomically,
+  type TruckInventorySnapshotCompletion,
+} from "./truck-inventory-snapshot";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, vehicleNumberVariants } from "./vehicle-number-utils";
@@ -357,7 +360,10 @@ export interface IStorage {
   getTruckInventoryByDistrict(district: string): Promise<TruckInventory[]>;
   getLatestTruckInventoryExtractDate(): Promise<string | null>;
   bulkUpsertTruckInventory(items: InsertTruckInventory[]): Promise<number>;
-  replaceTruckInventorySnapshot(items: InsertTruckInventory[]): Promise<number>;
+  replaceTruckInventorySnapshot(
+    items: InsertTruckInventory[],
+    completion: TruckInventorySnapshotCompletion,
+  ): Promise<number>;
   clearTruckInventoryByExtractDate(extractDate: string): Promise<number>;
 
   // Tech Vehicle Assignments Module
@@ -1549,7 +1555,10 @@ export class MemStorage implements IStorage {
     throw new Error("Truck inventory not implemented in memory storage - use database storage");
   }
 
-  async replaceTruckInventorySnapshot(_items: InsertTruckInventory[]): Promise<number> {
+  async replaceTruckInventorySnapshot(
+    _items: InsertTruckInventory[],
+    _completion: TruckInventorySnapshotCompletion,
+  ): Promise<number> {
     throw new Error("Truck inventory not implemented in memory storage - use database storage");
   }
 
@@ -4216,8 +4225,11 @@ export class DatabaseStorage implements IStorage {
     return result.length;
   }
 
-  async replaceTruckInventorySnapshot(items: InsertTruckInventory[]): Promise<number> {
-    return replaceTruckInventorySnapshotAtomically(items, (work) =>
+  async replaceTruckInventorySnapshot(
+    items: InsertTruckInventory[],
+    completion: TruckInventorySnapshotCompletion,
+  ): Promise<number> {
+    return replaceTruckInventorySnapshotAndCompleteAtomically(items, completion, (work) =>
       db.transaction(async (tx) =>
         work({
           deleteAll: async () => {
@@ -4226,6 +4238,24 @@ export class DatabaseStorage implements IStorage {
           insertBatch: async (batch) => {
             await tx.insert(truckInventory).values(batch);
             return batch.length;
+          },
+          completeSyncLog: async ({ syncLogId, completedAt }, recordsProcessed) => {
+            const updated = await tx.update(syncLogs)
+              .set({
+                status: "completed",
+                completedAt,
+                recordsProcessed,
+                recordsCreated: recordsProcessed,
+                recordsUpdated: 0,
+                queueItemsCreated: 0,
+                errorMessage: null,
+              })
+              .where(and(
+                eq(syncLogs.id, syncLogId),
+                eq(syncLogs.status, "running"),
+              ))
+              .returning({ id: syncLogs.id });
+            return updated.length === 1;
           },
         }),
       ),
