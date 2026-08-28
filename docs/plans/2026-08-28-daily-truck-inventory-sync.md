@@ -4,7 +4,7 @@
 
 **Goal:** Refresh the current truck-inventory mirror once per Eastern day at or after 7:00 AM, with autoscale startup catch-up and no Fleet Agents dependency.
 
-**Architecture:** Extract Eastern-time due logic and the daily runner into a focused scheduler module. Keep the existing Snowflake projection, but protect refreshes with a dedicated cross-process advisory lock and replace the PostgreSQL mirror in one transaction so readers see either the old complete snapshot or the new complete snapshot. The existing one-minute Nexus scheduler supplies both the 7:00 AM tick and startup catch-up.
+**Architecture:** Extract Eastern-time due logic and the daily runner into a focused scheduler module. Keep the existing Snowflake projection, but protect refreshes with a dedicated cross-process advisory lock and replace the PostgreSQL mirror in one transaction so readers see either the old complete snapshot or the new complete snapshot. A dedicated inventory-only one-minute timer runs in both environments because the general Snowflake interval is intentionally disabled in production.
 
 **Tech Stack:** TypeScript, Node.js `node:test` through `tsx`, Express, Drizzle ORM, node-postgres, PostgreSQL advisory locks, Snowflake SDK.
 
@@ -275,15 +275,15 @@ git commit -m "feat: lock and watermark daily inventory refresh"
 - Modify: `replit.md`
 
 **Interfaces:**
-- `checkAndRunSync()` invokes `runDailyTruckInventoryRefreshTick` on every one-minute scheduler check.
-- The first scheduler check five seconds after startup supplies `startup_catchup`; later interval checks use `scheduler`.
+- `startSyncScheduler()` starts a dedicated inventory-only one-minute timer in both development and production.
+- The first inventory check five seconds after startup supplies `startup_catchup`; later interval checks use `scheduler`.
 - The legacy “sync only if table empty” startup block is removed.
 
 - [ ] **Step 1: Add a failing wiring regression test**
 
 Read the scheduler and startup source as text and assert:
 
-- `sync-scheduler.ts` imports and calls `runDailyTruckInventoryRefreshTick`.
+- `sync-scheduler.ts` imports and calls `runDailyTruckInventoryRefreshTick` from a dedicated timer that is outside the development-only general scheduler branch.
 - `index.ts` no longer conditions truck-inventory refresh on `!latestExtract`.
 - No Fleet Agents URL or scheduler call is added.
 
@@ -295,7 +295,7 @@ Expected: FAIL because the scheduler is not wired and the empty-only startup blo
 
 - [ ] **Step 3: Wire the daily tick**
 
-Track whether `checkAndRunSync` is executing its first invocation. Pass `startup_catchup` for that first invocation and `scheduler` afterward. Invoke the inventory tick independently of the older fixed-offset 5:00 AM roster branch, and catch/log errors so one failed inventory refresh does not prevent unrelated scheduler checks.
+Start one dedicated inventory interval for both environments. Pass `startup_catchup` to a five-second startup timer and `scheduler` to later one-minute interval ticks. Invoke the inventory tick independently of the older fixed-offset 5:00 AM roster branch, and catch/log errors so one failed inventory refresh does not prevent unrelated scheduler checks.
 
 - [ ] **Step 4: Remove the obsolete startup block**
 

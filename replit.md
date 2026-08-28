@@ -227,6 +227,14 @@ To add a NEW recurring Nexus job:
 
 NEVER add a Nexus Scheduled Deployment or an in-process timer as the primary trigger.
 
+## Daily truck-inventory mirror refresh (2026-08-28, explicit exception)
+
+- Truck inventory refreshes once per `America/New_York` calendar day at or after 07:00. Nexus owns this schedule; do not add it to Fleet Agents.
+- The user explicitly accepted autoscale timing for this job: if Nexus sleeps through 07:00, the five-second startup check catches up when the app next wakes. A one-minute inventory-only timer handles an instance already awake at 07:00.
+- The durable watermark is the latest completed `sync_logs` row with `sync_type='truck_inventory'`; a failed run remains due and retryable that day. Automatic callers re-check that watermark while holding a dedicated cross-process advisory lock.
+- The Snowflake query keeps its latest-extract and bin/truck filters, joins the shared heavy-Snowflake-read lock, then replaces `truck_inventory` with one validated extract date in a single PostgreSQL transaction. Empty, mixed-date, or failed inserts preserve the prior complete snapshot.
+- This is a narrow, user-approved exception to the general external wake-up-call rule above. Do not generalize it to other recurring jobs.
+
 
 ## Truck Maintenance SMS + 4-hour booking workflow (2026-08-17)
 

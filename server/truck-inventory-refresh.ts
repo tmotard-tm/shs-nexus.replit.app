@@ -38,6 +38,7 @@ export interface TruckInventorySyncResult {
   success: boolean;
   recordsProcessed: number;
   errors: string[];
+  skippedReason?: string;
 }
 
 export interface DailyTruckInventoryRefreshDependencies {

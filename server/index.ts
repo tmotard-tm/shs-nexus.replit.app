@@ -370,11 +370,11 @@ async function runStartupBootstrap() {
   // Initialize Snowflake service
   await initializeSnowflake();
 
-  // Start the sync scheduler for daily 5am EST syncs
+  // Start in-process sync checks, including the DST-aware daily inventory catch-up.
   try {
     const { startSyncScheduler } = await import("./sync-scheduler");
     startSyncScheduler();
-    log("✅ Sync scheduler started (daily at 5am EST)");
+    log("✅ Sync schedulers started");
   } catch (error) {
     console.error("❌ Failed to start sync scheduler:", error);
   }
@@ -453,39 +453,6 @@ async function runStartupBootstrap() {
     log("✅ Holman submission verifier started (every 90s)");
   } catch (error) {
     console.error("❌ Failed to start Holman verifier:", error);
-  }
-
-  // Auto-sync truck inventory on startup if empty
-  try {
-    const { getSnowflakeService } = await import("./snowflake-service");
-    const snowflakeService = getSnowflakeService();
-    
-    if (snowflakeService) {
-      // Check if truck_inventory table has data by checking latest extract date
-      const latestExtract = await storage.getLatestTruckInventoryExtractDate();
-      log(`📦 Truck inventory check: latest extract = ${latestExtract || 'none'}`);
-      
-      if (!latestExtract) {
-        log("📦 Truck inventory empty - starting auto-sync from Snowflake...");
-        const { SnowflakeSyncService } = await import("./snowflake-sync-service");
-        const syncService = new SnowflakeSyncService();
-        
-        // Run sync in background (don't block server startup)
-        syncService.syncTruckInventory().then(result => {
-          if (result.success) {
-            log(`✅ Truck inventory auto-sync complete: ${result.recordsProcessed} items synced`);
-          } else {
-            log(`⚠️ Truck inventory auto-sync failed: ${result.errors?.join(', ')}`);
-          }
-        }).catch(err => {
-          console.error("❌ Truck inventory auto-sync error:", err);
-        });
-      } else {
-        log("✅ Truck inventory already populated, skipping auto-sync");
-      }
-    }
-  } catch (error) {
-    console.error("⚠️ Truck inventory auto-sync check failed:", error);
   }
 
   // Auto-sync all-techs on startup to ensure contact info and TPMS data is current

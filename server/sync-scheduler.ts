@@ -8,9 +8,14 @@ import { loadActiveFenceSet } from './fleet-reconciliation/fences';
 import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { storage } from './storage';
 import { createOffboardingQueueTasks } from './create-offboarding-tasks-service';
+import {
+  runDailyTruckInventoryRefreshTick,
+  type TruckInventoryRefreshTrigger,
+} from './truck-inventory-refresh';
 
 const SYNC_HOUR_EST = 5; // 5am EST
 const CHECK_INTERVAL_MS = 60 * 1000; // Check every minute
+const TRUCK_INVENTORY_CHECK_INTERVAL_MS = 60 * 1000;
 const ENRICH_INTERVAL_HOURS = 12; // Enrich every 12 hours
 const SEPARATION_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for separation sync
 const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
@@ -49,6 +54,8 @@ let pendingDistrictCostCenterNotification: {
 } | null = null;
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
+let truckInventoryIntervalId: NodeJS.Timeout | null = null;
+let truckInventoryCheckRunning = false;
 let separationPollIntervalId: NodeJS.Timeout | null = null;
 let notificationBackfillIntervalId: NodeJS.Timeout | null = null;
 
@@ -174,6 +181,41 @@ async function checkAndRunSync(): Promise<void> {
   await checkAndRunTpmsStaleSweep();
   if (DISTRICT_COST_CENTER_AUTO_SEED_ENABLED) {
     await checkAndRunDistrictCostCenterSeed();
+  }
+}
+
+async function checkAndRunTruckInventory(
+  trigger: TruckInventoryRefreshTrigger,
+): Promise<void> {
+  if (truckInventoryCheckRunning) return;
+  truckInventoryCheckRunning = true;
+  try {
+    const tick = await runDailyTruckInventoryRefreshTick(trigger);
+    if (!tick.ran) {
+      if (trigger === 'startup_catchup') {
+        console.log(`[Scheduler] Truck inventory startup check: ${tick.skippedReason}`);
+      }
+      return;
+    }
+
+    if (tick.result?.success) {
+      const suffix = tick.result.recordsProcessed > 0
+        ? `${tick.result.recordsProcessed} rows replaced`
+        : tick.result.skippedReason || 'completed';
+      console.log(`[Scheduler] Truck inventory refresh ${suffix}`);
+    } else {
+      console.error(
+        '[Scheduler] Truck inventory refresh failed (will retry):',
+        tick.result?.errors?.join('; ') || 'unknown error',
+      );
+    }
+  } catch (error: any) {
+    console.error(
+      '[Scheduler] Truck inventory refresh error (will retry):',
+      error?.message || error,
+    );
+  } finally {
+    truckInventoryCheckRunning = false;
   }
 }
 
@@ -1218,6 +1260,18 @@ export function startSyncScheduler(): void {
   }
 
   schedulerRunning = true;
+
+  // Inventory is intentionally independent of the general Snowflake scheduler,
+  // whose interval is disabled in production. This timer is best-effort on
+  // autoscale: the first check catches up after a sleeping instance wakes, and
+  // the durable sync_logs watermark plus advisory lock keep it once-per-ET-day.
+  setTimeout(() => {
+    checkAndRunTruckInventory('startup_catchup');
+  }, 5000);
+  truckInventoryIntervalId = setInterval(
+    () => { checkAndRunTruckInventory('scheduler'); },
+    TRUCK_INVENTORY_CHECK_INTERVAL_MS,
+  );
 
   // Task #487: startup catch-up for the All Vehicles roster mirror (all envs).
   // Offset 45s — distinct from the rental (15s) / offboarding (25s) / cost-center

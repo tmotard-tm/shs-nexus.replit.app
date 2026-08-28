@@ -1,5 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   inventoryEasternClock,
   isDailyTruckInventoryRefreshDue,
@@ -298,4 +299,22 @@ test("the dedicated advisory lock prevents concurrent inventory replacements", a
 
   releaseFirst();
   await first;
+});
+
+test("Nexus owns a production-capable inventory timer and no longer uses empty-only startup sync", async () => {
+  const schedulerSource = await readFile(
+    new URL("../server/sync-scheduler.ts", import.meta.url),
+    "utf8",
+  );
+  const indexSource = await readFile(
+    new URL("../server/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(schedulerSource, /runDailyTruckInventoryRefreshTick/);
+  assert.match(schedulerSource, /startup_catchup/);
+  assert.match(schedulerSource, /TRUCK_INVENTORY_CHECK_INTERVAL_MS/);
+  assert.doesNotMatch(indexSource, /getLatestTruckInventoryExtractDate/);
+  assert.doesNotMatch(indexSource, /Auto-sync truck inventory on startup if empty/);
+  assert.doesNotMatch(schedulerSource, /FLEET_AGENTS/i);
 });
