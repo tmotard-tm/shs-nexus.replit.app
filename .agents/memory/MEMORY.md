@@ -156,3 +156,4 @@
 - [Daily truck inventory mirror](daily-truck-inventory-mirror.md) — 07:00 ET Nexus catch-up; same lock session atomically replaces snapshot + watermark; all readers latest-only.
 - [Rental booking recovery serialization](rental-booking-recovery-serialization.md) — request intent creation and failure-to-review recovery must share one canonical request-key transaction lock.
 - [Async decision UI ordering](async-decision-ui-ordering.md) — accepted external work stays locked; reconcile stale refetches with a server-issued row version, never browser time.
+- [ETD distance-string parsing](etd-distance-string-parse.md) — calculatedDistance is "X.XX km", not bare number; strict parse silently disabled the branch-fallback walk since day one.

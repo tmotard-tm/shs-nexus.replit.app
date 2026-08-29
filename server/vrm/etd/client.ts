@@ -890,8 +890,17 @@ export class EtdClient {
         // treated as too far rather than free (Number(null) is 0, which would rank
         // "unknown distance" CLOSER than every real branch), because unknown is
         // exactly the airport-satellite shape the cap exists to exclude.
+        //
+        // The feed does not actually send a bare number — real responses read
+        // "22.45 km", unit suffix included. Number() demands the WHOLE string be
+        // numeric and rejects that suffix, so it returned NaN for every branch,
+        // every time, and this walk broke on its first candidate no matter how
+        // close it was (verified live: request #237/#238 each had 7-9 real,
+        // non-truck branches within a few km that were never tried). parseFloat
+        // reads the leading numeric token and ignores the rest, which is what this
+        // cap check has always needed.
         const raw = b?.calculatedDistance;
-        const dist = raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
+        const dist = raw === null || raw === undefined || raw === "" ? NaN : parseFloat(String(raw));
         if (!Number.isFinite(dist) || dist > NEARBY_FALLBACK_MAX_DISTANCE) break;
         fallbackTried += 1;
         const s2 = EtdClient.branchSite(b);

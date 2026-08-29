@@ -824,7 +824,16 @@ class EtdClient:
                 if tried >= NEARBY_FALLBACK_MAX_CANDIDATES:
                     break
                 try:
-                    dist = float(b.get("calculatedDistance"))
+                    # The feed does not send a bare km number — real responses read
+                    # "22.45 km", unit suffix included. float() demands the WHOLE
+                    # string be numeric and raises on that suffix, which broke this
+                    # walk on its first candidate every time, however close (TS
+                    # parity: the same fix in server/vrm/etd/client.ts, verified
+                    # live against request #237/#238). Parse the leading numeric
+                    # token instead, mirroring TS's parseFloat.
+                    raw = b.get("calculatedDistance")
+                    m = re.match(r"\s*([+-]?\d+(?:\.\d+)?)", str(raw)) if raw is not None else None
+                    dist = float(m.group(1)) if m else float("nan")
                 except (TypeError, ValueError):
                     break
                 # float('nan') parses but compares false against the cap — an

@@ -661,6 +661,48 @@ describe("nearbyOnEmpty branch walk (real client, faked transport)", () => {
     assert.deepEqual(priced, ["ST1001"], "the airport-satellite shape (no distance) is excluded");
   });
 
+  test("real feed shape: a formatted \"X.XX km\" string still walks (regression, #237/#238)", () => {
+    // Request #237 (Ramona CA) and #238 (Chicago Lincoln Park) both priced zero at
+    // their nearest branch on 2026-08-29 and stayed empty even though 7-9 real,
+    // non-truck branches sat within a few km — confirmed live by quoting the exact
+    // production addresses. `closestBranches` does not actually send the bare km
+    // number the walk assumed; it sends a formatted string with the unit baked in
+    // (verified against the live feed), e.g. "22.45 km". `Number("22.45 km")` is
+    // NaN, so the walk's distance/cap check broke on the very first candidate every
+    // time, for every quote that ever needed it — this opt-in feature has silently
+    // never worked. This test drives the same distance parsing the walk uses
+    // (`raw === null/undefined/"" ? NaN : parseFloat(String(raw))`) against that
+    // real shape so a future revert back to a strict Number() parse fails loudly.
+    const real = "22.45 km";
+    const dist = real === null || (real as any) === undefined || real === ""
+      ? NaN
+      : parseFloat(String(real));
+    assert.equal(dist, 22.45, "parseFloat reads the leading number and ignores the unit suffix");
+    assert.ok(Number.isFinite(dist) && dist <= 40, "a real, nearby branch must not be misread as unknown/too-far");
+  });
+
+  test("the walk adopts a next-nearest branch reported with the real \"X.XX km\" shape", async () => {
+    const BR_STR = (code: string, dist: string | null) => ({
+      branchCode: code,
+      customerFacingBranchName: `Branch ${code}`,
+      fullAddress: `${code} MAIN ST,TESTVILLE,OH,44100`,
+      latitude: "41.1",
+      longitude: "-81.5",
+      peoplesoftBranchId: `PS${code}`,
+      stationId: `ST${code}`,
+      calculatedDistance: dist,
+      telephone: "(+1)5555550100",
+    });
+    const { client, priced } = nearbyClient(
+      [BR_STR("1001", "0.75 km"), BR_STR("1002", "22.45 km")],
+      { ST1002: CLASSES },
+    );
+    const q = await client.quote({ address: "x", start: START, end: END, nearbyOnEmpty: true });
+    assert.deepEqual(priced, ["ST1001", "ST1002"], "a unit-suffixed distance must not stop the walk after the first candidate");
+    assert.equal(q.branch_code, "1002");
+    assert.ok((q.classes || []).length, "the adopted branch's real inventory reaches the quote");
+  });
+
   test("without the opt-in the quote behaves exactly as before", async () => {
     const { client, priced } = nearbyClient(
       [BR("1001", 1.0), BR("1002", 2.0)],
