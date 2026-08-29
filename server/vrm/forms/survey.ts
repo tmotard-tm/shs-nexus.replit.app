@@ -1084,6 +1084,26 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
         return res.status(400).json({ message: "date must be YYYY-MM-DD" });
       }
+      // Minutes to block. Optional; the arg builder defaults to 60.
+      //
+      // Tyler 2026-08-29: technicians who also have to CHANGE VEHICLES get 90,
+      // everyone else 60. The caller files those as two scoped batches rather
+      // than this route trying to work out who is swapping - it has no view of
+      // the class decision, which is made by the booker.
+      //
+      // Bounded deliberately: a fat-fingered 6000 would put a four-day block on
+      // a real route and there is no cancel API to undo it.
+      const rawDuration = req.body?.durationMinutes;
+      let durationMinutes: number | undefined;
+      if (rawDuration !== undefined && rawDuration !== null && rawDuration !== "") {
+        const n = Number(rawDuration);
+        if (!Number.isFinite(n) || n < 15 || n > 480) {
+          return res.status(400).json({
+            message: "durationMinutes must be a number between 15 and 480",
+          });
+        }
+        durationMinutes = Math.round(n);
+      }
       const live = !dryRun && isRouteBlockLive();
 
       const { rows } = await db.execute(sql`
@@ -1199,6 +1219,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           branchAddress: r.branch_address,
           date,
           live,
+          durationMinutes,
         });
         if (!decision.ok) {
           failed++;
@@ -1249,7 +1270,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       const confirmationGuards = await ensureConfirmationTexts(filedLdaps);
 
       res.json({
-        date, dryRun, live,
+        date, dryRun, live, durationMinutes: durationMinutes ?? 60,
         note: live
           ? "LIVE. Blocks were filed on real routes."
           : (dryRun

@@ -38,6 +38,16 @@ export type CutoverBlockInput = {
   branchAddress?: unknown;
   date: string;
   live: boolean;
+  /**
+   * Minutes to block. Defaults to 60.
+   *
+   * Tyler 2026-08-29: a technician who also has to CHANGE VEHICLES needs 90,
+   * not 60. They return one car, sign a new agreement, and move a van's worth
+   * of tools across. The caller already knows which technicians those are
+   * because the class chooser flags them, so the duration is passed in rather
+   * than this file trying to re-derive who is swapping.
+   */
+  durationMinutes?: number;
 };
 
 export type CutoverBlockDecision =
@@ -83,10 +93,10 @@ export function buildCutoverBlockArgs(input: CutoverBlockInput): CutoverBlockDec
       unit,
       truckNumber: input.truckNumber,
       date: input.date,
-      // One hour, Tyler 2026-08-28 for the Monday 8/31 wave: the technician has to
-      // return the Holman car and collect a new direct-bill reservation in the same
-      // visit, which does not fit the 30 minutes a plain billing swap needed.
-      durationMinutes: 60,
+      // 60 for a straight return-and-collect, 90 where the vehicle also changes.
+      // Was a hardcoded 30 until 2026-08-28, which was sized for a pure billing
+      // swap where the technician kept the same car and only signed.
+      durationMinutes: input.durationMinutes ?? 60,
       locationZip: zip,
       startTime: "08:00",
       // Pin by sending the same HH:MM the row starts at, per the API reference.
