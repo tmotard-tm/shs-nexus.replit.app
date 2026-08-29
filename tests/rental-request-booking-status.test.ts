@@ -30,6 +30,14 @@ const req = (over: Partial<BookingReqLike> = {}): BookingReqLike => ({
   status: "pending", ...over,
 });
 
+const assertRequestHasNoDriveAction = (actions: readonly string[], context: string) => {
+  const reviewActions = new Set(["edit_class", "edit_pickup", "open_workflow"]);
+  assert.ok(actions.every((action) => reviewActions.has(action)),
+    `${context}: clean failures may only edit or open for review; approval stays in the decision bar`);
+  assert.ok(!actions.includes("book_now"), `${context}: request UI must never offer book_now`);
+  assert.ok(!actions.includes("retry_workflow"), `${context}: request UI must never offer retry_workflow`);
+};
+
 // ── Verdict derivation ───────────────────────────────────────────────────────
 
 test("pending row with no intent shows nothing", () => {
@@ -183,12 +191,13 @@ test("fresh approved row is in progress", () => {
   assert.deepEqual(s.actions, []);
 });
 
-test("approved row older than the settle window is stalled — book_now offered", () => {
+test("approved row older than the settle window is reviewable — approve again or open, never drive directly", () => {
   const s = deriveBookingStatus(
     req({ status: "approved", decided_at: new Date(NOW - 30 * 60_000).toISOString() }), null, NOW,
   );
   assert.equal(s.verdict, "attention");
-  assert.ok(s.actions.includes("book_now"));
+  assert.deepEqual(s.actions, ["open_workflow"]);
+  assertRequestHasNoDriveAction(s.actions, "stalled approval");
 });
 
 test("parked intent (manual_review) outranks the row's etd_error", () => {
@@ -202,11 +211,12 @@ test("parked intent (manual_review) outranks the row's etd_error", () => {
     NOW,
   );
   assert.equal(s.verdict, "attention");
-  assert.ok(s.actions.includes("retry_workflow"), "parked always offers the staff retry");
+  assert.deepEqual(s.actions, ["open_workflow"], "a clean refusal is reviewable; APPROVE remains the only way to try again");
+  assertRequestHasNoDriveAction(s.actions, "clean manual-review failure");
   assert.ok(s.technical.some((l) => l.includes("some stale text")), "raw row error stays in technical");
 });
 
-test("booking_unknown gets the may-or-may-not-have-booked copy, retry action", () => {
+test("booking_unknown is fenced for reconciliation only", () => {
   const s = deriveBookingStatus(
     req({ status: "approved", decided_at: new Date(NOW - 60_000).toISOString() }),
     { status: "booking_unknown", last_error: "booking outcome timeout: socket hang up" },
@@ -214,7 +224,8 @@ test("booking_unknown gets the may-or-may-not-have-booked copy, retry action", (
   );
   assert.equal(s.verdict, "attention");
   assert.match(s.summary, /could not tell whether Enterprise/);
-  assert.ok(s.actions.includes("retry_workflow"));
+  assert.deepEqual(s.actions, ["open_workflow"]);
+  assertRequestHasNoDriveAction(s.actions, "ambiguous booking outcome");
 });
 
 test("cancel_pending_readback explains the evidence wait, no blind retry offered", () => {
@@ -225,7 +236,8 @@ test("cancel_pending_readback explains the evidence wait, no blind retry offered
   );
   assert.equal(s.verdict, "attention");
   assert.match(s.summary, /cancellation is waiting on proof/i);
-  assert.ok(!s.actions.includes("retry_workflow"));
+  assert.deepEqual(s.actions, ["open_workflow"]);
+  assertRequestHasNoDriveAction(s.actions, "cancellation reconciliation");
 });
 
 test("row etd_error with no parked intent is a failed verdict", () => {
@@ -262,44 +274,47 @@ test("failed intent (preview_failed) under an approved row reads failed with a f
     NOW,
   );
   assert.equal(s.verdict, "failed");
-  assert.ok(s.actions.includes("book_now"));
+  assert.deepEqual(s.actions, ["open_workflow"]);
+  assertRequestHasNoDriveAction(s.actions, "clean preview failure");
 });
 
 // ── Failure translation ──────────────────────────────────────────────────────
 
-const CASES: Array<[string, RegExp, string]> = [
+const CASES: Array<[string, RegExp, string | null]> = [
   ["booking: aborted_before_open: class CFAR no longer offered and nothing on the ladder is available here",
     /CFAR is no longer offered/, "edit_class"],
-  ["auto-book: branch drift E12345->E67890", /different branch \(E12345 → E67890\)/, "book_now"],
+  ["auto-book: branch drift E12345->E67890", /different branch \(E12345 → E67890\)/, "open_workflow"],
   ["booking: aborted_before_open: 2026-08-18 no longer a working day", /2026-08-18.*change the pickup date/, "edit_pickup"],
   ["preview: fresh quote failed: branch closed on requested date", /branch is closed/, "edit_pickup"],
-  ["booking: aborted_before_open: preview lacks pickupDate/sipp/branchCode", /quote is incomplete or stale/, "book_now"],
-  ["preview: fresh quote failed: ETD quote chain 500", /could not be quoted just now/, "book_now"],
+  ["booking: aborted_before_open: preview lacks pickupDate/sipp/branchCode", /quote is incomplete or stale/, "open_workflow"],
+  ["preview: fresh quote failed: ETD quote chain 500", /could not be quoted just now/, "open_workflow"],
   ["booking: aborted_before_open: no ETD user for JDOE42", /no driver profile for JDOE42/, "open_workflow"],
-  ["booking: aborted_before_open: additional-info lookup failed: 502", /usually transient/, "book_now"],
+  ["booking: aborted_before_open: additional-info lookup failed: 502", /usually transient/, "open_workflow"],
   ["booking: intent #12 already holds a reservation (booked_unverified); no second booking attempted",
     /reservation already exists/, "open_workflow"],
   ["auto-book: intent #12 is at manual_review; resolve it in the workflow panel before re-approving",
     /parked and needs a person/, "open_workflow"],
   ["auto-book: intent_conflict (a live intent already exists for this LDAP)", /two live workflows would mean two cars/i, "open_workflow"],
   ["preview: eligibility gate failed (not_active_on_roster: termed)", /eligibility gate/, "open_workflow"],
-  ["booking outcome timeout: socket hang up", /could not tell whether Enterprise/, "retry_workflow"],
-  ["booking failed clean: some vendor validation text nobody has seen before", /could not recover from/, "book_now"],
-  ["utter gibberish 0xDEADBEEF", /could not recover from/, "book_now"],
+  ["booking outcome timeout: socket hang up", /could not tell whether Enterprise/, "open_workflow"],
+  ["booking failed clean: some vendor validation text nobody has seen before", /could not recover from/, "open_workflow"],
+  ["utter gibberish 0xDEADBEEF", /could not recover from/, "open_workflow"],
 ];
 
 for (const [raw, summaryRe, action] of CASES) {
   test(`translate: ${raw.slice(0, 60)}…`, () => {
     const e = explainBookingFailure(raw);
     assert.match(e.summary, summaryRe, `summary for: ${raw}`);
-    assert.ok(e.actions.includes(action as any), `expected ${action} in [${e.actions}] for: ${raw}`);
+    if (action) assert.ok(e.actions.includes(action as any), `expected ${action} in [${e.actions}] for: ${raw}`);
+    assertRequestHasNoDriveAction(e.actions, raw);
   });
 }
 
-test("empty failure text still yields a sentence and an action", () => {
+test("empty clean failure is reviewable without a direct booking or retry action", () => {
   const e = explainBookingFailure("");
   assert.ok(e.summary.length > 0);
-  assert.ok(e.actions.length > 0);
+  assert.deepEqual(e.actions, ["open_workflow"]);
+  assertRequestHasNoDriveAction(e.actions, "empty failure");
 });
 
 // ── List badge + sort ────────────────────────────────────────────────────────

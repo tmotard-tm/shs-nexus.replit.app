@@ -28,8 +28,6 @@ export type BookingVerdict =
 export type BookingActionKind =
   | "edit_class"      // jump to the vehicle-class editor
   | "edit_pickup"     // jump to the pickup date field
-  | "book_now"        // POST /rental-request/:no/book (adopt-or-create + drive)
-  | "retry_workflow"  // POST cutover/intents/:id/retry (staff-approved)
   | "open_workflow"   // expand + scroll to the workflow panel
   | "resend_extension_email"; // POST /rental-request/:no/extension-email
 
@@ -81,8 +79,8 @@ function stripPrefixes(raw: string): { inner: string; unknownOutcome: boolean } 
 const UNKNOWN_OUTCOME_EXPLANATION: FailureExplanation = {
   summary:
     "We could not tell whether Enterprise actually created this reservation. " +
-    "A staff retry re-checks with Enterprise before anything is re-attempted — never book again blind.",
-  actions: ["retry_workflow", "open_workflow"],
+    "Reconcile the confirmation or cancellation evidence in the workflow before approving again.",
+  actions: ["open_workflow"],
 };
 
 /**
@@ -94,7 +92,7 @@ const UNKNOWN_OUTCOME_EXPLANATION: FailureExplanation = {
 export function explainBookingFailure(raw: string | null | undefined): FailureExplanation {
   const text = String(raw ?? "").trim();
   if (!text) {
-    return { summary: "The booking did not complete.", actions: ["book_now"] };
+    return { summary: "The booking did not complete. Review the workflow, then approve again if it is safe to do so.", actions: ["open_workflow"] };
   }
   const { inner, unknownOutcome } = stripPrefixes(text);
   if (unknownOutcome) return UNKNOWN_OUTCOME_EXPLANATION;
@@ -113,8 +111,8 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
     return {
       summary:
         `Enterprise now routes this pickup to a different branch (${m[1]} → ${m[2]}) than the one quoted. ` +
-        "Book it again so the quote and the reservation agree on where the technician goes.",
-      actions: ["book_now"],
+        "Review the branch and approve again so the quote and reservation agree on where the technician goes.",
+      actions: ["open_workflow"],
     };
   }
   if ((m = /(\d{4}-\d{2}-\d{2})?\s*(?:is\s+)?no longer a (?:verified )?working day/i.exec(inner))) {
@@ -134,15 +132,15 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
   }
   if (/preview (?:lacks|incomplete)/i.test(inner) || /^preview_(?:failed|required)$/i.test(inner)) {
     return {
-      summary: "The saved quote is incomplete or stale — book it again to build a fresh quote.",
-      actions: ["book_now"],
+      summary: "The saved quote is incomplete or stale — review it, then approve again to build a fresh quote.",
+      actions: ["open_workflow"],
     };
   }
   if (/fresh quote failed/i.test(inner)) {
     return {
       summary:
-        "Enterprise could not be quoted just now (often a temporary outage on their side) — try booking again.",
-      actions: ["book_now"],
+        "Enterprise could not be quoted just now (often a temporary outage on their side) — review the workflow, then approve again.",
+      actions: ["open_workflow"],
     };
   }
   if ((m = /no ETD user for (\S+)/i.exec(inner))) {
@@ -155,8 +153,8 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
   }
   if (/additional-info lookup failed/i.test(inner)) {
     return {
-      summary: "A lookup on Enterprise's side failed mid-booking (usually transient) — try booking again.",
-      actions: ["book_now"],
+      summary: "A lookup on Enterprise's side failed mid-booking (usually transient) — review the workflow, then approve again.",
+      actions: ["open_workflow"],
     };
   }
   if (/already holds a reservation/i.test(inner)) {
@@ -205,14 +203,14 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
   if (/manual_review/i.test(inner)) {
     return {
       summary: "The booking workflow is parked for a person to review — open the workflow below.",
-      actions: ["open_workflow", "retry_workflow"],
+      actions: ["open_workflow"],
     };
   }
   return {
     summary:
-      "The booking hit a problem it could not recover from. Try booking again, " +
-      "or check the technical details below.",
-    actions: ["book_now"],
+      "The booking hit a problem it could not recover from. Review the workflow and technical details, " +
+      "then approve again if appropriate.",
+    actions: ["open_workflow"],
   };
 }
 
@@ -231,6 +229,7 @@ export interface BookingReqLike {
   booked_facts?: {
     branchName?: string | null; branchAddress?: string | null;
     pickupDate?: string | null; pickupTime?: string | null;
+    returnDate?: string | null; returnTime?: string | null;
     classCode?: string | null; classDescription?: string | null;
   } | null;
   nearest_branch_name?: string | null;
@@ -274,19 +273,6 @@ export interface BookingStatus {
   /** The confirmation reference, wherever it lives (row or intent evidence). */
   reference: string | null;
 }
-
-/**
- * Request-lane intent statuses /book will adopt and drive — pre-reservation
- * only, mirroring CutoverIntentPanel's list. No intent at all is bookable
- * too (an auto-book that died before createIntent).
- */
-export const BOOKABLE_REQUEST_STATUSES: ReadonlySet<string> = new Set([
-  "created", "preview_pending", "preview_ready", "preview_required", "confirmed",
-]);
-/** Intent statuses the staff Retry endpoint accepts (mirror of the panel's canRetry). */
-export const RETRYABLE_INTENT_STATUSES: ReadonlySet<string> = new Set([
-  "manual_review", "booking_unknown", "block_conflict_pending_readback",
-]);
 
 /** Intent statuses that mean a person must act before anything else runs. */
 const PARKED_INTENT = new Set([
@@ -495,11 +481,7 @@ export function deriveBookingStatus(
               actions: ["open_workflow"] as BookingActionKind[],
             }
           : explainBookingFailure(raw);
-    const actions = Array.from(new Set<BookingActionKind>([
-      ...explained.actions,
-      ...(intentStatus === "cancel_pending_readback" ? [] : (["retry_workflow"] as BookingActionKind[])),
-      "open_workflow",
-    ]));
+    const actions = Array.from(new Set<BookingActionKind>([...explained.actions, "open_workflow"]));
     return {
       verdict: "attention",
       headline: "Booking needs attention",
@@ -512,7 +494,10 @@ export function deriveBookingStatus(
   }
 
   if (req.etd_error) {
-    const explained = explainBookingFailure(req.etd_error);
+    // An intent's error is written by the most recent attempt; the row error
+    // may be the earlier attempt that first opened this review. Keep both in
+    // technical details, but make the visible reason describe the latest one.
+    const explained = explainBookingFailure(intent?.last_error ?? req.etd_error);
     return {
       verdict: "failed",
       headline: "Booking failed",
@@ -528,7 +513,7 @@ export function deriveBookingStatus(
       verdict: "failed",
       headline: "Booking failed",
       summary: explained.summary,
-      actions: explained.actions.length ? explained.actions : ["book_now"],
+      actions: explained.actions.length ? explained.actions : ["open_workflow"],
       technical, textState: null, caution: null, reference,
     };
   }
@@ -544,9 +529,8 @@ export function deriveBookingStatus(
         headline: "Approved but not booked",
         summary:
           "The booking never finished — quoting and reserving takes 20–30 seconds, and this has been " +
-          "sitting far longer. Book it now to run the whole chain again (a request that already holds " +
-          "a reservation is refused, never booked twice).",
-        actions: ["book_now", "open_workflow"],
+          "sitting far longer. Review the workflow and approve again only after confirming no reservation exists.",
+        actions: ["open_workflow"],
         technical, textState: null, caution: null, reference,
       };
     }
@@ -588,15 +572,17 @@ export function bookingBadge(status: BookingStatus, req: BookingReqLike): Bookin
   switch (status.verdict) {
     case "booked": {
       const branch = req.booked_facts?.branchName ?? req.nearest_branch_name ?? "";
+      const returnDate = req.booked_facts?.returnDate ?? "";
       return {
         label: status.reference ? `✓ ${status.reference}` : "✓ BOOKED",
         tone: "ok",
         title: [
           status.reference ? `Confirmation ${status.reference}` : "Booked",
           branch ? `at Enterprise ${branch}` : "",
+          returnDate ? `Return ${returnDate} — extend separately if more time is needed` : "",
           status.textState?.text ?? "",
         ].filter(Boolean).join(" · "),
-        sub: branch || null,
+        sub: [branch, returnDate ? `return ${returnDate}` : ""].filter(Boolean).join(" · ") || null,
       };
     }
     case "failed":

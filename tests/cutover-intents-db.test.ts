@@ -44,6 +44,7 @@ import {
   finalizeCompletion,
   getQuietStateFallback,
   invalidateRequestPreviews,
+  intentsBySourceIds,
   isContractBlockLive,
   openBookingAttempt,
   persistPreviewFromRunner,
@@ -381,6 +382,30 @@ describe("request lane source keying", () => {
     assert.equal(String(byId.sourceRow.request_no), String(row.request_no));
   });
 
+  test("by-source returns a UUID-keyed request intent under its canonical request number", async () => {
+    const { rows } = await db.execute(sql`
+      INSERT INTO vrm_rental_request (ldap, tech_name, mobile_phone, home_state)
+      VALUES (${LDAP_PREFIX + "RQ2"}, 'ZZ UUID Intent', '5555550101', 'PA')
+      RETURNING id, request_no
+    `);
+    const row = (rows as any[])[0];
+    const intentId = await insertIntent({
+      workflow_type: WORKFLOW_REQUEST,
+      source_id: String(row.id),
+      ldap: `${LDAP_PREFIX}RQ2`,
+      execution_mode: "live",
+      status: "booking_unknown",
+    });
+
+    const bySource = await intentsBySourceIds(WORKFLOW_REQUEST, [String(row.request_no)]);
+    assert.equal(
+      Number(bySource[String(row.request_no)]?.id),
+      intentId,
+      "the request drawer must receive the historical UUID intent under request_no",
+    );
+    assert.equal(bySource[String(row.id)], undefined, "request output keys stay canonical for the UI");
+  });
+
   test("request intents never file a route block: legacy pending state normalizes to not_applicable, zero ART attempts", async () => {
     const id = await insertIntent({ workflow_type: WORKFLOW_REQUEST, ldap: `${LDAP_PREFIX}RQBLK`, status: "reservation_verified" });
     // Legacy shape from before the split: request row carrying cutover's
@@ -402,18 +427,29 @@ describe("request lane source keying", () => {
     assert.equal(n, 0, "no ART attempt is ever opened for a request intent");
   });
 
-  test("request booking completes on verified readback; duplicate and post-cancel postbacks never revive a terminal intent", async () => {
+  test("ambiguous request booking completes on verified readback and records the source request", async () => {
     const ldap = `${LDAP_PREFIX}RQDONE`;
+    const { rows: requests } = await db.execute(sql`
+      INSERT INTO vrm_rental_request (ldap, tech_name, mobile_phone, home_state, status)
+      VALUES (${ldap}, 'ZZ Cut Readback', '5555550110', 'TX', 'approved')
+      RETURNING request_no
+    `);
+    const requestNo = Number((requests as any[])[0].request_no);
     // Strict readback identity (repair spec §3) verifies branch/date/class
     // too — a production intent always carries them (preview + event_date),
     // so the fixture does as well.
     const id = await insertIntent({
-      workflow_type: WORKFLOW_REQUEST, ldap, status: "confirmed",
+      workflow_type: WORKFLOW_REQUEST, source_id: String(requestNo), ldap, status: "booking",
       preview: JSON.stringify({ reservation: { branchCode: "DAL123", sipp: "ICAR" } }),
     });
-    await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = '2026-08-20' WHERE id = ${id}`);
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+         SET event_date = '2026-08-20', reservation_state = 'unknown'
+       WHERE id = ${id}
+    `);
     const mine = (await claimBookingWork({ runnerId: "req-done-runner", limit: 50 })).find((i) => i.intentId === id);
     assert.ok(mine, "claim must return the confirmed request fixture");
+    assert.equal(mine!.requiresReconcile, true, "an ambiguous outcome must be readback-only");
 
     const verifiedPayload = {
       expected: { confirmation: "REQ-C1" },
@@ -434,6 +470,14 @@ describe("request lane source keying", () => {
     assert.equal(row.status, "completed");
     assert.equal(row.reservation_state, "verified");
     assert.equal(row.block_state, "not_applicable", "completion must not drag the request into block lanes");
+    const source = ((await db.execute(sql`
+      SELECT status, etd_reference, etd_booked_at
+        FROM vrm_rental_request
+       WHERE request_no = ${requestNo}
+    `)).rows as any[])[0];
+    assert.equal(source.status, "booked", "authoritative readback must close the source request");
+    assert.equal(source.etd_reference, "REQ-C1");
+    assert.ok(source.etd_booked_at, "authoritative readback must stamp the booked time");
     const attempts = (((await db.execute(sql`
       SELECT count(*)::int AS n FROM vrm_workflow_attempts WHERE intent_id = ${id} AND phase = 'art_block'
     `)).rows as any[])[0]).n;
@@ -469,6 +513,65 @@ describe("request lane source keying", () => {
     // reservation_state is born 'pending' (column default) — the point is the
     // losing postback must never have stamped it 'verified'.
     assert.notEqual(row2.reservation_state, "verified", "the loser CAS must not stamp verified state either");
+  });
+
+  test("verified readback with conflicting source confirmation remains fenced for staff review", async () => {
+    const ldap = `${LDAP_PREFIX}RQCONFLICT`;
+    const { rows: requests } = await db.execute(sql`
+      INSERT INTO vrm_rental_request
+        (ldap, tech_name, mobile_phone, home_state, status, etd_reference)
+      VALUES (${ldap}, 'ZZ Cut Conflict', '5555550111', 'TX', 'approved', 'EXISTING-C1')
+      RETURNING request_no
+    `);
+    const requestNo = Number((requests as any[])[0].request_no);
+    const id = await insertIntent({
+      workflow_type: WORKFLOW_REQUEST,
+      source_id: String(requestNo),
+      ldap,
+      status: "booking",
+      preview: JSON.stringify({ reservation: { branchCode: "DAL123", sipp: "ICAR" } }),
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+         SET event_date = '2026-08-20', reservation_state = 'unknown'
+       WHERE id = ${id}
+    `);
+    const mine = (await claimBookingWork({ runnerId: "req-conflict-runner", limit: 50 }))
+      .find((i) => i.intentId === id);
+    assert.ok(mine);
+
+    const result = await recordBookingPostback({
+      intentId: id,
+      runnerId: "req-conflict-runner",
+      fencingToken: mine!.fencingToken,
+      phase: "readback",
+      payload: {
+        expected: { confirmation: "NEW-C2" },
+        matches: [{
+          confirmation: "NEW-C2",
+          reference: `SHS ${ldap} pickup`,
+          branchCode: "DAL123",
+          date: "2026-08-20",
+          sipp: "ICAR",
+        }],
+      },
+    });
+    assert.equal(result.status, "manual_review");
+    const intent = ((await db.execute(sql`
+      SELECT status, reservation_state, last_error
+        FROM vrm_rental_workflow_intents
+       WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(intent.status, "manual_review");
+    assert.equal(intent.reservation_state, "unknown");
+    assert.match(String(intent.last_error), /possible duplicate/i);
+    const source = ((await db.execute(sql`
+      SELECT status, etd_reference
+        FROM vrm_rental_request
+       WHERE request_no = ${requestNo}
+    `)).rows as any[])[0];
+    assert.equal(source.status, "approved", "conflicting evidence must not silently close the request");
+    assert.equal(source.etd_reference, "EXISTING-C1", "existing evidence must never be overwritten");
   });
 });
 
@@ -658,6 +761,61 @@ describe("booked-unverified recovery lane", () => {
       /reconciled clean/,
       "with no recorded failure the clean-reconcile wording still stands",
     );
+  });
+
+  test("a clean request commit failure returns the source row to review and preserves its reason", async () => {
+    const ldap = `${LDAP_PREFIX}RQFAIL`;
+    const { rows: requests } = await db.execute(sql`
+      INSERT INTO vrm_rental_request (ldap, tech_name, mobile_phone, home_state, status)
+      VALUES (${ldap}, 'ZZ Cut Request Failure', '5555550100', 'PA', 'approved')
+      RETURNING request_no
+    `);
+    const requestNo = Number((requests as any[])[0].request_no);
+    const id = await insertIntent({
+      workflow_type: WORKFLOW_REQUEST,
+      source_id: String(requestNo),
+      ldap,
+      status: "booking",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET claimed_by = 'request-failure-runner',
+          lease_expires_at = now() + interval '10 minutes',
+          fencing_token = 1
+      WHERE id = ${id}
+    `);
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, evidence)
+      VALUES (${id}, 'etd_booking', 1, 1, NULL, '{}'::jsonb)
+    `);
+
+    const result = await recordBookingPostback({
+      intentId: id,
+      runnerId: "request-failure-runner",
+      fencingToken: 1,
+      phase: "op_result",
+      payload: {
+        attemptNo: 1,
+        outcome: "failed_clean",
+        evidence: { error: "Enterprise declined the reservation before creating it" },
+      },
+    });
+
+    assert.equal(result.status, "preview_required");
+    const intent = ((await db.execute(sql`
+      SELECT status, reservation_state, last_error
+      FROM vrm_rental_workflow_intents WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(intent.status, "preview_required");
+    assert.equal(intent.reservation_state, "failed");
+    assert.match(String(intent.last_error), /Enterprise declined/);
+
+    const request = ((await db.execute(sql`
+      SELECT status, etd_error FROM vrm_rental_request WHERE request_no = ${requestNo}
+    `)).rows as any[])[0];
+    assert.equal(request.status, "pending", "another reservation attempt requires another Approve");
+    assert.match(String(request.etd_error), /Enterprise declined/);
   });
 
   test("a clean-none readback after a REFUSED commit keeps the refusal as the last word", async () => {

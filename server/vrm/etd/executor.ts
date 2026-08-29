@@ -139,6 +139,12 @@ export type ExecutorRun = {
 export type ExecutorDeps = {
   client?: EtdClient;
   schedule?: (ldap: string, fromISO: string, horizonDays: number) => Promise<ScheduleWindow>;
+  bookingAssets?: () => {
+    template: Record<string, unknown>;
+    mapping: Record<string, string>;
+    oldJ: string | null;
+    oldR: string | null;
+  };
 };
 
 const clip = (v: unknown, n = EVIDENCE_CHARS): string => String(v ?? "").slice(0, n);
@@ -353,8 +359,7 @@ export function intentAddress(item: QueueItem): {
   // something the unattended guards refuse, so it also switches the state guard off:
   // the guard exists to catch a geocode that wandered off an address nobody checked,
   // and this address WAS checked, by a person. Second-guessing a human's explicit
-  // branch is the behaviour Tyler asked to remove on 2026-08-20. Mirrors `book_one`
-  // in etd-runner/scripts/book_request.py — change both or neither. VPRAK request
+  // branch is the behaviour Tyler asked to remove on 2026-08-20. VPRAK request
   // #110 (2026-08-24) is why this exists here too: a BYOV breakdown with no shop and
   // no reported branch, where the operator typed the Peoria branch on the approval
   // and this lane quoted from nothing anyway.
@@ -420,8 +425,7 @@ export function intentAddress(item: QueueItem): {
 /**
  * A field whose ENTIRE content is a placeholder token is an answer of no
  * answer. Matched whole-field and anchored so real places survive: "Natrona
- * Heights" is not "na", "Xenia" is not "x". Mirrors `_scrub_placeholder` in
- * etd-runner/scripts/book_request.py — change both or neither.
+ * Heights" is not "na", "Xenia" is not "x".
  */
 export function scrubPlaceholder(raw: unknown): string {
   const s = String(raw ?? "").trim();
@@ -640,9 +644,8 @@ export function classForIntent(
     // smallest-first, exactly as the sedan default's dead-end does. Space classes
     // (suv, minivan, cargo van, pickup) keep the down-only rule: their walk already
     // starts at MVAR, the policy ceiling, so there is no "up" left that policy allows.
-    // Mirrored by _named_class_pick in etd-runner/scripts/book_request.py — change
-    // both or neither (the two bookers resolved the same request in OPPOSITE
-    // directions until 2026-08-19).
+    // The retired Python request booker once resolved this in the opposite
+    // direction; this executor is now the sole request-booking authority.
     if (!pick && wantCode && SEDAN_CODES.has(wantCode)) {
       const rung = SEDAN_LADDER.indexOf(wantCode);
       for (const code of SEDAN_LADDER.slice(rung + 1)) {
@@ -761,9 +764,8 @@ async function runPreview(
       // request asked Enterprise to quote a pickup that had ALREADY HAPPENED, and ETD
       // answers a past start with an empty class list - which surfaced as
       // `class_unmapped` and looked for all the world like a vehicle-mapping bug. Two
-      // independent code paths hit it: the in-server preview and book_request.py, which
-      // reported "ETD offered no classes at any duration, from the shop address or the
-      // technician's reported branch". Proven 2026-08-18 with all 12 open requests
+      // both historical request bookers hit it before booking was consolidated.
+      // Proven 2026-08-18 with all 12 open requests
       // carrying pickup_at in the past, including two created that same morning.
       //
       // ET is the floor reference on purpose. Every US branch is at or west of Eastern,
@@ -789,16 +791,47 @@ async function runPreview(
           + `quoted ${startDay} ${window.time} instead`,
         );
       }
-      const end = fmtISO(addDaysDT(parseLocalDT(start), days));
       const { address, code, wantState } = intentAddress(item);
       if (!address) throw new Error("no branch/shop address seed on the intent facts");
 
-      const { q, usedReported } = await quoteSelectedAddress(
-        etd, item, address, code, wantState, start, end,
-      );
+      // Requests are first priced for their full approved duration.  Enterprise can
+      // have inventory for a short rental while returning no classes for the longer
+      // one, so a request (and only a request) may then try the documented 7/3-day
+      // ladder.  Do not use a class-mapping failure as an availability signal: a
+      // non-empty quote is authoritative and must remain reviewable as such.
+      //
+      // Keep the same address, state guard, and request nearby-branch behavior on
+      // every rung.  In particular, an approved Fleet address is not replaceable by
+      // the shop just because the first duration priced empty.
+      const durations = item.workflowType === WORKFLOW_REQUEST
+        ? [days, ...[7, 3].filter((candidate) => candidate < days)]
+        : [days];
+      let q: QuoteResult | null = null;
+      let usedReported = false;
+      let end = "";
+      let actualDays = days;
+      for (const candidate of durations) {
+        const candidateEnd = fmtISO(addDaysDT(parseLocalDT(start), candidate));
+        const quoted = await quoteSelectedAddress(
+          etd, item, address, code, wantState, start, candidateEnd,
+        );
+        q = quoted.q;
+        usedReported = quoted.usedReported;
+        end = candidateEnd;
+        actualDays = candidate;
+        // Retry a shorter duration only when ETD gave us no inventory at all.
+        if ((q.classes || []).length || candidate === durations[durations.length - 1]) break;
+      }
+      // Every duration list has at least the requested duration; this only narrows
+      // the type after the loop for the quote fields below.
+      if (!q) throw new Error("ETD quote was not taken");
       const classes = q.classes || [];
       const chosen = classForIntent(item, classes);
       classDecision = chosen.decision;
+      const shortened = item.workflowType === WORKFLOW_REQUEST && actualDays < days;
+      const extensionWarning = shortened
+        ? `Enterprise priced ${actualDays} days instead of the requested ${days}; extension required before return`
+        : "";
 
       Object.assign(quote, {
         // The DAY and TIME actually quoted. `firstDay` is pre-roll and a hardcoded
@@ -807,7 +840,9 @@ async function runPreview(
         pickupDate: startDay,
         pickupTime: window.time,
         returnDate: end.slice(0, 10),
-        returnTime: "09:00:00",
+        returnTime: end.slice(11, 19),
+        shortened,
+        extensionRequired: shortened,
         branchCode: q.branch_code,
         branchName: q.branch_name,
         branchAddress: q.branch_address,
@@ -820,6 +855,7 @@ async function runPreview(
         reference: q.reference,
         offeredClasses: classes.map((c) => ({ code: c.code, description: c.description })),
       });
+      if (extensionWarning) (quote.warnings as string[]).push(extensionWarning);
       // Name the branch that came up empty so the drawer reads "moved off X because
       // it had no cars" instead of looking like the geocoder picked somewhere odd.
       if (q.branch_fallback_from_code) {
@@ -1196,7 +1232,9 @@ async function runBook(
   // Defense in depth. A live intent is already unclaimable while the flag is disarmed
   // (claimBookingWork filters it out), so reaching here means the flag flipped mid-pass.
   if (mode === "live" && !isContractBlockLive()) {
-    return result("SKIP", "live_disarmed", "live intent but the contract-block flag is not armed");
+    const detail = "live intent but the contract-block flag is not armed";
+    await post("op_result", { outcome: "aborted_before_open", evidence: { reason: detail } });
+    return result("ABRT", "live_disarmed", detail);
   }
 
   const pickup = String(resv.pickupDate || "");
@@ -1385,6 +1423,12 @@ async function runBook(
     pickupDate: pickup,
     start,
     end,
+    ...(item.workflowType === WORKFLOW_REQUEST
+      ? {
+          shortened: !!resv.shortened,
+          extensionRequired: !!resv.extensionRequired,
+        }
+      : {}),
     requestHash,
   };
 
@@ -1396,7 +1440,12 @@ async function runBook(
   // the true state. Search error -> do NOT proceed to booking on a blind spot.
   const dup = await journeyMatches(etd, intentRef, { intentRef });
   if (dup.error) {
-    return result("HOLD", "search_failed", `pre-commit duplicate search failed: ${clip(dup.error, 120)}`);
+    const detail = `pre-commit duplicate search failed: ${clip(dup.error, 120)}`;
+    // This is a normal booking claim, never a reconciliation claim. The
+    // orchestrator proved there is no unresolved prior attempt before serving
+    // it, and op_open has not happened yet, so this pass is definitively clean.
+    await post("op_result", { outcome: "aborted_before_open", evidence: { reason: detail } });
+    return result("ABRT", "search_failed", detail);
   }
   if (dup.matches.length) {
     const body = await post("readback", {
@@ -1508,7 +1557,23 @@ async function runBook(
     await post("op_result", {
       outcome: "booked",
       attemptNo,
-      evidence: { confirmation, quoteReference: q.reference },
+      evidence: {
+        confirmation,
+        quoteReference: q.reference,
+        pickupDate: pickup,
+        pickupTime: String(resv.pickupTime || "").slice(0, 8) || null,
+        returnDate: String(resv.returnDate || "").slice(0, 10) || null,
+        returnTime: String(resv.returnTime || "").slice(0, 8) || null,
+        ...(item.workflowType === WORKFLOW_REQUEST
+          ? {
+              shortened: !!resv.shortened,
+              extensionRequired: !!resv.extensionRequired,
+              ...(resv.extensionRequired
+                ? { warning: "Shortened rental: extension required before return" }
+                : {}),
+            }
+          : {}),
+      },
     });
     bookDetail = `conf ${confirmation}  ${q.branch_name}`;
   } else {
@@ -1594,9 +1659,13 @@ async function executePass(opts: {
   const needsBooking = items.some((i) => i.kind !== "preview" && !i.requiresReconcile);
   if (needsBooking) {
     try {
-      template = loadSavedrTemplate();
-      mapping = loadUserMapping();
-      ({ oldJ, oldR } = templateOldIds(template));
+      if (opts.deps.bookingAssets) {
+        ({ template, mapping, oldJ, oldR } = opts.deps.bookingAssets());
+      } else {
+        template = loadSavedrTemplate();
+        mapping = loadUserMapping();
+        ({ oldJ, oldR } = templateOldIds(template));
+      }
     } catch (err) {
       console.error(`[etd-exec] booking assets unavailable: ${errText(err)}`);
     }
@@ -1607,13 +1676,21 @@ async function executePass(opts: {
       if (item.kind === "preview") {
         results.push(await runPreview(etd, item, opts.days, opts.runnerId, readSchedule));
       } else if (!template && !item.requiresReconcile) {
+        const detail = "booking assets unavailable on this host (savedr template / user mapping)";
+        await recordBookingPostback({
+          intentId: item.intentId,
+          runnerId: opts.runnerId,
+          fencingToken: item.fencingToken,
+          phase: "op_result",
+          payload: { outcome: "aborted_before_open", evidence: { reason: detail } },
+        });
         results.push({
           intentId: item.intentId,
           ldap: item.ldap,
           kind: item.kind,
-          action: "ERR",
+          action: "ABRT",
           status: "assets_missing",
-          detail: "savedr template / user mapping unavailable on this host",
+          detail,
         });
       } else {
         results.push(

@@ -1275,10 +1275,9 @@ def _guarded_quote(etd: EtdClient, address: str, code: str, want_state: str,
                    start: str, end: str, nearby_on_empty: bool = False) -> dict:
     """Quote with the same wrong-state guard the legacy pool lane uses.
 
-    ``nearby_on_empty`` is the request lane's opt-in (book_request passes it): when
-    the chosen branch prices zero classes the client walks the next-nearest branches.
-    The cutover lane never opts in — its quote pins the contract branch, and the
-    client refuses to move a pinned branch regardless.
+    ``nearby_on_empty`` remains for parity tests with the canonical TypeScript
+    request executor. This cutover-only runner never opts in: its quote pins the
+    contract branch, and the client refuses to move a pinned branch regardless.
     """
     q = etd.quote(address=address, start=start, end=end,
                   prefer_branch_code=code or None,

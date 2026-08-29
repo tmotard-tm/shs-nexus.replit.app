@@ -12,7 +12,7 @@
  * returned. (Plan rule: "The client can NEVER label a row clean or override
  * a failed gate.")
  *
- * Button availability follows intent.status alone:
+ * Cutover button availability follows intent.status alone:
  *   preview_ready                     -> Confirm (CAS on preview_version) / Re-preview / Cancel
  *   preview_required|preview_failed|
  *   eligibility_failed                -> Re-preview / Cancel
@@ -22,6 +22,10 @@
  *   awaiting_verification             -> nothing (work is in flight; cancel would race the runner)
  *   cancel_pending_readback           -> Record ETD cancellation evidence (or wait for the runner's readback proof)
  *   terminal                          -> nothing
+ *
+ * Rental requests deliberately have no creation controls here: Approve is
+ * their sole creation trigger. Possible reservations get a readback-only
+ * Reconcile control plus confirmation and cancellation evidence controls.
  *
  * LIVE lane (repair spec): starting a LIVE intent is admin/developer-only —
  * the server enforces the same rule (403 admin_required_live), this button is
@@ -175,14 +179,19 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
     return `engine: ${rows.map((r) => `${r.action} ${r.status}${r.detail ? ` (${r.detail})` : ""}`).join(" · ")}`;
   };
 
-  const run = async (label: string, fn: () => Promise<any>, after?: (j: any) => Promise<string>) => {
+  const run = async (
+    label: string,
+    fn: () => Promise<any>,
+    after?: (j: any) => Promise<string>,
+    afterLabel = "booking engine",
+  ) => {
     setBusy(label); setErr(""); setInfo("");
     try {
       const j = await fn();
       const codes = (j?.failures ?? []).map((f: any) => `${f.code}${f.detail ? `: ${f.detail}` : ""}`);
       let msg = codes.length ? `Server says ${j?.status ?? ""} — ${codes.join(" · ")}` : (j?.status ? `→ ${j.status}` : "done");
       if (after) {
-        setInfo(`${msg} — running booking engine (this can take up to a minute)…`);
+        setInfo(`${msg} — running ${afterLabel} (this can take up to a minute)…`);
         try {
           msg = `${msg} · ${await after(j)}`;
         } catch (e: any) {
@@ -203,9 +212,7 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   const create = (mode?: "live") => run(
     mode === "live" ? "create-live" : "create",
     () =>
-      workflow === "survey"
-        ? post(`${BASE}/intents`, { surveyResponseId: sourceId, ...(mode === "live" ? { executionMode: "live" } : {}) })
-        : post(`/api/vrm/forms/rental-request/${sourceId}/booking-intent`, mode === "live" ? { executionMode: "live" } : {}),
+      post(`${BASE}/intents`, { surveyResponseId: sourceId, ...(mode === "live" ? { executionMode: "live" } : {}) }),
     // Build the quote immediately: starting the workflow IS the request for a preview.
     (j) => engine(Number(j?.intent?.id) || undefined),
   );
@@ -240,44 +247,12 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
   // decision already made.
   const canConfirm = !isRequest && status === "preview_ready";
   const canRepreview = !isRequest && ["preview_ready", "preview_required", "preview_failed", "eligibility_failed"].includes(status);
-  const canRetry = ["manual_review", "booking_unknown", "block_conflict_pending_readback"].includes(status);
+  const canRetry = !isRequest && ["manual_review", "booking_unknown", "block_conflict_pending_readback"].includes(status);
+  const canReconcileRequest =
+    isRequest &&
+    ["unknown", "booked_unverified"].includes(String(intent?.reservation_state ?? "")) &&
+    ["manual_review", "booking_unknown", "awaiting_verification"].includes(status);
   const canCancel = !!intent && !TERMINAL.has(status) && !IN_FLIGHT.has(status);
-
-  // Pre-reservation only. Anything past these has already touched ETD, and a second
-  // pass would be a second car. No intent at all is bookable too: that is a request
-  // whose first auto-book died before createIntent, which is where the two new hires
-  // refused by the old TPMS gate ended up.
-  const BOOKABLE_REQUEST_STATUSES: ReadonlySet<string> = new Set([
-    "created", "preview_pending", "preview_ready", "preview_required", "confirmed",
-  ]);
-  const canBookRequest = isRequest && (!intent || BOOKABLE_REQUEST_STATUSES.has(status));
-
-  /**
-   * The whole chain in one press: adopt or create the intent, quote, confirm, book in
-   * ETD, text the technician. The server refuses anything that already holds a
-   * reservation, so pressing twice cannot make two cars.
-   */
-  const bookNow = () =>
-    run("book", async () => {
-      const r = await fetch(`/api/vrm/forms/rental-request/${sourceId}/book`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        credentials: "include",
-        body: "{}",
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || "book failed");
-      return { ...j, note: "Booking started. It takes 20-30s; reopen to see the result." };
-    });
-
-  const bookButton = (
-    <button type="button" disabled={!!busy}
-            title="Quote, confirm, book in ETD, then text the technician. Safe to press again - a request that already holds a reservation is refused, never booked twice."
-            onClick={bookNow}
-            style={{ ...btn, color: colors.green, borderColor: colors.green, fontWeight: 700 }}>
-      {busy === "book" ? <Loader2 size={13} className="animate-spin" /> : "Book it now"}
-    </button>
-  );
 
   const doConfirm = () => {
     const msg = live
@@ -306,17 +281,9 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
 
       {!intent ? (
         isRequest ? (
-          <>
-            {/* "Nothing to start here" was true only while approve was reaching the
-                server. A request whose auto-book died before createIntent shows no
-                intent at all, and this branch previously left the operator with a
-                sentence and no way to act on it. */}
-            <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: "0 0 8px" }}>
-              Approving this request books the reservation and texts the technician. If it is
-              still sitting here unbooked, the first attempt did not finish; run it again.
-            </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>{bookButton}</div>
-          </>
+          <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: 0 }}>
+            Approve is the only action that starts a rental booking. Review any recorded outcome above before approving again.
+          </p>
         ) : (
         <>
           <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, margin: "0 0 8px" }}>
@@ -325,14 +292,12 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="button" disabled={!!busy} onClick={() => create()} style={btn}>
-              {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : isRequest ? "Start booking workflow" : "Start cutover workflow"}
+              {busy === "create" ? <Loader2 size={13} className="animate-spin" /> : "Start cutover workflow"}
             </button>
             {isAdmin && (
               <button type="button" disabled={!!busy}
                       onClick={() => window.confirm(
-                        isRequest
-                          ? "Start a LIVE booking workflow? After Confirm, the runner books a REAL Enterprise reservation."
-                          : "Start a LIVE cutover? After Confirm, the runner books a REAL Enterprise reservation, then the route block and technician texts follow.")
+                        "Start a LIVE cutover? After Confirm, the runner books a REAL Enterprise reservation, then the route block and technician texts follow.")
                         && create("live")}
                       style={{ ...btn, color: colors.red, borderColor: colors.red, fontWeight: 700 }}>
                 {busy === "create-live" ? <Loader2 size={13} className="animate-spin" /> : "Start LIVE cutover"}
@@ -356,7 +321,9 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             ["Branch (tech reported)", resv?.reportedBranch],
             ["Branch ZIP", resv?.branchZip],
             ["Pickup", resv?.pickupDate ? `${resv.pickupDate} ${String(resv.pickupTime ?? "").slice(0, 5)}` : ""],
-            ["Return", resv?.returnDate ? `${resv.returnDate} ${String(resv.returnTime ?? "").slice(0, 5)}` : ""],
+            ["Actual return", resv?.returnDate
+              ? `${resv.returnDate} ${String(resv.returnTime ?? "").slice(0, 5)} — extend separately if more time is needed`
+              : ""],
             ["Class", resv?.sipp ? `${resv.sipp}${resv.classDecision?.detail ? ` — ${resv.classDecision.detail}` : ""}` : ""],
             ["Vehicle", resv?.vehicle ? `${[resv.vehicle.year, resv.vehicle.make, resv.vehicle.model].filter(Boolean).join(" ")}${resv.vehicle.noVehicleChange ? " (no vehicle change)" : ""}` : ""],
             ["Confirmation", confirmation],
@@ -511,7 +478,6 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
             {/* Every other control here is gated on !isRequest, so before this a
                 request stuck at preview_pending had NO control at all and could only be
                 moved by pressing APPROVE again, which re-texts the technician. */}
-            {canBookRequest && bookButton}
             {canRetry && (
               <button type="button" disabled={!!busy}
                       onClick={() => window.confirm("Staff retry: the orchestrator re-reconciles before anything is re-attempted. Proceed?") &&
@@ -520,10 +486,24 @@ export default function CutoverIntentPanel({ workflow, sourceId, intent, onChang
                 {busy === "retry" ? <Loader2 size={13} className="animate-spin" /> : "Retry (staff)"}
               </button>
             )}
+            {canReconcileRequest && (
+              <button type="button" disabled={!!busy}
+                      title="Checks Enterprise readback for the possible existing reservation. This cannot create a reservation."
+                      onClick={() => window.confirm("Check Enterprise for an existing reservation? This only reconciles readback evidence and cannot create a reservation.") &&
+                        run(
+                          "reconcile",
+                          () => post(`${BASE}/intents/${intent.id}/retry`, {}),
+                          () => engine(intent.id),
+                          "Enterprise readback",
+                        )}
+                      style={{ ...btn, color: colors.amber, borderColor: colors.amber }}>
+                {busy === "reconcile" ? <Loader2 size={13} className="animate-spin" /> : "Reconcile"}
+              </button>
+            )}
             {/* ETD texts the confirmation straight to the technician's carrier gateway,
                 so they often already know. This closes the request out on the reservation
                 we can prove, and sends nothing. */}
-            {isRequest && canRetry && intent?.reservation_state === "booked_unverified" && (
+            {canReconcileRequest && intent?.reservation_state === "booked_unverified" && (
               <button type="button" disabled={!!busy}
                       title="Marks the reservation verified and closes the request without texting. Use when the technician has already been given the confirmation."
                       onClick={() => window.confirm("This technician already has the confirmation? The reservation will be verified and the request closed, and NO text will be sent.") &&

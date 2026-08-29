@@ -880,14 +880,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // holman-po-queue/cron-refresh rides the same internal-cron convention:
       // the ARGUS 30-min heartbeat replaced the on-page-load Holman scrape
       // (Tyler 2026-07-29). The route itself gates in-flight + freshness.
-      // Rental request booking hand-off. Booking runs OUTSIDE Nexus (the box
-      // has no ETD credentials and no browser to mint an Azure B2C token), so
-      // the Python runner pulls the queue and posts results back using the same
-      // internal-cron convention. Scoped to these two paths only.
       if ((req.method === "GET" && req.path === "/forms/schema-health")
-        || (req.method === "GET" && req.path === "/forms/rental-request/booking-queue")
         || (req.method === "POST" && req.path === "/forms/etd-churn/record")
-        || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/booked$/.test(req.path))
         // Same convention for the Holman->direct-billing cutover: book_cutover.py
         // runs on Tyler's machine (ETD credentials live there, not here) and posts
         // each reservation back so the survey pool, the reservation and the route

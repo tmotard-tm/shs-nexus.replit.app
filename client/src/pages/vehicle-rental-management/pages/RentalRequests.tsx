@@ -24,8 +24,6 @@ import {
   deriveBookingStatus,
   bookingBadge,
   bookingSortKey,
-  BOOKABLE_REQUEST_STATUSES,
-  RETRYABLE_INTENT_STATUSES,
   type BookingActionKind,
 } from "../lib/booking-status";
 import {
@@ -528,8 +526,9 @@ export default function RentalRequests() {
   const [actionErr, setActionErr] = useState("");
   const [missing, setMissing] = useState<string[]>([]);
   const [classDraft, setClassDraft] = useState("sedan");
-  // The consolidated status card's quick actions (book now / staff retry).
-  const [quickBusy, setQuickBusy] = useState<"" | "book" | "retry" | "extemail">("");
+  // The consolidated status card can resend an extension email. Booking itself
+  // is intentionally started only by the APPROVE decision.
+  const [quickBusy, setQuickBusy] = useState<"" | "extemail">("");
   // Staff view splits new requests from extensions: they read differently
   // (booking pipeline vs. Enterprise email), so they queue differently.
   const [tab, setTab] = useState<"new" | "extension">("new");
@@ -881,42 +880,6 @@ export default function RentalRequests() {
     }
   };
 
-  // ── Quick corrective actions on the consolidated status card ──────────────
-  // These hit EXACTLY the endpoints the workflow panel already uses — the
-  // card adds proximity to the explanation, never a second code path.
-  const quickBook = async (requestNo: number) => {
-    setQuickBusy("book"); setQuickMsg(null);
-    try {
-      const r = await fetch(`/api/vrm/forms/rental-request/${requestNo}/book`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        credentials: "include", body: "{}",
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || "book failed");
-      setQuickMsg({ text: "Booking started — the outcome lands here in 20–30 seconds.", bad: false });
-    } catch (e: any) {
-      setQuickMsg({ text: e?.message || "book failed", bad: true });
-    } finally {
-      setQuickBusy(""); refreshIntents();
-    }
-  };
-  const quickRetry = async (intentId: number) => {
-    if (!window.confirm("Staff retry: the orchestrator re-reconciles before anything is re-attempted. Proceed?")) return;
-    setQuickBusy("retry"); setQuickMsg(null);
-    try {
-      const r = await fetch(`/api/vrm/forms/rental-survey/cutover/intents/${intentId}/retry`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        credentials: "include", body: JSON.stringify({}),
-      });
-      const j = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(j.message || "retry failed");
-      setQuickMsg({ text: "Retry accepted — reconciling with Enterprise now.", bad: false });
-    } catch (e: any) {
-      setQuickMsg({ text: e?.message || "retry failed", bad: true });
-    } finally {
-      setQuickBusy(""); refreshIntents();
-    }
-  };
   // Resend the Enterprise extension email, carrying whatever reservation
   // number / days the Decision inputs currently hold — so a typo fix and the
   // resend are one click. Synchronous: the button waits for the real outcome.
@@ -1506,21 +1469,13 @@ export default function RentalRequests() {
                 in_progress: [colors.accent, colors.accentLight],
               };
               const [fg, bg] = TONE[bookingSt.verdict] ?? [colors.inkMuted, colors.surface];
-              const canBookNow = detail.status === "approved" && !isExt(detail)
-                && (!detailIntent || BOOKABLE_REQUEST_STATUSES.has(String(detailIntent.status)));
-              const canRetryNow = !!detailIntent && RETRYABLE_INTENT_STATUSES.has(String(detailIntent.status));
               // Each corrective action the status names, wired to the SAME
-              // endpoints/inputs the drawer already uses — proximity, never a
-              // second code path.
+              // review inputs the drawer already uses. Only APPROVE may create
+              // or restart a request booking.
               const ACTION_BTN: Partial<Record<BookingActionKind, { label: string; onClick: () => void; show: boolean; busy?: boolean; title?: string }>> = {
                 edit_class: { label: "Pick a different class", onClick: jumpToClass,
                               show: !isExt(detail) && ["pending", "approved"].includes(detail.status) },
                 edit_pickup: { label: "Change pickup date", onClick: jumpToPickup, show: !isExt(detail) },
-                book_now: { label: "Book it now", onClick: () => quickBook(detail.request_no),
-                            show: canBookNow, busy: quickBusy === "book",
-                            title: "Quote, confirm, book in ETD, then text the technician. Safe to press again - a request that already holds a reservation is refused, never booked twice." },
-                retry_workflow: { label: "Retry (staff)", onClick: () => { if (detailIntent?.id) quickRetry(Number(detailIntent.id)); },
-                                  show: canRetryNow, busy: quickBusy === "retry" },
                 open_workflow: { label: "Open the booking workflow", onClick: openWorkflowSection, show: !isExt(detail) },
                 resend_extension_email: {
                   label: "Resend the Enterprise email", onClick: () => quickResendExtEmail(detail.request_no),
@@ -1528,7 +1483,12 @@ export default function RentalRequests() {
                   title: "Sends the extension email again with the reservation number and days currently in the Decision box — fix a typo there first if that's what failed.",
                 },
               };
-              const btns = bookingSt.actions.map((k) => ({ k, cfg: ACTION_BTN[k] }))
+              // A clean refusal can point directly at an editable field, but
+              // its attempt/evidence is still reviewable in the workflow.
+              const statusActions = !isExt(detail) && bookingSt.verdict === "failed"
+                ? Array.from(new Set<BookingActionKind>([...bookingSt.actions, "open_workflow"]))
+                : bookingSt.actions;
+              const btns = statusActions.map((k) => ({ k, cfg: ACTION_BTN[k] }))
                 .filter((x): x is { k: BookingActionKind; cfg: NonNullable<typeof x.cfg> } => !!x.cfg && x.cfg.show);
               return (
                 <div style={{ background: bg, border: `1px solid ${fg}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
@@ -1545,11 +1505,13 @@ export default function RentalRequests() {
                         const when = bookedWhen(b?.pickupDate, b?.pickupTime);
                         const where = [b?.branchName ?? detail.nearest_branch_name, b?.branchAddress]
                           .filter(Boolean).join(", ");
-                        if (!when && !where) return null;
+                        const actualReturn = bookedWhen(b?.returnDate, b?.returnTime);
+                        if (!when && !where && !actualReturn) return null;
                         return (
                           <> Pick up {when || "(no date recorded)"}
                             {where ? ` at Enterprise ${where}` : ""}
                             {b?.classCode ? ` — ${b.classCode}${b.classDescription ? ` (${b.classDescription})` : ""}` : ""}.
+                            {actualReturn ? ` Actual return: ${actualReturn}. Extend separately if more time is needed.` : ""}
                           </>
                         );
                       })()}
@@ -2333,7 +2295,20 @@ export default function RentalRequests() {
             <div style={{ flexShrink: 0, borderTop: `1px solid ${colors.rule}`, background: colors.surface, padding: "10px 20px 12px" }}>
               {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, margin: "0 0 8px" }}>{actionErr}</p>}
               <div style={{ display: "flex", gap: 8 }}>
-                {(["APPROVE", "DENY", "DEFER"] as const).map((d) => {
+                {(["APPROVE", "DENY", "DEFER"] as const).filter((d) => {
+                  if (d !== "APPROVE" || isExt(detail)) return true;
+                  const status = String(detailIntent?.status ?? "");
+                  const reservation = String(detailIntent?.reservation_state ?? "");
+                  const uncertain = ["booking_unknown", "cancel_pending_readback", "awaiting_verification"].includes(status)
+                    || reservation === "unknown" || reservation === "booked_unverified"
+                    || /booking outcome (?:timeout|ambiguous|unparsed|exception|no_reservation_found)/i.test(
+                      String(detailIntent?.last_error ?? ""),
+                    );
+                  // A possible existing reservation is reconciliation-only:
+                  // confirmation/cancellation evidence must settle it before a
+                  // new approval can create anything.
+                  return !uncertain;
+                }).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
                   return (
                     <button key={d} type="button" disabled={decide.isPending}

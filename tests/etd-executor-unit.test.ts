@@ -93,6 +93,8 @@ const ACCOUNT_ADDITIONAL_INFO = [
 type FakeOpts = {
   branchCode?: string;
   classes?: CarClass[];
+  /** Classes returned by successive quotes; useful for duration-fallback tests. */
+  classesByQuote?: CarClass[][];
   gateOk?: boolean;
   confirmOut?: unknown;
   confirmThrows?: boolean;
@@ -108,6 +110,7 @@ type FakeOpts = {
 /** Records what was called so a test can assert the commit was never reached. */
 function fakeEtd(opts: FakeOpts = {}) {
   const calls: string[] = [];
+  const quotes: any[] = [];
   /** Every model handed to the commit, so a test can assert what was actually sent. */
   const sent: unknown[] = [];
   const code = opts.branchCode ?? "9911";
@@ -115,6 +118,7 @@ function fakeEtd(opts: FakeOpts = {}) {
     calls: [],
     async quote(p: any) {
       calls.push(`quote:${p.preferBranchCode ?? ""}`);
+      quotes.push(p);
       return {
         journey_id: "j-fake-1",
         reference: "R-FAKE-1",
@@ -134,7 +138,7 @@ function fakeEtd(opts: FakeOpts = {}) {
         branch_name: "Testville Central",
         branch_address: "100 EXAMPLE WAY,TESTVILLE,OH,44100",
         site: {},
-        classes: opts.classes ?? CLASSES,
+        classes: opts.classesByQuote?.[quotes.length - 1] ?? opts.classes ?? CLASSES,
         ...(opts.fallbackFrom
           ? {
               branch_fallback_from_code: opts.fallbackFrom.code,
@@ -172,7 +176,7 @@ function fakeEtd(opts: FakeOpts = {}) {
     },
     timingSummary: () => "fake",
   };
-  return { client: client as unknown as EtdClient, calls, sent };
+  return { client: client as unknown as EtdClient, calls, quotes, sent };
 }
 
 /** A fresh schedule window whose working days start tomorrow. */
@@ -246,12 +250,14 @@ async function makeRequestIntent(over: {
   eventDate?: string;
   shopState?: string;
   approvedClass?: string;
+  approvedBranch?: string;
 }): Promise<{ intentId: number; sourceId: string }> {
   const sourceId = crypto.randomUUID();
   await db.execute(sql`
-    INSERT INTO vrm_rental_request (id, ldap, status, shop_address, shop_city, shop_state, approved_vehicle_class, truck_number)
+    INSERT INTO vrm_rental_request
+      (id, ldap, status, shop_address, shop_city, shop_state, approved_vehicle_class, approved_branch, truck_number)
     VALUES (${sourceId}::uuid, ${over.ldap}, 'approved', '100 Example Way', 'Testville',
-            ${over.shopState ?? "OH"}, ${over.approvedClass ?? null}, '012345')
+            ${over.shopState ?? "OH"}, ${over.approvedClass ?? null}, ${over.approvedBranch ?? null}, '012345')
   `);
   await seedEligibility(over.ldap);
   const { rows } = await db.execute(sql`
@@ -789,6 +795,95 @@ describe("class choice per workflow", () => {
 // --------------------------------------------------------------- lane tests
 
 describe("preview lane", () => {
+  const quoteDays = (p: any): number =>
+    Math.round(
+      (new Date(String(p.end)).getTime() - new Date(String(p.start)).getTime()) / 86_400_000,
+    );
+
+  test("an empty full-duration request quote retries 7 days then 3 days without changing the approved location", async () => {
+    const ldap = `${LDAP_PREFIX}DUR`;
+    const approvedBranch = "7440 W Cactus Rd Ste A7, Peoria, AZ 85381";
+    const { intentId, sourceId } = await makeRequestIntent({
+      ldap,
+      status: "preview_pending",
+      shopState: "OH",
+      approvedBranch,
+    });
+    const { client, quotes } = fakeEtd({ classesByQuote: [[], [], CLASSES] });
+
+    const run = await runBookingExecutor({
+      runnerId: "test-exec",
+      intentId,
+      days: 14,
+      deps: { client, schedule: fakeSchedule() },
+    });
+
+    assert.equal(run.results[0].status, "preview_ready", "the three-day inventory rescues the preview");
+    assert.deepEqual(quotes.map(quoteDays), [14, 7, 3], "only the documented duration ladder is tried");
+    assert.deepEqual(
+      quotes.map((q) => q.address),
+      [approvedBranch, approvedBranch, approvedBranch],
+      "a duration retry must not abandon Fleet's approved out-of-state address",
+    );
+    assert.ok(quotes.every((q) => q.preferBranchCode === undefined), "an approved address is not a branch pin");
+    assert.ok(quotes.every((q) => q.nearbyOnEmpty === true), "every duration keeps the request branch walk enabled");
+  });
+
+  test("a shorter successful quote persists its actual return date and extension-required evidence", async () => {
+    const ldap = `${LDAP_PREFIX}SHORT`;
+    const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client, quotes } = fakeEtd({ classesByQuote: [[], CLASSES] });
+
+    const run = await runBookingExecutor({
+      runnerId: "test-exec",
+      intentId,
+      days: 14,
+      deps: { client, schedule: fakeSchedule() },
+    });
+
+    assert.equal(run.results[0].status, "preview_ready");
+    assert.deepEqual(quotes.map(quoteDays), [14, 7]);
+    const reservation = (await loadIntentRow(intentId)).preview?.reservation ?? {};
+    assert.equal(
+      reservation.returnDate,
+      String(quotes[1].end).slice(0, 10),
+      "staff must review the seven-day return Enterprise actually priced",
+    );
+    assert.equal(reservation.shortened, true, "the preview records that the requested duration was shortened");
+    assert.equal(reservation.extensionRequired, true, "the preview explicitly records the follow-up obligation");
+    assert.ok(
+      (reservation.quote?.warnings ?? []).some((w: string) => /extension required/i.test(w)),
+      `the review warning explains the consequence (${JSON.stringify(reservation.quote?.warnings)})`,
+    );
+  });
+
+  test("exhausting the duration fallback remains a safe preview failure", async () => {
+    const ldap = `${LDAP_PREFIX}EMPTY`;
+    const { intentId, sourceId } = await makeRequestIntent({ ldap, status: "preview_pending" });
+    const { client, calls, quotes } = fakeEtd({ classesByQuote: [[], [], []] });
+
+    const run = await runBookingExecutor({
+      runnerId: "test-exec",
+      intentId,
+      days: 14,
+      deps: { client, schedule: fakeSchedule() },
+    });
+
+    assert.deepEqual(quotes.map(quoteDays), [14, 7, 3], "failure is authoritative only after the ladder is exhausted");
+    assert.equal(run.results[0].action, "PREV");
+    assert.equal(run.results[0].status, "preview_required");
+    assert.match(run.results[0].detail ?? "", /class_unmapped/);
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0, "preview fallback can never commit");
+    const row = await loadIntentRow(intentId);
+    assert.equal(row.status, "preview_required");
+    assert.equal(row.preview, null, "an inventory failure never creates a confirmable preview");
+    const request = ((await db.execute(sql`
+      SELECT status, etd_error FROM vrm_rental_request WHERE id = ${sourceId}::uuid
+    `)).rows as any[])[0];
+    assert.equal(request.status, "pending", "a proven pre-booking failure must require a new Approve");
+    assert.match(String(request.etd_error), /preview failed/i, "the review row keeps the latest plain-language reason");
+  });
+
   test("quotes the shop, persists a reviewable preview and records the schedule evidence", async () => {
     const ldap = `${LDAP_PREFIX}PRV`;
     const { intentId } = await makeRequestIntent({ ldap, status: "preview_pending" });
@@ -973,7 +1068,7 @@ describe("booking lane", () => {
     // (The schedule re-check is deliberately NOT the decline used here: it is
     // cutover-only at every home, so it no longer refuses a request.)
     const ldap = `${LDAP_PREFIX}DARK`;
-    const { intentId } = await makeRequestIntent({
+    const { intentId, sourceId } = await makeRequestIntent({
       ldap, status: "confirmed", preview: preview(), eventDate: preview().reservation.pickupDate,
     });
     await db.execute(sql`
@@ -993,6 +1088,11 @@ describe("booking lane", () => {
     const row = await loadIntentRow(intentId);
     assert.equal(row.status, "preview_required");
     assert.match(String(row.last_error ?? ""), /drift/i);
+    const source = ((await db.execute(sql`
+      SELECT status, etd_error FROM vrm_rental_request WHERE id = ${sourceId}::uuid
+    `)).rows as any[])[0];
+    assert.equal(source.status, "pending", "a refusal before op_open must require another Approve");
+    assert.match(String(source.etd_error), /drift/i);
   });
 
   test("branch drift between preview and booking aborts before the attempt opens", async () => {
@@ -1125,14 +1225,54 @@ describe("booking lane", () => {
 
   test("a pre-commit search FAILURE holds instead of booking on a blind spot", async () => {
     const ldap = `${LDAP_PREFIX}BLIND`;
-    const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
+    const { intentId, sourceId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });
     const { client, calls } = fakeEtd({ searchThrows: true });
 
     const run = await runBookingExecutor({ runnerId: "test-exec", intentId, deps: { client, schedule: fakeSchedule() } });
 
-    assert.equal(run.results[0].action, "HOLD");
+    assert.equal(run.results[0].action, "ABRT");
     assert.equal(run.results[0].status, "search_failed");
     assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
+    const intent = await loadIntentRow(intentId);
+    assert.equal(intent.status, "preview_required");
+    const source = ((await db.execute(sql`
+      SELECT status, etd_error FROM vrm_rental_request WHERE id = ${sourceId}::uuid
+    `)).rows as any[])[0];
+    assert.equal(source.status, "pending", "a failed pre-op search must require another Approve");
+    assert.match(String(source.etd_error), /duplicate search failed/i);
+  });
+
+  test("missing local booking assets fail clean before op_open and return the request to review", async () => {
+    const ldap = `${LDAP_PREFIX}ASSETS`;
+    const { intentId, sourceId } = await makeRequestIntent({
+      ldap,
+      status: "confirmed",
+      preview: preview(),
+    });
+    const { client, calls } = fakeEtd();
+
+    const run = await runBookingExecutor({
+      runnerId: "test-exec",
+      intentId,
+      deps: {
+        client,
+        schedule: fakeSchedule(),
+        bookingAssets: () => {
+          throw new Error("fixture assets unavailable");
+        },
+      },
+    });
+
+    assert.equal(run.results[0].action, "ABRT");
+    assert.equal(run.results[0].status, "assets_missing");
+    assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 0);
+    assert.equal((await attemptsFor(intentId)).length, 0);
+    assert.equal((await loadIntentRow(intentId)).status, "preview_required");
+    const source = ((await db.execute(sql`
+      SELECT status, etd_error FROM vrm_rental_request WHERE id = ${sourceId}::uuid
+    `)).rows as any[])[0];
+    assert.equal(source.status, "pending");
+    assert.match(String(source.etd_error), /assets unavailable/i);
   });
 
   test("one claim never holds more than its limit, however many lanes have work", async () => {

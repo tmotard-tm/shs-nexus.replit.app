@@ -1981,12 +1981,75 @@ export async function finalizeCompletion(intentId: number, observedStatus: strin
   return completed;
 }
 
-export async function createIntent(params: {
+type CreateIntentParams = {
   workflowType: string;
   sourceId: string;
   executionMode?: string;
   createdBy?: string | null;
-}): Promise<{ intent: any; created: boolean; failures?: EligibilityFailure[] }> {
+};
+
+async function persistIntentRow(
+  executor: any,
+  params: CreateIntentParams,
+  mode: string,
+  facts: EligibilityFacts,
+): Promise<{ intent: any; created: boolean; failures?: EligibilityFailure[] }> {
+  // Revision: reuse an existing nonterminal intent for this identity, or bump
+  // past the highest terminal revision.
+  const { rows: existing } = await executor.execute(sql`
+    SELECT * FROM vrm_rental_workflow_intents
+    WHERE workflow_type = ${params.workflowType}
+      AND source_id = ${params.sourceId}
+      AND execution_mode = ${mode}
+    ORDER BY source_revision DESC
+    LIMIT 1
+  `);
+  const prior = (existing as any[])[0];
+  if (prior && !TERMINAL_STATUSES.has(prior.status)) {
+    return { intent: prior, created: false };
+  }
+  const revision = prior ? Number(prior.source_revision) + 1 : 0;
+
+  try {
+    const { rows } = await executor.execute(sql`
+      INSERT INTO vrm_rental_workflow_intents
+        (workflow_type, source_id, source_revision, execution_mode, ldap, tech_name,
+         truck_number, enterprise_case_id, status, eligibility, created_by, block_state)
+      VALUES
+        (${params.workflowType}, ${params.sourceId}, ${revision}, ${mode}, ${facts.ldap},
+         ${facts.techName}, ${facts.tpmsTruck}, ${facts.caseKey},
+         'created', ${JSON.stringify({ facts: publicFacts(facts), checkedAt: new Date().toISOString(), failures: [] })}::jsonb,
+         ${params.createdBy ?? null},
+         ${params.workflowType === WORKFLOW_REQUEST ? "not_applicable" : "pending"})
+      ON CONFLICT (workflow_type, source_id, source_revision, execution_mode) DO NOTHING
+      RETURNING *
+    `);
+    const inserted = (rows as any[])[0];
+    if (!inserted) {
+      // Raced another creator — return whatever won.
+      const again = await executor.execute(sql`
+        SELECT * FROM vrm_rental_workflow_intents
+        WHERE workflow_type = ${params.workflowType} AND source_id = ${params.sourceId}
+          AND source_revision = ${revision} AND execution_mode = ${mode}
+        LIMIT 1
+      `);
+      return { intent: (again.rows as any[])[0], created: false };
+    }
+    // No tracking mirror here (repair spec §5): vrm_rental_cutover rows are
+    // written at COMPLETION, never at intent creation.
+    return { intent: inserted, created: true };
+  } catch (e: any) {
+    // Drizzle wraps the pg error ("Failed query: <sql>"); the constraint name
+    // lives on e.cause. Matching e.message here — the original code — matched
+    // NOTHING, so this race fell through to a generic 500.
+    if (isUniqueViolationOn(e, "vrm_workflow_intents_live_nonterminal_uq")) {
+      throw new OrchestratorError("live_lock_held", "another live nonterminal intent already exists for this LDAP", 409);
+    }
+    throw e;
+  }
+}
+
+export async function createIntent(params: CreateIntentParams): Promise<{ intent: any; created: boolean; failures?: EligibilityFailure[] }> {
   // Mode default follows the arming flag: armed (validated workflow — prod)
   // means LIVE is the normal mode for staff; disarmed (dark/dev) keeps the
   // dry_run default and live intents cannot exist at all. An explicit
@@ -2040,59 +2103,48 @@ export async function createIntent(params: {
     });
   }
 
-  // Revision: reuse an existing nonterminal intent for this identity, or bump
-  // past the highest terminal revision.
-  const { rows: existing } = await db.execute(sql`
-    SELECT * FROM vrm_rental_workflow_intents
-    WHERE workflow_type = ${params.workflowType}
-      AND source_id = ${params.sourceId}
-      AND execution_mode = ${mode}
-    ORDER BY source_revision DESC
-    LIMIT 1
-  `);
-  const prior = (existing as any[])[0];
-  if (prior && !TERMINAL_STATUSES.has(prior.status)) {
-    return { intent: prior, created: false };
-  }
-  const revision = prior ? Number(prior.source_revision) + 1 : 0;
-
-  try {
-    const { rows } = await db.execute(sql`
-      INSERT INTO vrm_rental_workflow_intents
-        (workflow_type, source_id, source_revision, execution_mode, ldap, tech_name,
-         truck_number, enterprise_case_id, status, eligibility, created_by, block_state)
-      VALUES
-        (${params.workflowType}, ${params.sourceId}, ${revision}, ${mode}, ${facts.ldap},
-         ${facts.techName}, ${facts.tpmsTruck}, ${facts.caseKey},
-         'created', ${JSON.stringify({ facts: publicFacts(facts), checkedAt: new Date().toISOString(), failures: [] })}::jsonb,
-         ${params.createdBy ?? null},
-         ${params.workflowType === WORKFLOW_REQUEST ? "not_applicable" : "pending"})
-      ON CONFLICT (workflow_type, source_id, source_revision, execution_mode) DO NOTHING
-      RETURNING *
-    `);
-    const inserted = (rows as any[])[0];
-    if (!inserted) {
-      // Raced another creator — return whatever won.
-      const again = await db.execute(sql`
-        SELECT * FROM vrm_rental_workflow_intents
-        WHERE workflow_type = ${params.workflowType} AND source_id = ${params.sourceId}
-          AND source_revision = ${revision} AND execution_mode = ${mode}
-        LIMIT 1
+  if (params.workflowType === WORKFLOW_REQUEST && mode === "live") {
+    const requestBookingKey = String((facts.sourceRow as any)?.request_no ?? params.sourceId);
+    return db.transaction(async (tx) => {
+      // Shared with rental-request failure recovery. If recovery wins, this
+      // source-status recheck sees pending and refuses insertion. If creation
+      // wins, recovery waits and then sees the durable intent/evidence fence.
+      await tx.execute(sql`
+        SELECT pg_advisory_xact_lock(
+          hashtext('vrm-request-booking'),
+          hashtext(${requestBookingKey})
+        )
       `);
-      return { intent: (again.rows as any[])[0], created: false };
-    }
-    // No tracking mirror here (repair spec §5): vrm_rental_cutover rows are
-    // written at COMPLETION, never at intent creation.
-    return { intent: inserted, created: true };
-  } catch (e: any) {
-    // Drizzle wraps the pg error ("Failed query: <sql>"); the constraint name
-    // lives on e.cause. Matching e.message here — the original code — matched
-    // NOTHING, so this race fell through to a generic 500.
-    if (isUniqueViolationOn(e, "vrm_workflow_intents_live_nonterminal_uq")) {
-      throw new OrchestratorError("live_lock_held", "another live nonterminal intent already exists for this LDAP", 409);
-    }
-    throw e;
+      const { rows: sourceRows } = await tx.execute(sql`
+        SELECT status, request_type, etd_booked_at
+          FROM vrm_rental_request
+         WHERE request_no::text = ${params.sourceId}
+            OR id::text = ${params.sourceId}
+         FOR UPDATE
+      `);
+      const currentSource = (sourceRows as any[])[0];
+      if (!currentSource) {
+        throw new OrchestratorError("source_missing", "source record not found", 404);
+      }
+      if (String(currentSource.request_type ?? "new") === "extension") {
+        throw new OrchestratorError(
+          "extension_not_bookable",
+          "extension requests are handled manually by Fleet and never book through ETD",
+          409,
+        );
+      }
+      if (String(currentSource.status ?? "") !== "approved" || currentSource.etd_booked_at) {
+        throw new OrchestratorError(
+          "source_not_approved",
+          "request is no longer approved for booking",
+          409,
+        );
+      }
+      return persistIntentRow(tx, params, mode, facts);
+    });
   }
+
+  return persistIntentRow(db, params, mode, facts);
 }
 
 /** Trim the facts snapshot persisted on the intent (no giant source rows). */
@@ -2168,6 +2220,84 @@ export async function requestPreview(intentId: number): Promise<any> {
     ...(prior ? { eligibility: { ...prior, failures: [], checkedAt: new Date().toISOString() } } : {}),
   });
   return loadIntent(intentId);
+}
+
+/**
+ * A request that definitively did not reserve a car is back in Fleet's review
+ * queue, not silently left approved. The intent remains as the audit record,
+ * but it cannot resume until a later APPROVE transitions the source back to
+ * approved and invokes the approval-owned booking chain.
+ */
+async function returnRequestToPendingReview(intent: any, detail: string): Promise<void> {
+  if (intent.workflow_type !== WORKFLOW_REQUEST) return;
+  const sourceId = String(intent.source_id ?? "").trim();
+  await db.execute(sql`
+    UPDATE vrm_rental_request
+       SET status = 'pending',
+           etd_error = ${clipText(detail, 500)},
+           claimed_at = NULL,
+           claimed_by = NULL,
+           updated_at = now()
+     WHERE (request_no::text = ${sourceId} OR id::text = ${sourceId})
+       AND status = 'approved'
+       AND etd_booked_at IS NULL
+  `);
+}
+
+type RequestBookedSourceResult = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Persist verified Enterprise evidence on the request itself without erasing a
+ * different confirmation that may be the only evidence of a duplicate booking.
+ * Both request_no and UUID source ids are supported because historical intents
+ * exist in both forms.
+ */
+async function recordRequestBookedSource(
+  intent: any,
+  confirmation: string | null,
+): Promise<RequestBookedSourceResult> {
+  if (intent.workflow_type !== WORKFLOW_REQUEST) return { ok: true };
+  const sourceId = String(intent.source_id ?? "").trim();
+  const conf = strOrNull(confirmation);
+  if (!conf) {
+    return { ok: false, reason: "Enterprise readback identified a reservation but returned no confirmation number" };
+  }
+
+  const { rows: updated } = await db.execute(sql`
+    UPDATE vrm_rental_request
+       SET status = 'booked',
+           etd_reference = COALESCE(nullif(trim(etd_reference), ''), ${conf}),
+           etd_booked_at = COALESCE(etd_booked_at, now()),
+           etd_error = NULL,
+           claimed_at = NULL,
+           claimed_by = NULL,
+           updated_at = now()
+     WHERE (request_no::text = ${sourceId} OR id::text = ${sourceId})
+       AND (
+         nullif(trim(etd_reference), '') IS NULL
+         OR upper(trim(etd_reference)) = upper(${conf})
+       )
+     RETURNING request_no
+  `);
+  if ((updated as any[]).length) return { ok: true };
+
+  const { rows: existing } = await db.execute(sql`
+    SELECT etd_reference
+      FROM vrm_rental_request
+     WHERE request_no::text = ${sourceId} OR id::text = ${sourceId}
+     LIMIT 1
+  `);
+  const row = (existing as any[])[0];
+  if (!row) {
+    return { ok: false, reason: "Enterprise readback identified a reservation but its rental request no longer exists" };
+  }
+  const prior = strOrNull(row.etd_reference);
+  return {
+    ok: false,
+    reason:
+      `Enterprise readback found confirmation ${conf}, but the request already records ` +
+      `${prior ?? "different booking evidence"}; staff must reconcile the possible duplicate`,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -2472,6 +2602,10 @@ export type RunnerQuote = {
   pickupTime?: string | null;
   returnDate?: string | null;
   returnTime?: string | null;
+  /** REQUEST lane: inventory required a shorter-than-requested rental duration. */
+  shortened?: boolean;
+  /** REQUEST lane: a shortened rental must be extended before its quoted return. */
+  extensionRequired?: boolean;
   /**
    * What the branch actually offered. Both runners send `{code, description}`
    * objects; the bare-string form is kept for previews persisted before that.
@@ -2664,6 +2798,10 @@ export async function persistPreviewFromRunner(params: {
       ...releaseClaim,
     }, postbackGuard);
     if (!stamped) throw staleDiscard();
+    await returnRequestToPendingReview(
+      intent,
+      `preview failed: ${failures.map((f) => f.detail || f.code).join("; ")}`,
+    );
     await mirrorCutoverSummary(intent.id);
     return { status: "preview_required", failures };
   }
@@ -2727,6 +2865,12 @@ export async function persistPreviewFromRunner(params: {
       pickupTime: params.quote.pickupTime ?? null,
       returnDate: params.quote.returnDate ?? null,
       returnTime: params.quote.returnTime ?? null,
+      ...(!isCutover
+        ? {
+            shortened: !!params.quote.shortened,
+            extensionRequired: !!params.quote.extensionRequired,
+          }
+        : {}),
       branchCode: params.quote.branchCode,
       branchName: params.quote.branchName,
       branchAddress: params.quote.branchAddress,
@@ -2837,11 +2981,10 @@ export async function confirmIntent(params: {
 }): Promise<{ status: string; failures?: EligibilityFailure[] }> {
   const intent = await loadIntent(params.intentId);
   if (intent.status !== "preview_ready") {
-    // BSOKOLO intent #162 (2026-08-25): Approve and "Book it now" both drive the
-    // inline chain, and the two confirms raced 200ms apart. Confirming a preview
-    // that is ALREADY confirmed — same version — is not an error, it is the other
-    // caller having won a race to do the identical thing. Report success and let
-    // the winner's chain carry the booking.
+    // Approve transport/click replays can overlap while the inline chain is
+    // active. Confirming a preview that is ALREADY confirmed — same version —
+    // is not an error; another caller won the race to do the identical thing.
+    // Report success and let the winner's chain carry the booking.
     if (
       intent.status === "confirmed" &&
       Number(intent.confirmed_preview_version) === Number(params.previewVersion)
@@ -3042,13 +3185,15 @@ export async function recordBookingPostback(params: {
     });
     const gate = evaluateEligibility(facts);
     if (!gate.ok) {
+      const detail = "eligibility drift immediately before booking";
       await touchIntent(intent.id, {
         status: "preview_required",
         eligibility: { facts: publicFacts(facts), failures: gate.failures, checkedAt: new Date().toISOString() },
-        last_error: "eligibility drift immediately before booking",
+        last_error: detail,
         claimed_by: null,
         lease_expires_at: null,
       });
+      await returnRequestToPendingReview(intent, detail);
       await mirrorCutoverSummary(intent.id);
       return { accepted: false, status: "preview_required", failures: gate.failures };
     }
@@ -3069,12 +3214,14 @@ export async function recordBookingPostback(params: {
         : { ok: false, detail: "intent has no event date to re-verify" };
     if (!sched.ok) drifts.push(`schedule: ${sched.detail}`);
     if (drifts.length) {
+      const detail = `input drift immediately before booking: ${drifts.slice(0, 6).join("; ")}`;
       await touchIntent(intent.id, {
         status: "preview_required",
-        last_error: `input drift immediately before booking: ${drifts.slice(0, 6).join("; ")}`,
+        last_error: detail,
         claimed_by: null,
         lease_expires_at: null,
       });
+      await returnRequestToPendingReview(intent, detail);
       await mirrorCutoverSummary(intent.id);
       return { accepted: false, status: "preview_required", failures: drifts.map((d) => ({ code: "input_drift", detail: d })) };
     }
@@ -3089,12 +3236,14 @@ export async function recordBookingPostback(params: {
     // the confirmed preview: branch/class/date drift). Nothing external
     // happened and no attempt row exists — back to preview so a human re-reviews.
     if (outcome === "aborted_before_open") {
+      const detail = `runner abort: ${strOrNull(params.payload?.evidence?.reason) ?? "fresh quote diverged from confirmed preview"}`;
       await touchIntent(intent.id, {
         status: "preview_required",
-        last_error: `runner abort: ${strOrNull(params.payload?.evidence?.reason) ?? "fresh quote diverged from confirmed preview"}`,
+        last_error: detail,
         claimed_by: null,
         lease_expires_at: null,
       });
+      await returnRequestToPendingReview(intent, detail);
       await mirrorCutoverSummary(intent.id);
       return { accepted: true, status: "preview_required" };
     }
@@ -3161,26 +3310,18 @@ export async function recordBookingPostback(params: {
         ...(verifiedOnCommit ? { claimed_by: null, lease_expires_at: null } : {}),
       });
       if (verifiedOnCommit) {
-        // Close the request row so the queue and the card both read 'booked'
-        // instead of an approved row that silently already has a car.
-        // COALESCE, not overwrite. A blind write here would quietly replace the
-        // confirmation number of a row that ALREADY booked - which is precisely the
-        // evidence a double booking leaves behind, erased by the second write.
-        //
-        // etd_reservation_id used to receive the QUOTE reference. A quote reference
-        // is not a reservation id: no branch can look one up, and it made the column
-        // read as populated while holding the wrong concept. ETD's own identifier
-        // (journeyUId) comes in through the runner's writeback; the quote reference
-        // stays in reservation_evidence.raw where it belongs.
-        await db.execute(sql`
-          UPDATE vrm_rental_request
-             SET status = 'booked',
-                 etd_reference = COALESCE(nullif(trim(etd_reference), ''), ${confirmation}),
-                 etd_booked_at = COALESCE(etd_booked_at, now()),
-                 etd_error = NULL,
-                 updated_at = now()
-           WHERE request_no = ${Number(intent.source_id)}
-        `);
+        const sourceWrite = await recordRequestBookedSource(intent, confirmation);
+        if (!sourceWrite.ok) {
+          await touchIntent(intent.id, {
+            status: "manual_review",
+            reservation_state: "unknown",
+            last_error: sourceWrite.reason,
+            claimed_by: null,
+            lease_expires_at: null,
+          }, { statusIn: ["reservation_verified"] });
+          await mirrorCutoverSummary(intent.id);
+          return { accepted: true, status: (await loadIntent(intent.id)).status };
+        }
         await mirrorCutoverSummary(intent.id);
         await releaseMessagesIfEligible(intent.id);
         // The request lane ends HERE. completionSatisfied already says so - a request
@@ -3199,14 +3340,17 @@ export async function recordBookingPostback(params: {
       }
     } else if (outcome === "failed_clean") {
       // Proven no reservation was created (validation-gate failure before the
-      // confirm call). No auto-retry for bookings — a human decides.
+      // confirm call). A request returns to pending review with the reason
+      // visible; only a subsequent APPROVE may resume this intent.
+      const detail = `booking failed clean: ${strOrNull(params.payload?.evidence?.error) ?? "unknown"}`;
       await touchIntent(intent.id, {
-        status: "manual_review",
+        status: intent.workflow_type === WORKFLOW_REQUEST ? "preview_required" : "manual_review",
         reservation_state: "failed",
-        last_error: `booking failed clean: ${strOrNull(params.payload?.evidence?.error) ?? "unknown"}`,
+        last_error: detail,
         claimed_by: null,
         lease_expires_at: null,
       });
+      await returnRequestToPendingReview(intent, detail);
     } else {
       // timeout / ambiguous / unparsed — we may or may not have booked.
       await touchIntent(intent.id, {
@@ -3408,9 +3552,10 @@ export async function recordBookingPostback(params: {
     // move (normal verify, reconcile-directed retry, parked unknown). A rival
     // writer — cancel, duplicate readback, sweep — makes this lose, and a
     // loser must ACK idempotently without rewriting anything.
+    const verifiedConfirmation = expected.confirmation || strOrNull(matches[0]?.confirmation);
     const verifiedEvidence = JSON.stringify({
       ...(intent.reservation_evidence ?? {}),
-      confirmation: expected.confirmation || strOrNull(matches[0]?.confirmation),
+      confirmation: verifiedConfirmation,
       verifiedAt: new Date().toISOString(),
       readback: verdict,
       match: matches[0] ?? null,
@@ -3426,6 +3571,22 @@ export async function recordBookingPostback(params: {
     if (!(advanced as any[]).length) {
       const cur = await loadIntent(intent.id);
       return { accepted: true, status: cur.status, readback: verdict, idempotent: true };
+    }
+    const sourceWrite = await recordRequestBookedSource(intent, verifiedConfirmation);
+    if (!sourceWrite.ok) {
+      await touchIntent(intent.id, {
+        status: "manual_review",
+        reservation_state: "unknown",
+        last_error: sourceWrite.reason,
+        claimed_by: null,
+        lease_expires_at: null,
+      }, { statusIn: ["reservation_verified"] });
+      await mirrorCutoverSummary(intent.id);
+      return {
+        accepted: true,
+        status: (await loadIntent(intent.id)).status,
+        readback: verdict,
+      };
     }
     await mirrorCutoverSummary(intent.id);
     // Reservation verified → file the block, then evaluate message releases.
@@ -3461,21 +3622,32 @@ export async function recordBookingPostback(params: {
     // explanation the operator has with a reassurance. Keep the refusal in front — the
     // state change is the same either way.
     const refusal = await latestBookingFailureReason(intent.id);
+    const isRequest = intent.workflow_type === WORKFLOW_REQUEST;
+    const detail = refusal
+      ? clipText(
+          `no reservation created — Enterprise refused: ${refusal}` +
+          (isRequest
+            ? ` (readback confirmed none exists; approve again to authorize another attempt)`
+            : ` (readback confirmed none exists; bookable again)`),
+          600,
+        )
+      : isRequest
+        ? "readback found no reservation; approve again to authorize another attempt"
+        : "readback found no reservation; reconciled clean";
     await touchIntent(intent.id, {
-      status: "confirmed",
+      status: isRequest ? "preview_required" : "confirmed",
       reservation_state: "pending",
-      last_error: refusal
-        ? clipText(
-            `no reservation created — Enterprise refused: ${refusal}` +
-              ` (readback confirmed none exists; bookable again)`,
-            600,
-          )
-        : "readback found no reservation; reconciled clean",
+      last_error: detail,
       claimed_by: null,
       lease_expires_at: null,
     });
+    await returnRequestToPendingReview(intent, detail);
     await mirrorCutoverSummary(intent.id);
-    return { accepted: true, status: "confirmed", readback: verdict };
+    return {
+      accepted: true,
+      status: isRequest ? "preview_required" : "confirmed",
+      readback: verdict,
+    };
   }
 
   // A REQUEST that already holds a confirmation must never park here. The journey
@@ -4554,7 +4726,8 @@ export async function morningSweep(): Promise<{
  * reading 'approved' with no reference. It suppresses msg1 by moving msg1_state off
  * 'pending' (the only value releaseMessagesIfEligible acts on) and records who said so.
  *
- * Idempotent and CAS-guarded. Returns true only when it actually promoted the intent.
+ * Idempotent and CAS-guarded. Returns true when it handled the evidence, including
+ * fencing a conflicting request confirmation for manual review.
  */
 export async function verifyRequestOnCommitEvidence(
   intentId: number,
@@ -4595,33 +4768,29 @@ export async function verifyRequestOnCommitEvidence(
   `);
   if (!(advanced as any[]).length) return false;
 
-  // Close the request row too, so the queue and the card both read 'booked' instead
-  // of an approved row that silently already has a car.
-  // Same rule as finalizeCommit: never overwrite a confirmation that is already on
-  // the row, and never put a quote reference in the reservation-id column.
-  await db.execute(sql`
-    UPDATE vrm_rental_request
-       SET status = 'booked',
-           etd_reference = COALESCE(nullif(trim(etd_reference), ''), ${confirmation}),
-           etd_booked_at = COALESCE(etd_booked_at, now()),
-           etd_error = NULL,
-           updated_at = now()
-     WHERE request_no = ${Number(intent.source_id)}
-  `);
+  const sourceWrite = await recordRequestBookedSource(intent, confirmation);
+  if (!sourceWrite.ok) {
+    await touchIntent(intentId, {
+      status: "manual_review",
+      reservation_state: "unknown",
+      last_error: sourceWrite.reason,
+      claimed_by: null,
+      lease_expires_at: null,
+    }, { statusIn: ["reservation_verified"] });
+    await mirrorCutoverSummary(intentId);
+    return true;
+  }
   await mirrorCutoverSummary(intentId);
   await releaseMessagesIfEligible(intentId);
   return true;
 }
 
 /**
- * Adopt a reservation the RUNNER created onto the intent it belongs to.
+ * Adopt an externally recorded reservation onto the intent it belongs to.
  *
- * `book_request.py` books outside the intent state machine and writes only
- * `vrm_rental_request`. The intent it was created from never learns the reservation
- * exists, so it sits wherever the last preview left it. On 2026-08-18 that meant
- * ELEVEN requests carrying live confirmation numbers whose panel read "Needs
- * re-preview", which is worse than useless: it is a booked technician displayed as a
- * broken one.
+ * Kept for historical rows and manual confirmation attachment. The retired Python
+ * request booker wrote only `vrm_rental_request`, leaving the intent unaware of the
+ * reservation; this repair path reconciles that evidence without creating a booking.
  *
  * Idempotent. Safe to call for a request that is already reconciled, and safe to call
  * repeatedly. `alreadyNotified` suppresses msg1 for the case where the technician was
@@ -4638,7 +4807,12 @@ export async function adoptRunnerBooking(
   const { rows } = await db.execute(sql`
     SELECT * FROM vrm_rental_workflow_intents
      WHERE workflow_type = ${WORKFLOW_REQUEST}
-       AND source_id = ${String(requestNo)}
+       AND (
+         source_id = ${String(requestNo)}
+         OR source_id = (
+           SELECT id::text FROM vrm_rental_request WHERE request_no = ${requestNo}
+         )
+       )
        AND status NOT IN ('cancelled', 'abandoned')
      ORDER BY id DESC
      LIMIT 1
@@ -4984,6 +5158,20 @@ export async function retryIntent(
 ): Promise<any> {
   const intent = await loadIntent(intentId);
   if (TERMINAL_STATUSES.has(intent.status)) throw new OrchestratorError("terminal", "intent is terminal", 409);
+  // Request Retry is reconciliation-only. It must never turn a clean failure
+  // (or a stale preview) into a new reservation authorization; Fleet must
+  // explicitly APPROVE the request again for that. Unknown/booked states are
+  // the sole exception because their only safe operation is a readback.
+  if (
+    intent.workflow_type === WORKFLOW_REQUEST &&
+    !["unknown", "booked_unverified"].includes(String(intent.reservation_state ?? ""))
+  ) {
+    throw new OrchestratorError(
+      "request_retry_reconcile_only",
+      "request Retry only reconciles a possible existing reservation; approve the pending request again to authorize a new reservation",
+      409,
+    );
+  }
   // Staff assertion that this technician already has the confirmation from somewhere
   // else. Only meaningful on the request lane, where the commit response is the proof.
   const notifiedOpt = opts?.alreadyNotified ? { alreadyNotifiedBy: requestedBy } : undefined;
@@ -5304,24 +5492,46 @@ function latestAttemptOf(raw: any): LatestAttemptSummary | null {
 export async function intentsBySourceIds(workflowType: string, sourceIds: string[]): Promise<Record<string, any>> {
   if (!sourceIds.length) return {};
   const joined = sourceIds.map((s) => String(s)).join(",");
-  const { rows } = await db.execute(sql`
-    SELECT DISTINCT ON (i.source_id) i.*, to_jsonb(a) AS latest_attempt
-    FROM vrm_rental_workflow_intents i
-    LEFT JOIN LATERAL (
-      SELECT attempt_no, outcome, started_at, finished_at, evidence
-      FROM vrm_workflow_attempts
-      WHERE intent_id = i.id AND phase = 'etd_booking'
-      ORDER BY attempt_no DESC
-      LIMIT 1
-    ) a ON true
-    WHERE i.workflow_type = ${workflowType}
-      AND i.source_id = ANY(string_to_array(${joined}, ','))
-    ORDER BY i.source_id, i.source_revision DESC, i.id DESC
-  `);
+  const { rows } = workflowType === WORKFLOW_REQUEST
+    ? await db.execute(sql`
+        SELECT DISTINCT ON (r.request_no)
+               i.*, r.request_no::text AS canonical_source_id,
+               to_jsonb(a) AS latest_attempt
+        FROM vrm_rental_workflow_intents i
+        JOIN vrm_rental_request r
+          ON i.source_id = r.request_no::text OR i.source_id = r.id::text
+        LEFT JOIN LATERAL (
+          SELECT attempt_no, outcome, started_at, finished_at, evidence
+          FROM vrm_workflow_attempts
+          WHERE intent_id = i.id AND phase = 'etd_booking'
+          ORDER BY attempt_no DESC
+          LIMIT 1
+        ) a ON true
+        WHERE i.workflow_type = ${workflowType}
+          AND (
+            r.request_no::text = ANY(string_to_array(${joined}, ','))
+            OR r.id::text = ANY(string_to_array(${joined}, ','))
+          )
+        ORDER BY r.request_no, i.source_revision DESC, i.id DESC
+      `)
+    : await db.execute(sql`
+        SELECT DISTINCT ON (i.source_id) i.*, to_jsonb(a) AS latest_attempt
+        FROM vrm_rental_workflow_intents i
+        LEFT JOIN LATERAL (
+          SELECT attempt_no, outcome, started_at, finished_at, evidence
+          FROM vrm_workflow_attempts
+          WHERE intent_id = i.id AND phase = 'etd_booking'
+          ORDER BY attempt_no DESC
+          LIMIT 1
+        ) a ON true
+        WHERE i.workflow_type = ${workflowType}
+          AND i.source_id = ANY(string_to_array(${joined}, ','))
+        ORDER BY i.source_id, i.source_revision DESC, i.id DESC
+      `);
   const out: Record<string, any> = {};
   for (const r of rows as any[]) {
-    const { latest_attempt, ...intent } = r;
-    out[r.source_id] = {
+    const { latest_attempt, canonical_source_id, ...intent } = r;
+    out[canonical_source_id ?? r.source_id] = {
       ...intent,
       displayPhase: deriveDisplayPhase(intent),
       latestAttempt: latestAttemptOf(latest_attempt),

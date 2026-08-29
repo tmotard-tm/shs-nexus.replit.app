@@ -1,15 +1,16 @@
 /**
  * Cutover workflow intent routes — the ONLY HTTP surface of the orchestrator.
  *
- * Two lanes, one router (mounted under /api/vrm):
+ * Two cutover lanes plus request reconciliation, one router (mounted under /api/vrm):
  *   - Session lane (staff UI): create / list / detail / confirm / retry /
  *     cancel / read-only eligibility. Auth = normal VRM session gate.
  *   - Cron lane (Python runner on Tyler's box + scheduled sweeps): the
  *     booking-queue claim, preview + booking postbacks, schedule-check and
  *     the morning sweep. These paths are allowlisted in server/routes.ts for
  *     the x-internal-cron header (SESSION_SECRET or NEXUS_CRON_SECRET) — the
- *     same convention as /forms/rental-request/booking-queue. The router
- *     ENFORCES the bearer itself (requireInternalCron below): a normal
+ *     cutover runner convention. The legacy rental-request booking queue has
+ *     been retired; request reservations can start only from Approve. The
+ *     router ENFORCES the bearer itself (requireInternalCron below): a normal
  *     session that fell through the outer allowlist is 403'd here, because
  *     fencing tokens authenticate concurrency, not identity — a logged-in
  *     user must never be able to claim runner work, learn a fencing token,
@@ -609,27 +610,4 @@ export function registerCutoverIntentRoutes(router: Router): void {
   // reservation.
   // ------------------------------------------------------------------
 
-  /** Create a booking intent from an APPROVED rental request. */
-  router.post("/forms/rental-request/:id/booking-intent", async (req, res) => {
-    try {
-      const sourceId = String(req.params.id ?? "").trim();
-      if (!sourceId) return res.status(400).json({ message: "request id required" });
-      if (String(req.body?.executionMode ?? "") === "live" && !isAdminSession(req) && !isContractBlockLive()) {
-        return res.status(403).json({ message: "creating a LIVE intent requires an admin or developer session", code: "admin_required_live" });
-      }
-      const { intent, created } = await createIntent({
-        workflowType: WORKFLOW_REQUEST,
-        sourceId,
-        executionMode: req.body?.executionMode,
-        createdBy: actor(req),
-      });
-      const fresh =
-        intent.status === "created" || intent.status === "preview_required"
-          ? await requestPreview(intent.id)
-          : intent;
-      res.status(created ? 201 : 200).json({ intent: fresh, created });
-    } catch (e: any) {
-      sendOrchestratorError(res, e);
-    }
-  });
 }

@@ -15,9 +15,6 @@
  */
 import type { Express, Router } from "express";
 import { db } from "../../db";
-// The canonical booked-SMS copy. Shared with the intent lane so a technician
-// gets the same words whichever path booked the car.
-import { renderRequestMsg1 } from "./cutover-orchestrator";
 import { isUniqueViolationOn } from "./db-errors";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
@@ -31,7 +28,6 @@ import {
   requestPreview,
   confirmIntent,
   verifyRequestOnCommitEvidence,
-  adoptRunnerBooking,
   WORKFLOW_REQUEST,
   // The Saturday-schedule truth for the Friday→Monday pickup default. The
   // underlying function, NOT the cron-bearer /schedule-check route: this is
@@ -1665,51 +1661,6 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 // ---------------------------------------------------------------------------
 export function registerRentalRequestAdminRoutes(router: Router): void {
   /**
- * Finish an approved request that never got booked.
- *
- * The decide route runs this chain on APPROVE, but a row that is ALREADY approved has
- * no way back into it: pressing APPROVE again is the only path, and that re-sends the
- * technician's "we are booking now" acknowledgement every press. Five requests sat at
- * preview_pending with no control in the panel able to move them.
- *
- * Deliberately NOT a new booking path. It calls exactly what approve calls, so the
- * adopt-or-create logic, the already-booked refusal and the failure reporting are the
- * same code and cannot drift.
- */
-  router.post("/forms/rental-request/:requestNo/book", async (req, res) => {
-    try {
-      const no = Number(req.params.requestNo);
-      if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
-      const { rows } = await db.execute(sql`
-        SELECT status, etd_booked_at, COALESCE(request_type, 'new') AS request_type
-        FROM vrm_rental_request WHERE request_no = ${no}
-      `);
-      const row = (rows as any[])[0];
-      if (!row) return res.status(404).json({ message: "request not found" });
-      // An extension NEVER books: the technician already has the car. Firing
-      // the ETD chain here would reserve a second one on top of it.
-      if (String(row.request_type) === "extension") {
-        return res.status(409).json({
-          message: "This is an extension request. Fleet extends the existing rental with "
-                 + "Enterprise manually — nothing books through ETD.",
-        });
-      }
-      if (row.etd_booked_at != null) {
-        return res.status(409).json({ message: "This request is already booked." });
-      }
-      if (String(row.status) !== "approved") {
-        return res.status(409).json({ message: `Request is ${row.status}. Approve it first.` });
-      }
-      // Same fire-and-forget shape as the decide route: the ETD chain costs 20-30s and
-      // the button must not hang on it. Every failure lands on the row's etd_error.
-      void autoBookApprovedRequest(no);
-      res.json({ ok: true, started: true, requestNo: no });
-    } catch (e: any) {
-      res.status(500).json({ message: e?.message || "book failed" });
-    }
-  });
-
-  /**
    * The retrievable acknowledgement record: who signed, when, and the exact
    * bullet texts they attested to. Requests since the snapshot landed carry it
    * verbatim (ack_snapshot, written server-side at submit); older rows are
@@ -2131,7 +2082,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                  i.last_error AS intent_error
             FROM vrm_rental_workflow_intents i
            WHERE i.workflow_type = 'rental_request'
-             AND i.source_id = r.request_no::text
+             AND (i.source_id = r.request_no::text OR i.source_id = r.id::text)
            ORDER BY i.id DESC LIMIT 1
         ) wi ON true
         LEFT JOIN LATERAL (
@@ -2228,308 +2179,6 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       res.json(rows[0] || {});
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "Failed to load stats." });
-    }
-  });
-
-  /**
-   * Approved requests waiting on a reservation.
-   *
-   * Everything the ETD booking chain needs, resolved server-side so the runner
-   * does not re-derive business rules:
-   *   pickup   - the SHOP, not the technician's home. They drop the van and
-   *              collect the rental nearby.
-   *   start    - the appointment. A rental starts when the van goes in.
-   *   end      - appointment + the SHOP's estimate + a one day buffer. Never
-   *              open-ended; an open-ended rental is one nobody closes.
-   *
-   * Reachable with a session OR the internal-cron header, so the Python runner
-   * can pull it without a browser login.
-   */
-  router.get("/forms/rental-request/booking-queue", async (req, res) => {
-    try {
-      // Lease what we hand out. A second runner starting while the first is
-      // mid-flight would otherwise pull the same rows and create a second real
-      // reservation for the same technician. Claims older than 30 minutes are
-      // reclaimable so a crashed runner does not park work forever.
-      const runner = String((req as any).query?.runner || "runner").slice(0, 60);
-      // ONE statement: claim, then hand back exactly the rows this call claimed.
-      //
-      // The lease used to be two statements - an UPDATE keyed on `claimed_at` and a
-      // SELECT keyed on `claimed_by` - and the pair provided no mutual exclusion at
-      // all in the default configuration. RUNNER_NAME defaults to "book_request", so
-      // a second runner starting mid-flight had its UPDATE correctly match nothing
-      // (claimed_at was recent) and then its SELECT matched the SAME rows anyway on
-      // claimed_by = 'book_request'. Both processes then booked real cars for the
-      // same technician; DWHITE0 ended up with two reservations 26 seconds apart.
-      //
-      // A data-modifying CTE closes it: the JOIN can only see what RETURNING gives
-      // it, so a concurrent caller claims nothing and receives an empty queue.
-      const { rows } = await db.execute(sql`
-        WITH leased AS (
-          UPDATE vrm_rental_request
-          SET claimed_at = now(), claimed_by = ${runner}
-          WHERE status = 'approved' AND etd_booked_at IS NULL
-            -- Extensions NEVER enter the booking pipeline: the technician
-            -- already holds the car and Fleet extends it with Enterprise
-            -- manually. Leasing one here would book them a second vehicle.
-            AND COALESCE(request_type, 'new') <> 'extension'
-            AND COALESCE(pickup_at, appointment_at) IS NOT NULL
-            AND (claimed_at IS NULL
-                 OR claimed_at < now() - interval '30 minutes'
-                 -- A runner may always re-take its OWN lease. Without this the
-                 -- required workflow - dry run to show the batch, then re-run with
-                 -- --confirm to book it - is broken for thirty minutes, because the
-                 -- dry run leases every row and the confirm run then sees an empty
-                 -- queue. Mutual exclusion is between DIFFERENT runners; a runner
-                 -- racing itself is a separate concern and one process drains
-                 -- sequentially.
-                 OR claimed_by = ${runner})
-          RETURNING request_no
-        )
-        SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
-               r.shop_name, r.shop_address, r.shop_city, r.shop_state, r.shop_postal,
-               -- The state the branch MUST land in. A new hire has no shop, so their
-               -- home state is the only check available on a geocode that wandered.
-               r.home_state,
-               r.tech_reported_branch,
-               -- Fleet's explicit branch pick. The booker prefers it over
-               -- everything and skips the state guard when it is set.
-               r.approved_branch,
-               r.appointment_at,
-               r.shop_estimated_days,
-               COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,
-               -- Provenance matters: an EXPLICIT Fleet pick of 'sedan' must be
-               -- distinguishable from the untouched default, or the booker's
-               -- job-title ladder silently overrides a human (e.g. Fleet sizing
-               -- an HVAC tech DOWN to a sedan would bounce back to a van).
-               CASE WHEN r.approved_vehicle_class IS NOT NULL
-                    THEN 'fleet' ELSE 'engine' END                  AS vehicle_class_source,
-               to_char(COALESCE(r.pickup_at, r.appointment_at), 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
-               -- 7 days when there is no shop estimate: the estimate question is
-               -- gone from the form (Tyler 2026-08-14) and 7 matches the weekly
-               -- extension cadence the technician signs. Old rows with an
-               -- estimate keep estimate + 1.
-               -- Fleet's return date decides the length. It is the only value here
-               -- a person actually chose. The old fallbacks stay underneath it for
-               -- rows approved before the field existed: an old shop estimate, then
-               -- 7 days, which matches the weekly extension cadence the technician
-               -- signs.
-               to_char(COALESCE(
-                         r.return_at,
-                         COALESCE(r.pickup_at, r.appointment_at)
-                           + (COALESCE(r.shop_estimated_days + 1, 7) * interval '1 day')),
-                       'YYYY-MM-DD"T"HH24:MI:SS')                    AS end_dt,
-               r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference,
-               -- Class is decided from the roster, never asked. Tyler's cutover
-               -- ruling 2026-08-13: not HVAC gets a sedan, HVAC keeps a vehicle
-               -- sized like the one they have because the equipment does not fit
-               -- in a trunk. Sent as the raw title so the runner owns the mapping.
-               a.job_title                                           AS job_title
-        FROM vrm_rental_request r
-        JOIN leased l ON l.request_no = r.request_no
-        LEFT JOIN all_techs a ON upper(a.tech_racfid) = upper(r.ldap)
-        ORDER BY r.appointment_at
-      `);
-      // Rows that are ready to book but held by somebody else's live lease. Without
-      // this the runner printed nothing and the row simply looked absent, which reads
-      // exactly like "no work to do" for up to thirty minutes.
-      const { rows: held } = await db.execute(sql`
-        SELECT request_no, ldap, claimed_by,
-               to_char(claimed_at + interval '30 minutes', 'HH24:MI:SS') AS lease_expires_utc
-          FROM vrm_rental_request
-         WHERE status = 'approved' AND etd_booked_at IS NULL
-           AND COALESCE(request_type, 'new') <> 'extension'
-           AND COALESCE(pickup_at, appointment_at) IS NOT NULL
-           AND claimed_at IS NOT NULL AND claimed_at >= now() - interval '30 minutes'
-           AND claimed_by IS DISTINCT FROM ${runner}
-         ORDER BY request_no
-      `);
-      res.json({ queue: rows, count: (rows as any[]).length, held });
-    } catch (e: any) {
-      console.error("[rental-request] booking-queue failed:", e?.message || e);
-      res.status(500).json({ message: e?.message || "Failed to load booking queue." });
-    }
-  });
-
-  /**
-   * Record the outcome of a booking attempt. Success stamps the reservation and
-   * moves the request to `booked`; failure stores the error and LEAVES the row
-   * approved so the next run retries it rather than losing it silently.
-   */
-/**
- * The only fields a runner may write into an intent's preview facts, length-capped.
- *
- * This object ends up rendered verbatim into a text message a technician receives, so
- * it is a whitelist rather than a spread: an unbounded merge would let anything that
- * can reach the internal-cron route rewrite the copy.
- */
-const BOOKED_FACT_KEYS = [
-  "branchName", "branchCode", "branchAddress", "branchPhone", "branchPinned",
-  "pickupDate", "pickupTime", "returnDate", "returnTime",
-  "classCode", "classDescription", "classDecision", "shortened",
-  "bookedBy", "factsFrom",
-] as const;
-
-function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-  const src = raw as Record<string, unknown>;
-  const out: Record<string, any> = {};
-  for (const k of BOOKED_FACT_KEYS) {
-    const v = src[k];
-    if (v === undefined || v === null || v === "") continue;
-    out[k] = typeof v === "boolean" ? v : String(v).slice(0, 300);
-  }
-  return Object.keys(out).length ? out : null;
-}
-
-  router.post("/forms/rental-request/:requestNo/booked", async (req, res) => {
-    try {
-      const no = Number(req.params.requestNo);
-      if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
-
-      // An extension must NEVER transition to booked — the technician already
-      // holds the car and Fleet extends it with Enterprise manually. The queue
-      // and /book both refuse extensions, but this writeback is its own door,
-      // and a runner replaying an old batch must bounce off it too.
-      const { rows: typeRow } = await db.execute(sql`
-        SELECT COALESCE(request_type, 'new') AS request_type
-        FROM vrm_rental_request WHERE request_no = ${no}
-      `);
-      if (String((typeRow as any[])[0]?.request_type) === "extension") {
-        return res.status(409).json({
-          message: `request #${no} is an EXTENSION — it never books; Fleet handles it manually with Enterprise.`,
-        });
-      }
-
-      const ref = String(req.body?.etdReference || "").trim();
-      const resId = String(req.body?.etdReservationId || "").trim();
-      const error = String(req.body?.error || "").trim();
-      // The branch is what the technician actually has to walk into, and
-      // nearest_branch_name existed as a column that nothing ever wrote. The
-      // runner knows it from the quote; take it while it is in hand.
-      // The facts the runner actually booked, as opposed to whatever the PREVIEW
-      // happened to hold. The technician's confirmation text renders from
-      // intent.preview.reservation; when a preview had failed that object was empty
-      // and the text read "Pick up today at Enterprise branch, ." with no address,
-      // and when a preview was a day old the text named the wrong pickup date for a
-      // real reservation. The runner is the only thing that knows the truth.
-      const bookedFacts = sanitizeBookedFacts(req.body?.booked);
-      const branch = String(
-        req.body?.branchName || (bookedFacts?.branchName ?? "") || "",
-      ).trim().slice(0, 200);
-
-      if (error) {
-        // Never stamp an error onto a row that already booked. A late failure
-        // report from a retry would otherwise mark a live reservation as broken.
-        await db.execute(sql`
-          UPDATE vrm_rental_request
-          SET etd_error = ${error.slice(0, 500)}, claimed_at = NULL, claimed_by = NULL, updated_at = now()
-          WHERE request_no = ${no} AND etd_booked_at IS NULL
-        `);
-        return res.json({ ok: true, recorded: "error" });
-      }
-      if (!ref && !resId) {
-        return res.status(400).json({ message: "supply etdReference/etdReservationId, or error" });
-      }
-      // Conditional transition, not a blind overwrite. A replayed writeback
-      // must not re-stamp a row that already booked, and must not resurrect one
-      // a human has since denied.
-      const { rows } = await db.execute(sql`
-        UPDATE vrm_rental_request
-        SET etd_reference = ${ref || null}, etd_reservation_id = ${resId || null},
-            nearest_branch_name = COALESCE(${branch || null}, nearest_branch_name),
-            etd_booked_at = now(), etd_error = NULL,
-            status = 'booked', claimed_at = NULL, claimed_by = NULL,
-            updated_at = now()
-        WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
-          -- Defence in depth behind the explicit 409 above: even a racing
-          -- writeback can never flip an extension to booked.
-          AND COALESCE(request_type, 'new') <> 'extension'
-        RETURNING request_no, status, COALESCE(pickup_at, appointment_at) AS appointment_at, shop_name
-      `);
-      // Same reconcile on the happy path, so a runner booking leaves ONE truth behind
-      // it rather than a booked row beside a stalled intent.
-      //
-      // adoptRunnerBooking returns true when an active intent exists and was
-      // advanced; in that case releaseMessagesIfEligible (inside adoptRunnerBooking)
-      // is the sole sender of the booked-SMS — it renders the canonical
-      // renderRequestMsg1 copy. The legacy notifyTech call below must NOT fire in
-      // that branch, or the technician receives two texts for one booking.
-      // When adoptRunnerBooking returns false (no intent — legacy runner path that
-      // pre-dates the orchestrator) the legacy notifyTech remains the fallback.
-      let orchestratorHandled = false;
-      if ((rows as any[]).length) {
-        orchestratorHandled = await adoptRunnerBooking(no, ref, resId || null, {
-          ...(req.body?.alreadyNotified === true ? { alreadyNotified: "runner" } : {}),
-          ...(bookedFacts ? { booked: bookedFacts } : {}),
-        });
-      }
-      if (!(rows as any[]).length) {
-        const { rows: cur } = await db.execute(sql`
-          SELECT status, etd_reference, etd_reservation_id, etd_booked_at
-            FROM vrm_rental_request WHERE request_no = ${no}
-        `);
-        const c = (cur as any[])[0];
-        if (!c) return res.status(404).json({ message: "request not found" });
-        // Already booked is not nothing to do. The runner writes this table but never
-        // the intent, so a replay is the natural moment to reconcile the two. Without
-        // it a live reservation keeps showing "Needs re-preview" in the panel.
-        if (c.etd_booked_at && strTrim(c.etd_reference)) {
-          const adopted = await adoptRunnerBooking(
-            no, String(c.etd_reference), c.etd_reservation_id ?? null,
-            {
-              ...(req.body?.alreadyNotified === true
-                ? { alreadyNotified: "runner-backfill" } : {}),
-              ...(bookedFacts ? { booked: bookedFacts } : {}),
-            },
-          );
-          if (adopted) return res.json({ ok: true, reconciled: true, etdReference: c.etd_reference });
-        }
-        return res.status(409).json({
-          message: `not writable: status is '${c.status}'` +
-                   (c.etd_booked_at ? ` and it already booked as ${c.etd_reference}` : ""),
-          status: c.status, etdReference: c.etd_reference,
-        });
-      }
-      const booked = (rows as any[])[0];
-
-      // Only use the legacy notifyTech path when the orchestrator did not handle
-      // the notification (no active intent). When an intent exists,
-      // adoptRunnerBooking → releaseMessagesIfEligible sends the canonical
-      // renderRequestMsg1 text and this block must stay silent to avoid a
-      // duplicate. See: cutover-orchestrator.ts:adoptRunnerBooking.
-      if (!orchestratorHandled) {
-        // Render from what the runner ACTUALLY booked, never from the row's
-        // pickup_at. A request whose pickup_at has passed is floored forward by the
-        // booker (and rolled to the next day past the last pickup slot), so the row
-        // still holds the rejected date. On 2026-08-20 that told AROTTER "From
-        // 8/19/2026" for a reservation starting 8/21. The runner posts the truth in
-        // `booked`; the intent lane already renders from it, so use the same
-        // renderer and the same words here.
-        const text = bookedFacts?.pickupDate
-          ? renderRequestMsg1({
-              conf: String(ref || resId),
-              branchName: String(bookedFacts.branchName ?? branch ?? ""),
-              branchAddress: String(bookedFacts.branchAddress ?? ""),
-              branchPhone: bookedFacts.branchPhone ?? null,
-              pickupDate: bookedFacts.pickupDate ?? null,
-              pickupTime: bookedFacts.pickupTime ?? null,
-              returnDate: bookedFacts.returnDate ?? null,
-            })
-          // Genuinely legacy caller: no facts posted, so there is nothing better to
-          // say than the confirmation number. Deliberately no date at all rather than
-          // a date we know may be wrong.
-          : `SHS Fleet: your rental is booked. Confirmation ${ref || resId}.`
-            + (branch ? ` Pick up at Enterprise ${branch}.` : "")
-            + ` Bring your driver's license and give them the confirmation number.`
-            + ` It is billed direct to Sears, so decline all insurance and upgrades.`
-            + ` Reply here if the branch cannot find the reservation.`;
-        void notifyTech(no, text, "booked-notice");
-      }
-      res.json({ ok: true, ...booked });
-    } catch (e: any) {
-      console.error("[rental-request] booked failed:", e?.message || e);
-      res.status(500).json({ message: e?.message || "Failed to record booking." });
     }
   });
 
@@ -2677,28 +2326,34 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       }
 
       const note = `reservation ${claimed} cancelled in ETD and released by ${actor}: ${reason}`;
-      const { rows: upd } = await db.execute(sql`
-        UPDATE vrm_rental_request
-           SET status = 'pending',
-               etd_reference = NULL, etd_reservation_id = NULL, etd_booked_at = NULL,
-               etd_error = ${note},
-               claimed_at = NULL, claimed_by = NULL,
-               updated_at = now()
-         WHERE request_no = ${no} AND etd_reference = ${claimed}
-        RETURNING request_no, status
-      `);
-      if (!(upd as any[]).length) return res.status(409).json({ message: "nothing released" });
+      const upd = await db.transaction(async (tx) => {
+        const { rows } = await tx.execute(sql`
+          UPDATE vrm_rental_request
+             SET status = 'pending',
+                 etd_reference = NULL, etd_reservation_id = NULL, etd_booked_at = NULL,
+                 etd_error = ${note},
+                 claimed_at = NULL, claimed_by = NULL,
+                 updated_at = now()
+           WHERE request_no = ${no} AND etd_reference = ${claimed}
+          RETURNING request_no, id::text AS request_id, status
+        `);
+        const released = (rows as any[])[0];
+        if (!released) return [];
 
-      // Terminate the workflow intent too. Leaving it live would let the executor or the
-      // box runner adopt the request and book a second car for the same person.
-      await db.execute(sql`
-        UPDATE vrm_rental_workflow_intents
-           SET status = 'cancelled', reservation_state = 'cancelled',
-               last_error = ${note}, claimed_by = NULL, lease_expires_at = NULL,
-               updated_at = now()
-         WHERE workflow_type = ${WORKFLOW_REQUEST} AND source_id = ${String(no)}
-           AND status NOT IN ('cancelled', 'abandoned')
-      `);
+        // Terminate the workflow intent in the same transaction. Leaving it live would
+        // preserve the per-LDAP lock and let a runner adopt or book a second car.
+        await tx.execute(sql`
+          UPDATE vrm_rental_workflow_intents
+             SET status = 'cancelled', reservation_state = 'cancelled',
+                 last_error = ${note}, claimed_by = NULL, lease_expires_at = NULL,
+                 updated_at = now()
+           WHERE workflow_type = ${WORKFLOW_REQUEST}
+             AND (source_id = ${String(no)} OR source_id = ${String(released.request_id)})
+             AND status NOT IN ('cancelled', 'abandoned')
+        `);
+        return rows as any[];
+      });
+      if (!upd.length) return res.status(409).json({ message: "nothing released" });
 
       res.json({ ok: true, requestNo: no, status: "pending", released: claimed, note });
     } catch (e: any) {
@@ -2866,19 +2521,10 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         }
       }
       if (!cur) return res.status(404).json({ message: "request not found" });
-      // Extensions are deliberately auto-classified as REVIEW because Fleet
-      // must handle the existing Enterprise rental manually. APPROVE is the
-      // normal resolution of that review, not an engine-policy overrule, so it
-      // does not need a manufactured comment. Keep the note gate for every
-      // other auto-decision override (and keep VOID's separate mandatory note).
-      const isRoutineExtensionApproval =
-        decision === "APPROVE" && isExtensionRow;
-      if (cur.auto_decision && cur.auto_decision !== decision && !note
-          && !isRoutineExtensionApproval) {
-        return res.status(400).json({
-          message: `Overruling the engine (${cur.auto_decision} -> ${decision}) requires a note.`,
-        });
-      }
+      // Routine decisions are a human judgment, not an engine-override
+      // exception. APPROVE, DENY and DEFER notes are therefore optional even
+      // when the recommendation differs; RETURN and VOID retain their
+      // evidence safeguards above.
 
       // EXTENSION approve gate: is the rental being extended actually
       // DIRECT-BILLED? Computed FRESH here — the submit-time pin is audit
@@ -3068,6 +2714,9 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
               FOR UPDATE) old
         WHERE vrm_rental_request.request_no = old.prev_rn
           AND vrm_rental_request.status <> 'booked'
+          -- APPROVE is an edge, not a level. Replaying it must not rewrite the
+          -- first approval audit or repeat SMS/email/booking side effects.
+          ${decision === "APPROVE" ? sql`AND vrm_rental_request.status <> 'approved'` : sql``}
           -- VOID is refused once the row is APPROVED, and the refusal lives
           -- INSIDE the same locked UPDATE that decides everything else: the
           -- approve path schedules the Enterprise email after its own commit,
@@ -3079,6 +2728,28 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         RETURNING vrm_rental_request.request_no, old.prev_status
       `);
       if (!(upd as any[]).length) {
+        if (decision === "APPROVE") {
+          const { rows: current } = await db.execute(sql`
+            SELECT status, request_type, etd_booked_at
+              FROM vrm_rental_request
+             WHERE request_no = ${Number(req.params.requestNo)}
+          `);
+          const currentRow = (current as any[])[0];
+          if (String(currentRow?.status ?? "") === "approved") {
+            // The decision/audit/SMS remain idempotent, but a deliberate second
+            // Approve is also the sole recovery door for an approved request
+            // whose pre-intent lookup failed closed. The helper re-reads the
+            // durable intent and attempt fences before it can reach ETD; an
+            // ambiguous or already-booked intent therefore remains readback-only.
+            const recoveryStarted =
+              String(currentRow?.request_type ?? "new") !== "extension"
+              && !currentRow?.etd_booked_at;
+            if (recoveryStarted) {
+              void autoBookApprovedRequest(Number(req.params.requestNo));
+            }
+            return res.json({ ok: true, decision, idempotent: true, recoveryStarted });
+          }
+        }
         if (decision === "VOID") {
           return res.status(409).json({
             message: "Too late to void — this extension is already approved and the Enterprise "
@@ -3092,6 +2763,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
         });
       }
       const prevStatus = String((upd as any[])[0]?.prev_status ?? "");
+      const transitionedToApproved = decision === "APPROVE" && prevStatus !== "approved";
 
       // Close the loop. A decision that only lands in a table is invisible to
       // the one person waiting on it, and silence is what drives the call to
@@ -3117,7 +2789,9 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // mistake (wrong queue, duplicate), not their situation, and "your
       // request was voided" reads like a denial to the person holding the
       // car. Fleet reaches out manually when there is something to say.
-      if (decision !== "VOID") void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
+      if (decision !== "VOID" && (decision !== "APPROVE" || transitionedToApproved)) {
+        void notifyTech(no, text, `decision-${decision.toLowerCase()}`);
+      }
 
       // A preview quoted before this decision carries the OLD pickup time, and the
       // booking chain commits from the stored preview, never re-deriving from the
@@ -3126,7 +2800,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // preview_pending/preview_ready are knocked back; an intent already at
       // confirmed/booking is past the point where a retime can be honored, and
       // yanking it there risks orphaning a real ETD reservation.
-      if (decision === "APPROVE" && pickupAt && cur.pickup_changes && !isExtensionRow) {
+      if (transitionedToApproved && pickupAt && cur.pickup_changes && !isExtensionRow) {
         await invalidateRequestPreviews(
           String(no), `pickup time set to ${pickupAt} by ${actor}`);
       }
@@ -3137,7 +2811,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // NEVER for an extension: the technician already holds the car, and this
       // chain would reserve a second one. Fleet extends with Enterprise
       // manually after approval — the row is settled the moment it flips.
-      if (decision === "APPROVE" && !isExtensionRow) void autoBookApprovedRequest(no);
+      if (transitionedToApproved && !isExtensionRow) void autoBookApprovedRequest(no);
 
       // An extension APPROVE emails Enterprise instead. Fire-and-forget like
       // the booking chain: the outcome is recorded on the row and the drawer
@@ -3147,7 +2821,7 @@ function sanitizeBookedFacts(raw: unknown): Record<string, any> | null {
       // route is the deliberate re-send path. The auto flag additionally
       // refuses to repeat a send that already succeeded (e.g. deny→re-approve
       // after the email landed).
-      if (decision === "APPROVE" && isExtensionRow && prevStatus !== "approved") {
+      if (transitionedToApproved && isExtensionRow) {
         void sendExtensionEmail(no, actor, { auto: true });
       }
 
@@ -3236,14 +2910,9 @@ async function releaseInlineAutobookClaim(intentId: number): Promise<void> {
 }
 
 /**
- * One inline booking chain per request per process. Approve fires this chain
- * and the "Book it now" button fires it again; on 2026-08-25 (BSOKOLO, request
- * #117) a staffer did exactly what the UI offers — approved, then clicked Book —
- * and the two chains raced their confirms 200ms apart. The loser's failure
- * handling then knocked the freshly confirmed intent back to preview_required
- * and the booking was lost. The orchestrator's confirm is idempotent now, but
- * there is no reason to run the 20-30s quote chain twice at all: the second
- * caller joins the outcome of the first by simply not starting.
+ * One inline booking chain per request per process. Approve is the sole caller,
+ * but transport/click replays can still overlap while the 20-30s quote chain is
+ * active. The later caller joins the outcome of the first by not starting.
  */
 const autoBookInFlight = new Set<number>();
 
@@ -3260,14 +2929,85 @@ async function autoBookApprovedRequest(requestNo: number): Promise<void> {
   }
 }
 
-async function autoBookApprovedRequestInner(requestNo: number): Promise<void> {
+type AutoBookApprovedRequestDeps = {
+  findLiveIntent?: typeof liveIntentForRequest;
+  createBookingIntent?: typeof createIntent;
+};
+
+export async function autoBookApprovedRequestInner(
+  requestNo: number,
+  deps: AutoBookApprovedRequestDeps = {},
+): Promise<void> {
+  const findLiveIntent = deps.findLiveIntent ?? liveIntentForRequest;
+  const createBookingIntent = deps.createBookingIntent ?? createIntent;
   let inlineIntentId: number | null = null;
-  const fail = async (stage: string, detail: string) => {
-    await db.execute(sql`
+  const fail = async (stage: string, detail: string, reopenForReview = false) => {
+    const writeFailure = async (executor: any) => executor.execute(sql`
+      WITH booking_fence AS (
+        SELECT EXISTS (
+          SELECT 1
+            FROM vrm_rental_workflow_intents i
+           WHERE i.workflow_type = ${WORKFLOW_REQUEST}
+             AND (i.source_id = ${String(requestNo)}
+                  OR i.source_id = (SELECT id::text FROM vrm_rental_request WHERE request_no = ${requestNo}))
+             AND (
+               i.status NOT IN ('completed', 'cancelled', 'abandoned')
+               OR i.reservation_state IN ('unknown', 'booked_unverified', 'verified')
+               OR EXISTS (
+                 SELECT 1
+                   FROM vrm_workflow_attempts a
+                  WHERE a.intent_id = i.id
+                    AND a.phase = 'etd_booking'
+               )
+             )
+        ) AS present
+      )
       UPDATE vrm_rental_request
-         SET etd_error = ${`${stage}: ${detail}`.slice(0, 500)}, updated_at = now()
+         SET etd_error = ${`${stage}: ${detail}`.slice(0, 500)},
+             -- A failure before createIntent returns is provably before any ETD
+             -- operation: there is no intent and therefore no attempt ledger row.
+             -- Reopen in the SAME write as the error so staff can safely press
+             -- Approve again. Once an intent exists, preserve its fence instead.
+             status = CASE
+               WHEN ${reopenForReview}::boolean
+                AND NOT (SELECT present FROM booking_fence)
+                AND status = 'approved'
+               THEN 'pending'
+               ELSE status
+             END,
+             claimed_at = CASE
+               WHEN ${reopenForReview}::boolean
+                AND NOT (SELECT present FROM booking_fence)
+                AND status = 'approved'
+               THEN NULL
+               ELSE claimed_at
+             END,
+             claimed_by = CASE
+               WHEN ${reopenForReview}::boolean
+                AND NOT (SELECT present FROM booking_fence)
+                AND status = 'approved'
+               THEN NULL
+               ELSE claimed_by
+             END,
+             updated_at = now()
        WHERE request_no = ${requestNo} AND etd_booked_at IS NULL
     `);
+    if (!reopenForReview) {
+      await writeFailure(db);
+      return;
+    }
+    await db.transaction(async (tx) => {
+      // Shared with live request-intent creation. The lock must be acquired
+      // before reading the intent/attempt fence so the check cannot race a
+      // creator that has not committed its row yet.
+      await tx.execute(sql`
+        SELECT pg_advisory_xact_lock(
+          hashtext('vrm-request-booking'),
+          hashtext(${String(requestNo)})
+        )
+      `);
+      await writeFailure(tx);
+    });
   };
   try {
     // Adopt before creating. createIntent refuses a second live intent for the same
@@ -3275,7 +3015,7 @@ async function autoBookApprovedRequestInner(requestNo: number): Promise<void> {
     // it also made Approve a ONE-SHOT: a request whose first pass died left an intent
     // behind that the button could then never touch again, so the row sat approved
     // and carless with nothing able to move it. Resume the intent that is there.
-    const existing = await liveIntentForRequest(requestNo);
+    const existing = await findLiveIntent(requestNo);
     if (existing) {
       inlineIntentId = Number(existing.id);
       // Anything that already reached ETD is never re-driven. A second pass over a
@@ -3306,7 +3046,7 @@ async function autoBookApprovedRequestInner(requestNo: number): Promise<void> {
     let cur =
       existing ??
       (
-        await createIntent({
+        await createBookingIntent({
           workflowType: WORKFLOW_REQUEST,
           sourceId: String(requestNo),
           executionMode: "live",
@@ -3361,7 +3101,13 @@ async function autoBookApprovedRequestInner(requestNo: number): Promise<void> {
           .map((f: any) => (f?.detail ? `${f.code}: ${f.detail}` : String(f?.code ?? "?")))
           .join("; ")
       : "";
-    await fail("auto-book", codes ? `${err?.message ?? "failed"} (${codes})` : String(err?.message ?? err));
+    await fail(
+      "auto-book",
+      codes ? `${err?.message ?? "failed"} (${codes})` : String(err?.message ?? err),
+      inlineIntentId == null
+        && err instanceof OrchestratorError
+        && ["live_disarmed", "eligibility_failed", "source_missing"].includes(err.code),
+    );
   } finally {
     // The inline lane is done either way. Holding a 30 minute lease past the end of
     // this function is what parked six requests on 2026-08-20 with a built preview,
@@ -3391,7 +3137,12 @@ async function liveIntentForRequest(requestNo: number): Promise<any | null> {
   const { rows } = await db.execute(sql`
     SELECT * FROM vrm_rental_workflow_intents
     WHERE workflow_type = ${WORKFLOW_REQUEST}
-      AND source_id = ${String(requestNo)}
+      AND (
+        source_id = ${String(requestNo)}
+        OR source_id = (
+          SELECT id::text FROM vrm_rental_request WHERE request_no = ${requestNo}
+        )
+      )
       AND execution_mode = 'live'
       AND status NOT IN ('completed', 'cancelled', 'abandoned')
     ORDER BY id DESC

@@ -69,6 +69,9 @@ g.ResizeObserver = dom.window.ResizeObserver =
 (dom.window.Element.prototype as any).setPointerCapture ||= () => {};
 (dom.window.Element.prototype as any).releasePointerCapture ||= () => {};
 g.IS_REACT_ACT_ENVIRONMENT = true;
+dom.window.confirm = () => true;
+const promptAnswers: Array<string | null> = [];
+dom.window.prompt = () => promptAnswers.shift() ?? null;
 
 // ── Fixture rows: one per verdict family ────────────────────────────────────
 
@@ -106,12 +109,15 @@ const ROWS = [
                     pickupTime: "08:00", classCode: "CCAR", classDescription: "Compact" } },
   { ...base, request_no: 903, status: "approved", decided_at: new Date().toISOString() },
   { ...base, request_no: 904, status: "approved", decided_at: hourAgo },
+  { ...base, request_no: 906, status: "approved", decided_at: hourAgo },
 ];
 
 const RAW_INTENT_ERR = "booking outcome timeout: readback still pending after 3 attempts";
 const INTENTS: Record<string, any> = {
-  "904": { id: 55, status: "manual_review", reservation_state: null, last_error: RAW_INTENT_ERR,
+  "904": { id: 55, status: "booking_unknown", reservation_state: "unknown", last_error: RAW_INTENT_ERR,
            execution_mode: "live", preview_version: 1 },
+  "906": { id: 56, status: "cancel_pending_readback", reservation_state: "unknown",
+           last_error: "cancellation readback pending", execution_mode: "live", preview_version: 1 },
 };
 
 // Row 905: a pending EXTENSION. It lives on the Extensions tab, never the
@@ -126,6 +132,7 @@ const EXT_ROW = {
 
 /** Bodies POSTed to /decide, so a test can prove the gate held (or what sent). */
 const decideCalls: any[] = [];
+const workflowPosts: Array<{ path: string; body: any }> = [];
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -150,6 +157,14 @@ g.fetch = dom.window.fetch = (async (input: any, init?: any) => {
     });
   }
   if (p.endsWith("/cutover/intents/by-source")) return json(INTENTS);
+  if (p.includes("/cutover/intents/") && String(init?.method ?? "GET").toUpperCase() === "POST") {
+    const body = JSON.parse(String(init?.body ?? "{}"));
+    workflowPosts.push({ path: p, body });
+    if (p.endsWith("/executor/run")) {
+      return json({ claimed: 1, results: [{ action: "RECON", status: "booking_unknown" }] });
+    }
+    return json({ status: p.endsWith("/retry") ? "booking" : "booking_unknown" });
+  }
   if (p.endsWith("/approval-sms-templates")) return json({ templates: { standard: "", monday: "" } });
   // No SSO session in the harness: a 200 {} here would make AuthProvider
   // store JSON.stringify(undefined) ("undefined") and blow up the next mount.
@@ -201,6 +216,8 @@ async function cleanup(): Promise<void> {
   container = null;
   queryClient.clear();
   dom.window.localStorage.clear();
+  promptAnswers.length = 0;
+  workflowPosts.length = 0;
 }
 afterEach(cleanup);
 after(cleanup);
@@ -234,7 +251,7 @@ async function openDrawer(no: number): Promise<HTMLElement> {
 }
 
 async function closeDrawer(no: number): Promise<void> {
-  const x = drawerEl(no)?.querySelector("button");
+  const x = drawerEl(no)?.querySelector("svg.lucide-x")?.closest("button");
   assert.ok(x, "the drawer close button must exist");
   await act(async () => { (x as HTMLButtonElement).click(); });
   await waitFor("the drawer to close", () => !drawerEl(no));
@@ -284,6 +301,12 @@ test("failed booking: one consolidated card, plain language, quick action, raw e
   // The matching one-click correction sits right on the card.
   assert.ok(buttons(drawer).some((b) => b.textContent === "Pick a different class"),
     "the quick action for a class failure");
+  assert.ok(buttons(drawer).some((b) => b.textContent === "Open the booking workflow"),
+    "the clean failure remains open for staff review");
+  assert.ok(!buttons(drawer).some((b) => b.textContent === "Book it now"),
+    "APPROVE/edit/open are the only recovery choices for a clean failure");
+  assert.ok(!buttons(drawer).some((b) => b.textContent === "Retry (staff)"),
+    "clean failures never expose the workflow retry route");
 
   // The raw machine error survives, but ONLY inside the technical expander.
   const details = drawer.querySelector("details");
@@ -339,7 +362,7 @@ test("booked: confirmation, branch + address, pickup, class, and the text truth"
   await closeDrawer(902);
 });
 
-test("parked intent: needs-attention verdict outranks, staff retry offered, panel stays deduplicated", async () => {
+test("ambiguous request can attach evidence and run readback, never Book it now or booking retry", async () => {
   await renderPage();
   await waitFor("the intent to land", () => rowFor(904)!.textContent!.includes("NEEDS ATTENTION"));
   const drawer = await openDrawer(904);
@@ -348,9 +371,42 @@ test("parked intent: needs-attention verdict outranks, staff retry offered, pane
   assert.match(text, /Booking needs attention/i);
   assert.match(text, /could not tell whether Enterprise actually created this reservation/,
     "unknown-outcome copy: never advise a blind re-book");
-  assert.ok(buttons(drawer).some((b) => b.textContent === "Retry (staff)"),
-    "the staff retry quick action for a parked intent");
   assert.ok(buttons(drawer).some((b) => b.textContent === "Open the booking workflow"));
+  assert.ok(buttons(drawer).some((b) => b.textContent === "Attach confirmation #"),
+    "manual confirmation reconciliation remains available");
+  assert.ok(buttons(drawer).some((b) => b.textContent === "Cancel"),
+    "manual cancellation reconciliation remains available");
+  assert.ok(buttons(drawer).some((b) => b.textContent === "Reconcile"),
+    "an uncertain outcome has a non-destructive readback control");
+  assert.ok(!buttons(drawer).some((b) => b.textContent === "Book it now"),
+    "an ambiguous request has no direct booking control");
+  assert.ok(!buttons(drawer).some((b) => b.textContent === "Retry (staff)"),
+    "the readback action is never worded as a booking retry");
+  assert.ok(!buttons(drawer).some((b) => /^APPROVE/.test(b.textContent ?? "")),
+    "an ambiguous outcome is fenced: it cannot be approved again before reconciliation");
+
+  promptAnswers.push("ENT-904", "confirmed by Enterprise branch");
+  await act(async () => {
+    (buttons(drawer).find((b) => b.textContent === "Attach confirmation #") as HTMLButtonElement).click();
+  });
+  await waitFor("confirmation attachment post", () =>
+    workflowPosts.find((c) => c.path.endsWith("/intents/55/attach-confirmation")));
+
+  await act(async () => {
+    (buttons(drawer).find((b) => b.textContent === "Reconcile") as HTMLButtonElement).click();
+  });
+  await waitFor("request reconciliation post", () =>
+    workflowPosts.find((c) => c.path.endsWith("/intents/55/retry")));
+  await waitFor("readback executor post", () =>
+    workflowPosts.find((c) => c.path.endsWith("/intents/executor/run")));
+  assert.deepEqual(
+    workflowPosts.find((c) => c.path.endsWith("/intents/55/attach-confirmation"))?.body,
+    { confirmation: "ENT-904", note: "confirmed by Enterprise branch" },
+  );
+  assert.deepEqual(
+    workflowPosts.find((c) => c.path.endsWith("/intents/executor/run"))?.body,
+    { intentId: 55 },
+  );
 
   // The raw intent error appears exactly once (technical expander); the
   // workflow panel below is fully visible but status-hidden, so nothing
@@ -358,6 +414,29 @@ test("parked intent: needs-attention verdict outranks, staff retry offered, pane
   assert.equal(count(text, "readback still pending"), 1,
     "the intent's raw error must not render twice");
   await closeDrawer(904);
+});
+
+test("request drawers expose no direct book/retry controls while cancellation evidence remains", async () => {
+  await renderPage();
+  await waitFor("the cancellation intent to land", () => rowFor(906)!.textContent!.includes("NEEDS ATTENTION"));
+
+  for (const no of [901, 903, 904]) {
+    const drawer = await openDrawer(no);
+    const labels = buttons(drawer).map((b) => b.textContent?.trim());
+    assert.ok(!labels.includes("Book it now"), `request #${no} must not expose the /book control`);
+    assert.ok(!labels.includes("Retry (staff)"), `request #${no} must not expose the /retry control`);
+    await closeDrawer(no);
+  }
+
+  const cancelling = await openDrawer(906);
+  const labels = buttons(cancelling).map((b) => b.textContent?.trim());
+  assert.ok(labels.includes("Record ETD cancellation evidence"),
+    "manual cancellation reconciliation must remain");
+  assert.ok(labels.includes("Attach confirmation #"),
+    "manual confirmation reconciliation must remain");
+  assert.ok(!labels.includes("Book it now"));
+  assert.ok(!labels.includes("Retry (staff)"));
+  await closeDrawer(906);
 });
 
 test("extensions live on their own tab, and approve is blocked without a reservation number", async () => {

@@ -141,28 +141,25 @@ describe("staff lane unaffected", () => {
 });
 
 describe("LIVE-mode RBAC (repair spec §6)", () => {
-  test("creating a LIVE intent is admin-gated on BOTH create lanes; admin then hits the kill switch", async () => {
-    for (const [path, body] of [
-      [`${B}/intents`, { surveyResponseId: crypto.randomUUID(), executionMode: "live" }],
-      [`/api/vrm/forms/rental-request/${crypto.randomUUID()}/booking-intent`, { executionMode: "live" }],
-    ] as const) {
-      const plain = await fetch(baseUrl + path, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-      });
-      assert.equal(plain.status, 403, `${path} must refuse a plain session for live`);
-      assert.equal(((await plain.json()) as any).code, "admin_required_live");
+  test("creating a LIVE cutover intent is admin-gated; admin then hits the kill switch", async () => {
+    const path = `${B}/intents`;
+    const body = { surveyResponseId: crypto.randomUUID(), executionMode: "live" };
+    const plain = await fetch(baseUrl + path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    assert.equal(plain.status, 403, `${path} must refuse a plain session for live`);
+    assert.equal(((await plain.json()) as any).code, "admin_required_live");
 
-      // Admin clears RBAC and lands on the NEXT gate: the dark-build kill
-      // switch (VRM_CONTRACT_BLOCK_ENABLED absent → live_disarmed) — proving
-      // no eligibility read or intent write ran for a live create.
-      const admin = await fetch(baseUrl + path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-test-role": "admin" },
-        body: JSON.stringify(body),
-      });
-      assert.equal(admin.status, 403, `${path} admin live create must hit live_disarmed while dark`);
-      assert.equal(((await admin.json()) as any).code, "live_disarmed");
-    }
+    // Admin clears RBAC and lands on the NEXT gate: the dark-build kill
+    // switch (VRM_CONTRACT_BLOCK_ENABLED absent → live_disarmed) — proving
+    // no eligibility read or intent write ran for a live create.
+    const admin = await fetch(baseUrl + path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-test-role": "admin" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(admin.status, 403, `${path} admin live create must hit live_disarmed while dark`);
+    assert.equal(((await admin.json()) as any).code, "live_disarmed");
   });
 
   test("a dry_run create is NOT RBAC-blocked (plain session reaches the handler's own gates)", async () => {
@@ -221,22 +218,16 @@ describe("ARMED mode (VRM_CONTRACT_BLOCK_ENABLED=true): the flag, not the role, 
   test("armed: a plain session's explicit live create clears RBAC + kill switch and reaches source lookup", async () => {
     const disarm = arm();
     try {
-      for (const path of [
-        `${B}/intents`,
-        `/api/vrm/forms/rental-request/${crypto.randomUUID()}/booking-intent`,
-      ]) {
-        const body = path.endsWith("/booking-intent")
-          ? { executionMode: "live" }
-          : { surveyResponseId: crypto.randomUUID(), executionMode: "live" };
-        const res = await fetch(baseUrl + path, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
-        });
-        // 404 source_missing proves the request cleared BOTH the dark-phase
-        // RBAC gate and live_disarmed, and died only on the missing source —
-        // no intent row is ever written.
-        assert.equal(res.status, 404, `${path}: armed live create by a plain session must fall through to source lookup`);
-        assert.equal(((await res.json()) as any).code, "source_missing");
-      }
+      const path = `${B}/intents`;
+      const body = { surveyResponseId: crypto.randomUUID(), executionMode: "live" };
+      const res = await fetch(baseUrl + path, {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      // 404 source_missing proves the request cleared BOTH the dark-phase
+      // RBAC gate and live_disarmed, and died only on the missing source —
+      // no intent row is ever written.
+      assert.equal(res.status, 404, `${path}: armed live create by a plain session must fall through to source lookup`);
+      assert.equal(((await res.json()) as any).code, "source_missing");
     } finally {
       disarm();
     }

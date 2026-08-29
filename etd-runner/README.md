@@ -1,10 +1,16 @@
 # etd-runner
 
-The ETD reservation booker, running on the Nexus box instead of Tyler's desktop.
+ETD token and cutover tooling.
 
-Nexus already owns the request, the decision and the queue
-(`server/vrm/forms/rental-request.ts`, endpoints `booking-queue` and
-`:requestNo/booked`). This owns only the ETD call.
+## Rental-request booking retirement
+
+Rental requests are booked **only** by Nexus Approve's canonical in-server ETD
+executor. The former desktop runner (`scripts/book_request.py`) and its legacy
+booking routes are retired and must not be used. The script path remains only
+as a compatibility shim: every invocation exits with a clear retirement
+message and creates no reservation.
+
+Token tooling and cutover tooling in this repository remain supported.
 
 ## Setup, once per container rebuild
 
@@ -26,9 +32,6 @@ There is no `playwright install`. Chromium is already in the nix store; point
     .venv/bin/python scripts/etd_token.py status      # time left, never prints the secret
     .venv/bin/python scripts/etd_token.py verify      # a real authenticated ETD call
 
-    .venv/bin/python scripts/book_request.py           # DRY RUN, books nothing
-    .venv/bin/python scripts/book_request.py --confirm # creates REAL reservations
-
 Start with `preflight`. It makes no network calls and mints nothing, so it is
 safe to run before any credential exists.
 
@@ -43,25 +46,18 @@ safe to run before any credential exists.
     ETD_CHROMIUM_PATH      the nix-store chromium. It is a nix hash and changes
                            when Replit updates the package; re-resolve with
                            `which chromium` if minting starts failing.
-    NEXUS_CRON_SECRET      to call the booking-queue endpoints
     ETD_RUNNER             optional label, lands in vrm_etd_token.minted_by
 
-## Why there is no forever loop
+## Token lifecycle
 
 This deployment is `deploymentTarget = "autoscale"` and scales to zero between
-requests, so a `--watch` loop cannot survive here. That is why the token lives in
-`vrm_etd_token` rather than in a process: any wake-up reuses a live token instead
-of paying ~21 s of Azure B2C. Minting is single-flighted with `pg_advisory_lock`,
-so two runners waking together never both drive a login.
+requests. The token lives in `vrm_etd_token` rather than in a process, so a
+wake-up can reuse a live token instead of paying ~21 s of Azure B2C. Minting is
+single-flighted with `pg_advisory_lock`, so two runners waking together never
+both drive a login.
 
 ## Do not
 
-**Never add `book_approved.py`.** It is deliberately absent. It predates the
-2026-08-13 cutover and books in the wrong driver's name, at the wrong branch, in
-a Mirage, with no confirmation number stored.
-
-`reference/savedr_request.json` is the captured reservation model every booking
-deep-copies. It cannot be regenerated except by re-running `canary_capture.py`
-against a real live booking. It still contains the original capture's driver
-identity in eleven places; `set_driver()` overwrites all of them on every
-booking.
+**Never restore `book_approved.py` or booking logic to `book_request.py`.**
+Those legacy routes are retired; Nexus Approve's in-server executor is the
+sole rental-request booking authority.

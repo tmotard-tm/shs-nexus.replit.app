@@ -153,3 +153,4 @@
 - [Rollback test fixture fidelity](rollback-test-fixture-fidelity.md) — rollback tests must match production selectors; plausible literals can false-green preservation assertions.
 - [VRM Rental Operations row budget](vrm-rental-ops-row-budget.md) — search lag was dense unbounded DOM, not API; filter all rows but render 50 per page.
 - [Daily truck inventory mirror](daily-truck-inventory-mirror.md) — 07:00 ET Nexus catch-up; same lock session atomically replaces snapshot + watermark; all readers latest-only.
+- [Rental booking recovery serialization](rental-booking-recovery-serialization.md) — request intent creation and failure-to-review recovery must share one canonical request-key transaction lock.

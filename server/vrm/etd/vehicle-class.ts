@@ -227,11 +227,9 @@ export const ESCALATION_LADDER = ["CFAR", "IFAR", "SFAR", "FFAR", "MVAR"];
  * here because it is the whole rule: somebody who named a minivan needs space, and
  * somebody who said nothing gets the cheapest car that does the job.
  *
- * Mirrored verbatim by NAMED_DOWNGRADE in etd-runner/scripts/book_request.py. The two
- * bookers resolved the same request in OPPOSITE directions until 2026-08-19 - the
- * server took the largest class on the lot regardless of what was named, the runner
- * refused outright - so which vehicle a technician got depended on which program
- * happened to run. Change both or neither.
+ * The retired Python request booker once carried a second copy of this rule and
+ * resolved requests differently. The TypeScript executor is now the sole
+ * request-booking authority, so this is the canonical ladder.
  *
  * Minivan is the ceiling (Tyler, 2026-08-17). Pickups are deliberately absent: an
  * open bed is not a substitute for enclosed space. PCAR and LCAR stay out for the
