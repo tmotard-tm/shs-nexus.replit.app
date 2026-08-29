@@ -155,3 +155,4 @@
 - [VRM Rental Operations row budget](vrm-rental-ops-row-budget.md) — search lag was dense unbounded DOM, not API; filter all rows but render 50 per page.
 - [Daily truck inventory mirror](daily-truck-inventory-mirror.md) — 07:00 ET Nexus catch-up; same lock session atomically replaces snapshot + watermark; all readers latest-only.
 - [Rental booking recovery serialization](rental-booking-recovery-serialization.md) — request intent creation and failure-to-review recovery must share one canonical request-key transaction lock.
+- [Async decision UI ordering](async-decision-ui-ordering.md) — accepted external work stays locked; reconcile stale refetches with a server-issued row version, never browser time.

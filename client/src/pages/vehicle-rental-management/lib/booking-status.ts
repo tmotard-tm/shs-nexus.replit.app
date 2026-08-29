@@ -151,6 +151,14 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
       actions: ["open_workflow"],
     };
   }
+  if ((m = /could not create an ETD user for (\S+)/i.exec(inner))) {
+    return {
+      summary:
+        `Enterprise could not create a driver profile for ${m[1]}. ` +
+        "Check the technician's contact and roster details, then approve again after correcting them.",
+      actions: ["open_workflow"],
+    };
+  }
   if (/additional-info lookup failed/i.test(inner)) {
     return {
       summary: "A lookup on Enterprise's side failed mid-booking (usually transient) — review the workflow, then approve again.",

@@ -289,6 +289,8 @@ const CASES: Array<[string, RegExp, string | null]> = [
   ["booking: aborted_before_open: preview lacks pickupDate/sipp/branchCode", /quote is incomplete or stale/, "open_workflow"],
   ["preview: fresh quote failed: ETD quote chain 500", /could not be quoted just now/, "open_workflow"],
   ["booking: aborted_before_open: no ETD user for JDOE42", /no driver profile for JDOE42/, "open_workflow"],
+  ["runner abort: could not create an ETD user for JDOE42: Unable to save the user",
+    /could not create a driver profile for JDOE42/, "open_workflow"],
   ["booking: aborted_before_open: additional-info lookup failed: 502", /usually transient/, "open_workflow"],
   ["booking: intent #12 already holds a reservation (booked_unverified); no second booking attempted",
     /reservation already exists/, "open_workflow"],

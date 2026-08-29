@@ -62,7 +62,7 @@ interface Req {
   status: string; auto_decision: string | null; auto_reason: string | null; auto_rule: number | null;
   decided_by: string | null; decided_at: string | null; decision_note: string | null;
   actual_days_down: number | null; claim_variance_days: number | null;
-  created_at: string;
+  created_at: string; updated_at?: string | null;
   // Booking outcome, written by the auto-book chain that Approve kicks off.
   // etd_error is cleared on a retry and overwritten by the newest failure.
   etd_booked_at?: string | null; etd_reference?: string | null;
@@ -524,6 +524,12 @@ export default function RentalRequests() {
   // Mirrors the server's cap. Longer stays are extensions, not longer bookings.
   const MAX_RENTAL_DAYS = 7;
   const [actionErr, setActionErr] = useState("");
+  // Approve starts a fire-and-forget Enterprise chain. Keep an explicit
+  // acknowledgement in the pinned action bar so the fast 200 response does
+  // not look like a dead click while the slower quote/book calls continue.
+  const [approvalSubmittingFor, setApprovalSubmittingFor] = useState<number | null>(null);
+  const [approvalAcceptedFor, setApprovalAcceptedFor] = useState<number | null>(null);
+  const approvalServerVersionRef = useRef("");
   const [missing, setMissing] = useState<string[]>([]);
   const [classDraft, setClassDraft] = useState("sedan");
   // The consolidated status card can resend an extension email. Booking itself
@@ -776,7 +782,12 @@ export default function RentalRequests() {
       }
       return j;
     },
+    onMutate: (v) => {
+      setActionErr("");
+      if (v.decision === "APPROVE") setApprovalAcceptedFor(null);
+    },
     onSuccess: (_j, v) => {
+      setApprovalSubmittingFor(null);
       setActionErr(""); setNote(""); setMissing([]); setPickupDate(""); setPickupTime("08:00");
       setSmsBody(""); setSmsEdited(false); setDateEdited(false); setPendingReason(""); suggestedFor.current = null;
       setHolmanAck(false); setNeedsBillingAck(false);
@@ -784,12 +795,39 @@ export default function RentalRequests() {
       // watches the confirmation (or the failure reason) land, instead of
       // closing on a request that still says nothing. Other verdicts are
       // final; closing is the right acknowledgement.
-      if (v.decision !== "APPROVE") setDetail(null);
+      if (v.decision !== "APPROVE") {
+        approvalServerVersionRef.current = "";
+        setApprovalAcceptedFor(null);
+        setDetail(null);
+      } else if (detail?.request_no === v.requestNo && !isExt(detail)) {
+        approvalServerVersionRef.current = String(_j?.updatedAt ?? "");
+        setApprovalAcceptedFor(v.requestNo);
+        // Do not wait for the list refetch to acknowledge the accepted edge.
+        // The server has already committed this status before returning 200.
+        setDetail((current) => current?.request_no === v.requestNo
+          ? {
+              ...current,
+              status: "approved",
+              decided_at: String(_j?.decidedAt ?? "") || new Date().toISOString(),
+              updated_at: String(_j?.updatedAt ?? "") || current.updated_at,
+              etd_error: null,
+            }
+          : current);
+      } else if (detail?.request_no === v.requestNo && isExt(detail)) {
+        // Extension approval sends its Enterprise email but does not enter the
+        // booking executor, so success is terminal and the drawer can close.
+        approvalServerVersionRef.current = "";
+        setApprovalAcceptedFor(null);
+        setDetail(null);
+      }
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/list"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/forms/rental-request/stats"] });
       refreshIntents();
     },
     onError: (e: any) => {
+      setApprovalSubmittingFor(null);
+      approvalServerVersionRef.current = "";
+      setApprovalAcceptedFor(null);
       setActionErr(e.message);
       // The server's own fresh check said holman_only — surface the
       // acknowledgement checkbox even when the row the client holds is
@@ -830,8 +868,23 @@ export default function RentalRequests() {
   useEffect(() => {
     if (!detail) return;
     const fresh = rows.find((r) => r.request_no === detail.request_no);
-    if (fresh && JSON.stringify(fresh) !== JSON.stringify(detail)) setDetail(fresh);
-  }, [rows, detail]);
+    if (!fresh || JSON.stringify(fresh) === JSON.stringify(detail)) return;
+    if (approvalAcceptedFor === detail.request_no) {
+      const acceptedVersion = Date.parse(approvalServerVersionRef.current);
+      const freshVersion = Date.parse(String(fresh.updated_at ?? ""));
+      const terminalBooking = fresh.status === "booked"
+        || Boolean(fresh.etd_booked_at)
+        || Boolean(fresh.etd_reference);
+      const belongsToThisApproval = Number.isFinite(acceptedVersion)
+        && Number.isFinite(freshVersion)
+        && (fresh.etd_error ? freshVersion > acceptedVersion : freshVersion >= acceptedVersion);
+      // An invalidation can finish with bytes fetched just before POST /decide
+      // committed. Do not let that old pending/error snapshot erase the local
+      // accepted edge. A fresh failure or a confirmed booking may replace it.
+      if (!terminalBooking && !belongsToThisApproval) return;
+    }
+    setDetail(fresh);
+  }, [rows, detail, approvalAcceptedFor]);
 
   // Latest booking-workflow intent per request (keyed by request_no).
   const sourceIds = useMemo(() => rows.map((r) => String(r.request_no)), [rows]);
@@ -1012,6 +1065,12 @@ export default function RentalRequests() {
   // the drawer is open shows up without reopening it.
   const detailIntent = detail ? intentFor(detail.request_no) : null;
   const bookingSt = detail ? deriveBookingStatus(detail, detailIntent) : null;
+  const acceptedBookingRunning = Boolean(
+    detail
+    && approvalAcceptedFor === detail.request_no
+    && bookingSt
+    && !["booked", "failed", "attention"].includes(bookingSt.verdict),
+  );
 
   return (
     <div style={{ padding: "18px 22px 40px" }}>
@@ -1225,6 +1284,9 @@ export default function RentalRequests() {
                         setNote(MAINT_CATS.has(r.problem_category ?? "") && r.status === "pending" ? MAINT_SCRIPT : "");
                         setClassDraft(normCls(r.approved_vehicle_class) || "sedan");
                         setActionErr("");
+                        setApprovalSubmittingFor(null);
+                        approvalServerVersionRef.current = "";
+                        setApprovalAcceptedFor(null);
                         setQuickMsg(null);
                         // The Holman-book acknowledgement never survives a row
                         // change — it attests to THIS rental's standing.
@@ -2293,6 +2355,18 @@ export default function RentalRequests() {
                 never at the bottom of a long scroll. Same buttons, same
                 gate, same mutation as before the restructure. */}
             <div style={{ flexShrink: 0, borderTop: `1px solid ${colors.rule}`, background: colors.surface, padding: "10px 20px 12px" }}>
+              {approvalSubmittingFor === detail.request_no && (
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.accent, margin: "0 0 8px", fontWeight: 600 }}>
+                  Submitting approval…
+                </p>
+              )}
+              {approvalSubmittingFor !== detail.request_no
+                && acceptedBookingRunning
+                && (
+                  <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.accent, margin: "0 0 8px", fontWeight: 600 }}>
+                    Approval accepted — booking is running. Enterprise can take up to 90 seconds; the confirmation or blocker will appear above.
+                  </p>
+                )}
               {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, margin: "0 0 8px" }}>{actionErr}</p>}
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).filter((d) => {
@@ -2311,7 +2385,8 @@ export default function RentalRequests() {
                 }).map((d) => {
                   const [fg, bg] = DECISION_TONE[d];
                   return (
-                    <button key={d} type="button" disabled={decide.isPending}
+                    <button key={d} type="button"
+                            disabled={decide.isPending || approvalSubmittingFor != null || acceptedBookingRunning}
                             onClick={() => {
                               // What-you-see-is-what-sends: the textarea's
                               // exact bytes are submitted, so preview, sent
@@ -2348,6 +2423,7 @@ export default function RentalRequests() {
                                 setActionErr("This rental is on the Holman (ECARS) book only — tick the acknowledgement above to approve anyway, or run the cutover first.");
                                 return;
                               }
+                              if (d === "APPROVE") setApprovalSubmittingFor(detail.request_no);
                               decide.mutate({ requestNo: detail.request_no, decision: d, note,
                                 pickupAt: d === "APPROVE" && !isExt(detail) && pickupDate ? `${pickupDate}T${pickupTime || "08:00"}` : null,
                                 returnAt: d === "APPROVE" && !isExt(detail) && returnDate ? `${returnDate}T${returnTime || "08:00"}` : null,
@@ -2358,7 +2434,9 @@ export default function RentalRequests() {
                                 holmanOnlyAcknowledged: d === "APPROVE" && isExt(detail) ? holmanAck : false });
                             }}
                             style={{ ...ctrl, cursor: "pointer", flex: 1, color: fg, background: bg, borderColor: fg, fontWeight: 600 }}>
-                      {d === "APPROVE" && isExt(detail) ? "APPROVE EXTENSION" : d}
+                      {d === "APPROVE" && approvalSubmittingFor === detail.request_no
+                        ? "SUBMITTING APPROVAL…"
+                        : d === "APPROVE" && isExt(detail) ? "APPROVE EXTENSION" : d}
                     </button>
                   );
                 })}

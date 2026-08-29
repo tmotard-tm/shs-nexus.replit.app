@@ -93,6 +93,7 @@ const base = {
   actual_days_down: null, claim_variance_days: null,
   created_at: new Date().toISOString(),
   pickup_at: new Date().toISOString(),
+  updated_at: "2026-08-29T12:00:00.000Z",
 };
 
 const RAW_FAIL = "booking: aborted_before_open: class CFAR no longer offered at pickup branch E12345";
@@ -110,6 +111,7 @@ const ROWS = [
   { ...base, request_no: 903, status: "approved", decided_at: new Date().toISOString() },
   { ...base, request_no: 904, status: "approved", decided_at: hourAgo },
   { ...base, request_no: 906, status: "approved", decided_at: hourAgo },
+  { ...base, request_no: 907, status: "pending", decided_at: null, etd_error: null },
 ];
 
 const RAW_INTENT_ERR = "booking outcome timeout: readback still pending after 3 attempts";
@@ -133,6 +135,9 @@ const EXT_ROW = {
 /** Bodies POSTed to /decide, so a test can prove the gate held (or what sent). */
 const decideCalls: any[] = [];
 const workflowPosts: Array<{ path: string; body: any }> = [];
+const rowOverrides = new Map<number, Record<string, unknown>>();
+let releaseHeldDecision: (() => void) | null = null;
+let holdNextDecision = false;
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -143,9 +148,25 @@ g.fetch = dom.window.fetch = (async (input: any, init?: any) => {
   const p = url.pathname;
   if (/\/rental-request\/\d+\/decide$/.test(p)) {
     decideCalls.push(JSON.parse(String(init?.body ?? "{}")));
-    return json({ ok: true, decision: "APPROVE" });
+    if (holdNextDecision) {
+      holdNextDecision = false;
+      await new Promise<void>((resolve) => { releaseHeldDecision = resolve; });
+      releaseHeldDecision = null;
+    }
+    return json({
+      ok: true,
+      decision: "APPROVE",
+      decidedAt: "2026-08-29T13:30:00.000Z",
+      updatedAt: "2026-08-29T13:30:00.000Z",
+    });
   }
-  if (p.endsWith("/rental-request/list")) return json({ requests: [...ROWS, EXT_ROW] });
+  if (p.endsWith("/rental-request/list")) {
+    const requests = [...ROWS, EXT_ROW].map((row) => ({
+      ...row,
+      ...(rowOverrides.get(row.request_no) ?? {}),
+    }));
+    return json({ requests });
+  }
   if (p.endsWith("/rental-request/class-options")) {
     return json({
       options: [{ label: "sedan", sipp: "", note: "" }, { label: "suv", sipp: "IFAR", note: "" }],
@@ -218,6 +239,10 @@ async function cleanup(): Promise<void> {
   dom.window.localStorage.clear();
   promptAnswers.length = 0;
   workflowPosts.length = 0;
+  rowOverrides.clear();
+  holdNextDecision = false;
+  releaseHeldDecision?.();
+  releaseHeldDecision = null;
 }
 afterEach(cleanup);
 after(cleanup);
@@ -286,6 +311,67 @@ test("the request ticket shows the branch selected by the technician", async () 
     drawer.textContent!,
     /Requested branchEnterprise, 201 W Madison St, Chicago, IL 60606/,
   );
+});
+
+test("Approve immediately says it is submitting, then says the booking is running", async () => {
+  decideCalls.length = 0;
+  holdNextDecision = true;
+  await renderPage();
+  const drawer = await openDrawer(907);
+  const approve = buttons(drawer).find((b) => b.textContent === "APPROVE");
+  assert.ok(approve, "the approve button");
+
+  await act(async () => { approve!.click(); });
+  await waitFor("the held decide POST", () => decideCalls.length === 1);
+  assert.match(drawer.textContent!, /SUBMITTING APPROVAL/i,
+    "the click must acknowledge itself while the decision request is in flight");
+
+  await act(async () => { releaseHeldDecision?.(); });
+  await waitFor("the accepted booking notice", () =>
+    /APPROVAL ACCEPTED.*BOOKING IS RUNNING/i.test(drawer.textContent ?? ""));
+  assert.equal(approve!.disabled, true,
+    "Approve stays disabled while the accepted booking is still running");
+  await act(async () => { approve!.click(); });
+  assert.equal(decideCalls.length, 1, "a second click cannot submit another approval");
+});
+
+test("a stale pre-approval list response cannot resurrect the previous booking failure", async () => {
+  decideCalls.length = 0;
+  await renderPage();
+  const drawer = await openDrawer(901);
+  const approve = buttons(drawer).find((b) => b.textContent === "APPROVE");
+  assert.ok(approve, "the retry approval button");
+
+  await act(async () => { approve!.click(); });
+  await waitFor("the accepted retry notice", () =>
+    /APPROVAL ACCEPTED.*BOOKING IS RUNNING/i.test(drawer.textContent ?? ""));
+  assert.doesNotMatch(drawer.textContent!, /Booking failed/i,
+    "the invalidated list's old error must not replace the accepted retry state");
+  assert.equal(approve!.disabled, true);
+});
+
+test("a newer server-written booking failure replaces the local running state", async () => {
+  decideCalls.length = 0;
+  await renderPage();
+  const drawer = await openDrawer(907);
+  const approve = buttons(drawer).find((b) => b.textContent === "APPROVE");
+  assert.ok(approve, "the approval button");
+
+  await act(async () => { approve!.click(); });
+  await waitFor("the accepted booking notice", () =>
+    /APPROVAL ACCEPTED.*BOOKING IS RUNNING/i.test(drawer.textContent ?? ""));
+
+  rowOverrides.set(907, {
+    status: "pending",
+    decided_at: "2026-08-29T13:30:00.000Z",
+    updated_at: "2026-08-29T13:31:00.000Z",
+    etd_error: "runner abort: could not create an ETD user for ZZDRW01: Unable to save the user",
+  });
+
+  await waitFor("the newly written failure", () =>
+    /could not create a driver profile for ZZDRW01/i.test(drawer.textContent ?? ""), 5_000);
+  assert.equal(approve!.disabled, false,
+    "a fresh terminal failure releases the local in-progress lock for correction");
 });
 
 test("failed booking: one consolidated card, plain language, quick action, raw error collapsed", async () => {
@@ -483,5 +569,5 @@ test("extensions live on their own tab, and approve is blocked without a reserva
   assert.equal(decideCalls[0].reservationNumber, "1565400123");
   assert.equal(decideCalls[0].extensionDays, 7);
   assert.equal(decideCalls[0].decision, "APPROVE");
-  await closeDrawer(905);
+  await waitFor("the successful extension approval to close", () => !drawerEl(905));
 });

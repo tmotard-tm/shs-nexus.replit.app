@@ -2725,12 +2725,13 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
           -- serialize on the FOR UPDATE row lock, so whichever lands first
           -- wins and the loser gets a clean refusal, never a half-state.
           ${decision === "VOID" ? sql`AND vrm_rental_request.status <> 'approved'` : sql``}
-        RETURNING vrm_rental_request.request_no, old.prev_status
+        RETURNING vrm_rental_request.request_no, old.prev_status,
+                  vrm_rental_request.decided_at, vrm_rental_request.updated_at
       `);
       if (!(upd as any[]).length) {
         if (decision === "APPROVE") {
           const { rows: current } = await db.execute(sql`
-            SELECT status, request_type, etd_booked_at
+            SELECT status, request_type, etd_booked_at, decided_at, updated_at
               FROM vrm_rental_request
              WHERE request_no = ${Number(req.params.requestNo)}
           `);
@@ -2747,7 +2748,14 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
             if (recoveryStarted) {
               void autoBookApprovedRequest(Number(req.params.requestNo));
             }
-            return res.json({ ok: true, decision, idempotent: true, recoveryStarted });
+            return res.json({
+              ok: true,
+              decision,
+              idempotent: true,
+              recoveryStarted,
+              decidedAt: currentRow.decided_at,
+              updatedAt: currentRow.updated_at,
+            });
           }
         }
         if (decision === "VOID") {
@@ -2762,7 +2770,8 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
                  + "changing the decision here would leave a live rental on a denied request.",
         });
       }
-      const prevStatus = String((upd as any[])[0]?.prev_status ?? "");
+      const updatedRow = (upd as any[])[0];
+      const prevStatus = String(updatedRow?.prev_status ?? "");
       const transitionedToApproved = decision === "APPROVE" && prevStatus !== "approved";
 
       // Close the loop. A decision that only lands in a table is invisible to
@@ -2825,7 +2834,12 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         void sendExtensionEmail(no, actor, { auto: true });
       }
 
-      res.json({ ok: true, decision });
+      res.json({
+        ok: true,
+        decision,
+        decidedAt: updatedRow?.decided_at,
+        updatedAt: updatedRow?.updated_at,
+      });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "decide failed" });
     }
