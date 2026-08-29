@@ -9,7 +9,7 @@ Repair the pre-publish risks introduced or exposed by the unified rental-request
 - Once an executor begins an external booking attempt, any exception whose external outcome is uncertain must durably move the intent to an operator-review state. Lease expiry must never automatically re-drive that attempt.
 - Request eligibility and booking inputs must be read and validated while holding the same request-scoped transaction lock used to create or recover the intent. A concurrent request edit must either be included in the intent or cause the action to stop and reload.
 - Failure/reopen handling must use that same request-scoped lock and compare-at-write predicates so a late failure cannot overwrite a newer booking state.
-- Live cutover-intent creation remains restricted to an administrator or an explicitly authenticated service path, regardless of whether the live contract feature flag is armed.
+- Live cutover-intent creation requires an administrator or developer while the contract-block feature is dark. Once the flag is armed, signed-in VRM staff retain the approved normal-operations access; cron and service paths remain separately authenticated.
 - Historical confirmation adoption must lock the source and intent, accept only eligible states, prove that the evidence belongs to the same logical request/attempt, and remain idempotent for duplicate callbacks.
 - UUID and numeric representations of one rental request must resolve to one canonical logical source before intent persistence. Existing legacy rows must be reused rather than duplicated.
 - The retired Python request booker remains fail-closed. Operational documentation and smoke coverage must make the TypeScript executor the only request-booking path.
