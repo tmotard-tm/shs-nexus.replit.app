@@ -176,9 +176,11 @@ function TechStatusBadge({ status }: { status: string | null | undefined }) {
 function MismatchAssignmentSection({
   vehicle,
   getTechStatus,
+  getTechScheduleCandidate,
 }: {
   vehicle: FleetVehicle;
   getTechStatus: (techId: string) => string | null | undefined;
+  getTechScheduleCandidate: (techId: string) => unknown;
 }) {
   const { data: amsData, isLoading: amsLoading } = useQuery<any>({
     queryKey: ["/api/ams/vehicles", vehicle.vin],
@@ -215,7 +217,7 @@ function MismatchAssignmentSection({
         <>
           <p className="text-xs font-medium leading-tight flex items-center gap-1 min-w-0">
             <TechnicianScheduleHoverCard
-              ldap={techId}
+              rosterCandidate={getTechScheduleCandidate(techId)}
               name={techName || techId}
               className="truncate"
             />
@@ -255,7 +257,7 @@ function MismatchAssignmentSection({
             <>
               <p className="text-xs font-medium leading-tight flex items-center gap-1 min-w-0">
                 <TechnicianScheduleHoverCard
-                  ldap={vehicle.tpmsAssignedTechId.trim()}
+                  rosterCandidate={getTechScheduleCandidate(vehicle.tpmsAssignedTechId.trim())}
                   name={vehicle.tpmsAssignedTechName?.trim() || vehicle.tpmsAssignedTechId}
                   className="truncate"
                 />
@@ -1016,6 +1018,14 @@ export default function FleetManagement() {
     }
     return m;
   }, [allTechStatuses]);
+  const techScheduleCandidateMap = useMemo(() => {
+    const m = new Map<string, { techRacfid: string }>();
+    for (const tech of allTechStatuses ?? []) {
+      const ldap = tech.techRacfid?.trim();
+      if (ldap) m.set(ldap.toLowerCase(), { techRacfid: ldap });
+    }
+    return m;
+  }, [allTechStatuses]);
 
   // Full techs roster — only the Ops Review modal needs the heavy fields
   // (contact info, addresses, phones), so this is gated to load lazily when the
@@ -1055,6 +1065,11 @@ export default function FleetManagement() {
     (techId: string): string | null | undefined =>
       techStatusMap.get((techId || "").trim().toLowerCase()),
     [techStatusMap],
+  );
+  const getTechScheduleCandidate = useCallback(
+    (techId: string) =>
+      techScheduleCandidateMap.get((techId || "").trim().toLowerCase()) ?? null,
+    [techScheduleCandidateMap],
   );
 
   // Ops Review — raw list of techs whose assigned vehicle is in rental ops
@@ -2592,7 +2607,11 @@ export default function FleetManagement() {
                           
                           {/* Tech Assignment Section */}
                           {hasMismatch ? (
-                            <MismatchAssignmentSection vehicle={vehicle} getTechStatus={getTechStatus} />
+                            <MismatchAssignmentSection
+                              vehicle={vehicle}
+                              getTechStatus={getTechStatus}
+                              getTechScheduleCandidate={getTechScheduleCandidate}
+                            />
                           ) : (
                             /* Matched or unassigned: show single tech line */
                             <div className="flex items-center gap-2 pt-2 border-t">
@@ -2601,7 +2620,7 @@ export default function FleetManagement() {
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium truncate flex items-center gap-1.5">
                                     <TechnicianScheduleHoverCard
-                                      ldap={vehicle.tpmsAssignedTechId}
+                                      rosterCandidate={getTechScheduleCandidate(vehicle.tpmsAssignedTechId)}
                                       name={vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}
                                       className="truncate"
                                     />

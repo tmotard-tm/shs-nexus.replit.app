@@ -2990,12 +2990,10 @@ export async function autoBookApprovedRequestInner(
                ELSE claimed_by
              END,
              updated_at = now()
-       WHERE request_no = ${requestNo} AND etd_booked_at IS NULL
+       WHERE request_no = ${requestNo}
+         AND etd_booked_at IS NULL
+         AND status = 'approved'
     `);
-    if (!reopenForReview) {
-      await writeFailure(db);
-      return;
-    }
     await db.transaction(async (tx) => {
       // Shared with live request-intent creation. The lock must be acquired
       // before reading the intent/attempt fence so the check cannot race a

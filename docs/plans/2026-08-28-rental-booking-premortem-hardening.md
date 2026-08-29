@@ -32,13 +32,13 @@
 - Consumes: existing `op_open`, `op_result`, attempt number, runner ID, and fencing token contract.
 - Produces: a durable unknown/manual-review result that normal booking claims cannot replay.
 
-- [ ] Add an executor regression where `op_open` succeeds, the external commit may have landed, and parsing/readback throws; expect exactly one unknown `op_result`.
-- [ ] Run `npx tsx --test tests/etd-executor-unit.test.ts` and confirm the unknown postback assertion fails.
-- [ ] Add a DB regression proving an expired ambiguous attempt is excluded from fresh booking work and remains reconciliation-only.
-- [ ] Run `npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts` and confirm the expired claim is incorrectly reclaimable.
-- [ ] Track whether external execution opened, post one fenced unknown result from the exception path, and ensure claim selection cannot return unknown attempts as fresh booking work.
-- [ ] Run both suites plus `npx tsx --test tests/cutover-attempt-ledger-race.test.ts` and confirm they pass.
-- [ ] Commit the executor/recovery change.
+- [x] Add an executor regression where `op_open` succeeds, the external commit may have landed, and parsing/readback throws; expect exactly one unknown `op_result`.
+- [x] Run `npx tsx --test tests/etd-executor-unit.test.ts` and confirm the unknown postback assertion fails.
+- [x] Add a DB regression proving an expired ambiguous attempt is excluded from fresh booking work and remains reconciliation-only.
+- [x] Run `npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts`; current claim behavior was already reconciliation-only, so this audit item was closed with coverage rather than a production change.
+- [x] Track whether external execution opened, post one fenced unknown result from the exception path, and ensure claim selection cannot return unknown attempts as fresh booking work.
+- [x] Run both suites plus `npx tsx --test tests/cutover-attempt-ledger-race.test.ts` and confirm they pass.
+- [ ] Commit the executor/recovery change. (Not committed: user constraint.)
 
 ### Task 2: Read request facts under the booking lock
 
@@ -149,3 +149,10 @@
 - [ ] Run `npm run build` and restore build-generated deployment history if changed.
 - [ ] Run `git diff --check`.
 - [ ] Obtain independent code review and repair all Critical and Important findings.
+
+## Execution record
+
+- RED — `npx tsx --test tests/etd-executor-unit.test.ts` (2026-08-29): failed as expected. New post-open response parsing regression received executor action `ERR` instead of `HOLD`; no durable unknown postback was written.
+- GREEN — `npx tsx --test tests/etd-executor-unit.test.ts` (2026-08-29): passed, 82 tests; the parsing failure now records one `unknown` attempt and leaves the intent in `booking_unknown`.
+- COVERAGE CLOSURE — `npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts` (2026-08-29): passed, 58 tests. Existing `claimBookingWork` already marks an expired `reservation_state='unknown'` claim `requiresReconcile=true`, preventing a fresh commit. Added regression coverage; no production change required.
+- GREEN — `npx tsx --test tests/etd-executor-unit.test.ts tests/cutover-attempt-ledger-race.test.ts && npx tsx --test --test-force-exit tests/cutover-intents-db.test.ts` (2026-08-29): passed. Executor, attempt-ledger race, and DB suites completed with zero failures.

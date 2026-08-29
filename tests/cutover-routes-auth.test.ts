@@ -141,7 +141,7 @@ describe("staff lane unaffected", () => {
 });
 
 describe("LIVE-mode RBAC (repair spec §6)", () => {
-  test("creating a LIVE cutover intent is admin-gated; admin then hits the kill switch", async () => {
+  test("creating a LIVE cutover intent is admin-gated while dark; admin reaches source lookup", async () => {
     const path = `${B}/intents`;
     const body = { surveyResponseId: crypto.randomUUID(), executionMode: "live" };
     const plain = await fetch(baseUrl + path, {
@@ -150,16 +150,16 @@ describe("LIVE-mode RBAC (repair spec §6)", () => {
     assert.equal(plain.status, 403, `${path} must refuse a plain session for live`);
     assert.equal(((await plain.json()) as any).code, "admin_required_live");
 
-    // Admin clears RBAC and lands on the NEXT gate: the dark-build kill
-    // switch (VRM_CONTRACT_BLOCK_ENABLED absent → live_disarmed) — proving
-    // no eligibility read or intent write ran for a live create.
+    // Admin clears dark-state RBAC. The source is intentionally absent, so 404
+    // proves creation authorization reached the handler without creating an
+    // intent. Claims, confirmation, and op_open remain disarmed separately.
     const admin = await fetch(baseUrl + path, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-test-role": "admin" },
       body: JSON.stringify(body),
     });
-    assert.equal(admin.status, 403, `${path} admin live create must hit live_disarmed while dark`);
-    assert.equal(((await admin.json()) as any).code, "live_disarmed");
+    assert.equal(admin.status, 404, `${path} admin live create must reach source lookup while dark`);
+    assert.equal(((await admin.json()) as any).code, "source_missing");
   });
 
   test("a dry_run create is NOT RBAC-blocked (plain session reaches the handler's own gates)", async () => {

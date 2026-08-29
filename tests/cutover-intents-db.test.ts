@@ -27,6 +27,7 @@ import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
 import crypto from "node:crypto";
 import { sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
 
 import { db, pool } from "../server/db";
 import { initFormsSchema } from "../server/vrm/forms/schema";
@@ -34,6 +35,7 @@ import {
   WORKFLOW_CUTOVER,
   WORKFLOW_REQUEST,
   QUIET_FALLBACK_SETTING_KEY,
+  adoptRunnerBooking,
   cancelIntent,
   claimBookingWork,
   claimSendGuardDispatch,
@@ -118,6 +120,29 @@ after(async () => {
 // ---------------------------------------------------------------------------
 
 describe("intent identity + live lock constraints", () => {
+  test("fetchEligibilityFacts routes every request-lane read through its supplied transaction executor", async () => {
+    const seen: string[] = [];
+    const dialect = new PgDialect();
+    const executor = {
+      execute: async (query: any) => {
+        const text = dialect.sqlToQuery(query).sql;
+        seen.push(text);
+        if (text.includes("FROM vrm_rental_request")) {
+          return { rows: [{ request_no: 991234, ldap: `${LDAP_PREFIX}TX`, tech_name: "Tx Fixture" }] };
+        }
+        return { rows: [] };
+      },
+    };
+    const facts = await fetchEligibilityFacts({
+      workflowType: WORKFLOW_REQUEST,
+      sourceId: "991234",
+      executor: executor as any,
+    });
+    assert.equal(facts.ldap, `${LDAP_PREFIX}TX`);
+    assert.ok(seen.length >= 4, "source and all dependent eligibility reads must use the supplied executor");
+    assert.ok(seen.every((text) => text.length > 0));
+  });
+
   test("same (workflow, source, revision, mode) cannot exist twice", async () => {
     const sourceId = crypto.randomUUID();
     await insertIntent({ source_id: sourceId, ldap: `${LDAP_PREFIX}ID1` });
@@ -198,6 +223,31 @@ describe("claimBookingWork CAS", () => {
     const got = (await claimBookingWork({ runnerId: "test-runner-4", limit: 20 })).filter((i) => i.intentId === id);
     assert.equal(got.length, 1, "expired lease must be reclaimable");
     assert.equal(got[0].fencingToken, 8, "reclaim must fence out the dead runner's token 7");
+  });
+
+  test("an expired ambiguous booking claim is reclaimed for reconciliation, never fresh booking", async () => {
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}AMBIG`, status: "booking" });
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, finished_at, evidence)
+      VALUES (${id}, 'etd_booking', 1, 7, 'unknown', now(), '{}'::jsonb)
+    `);
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET reservation_state = 'unknown',
+          claimed_by = 'dead-runner',
+          fencing_token = 7,
+          lease_expires_at = now() - interval '1 minute'
+      WHERE id = ${id}
+    `);
+
+    const item = (await claimBookingWork({ runnerId: "reconcile-runner", limit: 20 }))
+      .find((candidate) => candidate.intentId === id);
+
+    assert.ok(item, "the stranded intent is available only so its evidence can be reconciled");
+    assert.equal(item!.kind, "book");
+    assert.equal(item!.requiresReconcile, true, "unknown external outcome must not authorize another commit");
+    assert.equal(item!.fencingToken, 8, "the replacement claimant fences the expired holder");
   });
 });
 
@@ -404,6 +454,148 @@ describe("request lane source keying", () => {
       "the request drawer must receive the historical UUID intent under request_no",
     );
     assert.equal(bySource[String(row.id)], undefined, "request output keys stay canonical for the UI");
+  });
+
+  test("historical adoption resolves UUID aliases and rejects stale attempt fencing", async () => {
+    const ldap = `${LDAP_PREFIX}RQADOPT`;
+    const { rows: requests } = await db.execute(sql`
+      INSERT INTO vrm_rental_request (ldap, tech_name, mobile_phone, home_state, status)
+      VALUES (${ldap}, 'ZZ Cut Adopt', '5555550119', 'TX', 'approved')
+      RETURNING id, request_no
+    `);
+    const source = (requests as any[])[0];
+    const intentId = await insertIntent({
+      workflow_type: WORKFLOW_REQUEST,
+      source_id: String(source.id),
+      ldap,
+      status: "booking",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET reservation_state = 'unknown', fencing_token = 8
+      WHERE id = ${intentId}
+    `);
+    await db.execute(sql`
+      UPDATE vrm_rental_request
+      SET status = 'booked', etd_reference = 'ADOPT-C1', etd_booked_at = now()
+      WHERE request_no = ${Number(source.request_no)}
+    `);
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, evidence)
+      VALUES (${intentId}, 'etd_booking', 2, 8, 'unknown', '{}'::jsonb)
+    `);
+
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "ADOPT-C1", null, {
+        attemptNo: 1,
+        fencingToken: 8,
+        alreadyNotified: "test_fixture",
+      }),
+      false,
+      "a different attempt cannot donate confirmation evidence",
+    );
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "ADOPT-C1", null, {
+        attemptNo: 2,
+        fencingToken: 7,
+        alreadyNotified: "test_fixture",
+      }),
+      false,
+      "a stale fencing token cannot adopt a reservation",
+    );
+    let intent = ((await db.execute(sql`
+      SELECT reservation_state FROM vrm_rental_workflow_intents WHERE id = ${intentId}
+    `)).rows as any[])[0];
+    assert.equal(intent.reservation_state, "unknown");
+
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents SET fencing_token = 9 WHERE id = ${intentId}
+    `);
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "ADOPT-C1", null, {
+        attemptNo: 2,
+        fencingToken: 8,
+        alreadyNotified: "test_fixture",
+      }),
+      false,
+      "a delayed callback cannot reuse a real historical attempt after the current fence advances",
+    );
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, evidence)
+      VALUES (${intentId}, 'etd_booking', 3, 9, 'unknown', '{}'::jsonb)
+    `);
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "ADOPT-C1", null, {
+        attemptNo: 3,
+        fencingToken: 9,
+        alreadyNotified: "test_fixture",
+      }),
+      true,
+    );
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "ADOPT-C1", null, {
+        attemptNo: 3,
+        fencingToken: 9,
+        alreadyNotified: "test_fixture",
+      }),
+      true,
+      "an exact duplicate callback must ACK idempotently",
+    );
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "adopt-c1", null, {
+        attemptNo: 3,
+        fencingToken: 9,
+        alreadyNotified: "test_fixture",
+      }),
+      true,
+      "confirmation casing alone must not break duplicate acknowledgement",
+    );
+    assert.equal(
+      await adoptRunnerBooking(Number(source.request_no), "ADOPT-C2", null, {
+        attemptNo: 3,
+        fencingToken: 9,
+        alreadyNotified: "test_fixture",
+      }),
+      false,
+      "a conflicting confirmation must never replace verified evidence",
+    );
+    intent = ((await db.execute(sql`
+      SELECT reservation_state, reservation_evidence
+      FROM vrm_rental_workflow_intents WHERE id = ${intentId}
+    `)).rows as any[])[0];
+    assert.equal(intent.reservation_state, "verified");
+    assert.equal(intent.reservation_evidence?.confirmation, "ADOPT-C1");
+  });
+
+  test("historical adoption requires exact durable booking evidence on the request", async () => {
+    const ldap = `${LDAP_PREFIX}RQNOEVID`;
+    const { rows: requests } = await db.execute(sql`
+      INSERT INTO vrm_rental_request (ldap, tech_name, mobile_phone, home_state, status)
+      VALUES (${ldap}, 'ZZ Cut No Evidence', '5555550120', 'TX', 'approved')
+      RETURNING request_no
+    `);
+    const requestNo = Number((requests as any[])[0].request_no);
+    const intentId = await insertIntent({
+      workflow_type: WORKFLOW_REQUEST,
+      source_id: String(requestNo),
+      ldap,
+      status: "created",
+    });
+
+    assert.equal(
+      await adoptRunnerBooking(requestNo, "UNPROVED-C1", null, {
+        alreadyNotified: "test_fixture",
+      }),
+      false,
+    );
+    const intent = ((await db.execute(sql`
+      SELECT status, reservation_state
+      FROM vrm_rental_workflow_intents WHERE id = ${intentId}
+    `)).rows as any[])[0];
+    assert.equal(intent.status, "created");
+    assert.notEqual(intent.reservation_state, "verified");
   });
 
   test("request intents never file a route block: legacy pending state normalizes to not_applicable, zero ART attempts", async () => {
@@ -816,6 +1008,139 @@ describe("booked-unverified recovery lane", () => {
     `)).rows as any[])[0];
     assert.equal(request.status, "pending", "another reservation attempt requires another Approve");
     assert.match(String(request.etd_error), /Enterprise declined/);
+  });
+
+  test("a booked attempt owns the result slot and a late failure cannot demote it", async () => {
+    const id = await insertIntent({
+      workflow_type: WORKFLOW_CUTOVER,
+      ldap: `${LDAP_PREFIX}RESULTCAS`,
+      status: "booking",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET claimed_by = 'result-cas-runner',
+          lease_expires_at = now() + interval '10 minutes',
+          fencing_token = 4
+      WHERE id = ${id}
+    `);
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, evidence)
+      VALUES (${id}, 'etd_booking', 1, 4, NULL, '{}'::jsonb)
+    `);
+
+    const booked = await recordBookingPostback({
+      intentId: id,
+      runnerId: "result-cas-runner",
+      fencingToken: 4,
+      phase: "op_result",
+      payload: {
+        attemptNo: 1,
+        outcome: "booked",
+        evidence: { confirmation: "CAS-C1" },
+      },
+    });
+    assert.equal(booked.status, "awaiting_verification");
+
+    const lateFailure = await recordBookingPostback({
+      intentId: id,
+      runnerId: "result-cas-runner",
+      fencingToken: 4,
+      phase: "op_result",
+      payload: {
+        attemptNo: 1,
+        outcome: "failed_clean",
+        evidence: { error: "late duplicate failure" },
+      },
+    });
+    assert.equal(lateFailure.idempotent, true);
+    assert.equal(lateFailure.status, "awaiting_verification");
+
+    const row = ((await db.execute(sql`
+      SELECT status, reservation_state, reservation_evidence
+      FROM vrm_rental_workflow_intents
+      WHERE id = ${id}
+    `)).rows as any[])[0];
+    assert.equal(row.status, "awaiting_verification");
+    assert.equal(row.reservation_state, "booked_unverified");
+    assert.equal(row.reservation_evidence?.confirmation, "CAS-C1");
+  });
+
+  test("a reclaim between postback verification and attempt close leaves the stale attempt open for reconciliation", async () => {
+    const id = await insertIntent({
+      workflow_type: WORKFLOW_CUTOVER,
+      ldap: `${LDAP_PREFIX}RESULTFENCE`,
+      status: "booking",
+    });
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET claimed_by = 'stale-result-runner',
+          lease_expires_at = now() + interval '10 minutes',
+          fencing_token = 6
+      WHERE id = ${id}
+    `);
+    await db.execute(sql`
+      INSERT INTO vrm_workflow_attempts
+        (intent_id, phase, attempt_no, fencing_token, outcome, evidence)
+      VALUES (${id}, 'etd_booking', 1, 6, NULL, '{}'::jsonb)
+    `);
+
+    const blocker = await pool.connect();
+    let stalePromise: Promise<any> | null = null;
+    try {
+      await blocker.query("BEGIN");
+      await blocker.query(
+        "SELECT id FROM vrm_rental_workflow_intents WHERE id = $1 FOR UPDATE",
+        [id],
+      );
+      stalePromise = recordBookingPostback({
+        intentId: id,
+        runnerId: "stale-result-runner",
+        fencingToken: 6,
+        phase: "op_result",
+        payload: {
+          attemptNo: 1,
+          outcome: "failed_clean",
+          evidence: { error: "stale failure after reclaim" },
+        },
+      });
+      // The postback passes its initial read, then waits on the in-transaction
+      // FOR UPDATE ownership recheck while this simulated reclaim advances the
+      // parent fence.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await blocker.query(
+        `UPDATE vrm_rental_workflow_intents
+         SET claimed_by = 'replacement-result-runner',
+             lease_expires_at = now() + interval '10 minutes',
+             fencing_token = 7
+         WHERE id = $1`,
+        [id],
+      );
+      await blocker.query("COMMIT");
+      const stale = await stalePromise;
+      assert.equal(stale.idempotent, true);
+      assert.equal(stale.status, "booking");
+    } finally {
+      await blocker.query("ROLLBACK").catch(() => {});
+      blocker.release();
+    }
+
+    const attempt = ((await db.execute(sql`
+      SELECT outcome
+      FROM vrm_workflow_attempts
+      WHERE intent_id = ${id} AND phase = 'etd_booking' AND attempt_no = 1
+    `)).rows as any[])[0];
+    assert.equal(attempt.outcome, null, "the stale runner must not erase the open-attempt reconciliation fence");
+
+    await db.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+      SET lease_expires_at = now() - interval '1 minute'
+      WHERE id = ${id}
+    `);
+    const reclaimed = (await claimBookingWork({ runnerId: "next-result-runner", limit: 50 }))
+      .find((item) => item.intentId === id);
+    assert.ok(reclaimed);
+    assert.equal(reclaimed!.requiresReconcile, true, "the next owner must read back instead of booking again");
   });
 
   test("a clean-none readback after a REFUSED commit keeps the refusal as the last word", async () => {

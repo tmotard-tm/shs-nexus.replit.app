@@ -1177,6 +1177,49 @@ describe("booking lane", () => {
     assert.equal(calls.length, 0, "nothing is asked of ETD without a complete preview");
   });
 
+  test("a post-open response parsing failure is durably recorded once as unknown", async () => {
+    const flag = "VRM_CONTRACT_BLOCK_ENABLED";
+    const prior = process.env[flag];
+    try {
+      process.env[flag] = "true";
+      const ldap = `${LDAP_PREFIX}PARSE`;
+      const { intentId } = await makeRequestIntent({
+        ldap,
+        status: "confirmed",
+        executionMode: "live",
+        preview: preview(),
+      });
+      const confirmOut = {};
+      Object.defineProperty(confirmOut, "data", {
+        get() {
+          throw new Error("savedr response stream failed during parse");
+        },
+      });
+      const { client, calls } = fakeEtd({ confirmOut });
+
+      const run = await runBookingExecutor({
+        runnerId: "test-exec",
+        intentId,
+        deps: { client, schedule: fakeSchedule() },
+      });
+
+      assert.equal(calls.filter((c) => c.startsWith("confirm:")).length, 1);
+      assert.equal(run.results[0].action, "HOLD");
+      assert.equal(run.results[0].status, "unknown");
+      const attempts = await attemptsFor(intentId);
+      assert.equal(attempts.length, 1);
+      assert.equal(attempts[0].outcome, "unknown");
+      assert.equal(
+        (await loadIntentRow(intentId)).status,
+        "booking_unknown",
+        "an external outcome that could have landed must require reconciliation",
+      );
+    } finally {
+      if (prior === undefined) delete process.env[flag];
+      else process.env[flag] = prior;
+    }
+  });
+
   test("a pre-commit search that already finds this intent's reservation books nothing", async () => {
     const ldap = `${LDAP_PREFIX}DUPE`;
     const { intentId } = await makeRequestIntent({ ldap, status: "confirmed", preview: preview() });

@@ -5,6 +5,15 @@ npm install --no-fund --no-audit 2>&1 | tail -1
 for f in migrations/*.sql; do
   if [ -f "$f" ]; then
     echo "[post-merge] Running migration: $f"
+    if grep -q '^-- replit-migration-mode: psql-on-error-stop$' "$f"; then
+      # Complex/non-transactional migrations (for example DO + CREATE INDEX
+      # CONCURRENTLY) must be parsed by PostgreSQL itself. ON_ERROR_STOP makes
+      # duplicate diagnostics and index failures abort the merge setup instead
+      # of being mislabeled as "already applied".
+      psql "$DATABASE_URL" --set=ON_ERROR_STOP=1 --file "$f"
+      echo "[post-merge] Migration applied: $f"
+      continue
+    fi
     npx tsx -e "
       const { neon } = require('@neondatabase/serverless');
       const fs = require('fs');

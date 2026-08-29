@@ -1549,7 +1549,27 @@ async function runBook(
     return result("HOLD", "exception", `confirm raised: ${clip(errText(err), 120)} (readback will decide)`);
   }
 
-  const confirmation = parseConfirmation(out);
+  let confirmation: string;
+  try {
+    confirmation = parseConfirmation(out);
+  } catch (err) {
+    // savedr accepted the request before this response could be parsed, so an
+    // exception here is not proof that no reservation exists. Close the opened
+    // attempt exactly once as unknown and require reconciliation; never let a
+    // lease expiry turn this into a fresh booking.
+    await post("op_result", {
+      outcome: "unknown",
+      attemptNo,
+      evidence: failureEvidence(err, { calls: passCalls(), request: passRequest }, {
+        stage: "savedr_response_parse",
+      }),
+    });
+    return result(
+      "HOLD",
+      "unknown",
+      `savedr response could not be parsed: ${clip(errText(err), 120)} (readback will decide)`,
+    );
+  }
   let bookAction: ExecutorAction = "BOOK";
   let bookStatus = "booked";
   let bookDetail = "";

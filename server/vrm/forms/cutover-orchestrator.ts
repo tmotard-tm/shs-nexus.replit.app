@@ -802,13 +802,16 @@ export async function fetchEligibilityFacts(params: {
   workflowType: string;
   sourceId: string;
   excludeIntentId?: number | null;
+  /** Transaction/executor holding the request source lock, when applicable. */
+  executor?: Pick<typeof db, "execute">;
 }): Promise<EligibilityFacts> {
+  const executor = params.executor ?? db;
   const isCutover = params.workflowType === WORKFLOW_CUTOVER;
 
   // --- source row -----------------------------------------------------------
   let sourceRow: any | null = null;
   if (isCutover) {
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT * FROM vrm_rental_tech_survey WHERE id = ${params.sourceId}::uuid LIMIT 1
     `);
     sourceRow = (rows as any[])[0] ?? null;
@@ -818,10 +821,10 @@ export async function fetchEligibilityFacts(params: {
     // fixtures and direct-id callers keep working.
     const key = String(params.sourceId).trim();
     const { rows } = /^\d+$/.test(key)
-      ? await db.execute(sql`
+      ? await executor.execute(sql`
           SELECT * FROM vrm_rental_request WHERE request_no = ${Number(key)} LIMIT 1
         `)
-      : await db.execute(sql`
+      : await executor.execute(sql`
           SELECT * FROM vrm_rental_request WHERE id = ${key}::uuid LIMIT 1
         `);
     sourceRow = (rows as any[])[0] ?? null;
@@ -832,7 +835,7 @@ export async function fetchEligibilityFacts(params: {
   // --- newer response check (cutover) ---------------------------------------
   let newerResponseExists = false;
   if (isCutover && sourceRow) {
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT 1 FROM vrm_rental_tech_survey
       WHERE upper(ldap) = ${ldap} AND created_at > ${sourceRow.created_at} LIMIT 1
     `);
@@ -847,7 +850,7 @@ export async function fetchEligibilityFacts(params: {
   // --- other nonterminal intents for this LDAP -------------------------------
   let otherNonterminalIntentId: number | null = null;
   if (ldap) {
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT i.id FROM vrm_rental_workflow_intents i
       WHERE upper(i.ldap) = ${ldap}
         AND i.execution_mode = 'live'
@@ -881,7 +884,7 @@ export async function fetchEligibilityFacts(params: {
     // evidence when its status says booked OR either ETD evidence field is a
     // non-blank value. (reservation_confirmation was a phantom column — every
     // eligibility fetch died on 42703 before any gate could run.)
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT 1 FROM vrm_rental_cutover
       WHERE upper(ldap) = ${ldap}
         AND (reservation_status = 'booked'
@@ -895,7 +898,7 @@ export async function fetchEligibilityFacts(params: {
   // --- roster (candidate-SQL ordering: prefer active, newest effective/sync) --
   let roster: EligibilityFacts["roster"] = null;
   if (ldap) {
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT employment_status, dropped_from_source_at, district_no, employee_id, tech_name, job_title
       FROM all_techs
       WHERE upper(tech_racfid) = ${ldap}
@@ -924,7 +927,7 @@ export async function fetchEligibilityFacts(params: {
   // --- TPMS truck -------------------------------------------------------------
   let tpmsTruck: string | null = null;
   if (ldap) {
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT truck_no FROM tpms_tech_profiles
       WHERE upper(enterprise_id) = ${ldap}
       ORDER BY synced_at DESC NULLS LAST
@@ -948,7 +951,7 @@ export async function fetchEligibilityFacts(params: {
   let caseFacts: EligibilityFacts["caseFacts"] = null;
   if (isCutover && roster?.employeeId) {
     const empDigits = digitsOnly(roster.employeeId);
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT c.case_key, c.vehicle_number, c.feed_json, c.rental_vendor
       FROM vrm_rental_operations_cases c
       JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
@@ -984,7 +987,7 @@ export async function fetchEligibilityFacts(params: {
   let contactPhone: string | null = null;
   let contactState: string | null = null;
   if (ldap) {
-    const { rows } = await db.execute(sql`
+    const { rows } = await executor.execute(sql`
       SELECT phone, primary_state FROM fs_comms_contacts WHERE upper(ldap) = ${ldap} LIMIT 1
     `);
     const c = (rows as any[])[0];
@@ -1577,123 +1580,37 @@ export async function retireRequestIntentsBeforeSourceRemoval(
   return db.transaction((tx) => abandonRequestIntentsForRemovedSource(tx, params));
 }
 
-type TokenBackedDuplicateRequest = {
-  id: string;
-  request_no: string | number;
-  token_id: string;
-  created_at: string | Date;
-};
-
-async function deleteStartupDuplicateRequest(executor: any, request: TokenBackedDuplicateRequest): Promise<void> {
-  const { rows } = await executor.execute(sql`
-    DELETE FROM vrm_rental_request
-    WHERE id = ${String(request.id)}::uuid
-      AND request_no = ${Number(request.request_no)}
-    RETURNING request_no
+export async function ensureTokenBackedRequestUniquenessForStartup(): Promise<void> {
+  // Startup must never repair rows or build an index: both can block a restart
+  // wave and silently turn boot into a destructive migration.  Keep this read
+  // bounded and make the deploy-time migration the only repair authority.
+  const { rows } = await db.execute(sql`
+    SELECT i.indisvalid
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    LEFT JOIN pg_index i ON i.indexrelid = to_regclass(
+      quote_ident(n.nspname) || '.vrm_rental_request_token_uniq'
+    )
+    WHERE c.oid = 'vrm_rental_request'::regclass
+    LIMIT 1
   `);
-  if ((rows as any[]).length !== 1) {
-    throw new OrchestratorError(
-      "startup_duplicate_changed",
-      `Rental request ${request.request_no} changed while startup was deduplicating its token. Manual review is required.`,
-      409,
-      { requestNo: Number(request.request_no), requestId: String(request.id) },
+  const valid = (rows as any[])[0]?.indisvalid === true;
+  if (!valid) {
+    console.error(
+      "[vrm] required index vrm_rental_request_token_uniq is missing or invalid; "
+      + "apply migrations/20260828_cutover_attempt_token_unique.sql before enabling token-backed requests",
     );
   }
-}
-
-/**
- * Repair pre-index token duplicates without ever orphaning a LIVE request
- * intent. The newest request remains the default survivor. If an older source
- * fails the normal evidence-gated retirement check, that protected source
- * becomes the survivor and the harmless newer row is retired instead.
- *
- * The advisory xact lock covers both cleanup and index creation, so concurrent
- * application instances cannot choose different survivors or observe a gap
- * between dedupe and the uniqueness guard.
- */
-export async function ensureTokenBackedRequestUniquenessForStartup(): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.execute(sql`
-      SELECT pg_advisory_xact_lock(hashtext('vrm_rental_request_token_dedupe'))
-    `);
-
-    const { rows } = await tx.execute(sql`
-      SELECT r.id, r.request_no, r.token_id, r.created_at
-      FROM vrm_rental_request r
-      JOIN (
-        SELECT token_id
-        FROM vrm_rental_request
-        WHERE token_id IS NOT NULL
-        GROUP BY token_id
-        HAVING count(*) > 1
-      ) duplicate_tokens ON duplicate_tokens.token_id = r.token_id
-      ORDER BY r.token_id, r.created_at DESC, r.request_no DESC
-      FOR UPDATE OF r
-    `);
-
-    const groups = new Map<string, TokenBackedDuplicateRequest[]>();
-    for (const raw of rows as any[]) {
-      const request = raw as TokenBackedDuplicateRequest;
-      const tokenId = String(request.token_id);
-      const group = groups.get(tokenId);
-      if (group) group.push(request);
-      else groups.set(tokenId, [request]);
-    }
-
-    for (const requests of Array.from(groups.values())) {
-      let survivor = requests[0];
-      let survivorIsProtected = false;
-
-      for (const candidate of requests.slice(1)) {
-        try {
-          await abandonRequestIntentsForRemovedSource(tx, {
-            requestNo: Number(candidate.request_no),
-            requestId: String(candidate.id),
-            retiredBy: "startup token dedupe",
-            reason: `duplicate of rental request ${survivor.request_no}`,
-          });
-        } catch (error: any) {
-          if (!(error instanceof OrchestratorError) || error.code !== "orphan_manual_review") {
-            throw error;
-          }
-          if (survivorIsProtected) {
-            throw error;
-          }
-
-          // The candidate may own an in-flight/unknown booking, so preserve it
-          // and prove the default survivor is harmless before deleting that row
-          // instead. If both are ambiguous, this throws and the whole cleanup
-          // rolls back for manual review.
-          await abandonRequestIntentsForRemovedSource(tx, {
-            requestNo: Number(survivor.request_no),
-            requestId: String(survivor.id),
-            retiredBy: "startup token dedupe",
-            reason: `duplicate of protected rental request ${candidate.request_no}`,
-          });
-          await deleteStartupDuplicateRequest(tx, survivor);
-          survivor = candidate;
-          survivorIsProtected = true;
-          continue;
-        }
-
-        await deleteStartupDuplicateRequest(tx, candidate);
-      }
-    }
-
-    await tx.execute(sql`
-      CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_token_uniq
-        ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL
-    `);
-  });
 }
 
 async function reclaimDeletedRequestLiveLock(params: {
   ldap: string;
   replacementSourceId: string;
   createdBy?: string | null;
+  executor?: Pick<typeof db, "execute">;
 }): Promise<number | null> {
-  return db.transaction(async (tx) => {
-    const { rows } = await tx.execute(sql`
+  const reclaim = async (executor: Pick<typeof db, "execute">) => {
+    const { rows } = await executor.execute(sql`
       SELECT *
       FROM vrm_rental_workflow_intents
       WHERE upper(ldap) = ${params.ldap.toUpperCase()}
@@ -1706,7 +1623,7 @@ async function reclaimDeletedRequestLiveLock(params: {
     const conflict = (rows as any[])[0];
     if (!conflict || conflict.workflow_type !== WORKFLOW_REQUEST) return null;
 
-    const { rows: sourceRows } = await tx.execute(sql`
+    const { rows: sourceRows } = await executor.execute(sql`
       SELECT 1
       FROM vrm_rental_request
       WHERE request_no::text = ${String(conflict.source_id)}
@@ -1715,7 +1632,7 @@ async function reclaimDeletedRequestLiveLock(params: {
     `);
     if ((sourceRows as any[]).length) return null;
 
-    const { rows: attempts } = await tx.execute(sql`
+    const { rows: attempts } = await executor.execute(sql`
       SELECT phase, attempt_no, outcome
       FROM vrm_workflow_attempts
       WHERE intent_id = ${Number(conflict.id)}
@@ -1738,7 +1655,7 @@ async function reclaimDeletedRequestLiveLock(params: {
       );
     }
 
-    const { rows: abandoned } = await tx.execute(sql`
+    const { rows: abandoned } = await executor.execute(sql`
       UPDATE vrm_rental_workflow_intents
       SET status = 'abandoned',
           last_error = ${`auto-abandoned by ${params.createdBy ?? "auto-book"}: source request ${conflict.source_id} no longer exists and no booking attempt may be in flight`},
@@ -1759,13 +1676,15 @@ async function reclaimDeletedRequestLiveLock(params: {
       );
     }
     return Number(conflict.id);
-  });
+  };
+  return params.executor ? reclaim(params.executor) : db.transaction(reclaim);
 }
 
 async function touchIntent(
   intentId: number,
   patch: Record<string, unknown>,
   guard?: { statusIn?: string[]; claimedBy?: string; fencingToken?: number },
+  executor: any = db,
 ): Promise<number> {
   // Narrow, whitelisted dynamic update — build SET clauses explicitly.
   const sets: any[] = [];
@@ -1813,7 +1732,7 @@ async function touchIntent(
   }
   if (guard?.claimedBy !== undefined) where = sql`${where} AND claimed_by = ${guard.claimedBy}`;
   if (guard?.fencingToken !== undefined) where = sql`${where} AND fencing_token = ${guard.fencingToken}`;
-  const res = await db.execute(sql`UPDATE vrm_rental_workflow_intents SET ${setSql} WHERE ${where}`);
+  const res = await executor.execute(sql`UPDATE vrm_rental_workflow_intents SET ${setSql} WHERE ${where}`);
   return (res as any).rowCount ?? 0;
 }
 
@@ -1999,7 +1918,17 @@ async function persistIntentRow(
   const { rows: existing } = await executor.execute(sql`
     SELECT * FROM vrm_rental_workflow_intents
     WHERE workflow_type = ${params.workflowType}
-      AND source_id = ${params.sourceId}
+      AND (
+        source_id = ${params.sourceId}
+        OR (
+          ${params.workflowType} = ${WORKFLOW_REQUEST}
+          AND source_id = (
+            SELECT id::text FROM vrm_rental_request
+            WHERE request_no::text = ${params.sourceId}
+            LIMIT 1
+          )
+        )
+      )
       AND execution_mode = ${mode}
     ORDER BY source_revision DESC
     LIMIT 1
@@ -2052,22 +1981,25 @@ async function persistIntentRow(
 export async function createIntent(params: CreateIntentParams): Promise<{ intent: any; created: boolean; failures?: EligibilityFailure[] }> {
   // Mode default follows the arming flag: armed (validated workflow — prod)
   // means LIVE is the normal mode for staff; disarmed (dark/dev) keeps the
-  // dry_run default and live intents cannot exist at all. An explicit
-  // executionMode from the caller always wins in both states.
+  // dry_run default. The session route separately restricts an explicit dark
+  // LIVE create to admin/developer. Claims, confirmation, and op_open still
+  // enforce the kill switch, so creation cannot cause an external operation.
   const mode = params.executionMode ?? defaultExecutionMode();
   if (!EXECUTION_MODES.has(mode)) {
     throw new OrchestratorError("bad_mode", `execution_mode must be one of dry_run|test|live`, 400);
-  }
-  if (mode === "live" && !isContractBlockLive()) {
-    // Disarmed: live intents cannot exist until the flag is armed.
-    throw new OrchestratorError("live_disarmed", "VRM_CONTRACT_BLOCK_ENABLED is not armed; live intents are disabled", 403);
   }
   if (params.workflowType !== WORKFLOW_CUTOVER && params.workflowType !== WORKFLOW_REQUEST) {
     throw new OrchestratorError("bad_workflow", "unknown workflow_type", 400);
   }
 
-  const facts = await fetchEligibilityFacts({ workflowType: params.workflowType, sourceId: params.sourceId });
-  if (!facts.sourceRow) throw new OrchestratorError("source_missing", "source record not found", 404);
+  // Request creation needs one source version for both the eligibility snapshot
+  // and INSERT.  The live lane obtains it below under its canonical lock.
+  const facts = params.workflowType === WORKFLOW_REQUEST && mode === "live"
+    ? null
+    : await fetchEligibilityFacts({ workflowType: params.workflowType, sourceId: params.sourceId });
+  if (!facts?.sourceRow && !(params.workflowType === WORKFLOW_REQUEST && mode === "live")) {
+    throw new OrchestratorError("source_missing", "source record not found", 404);
+  }
 
   // EXTENSION requests never spawn a booking intent, from ANY caller. The
   // technician already holds the car; the only thing an intent could do here
@@ -2076,7 +2008,7 @@ export async function createIntent(params: CreateIntentParams): Promise<{ intent
   // route's own skip — this is the layer a future caller cannot forget.
   if (
     params.workflowType === WORKFLOW_REQUEST &&
-    String((facts.sourceRow as any)?.request_type ?? "new") === "extension"
+    String((facts?.sourceRow as any)?.request_type ?? "new") === "extension"
   ) {
     throw new OrchestratorError(
       "extension_not_bookable",
@@ -2085,27 +2017,25 @@ export async function createIntent(params: CreateIntentParams): Promise<{ intent
     );
   }
 
-  const gate = evaluateEligibility(facts);
-  if (!gate.ok) {
-    throw new OrchestratorError("eligibility_failed", "eligibility gate failed", 422, { failures: gate.failures });
-  }
-
-  // The request gate deliberately ignores a live intent whose source request
-  // was deleted, but the DB live-lock index cannot. Reclaim that orphan only
-  // after proving both halves of "nothing external happened" while holding
-  // the intent row lock. Unknown/open evidence remains nonterminal and gets a
-  // manual-review error rather than a second booking.
-  if (params.workflowType === WORKFLOW_REQUEST && mode === "live") {
-    await reclaimDeletedRequestLiveLock({
-      ldap: facts.ldap,
-      replacementSourceId: params.sourceId,
-      createdBy: params.createdBy,
-    });
+  if (facts) {
+    const gate = evaluateEligibility(facts);
+    if (!gate.ok) {
+      throw new OrchestratorError("eligibility_failed", "eligibility gate failed", 422, { failures: gate.failures });
+    }
   }
 
   if (params.workflowType === WORKFLOW_REQUEST && mode === "live") {
-    const requestBookingKey = String((facts.sourceRow as any)?.request_no ?? params.sourceId);
     return db.transaction(async (tx) => {
+      // Resolve aliases before taking the advisory lock, then use request_no as
+      // the sole lock identity. UUID and numeric callers therefore serialize.
+      const { rows: aliases } = await tx.execute(sql`
+        SELECT request_no
+        FROM vrm_rental_request
+        WHERE request_no::text = ${params.sourceId} OR id::text = ${params.sourceId}
+        LIMIT 1
+      `);
+      const requestBookingKey = String((aliases as any[])[0]?.request_no ?? "");
+      if (!requestBookingKey) throw new OrchestratorError("source_missing", "source record not found", 404);
       // Shared with rental-request failure recovery. If recovery wins, this
       // source-status recheck sees pending and refuses insertion. If creation
       // wins, recovery waits and then sees the durable intent/evidence fence.
@@ -2116,10 +2046,9 @@ export async function createIntent(params: CreateIntentParams): Promise<{ intent
         )
       `);
       const { rows: sourceRows } = await tx.execute(sql`
-        SELECT status, request_type, etd_booked_at
+        SELECT *
           FROM vrm_rental_request
-         WHERE request_no::text = ${params.sourceId}
-            OR id::text = ${params.sourceId}
+         WHERE request_no = ${Number(requestBookingKey)}
          FOR UPDATE
       `);
       const currentSource = (sourceRows as any[])[0];
@@ -2140,11 +2069,46 @@ export async function createIntent(params: CreateIntentParams): Promise<{ intent
           409,
         );
       }
-      return persistIntentRow(tx, params, mode, facts);
+      // A pre-canonicalization intent may carry the source UUID. Lock it while
+      // deciding eligibility so an alias caller cannot create a second logical
+      // request intent.
+      const { rows: aliasIntents } = await tx.execute(sql`
+        SELECT id
+        FROM vrm_rental_workflow_intents
+        WHERE workflow_type = ${WORKFLOW_REQUEST}
+          AND execution_mode = ${mode}
+          AND (
+            source_id = ${requestBookingKey}
+            OR source_id = ${String(currentSource.id)}
+          )
+        ORDER BY id DESC
+        LIMIT 1
+        FOR UPDATE
+      `);
+      const existingAliasIntentId = Number((aliasIntents as any[])[0]?.id ?? 0) || null;
+      const lockedFacts = await fetchEligibilityFacts({
+        workflowType: params.workflowType,
+        sourceId: requestBookingKey,
+        excludeIntentId: existingAliasIntentId,
+        executor: tx,
+      });
+      const gate = evaluateEligibility(lockedFacts);
+      if (!gate.ok) {
+        throw new OrchestratorError("eligibility_failed", "eligibility gate failed", 422, { failures: gate.failures });
+      }
+      await reclaimDeletedRequestLiveLock({
+        ldap: lockedFacts.ldap,
+        replacementSourceId: requestBookingKey,
+        createdBy: params.createdBy,
+        executor: tx,
+      });
+      // Persist the canonical request number so legacy UUID and numeric aliases
+      // reuse one intent identity.
+      return persistIntentRow(tx, { ...params, sourceId: requestBookingKey }, mode, lockedFacts);
     });
   }
 
-  return persistIntentRow(db, params, mode, facts);
+  return persistIntentRow(db, params, mode, facts!);
 }
 
 /** Trim the facts snapshot persisted on the intent (no giant source rows). */
@@ -3237,12 +3201,29 @@ export async function recordBookingPostback(params: {
     // happened and no attempt row exists — back to preview so a human re-reviews.
     if (outcome === "aborted_before_open") {
       const detail = `runner abort: ${strOrNull(params.payload?.evidence?.reason) ?? "fresh quote diverged from confirmed preview"}`;
-      await touchIntent(intent.id, {
-        status: "preview_required",
-        last_error: detail,
-        claimed_by: null,
-        lease_expires_at: null,
-      });
+      const { rows: aborted } = await db.execute(sql`
+        UPDATE vrm_rental_workflow_intents i
+        SET status = 'preview_required',
+            last_error = ${detail},
+            claimed_by = NULL,
+            lease_expires_at = NULL,
+            updated_at = now()
+        WHERE i.id = ${intent.id}
+          AND i.status = 'booking'
+          AND i.claimed_by = ${params.runnerId}
+          AND i.fencing_token = ${params.fencingToken}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM vrm_workflow_attempts a
+            WHERE a.intent_id = i.id
+              AND a.phase = 'etd_booking'
+              AND a.fencing_token = ${params.fencingToken}
+          )
+        RETURNING i.id
+      `);
+      if (!(aborted as any[]).length) {
+        return { accepted: true, status: (await loadIntent(intent.id)).status, idempotent: true };
+      }
       await returnRequestToPendingReview(intent, detail);
       await mirrorCutoverSummary(intent.id);
       return { accepted: true, status: "preview_required" };
@@ -3250,11 +3231,125 @@ export async function recordBookingPostback(params: {
 
     const attemptNo = Number(params.payload?.attemptNo);
     if (!attemptNo) throw new OrchestratorError("bad_payload", "attemptNo required", 400);
-    await db.execute(sql`
-      UPDATE vrm_workflow_attempts
-      SET outcome = ${outcome}, finished_at = now(), evidence = ${JSON.stringify(params.payload?.evidence ?? {})}::jsonb
-      WHERE intent_id = ${intent.id} AND phase = 'etd_booking' AND attempt_no = ${attemptNo} AND outcome IS NULL
-    `);
+    const confirmation = outcome === "booked"
+      ? strOrNull(params.payload?.evidence?.confirmation)
+      : null;
+    const verifiedOnCommit =
+      outcome === "booked"
+      && intent.workflow_type === WORKFLOW_REQUEST
+      && !!confirmation;
+    const failedDetail =
+      outcome === "failed_clean"
+        ? `booking failed clean: ${strOrNull(params.payload?.evidence?.error) ?? "unknown"}`
+        : null;
+    if (outcome === "dry_run_validated" && intent.execution_mode === "live") {
+      throw new OrchestratorError("bad_payload", "dry_run_validated is not a live outcome", 400);
+    }
+    const resultAt = new Date().toISOString();
+    const resultPatch: Record<string, unknown> =
+      outcome === "dry_run_validated"
+        ? {
+            reservation_state: "dry_run_validated",
+            status: "awaiting_verification",
+            reservation_evidence: {
+              dryRunValidated: true,
+              gates: params.payload?.evidence?.gates ?? null,
+              attemptNo,
+              at: resultAt,
+            },
+            last_error: null,
+            claimed_by: null,
+            lease_expires_at: null,
+          }
+        : outcome === "booked"
+          ? {
+              reservation_state: verifiedOnCommit ? "verified" : "booked_unverified",
+              status: verifiedOnCommit ? "reservation_verified" : "awaiting_verification",
+              reservation_evidence: {
+                confirmation,
+                verifiedBy: verifiedOnCommit ? "commit_response" : null,
+                bookedAt: resultAt,
+                attemptNo,
+                raw: params.payload?.evidence ?? null,
+              },
+              last_error: null,
+              ...(verifiedOnCommit ? { claimed_by: null, lease_expires_at: null } : {}),
+            }
+          : outcome === "failed_clean"
+            ? {
+                status: intent.workflow_type === WORKFLOW_REQUEST ? "preview_required" : "manual_review",
+                reservation_state: "failed",
+                last_error: failedDetail,
+                claimed_by: null,
+                lease_expires_at: null,
+              }
+            : {
+                status: "booking_unknown",
+                reservation_state: "unknown",
+                last_error: `booking outcome ${outcome}: ${strOrNull(params.payload?.evidence?.error) ?? "ambiguous"}`,
+                claimed_by: null,
+                lease_expires_at: null,
+              };
+    const resultGuard = {
+      statusIn: ["booking"],
+      claimedBy: params.runnerId,
+      fencingToken: params.fencingToken,
+    };
+    const changed = await db.transaction(async (tx) => {
+      // Lock and re-assert current ownership inside the same transaction that
+      // closes the attempt and advances the parent. A reclaim that races after
+      // verifyClaim must win or wait as one unit; it can never slip between the
+      // attempt close and the parent transition.
+      const { rows: owners } = await tx.execute(sql`
+        SELECT id
+        FROM vrm_rental_workflow_intents
+        WHERE id = ${intent.id}
+          AND status = 'booking'
+          AND claimed_by = ${params.runnerId}
+          AND fencing_token = ${params.fencingToken}
+        FOR UPDATE
+      `);
+      if (!(owners as any[]).length) return false;
+      const { rows: closedAttempts } = await tx.execute(sql`
+        UPDATE vrm_workflow_attempts a
+        SET outcome = ${outcome},
+            finished_at = now(),
+            evidence = ${JSON.stringify(params.payload?.evidence ?? {})}::jsonb
+        FROM vrm_rental_workflow_intents i
+        WHERE a.intent_id = i.id
+          AND a.intent_id = ${intent.id}
+          AND a.phase = 'etd_booking'
+          AND a.attempt_no = ${attemptNo}
+          AND a.fencing_token = ${params.fencingToken}
+          AND a.outcome IS NULL
+          AND i.status = 'booking'
+          AND i.claimed_by = ${params.runnerId}
+          AND i.fencing_token = ${params.fencingToken}
+        RETURNING a.outcome
+      `);
+      if (!(closedAttempts as any[]).length) {
+        const { rows: recordedAttempts } = await tx.execute(sql`
+          SELECT outcome, fencing_token
+          FROM vrm_workflow_attempts
+          WHERE intent_id = ${intent.id}
+            AND phase = 'etd_booking'
+            AND attempt_no = ${attemptNo}
+          LIMIT 1
+        `);
+        const recorded = (recordedAttempts as any[])[0];
+        const sameResult =
+          Number(recorded?.fencing_token) === Number(params.fencingToken)
+          && String(recorded?.outcome ?? "") === outcome;
+        // Legacy recovery: before this transaction existed, a crash could close
+        // the attempt while leaving the parent in booking. A same-result retry
+        // may finish that exact transition; conflicting results never can.
+        if (!sameResult || intent.status !== "booking") return false;
+      }
+      return (await touchIntent(intent.id, resultPatch, resultGuard, tx)) > 0;
+    });
+    if (!changed) {
+      return { accepted: true, status: (await loadIntent(intent.id)).status, idempotent: true };
+    }
 
     if (outcome === "dry_run_validated") {
       // Dark modes only: the runner ran every non-mutating gate (quote,
@@ -3263,22 +3358,6 @@ export async function recordBookingPostback(params: {
       // dark reservation_state — readbacks skip it, completion never fires.
       // Block filing still proceeds: dry_run records would_file; test files a
       // real TEST-prefixed block.
-      if (intent.execution_mode === "live") {
-        throw new OrchestratorError("bad_payload", "dry_run_validated is not a live outcome", 400);
-      }
-      await touchIntent(intent.id, {
-        reservation_state: "dry_run_validated",
-        status: "awaiting_verification",
-        reservation_evidence: {
-          dryRunValidated: true,
-          gates: params.payload?.evidence?.gates ?? null,
-          attemptNo,
-          at: new Date().toISOString(),
-        },
-        last_error: null,
-        claimed_by: null,
-        lease_expires_at: null,
-      });
       await mirrorCutoverSummary(intent.id);
       await fileContractBlock(intent.id);
       await releaseMessagesIfEligible(intent.id);
@@ -3286,7 +3365,6 @@ export async function recordBookingPostback(params: {
     }
 
     if (outcome === "booked") {
-      const confirmation = strOrNull(params.payload?.evidence?.confirmation);
       // A cutover still waits for an independent journey readback before anyone
       // is texted. A request cannot: ETD's /api/myjourney/search ignores both
       // SearchCriteria and Period (every value returns the same rows, a nonsense
@@ -3295,20 +3373,6 @@ export async function recordBookingPostback(params: {
       // manual_review forever. The savedr response carrying a confirmation
       // number is the proof, and it is recorded as that rather than passed off
       // as a readback.
-      const verifiedOnCommit = intent.workflow_type === WORKFLOW_REQUEST && !!confirmation;
-      await touchIntent(intent.id, {
-        reservation_state: verifiedOnCommit ? "verified" : "booked_unverified",
-        status: verifiedOnCommit ? "reservation_verified" : "awaiting_verification",
-        reservation_evidence: {
-          confirmation,
-          verifiedBy: verifiedOnCommit ? "commit_response" : null,
-          bookedAt: new Date().toISOString(),
-          attemptNo,
-          raw: params.payload?.evidence ?? null,
-        },
-        last_error: null,
-        ...(verifiedOnCommit ? { claimed_by: null, lease_expires_at: null } : {}),
-      });
       if (verifiedOnCommit) {
         const sourceWrite = await recordRequestBookedSource(intent, confirmation);
         if (!sourceWrite.ok) {
@@ -3342,24 +3406,7 @@ export async function recordBookingPostback(params: {
       // Proven no reservation was created (validation-gate failure before the
       // confirm call). A request returns to pending review with the reason
       // visible; only a subsequent APPROVE may resume this intent.
-      const detail = `booking failed clean: ${strOrNull(params.payload?.evidence?.error) ?? "unknown"}`;
-      await touchIntent(intent.id, {
-        status: intent.workflow_type === WORKFLOW_REQUEST ? "preview_required" : "manual_review",
-        reservation_state: "failed",
-        last_error: detail,
-        claimed_by: null,
-        lease_expires_at: null,
-      });
-      await returnRequestToPendingReview(intent, detail);
-    } else {
-      // timeout / ambiguous / unparsed — we may or may not have booked.
-      await touchIntent(intent.id, {
-        status: "booking_unknown",
-        reservation_state: "unknown",
-        last_error: `booking outcome ${outcome}: ${strOrNull(params.payload?.evidence?.error) ?? "ambiguous"}`,
-        claimed_by: null,
-        lease_expires_at: null,
-      });
+      await returnRequestToPendingReview(intent, failedDetail!);
     }
     await mirrorCutoverSummary(intent.id);
     return { accepted: true, status: (await loadIntent(intent.id)).status };
@@ -4800,41 +4847,16 @@ export async function adoptRunnerBooking(
   requestNo: number,
   confirmation: string,
   quoteRef?: string | null,
-  opts?: { alreadyNotified?: string; booked?: Record<string, any> | null },
+  opts?: {
+    alreadyNotified?: string;
+    booked?: Record<string, any> | null;
+    attemptNo?: number;
+    fencingToken?: number;
+  },
 ): Promise<boolean> {
   const conf = strOrNull(confirmation);
   if (!conf) return false;
-  const { rows } = await db.execute(sql`
-    SELECT * FROM vrm_rental_workflow_intents
-     WHERE workflow_type = ${WORKFLOW_REQUEST}
-       AND (
-         source_id = ${String(requestNo)}
-         OR source_id = (
-           SELECT id::text FROM vrm_rental_request WHERE request_no = ${requestNo}
-         )
-       )
-       AND status NOT IN ('cancelled', 'abandoned')
-     ORDER BY id DESC
-     LIMIT 1
-  `);
-  const intent = (rows as any[])[0];
-  if (!intent) return false;
-  if (intent.reservation_state === "verified") return false;
-
   const notifiedBy = strOrNull(opts?.alreadyNotified);
-  const evidence = JSON.stringify({
-    ...(intent.reservation_evidence ?? {}),
-    confirmation: conf,
-    verifiedBy: "runner_commit",
-    verifiedAt: new Date().toISOString(),
-    ...(quoteRef ? { raw: { quoteReference: quoteRef } } : {}),
-    ...(notifiedBy ? { alreadyNotified: { by: notifiedBy, at: new Date().toISOString() } } : {}),
-  });
-  // Overwrite the preview's reservation facts with what was really booked, in the
-  // SAME statement that verifies the reservation - releaseMessagesIfEligible re-reads
-  // the intent immediately below and renders the technician's text from exactly this
-  // object. Merging after the release would be too late, and merging into a separate
-  // key would leave the renderer still reading the stale one.
   const bookedFacts = opts?.booked && Object.keys(opts.booked).length ? opts.booked : null;
   const previewSet = bookedFacts
     ? sql`preview = COALESCE(preview, '{}'::jsonb) || jsonb_build_object(
@@ -4843,23 +4865,101 @@ export async function adoptRunnerBooking(
           ),
           event_date = COALESCE(event_date, ${strOrNull(bookedFacts.pickupDate)}::date),`
     : sql``;
-  const { rows: advanced } = await db.execute(sql`
-    UPDATE vrm_rental_workflow_intents
-       SET ${previewSet}
-           reservation_state = 'verified',
-           status = 'reservation_verified',
-           reservation_evidence = ${evidence}::jsonb,
-           msg1_state = ${notifiedBy ? sql`'skipped_already_notified'` : sql`msg1_state`},
-           last_error = NULL,
-           claimed_by = NULL,
-           lease_expires_at = NULL,
-           updated_at = now()
-     WHERE id = ${intent.id}
-       AND reservation_state <> 'verified'
-       AND status NOT IN ('cancelled', 'abandoned', 'completed')
-     RETURNING id
-  `);
-  if (!(advanced as any[]).length) return false;
+  const adoption = await db.transaction(async (tx) => {
+    // Resolve and lock the source first. Its request number is the canonical
+    // identity for both legacy UUID intents and modern numeric intents.
+    const { rows: sources } = await tx.execute(sql`
+      SELECT id, request_no, status, etd_reference, etd_booked_at
+      FROM vrm_rental_request
+      WHERE request_no = ${requestNo}
+      FOR UPDATE
+    `);
+    const source = (sources as any[])[0];
+    if (!source) return { handled: false, intent: null, advanced: false, evidence: null };
+    const sourceConfirmation = strOrNull(source.etd_reference);
+    if (
+      String(source.status ?? "") !== "booked"
+      || !source.etd_booked_at
+      || sourceConfirmation?.toUpperCase() !== conf.toUpperCase()
+    ) {
+      return { handled: false, intent: null, advanced: false, evidence: null };
+    }
+    const { rows } = await tx.execute(sql`
+      SELECT * FROM vrm_rental_workflow_intents
+       WHERE workflow_type = ${WORKFLOW_REQUEST}
+         AND (source_id = ${String(source.request_no)} OR source_id = ${String(source.id)})
+       ORDER BY id DESC
+       LIMIT 1
+       FOR UPDATE
+    `);
+    const intent = (rows as any[])[0];
+    if (!intent) return { handled: false, intent: null, advanced: false, evidence: null };
+    // Exact duplicate callbacks are a success, but conflicting evidence is
+    // never silently adopted onto an already verified reservation.
+    if (intent.reservation_state === "verified") {
+      const existingConfirmation = strOrNull(intent.reservation_evidence?.confirmation);
+      return {
+        handled: existingConfirmation?.toUpperCase() === conf.toUpperCase(),
+        intent: null,
+        advanced: false,
+        evidence: null,
+      };
+    }
+    if (["cancelled", "abandoned", "completed"].includes(String(intent.status))) {
+      return { handled: false, intent: null, advanced: false, evidence: null };
+    }
+    const hasAttemptNo = opts?.attemptNo !== undefined;
+    const hasFencingToken = opts?.fencingToken !== undefined;
+    if (hasAttemptNo !== hasFencingToken) {
+      return { handled: false, intent: null, advanced: false, evidence: null };
+    }
+    if (hasAttemptNo && hasFencingToken) {
+      if (Number(intent.fencing_token) !== Number(opts!.fencingToken)) {
+        return { handled: false, intent: null, advanced: false, evidence: null };
+      }
+      const { rows: attempts } = await tx.execute(sql`
+        SELECT 1 FROM vrm_workflow_attempts
+        WHERE intent_id = ${Number(intent.id)}
+          AND phase = 'etd_booking'
+          AND attempt_no = ${opts!.attemptNo!}
+          AND fencing_token = ${opts!.fencingToken!}
+        LIMIT 1
+      `);
+      if (!(attempts as any[]).length) {
+        return { handled: false, intent: null, advanced: false, evidence: null };
+      }
+    }
+    const evidence = {
+      ...(intent.reservation_evidence ?? {}),
+      confirmation: conf,
+      verifiedBy: "runner_commit",
+      verifiedAt: new Date().toISOString(),
+      ...(quoteRef ? { raw: { quoteReference: quoteRef } } : {}),
+      ...(notifiedBy ? { alreadyNotified: { by: notifiedBy, at: new Date().toISOString() } } : {}),
+    };
+    // Merge the booked facts and verify the reservation under the same source,
+    // intent, and optional attempt/fencing locks used to authorize adoption.
+    const { rows: advanced } = await tx.execute(sql`
+      UPDATE vrm_rental_workflow_intents
+         SET ${previewSet}
+             reservation_state = 'verified',
+             status = 'reservation_verified',
+             reservation_evidence = ${JSON.stringify(evidence)}::jsonb,
+             msg1_state = ${notifiedBy ? sql`'skipped_already_notified'` : sql`msg1_state`},
+             last_error = NULL,
+             claimed_by = NULL,
+             lease_expires_at = NULL,
+             updated_at = now()
+       WHERE id = ${intent.id}
+         AND reservation_state <> 'verified'
+         AND status NOT IN ('cancelled', 'abandoned', 'completed')
+       RETURNING id
+    `);
+    return { handled: false, intent, advanced: (advanced as any[]).length === 1, evidence };
+  });
+  if (adoption.handled) return true;
+  const intent = adoption.intent;
+  if (!intent || !adoption.advanced) return false;
   await mirrorCutoverSummary(intent.id);
 
   // Did this technician ALREADY get a confirmation text?
@@ -4889,7 +4989,7 @@ export async function adoptRunnerBooking(
     await touchIntent(intent.id, {
       msg1_state: "sent",
       reservation_evidence: {
-        ...(JSON.parse(evidence) as Record<string, unknown>),
+        ...(adoption.evidence ?? {}),
         msg1: { at: already.at, phone: already.phone_digits, by: "runner_sms" },
       },
     });

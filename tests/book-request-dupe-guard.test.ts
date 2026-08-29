@@ -41,3 +41,20 @@ test("book_request refuses execution clearly and without booking", () => {
   assert.match(result.stderr, /Nexus Approve canonical in-server executor/i);
   assert.match(result.stderr, /Token tooling.*cutover tooling remain available/i);
 });
+
+test("no scheduler or application source invokes the retired request runner", () => {
+  const result = spawnSync(
+    "rg",
+    ["-n", "book_request\\.py", "server", "scripts"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  // rg exits 1 for no matches. Any match outside retirement documentation or
+  // tests is an invocation-risk regression and must be reviewed explicitly.
+  assert.ok(result.status === 0 || result.status === 1);
+  const unsafe = result.stdout
+    .split("\n")
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("scripts/fix_request_msg1.ts:"))
+    .filter((line) => !/retired|legacy|do not|never/i.test(line));
+  assert.deepEqual(unsafe, [], `retired runner reference requires review:\n${unsafe.join("\n")}`);
+});

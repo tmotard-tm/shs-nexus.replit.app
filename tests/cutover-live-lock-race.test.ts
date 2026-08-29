@@ -141,6 +141,10 @@ after(async () => {
   if (savedFlag === undefined) delete process.env[FLAG];
   else process.env[FLAG] = savedFlag;
   await cleanupFixtures().catch(() => {});
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_token_uniq
+      ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL
+  `).catch(() => {});
   await pool.end().catch(() => {});
   const { fsPool } = await import("../server/fleet-scope-db");
   await fsPool.end().catch(() => {});
@@ -400,7 +404,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
     assert.equal((await readIntent(Number(prior.intent.id))).status, "abandoned");
   });
 
-  test("concurrent startup dedupe preserves a duplicate source with ambiguous booking evidence", async () => {
+  test("concurrent startup checks preserve duplicate sources for the explicit migration", async () => {
     const ldap = `${LDAP_PREFIX}S1`;
     const token = `zzllk-startup-${crypto.randomUUID()}`;
     const { rows: tokenRows } = await db.execute(sql`
@@ -410,10 +414,9 @@ describe("deleted-request live-lock recovery in createIntent", () => {
     `);
     const tokenId = String((tokenRows as any[])[0].id);
 
-    // Recreate the pre-index legacy shape that startup is responsible for
-    // repairing. The older request already owns an ambiguous LIVE intent; the
-    // newer duplicate is harmless and may be discarded instead.
-    await db.execute(sql`DROP INDEX vrm_rental_request_token_uniq`);
+    // Recreate the pre-index legacy shape. Application startup must only report
+    // it; the explicit migration owns repair and concurrent index creation.
+    await db.execute(sql`DROP INDEX IF EXISTS vrm_rental_request_token_uniq`);
     const { rows: olderRows } = await db.execute(sql`
       INSERT INTO vrm_rental_request
         (token_id, ldap, tech_name, request_type, status, home_state, created_at)
@@ -454,8 +457,8 @@ describe("deleted-request live-lock recovery in createIntent", () => {
     `);
     assert.deepEqual(
       (requestRows as any[]).map((row) => Number(row.request_no)),
-      [olderNo],
-      "startup must keep the ambiguous intent's source and remove only the safe duplicate",
+      [olderNo, newerNo],
+      "startup must preserve both rows so deploy-time migration can audit the duplicate",
     );
     assert.notEqual(olderNo, newerNo);
 
@@ -468,13 +471,13 @@ describe("deleted-request live-lock recovery in createIntent", () => {
         SELECT source_id FROM vrm_rental_workflow_intents WHERE id = ${intentId}
       )
     `);
-    assert.equal((sourceRows as any[]).length, 1, "startup cleanup must never leave a source-less live lock");
+    assert.equal((sourceRows as any[]).length, 1, "the ambiguous live intent must retain its source");
 
     const { rows: indexRows } = await db.execute(sql`
       SELECT 1 FROM pg_indexes
       WHERE schemaname = current_schema()
         AND indexname = 'vrm_rental_request_token_uniq'
     `);
-    assert.equal((indexRows as any[]).length, 1, "startup must restore the token uniqueness guard");
+    assert.equal((indexRows as any[]).length, 0, "startup must not build a potentially blocking index");
   });
 });

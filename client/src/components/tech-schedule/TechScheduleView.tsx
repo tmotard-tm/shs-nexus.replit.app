@@ -111,6 +111,19 @@ export function isIsoDate(value: unknown): value is string {
   return typeof value === "string" && ISO_DATE.test(value);
 }
 
+export function getScheduleIdentityDisplay(returnedName: string | null | undefined, fleetName: string | null | undefined) {
+  const primary = returnedName || fleetName || null;
+  const normalizedReturned = returnedName?.trim().toLocaleLowerCase();
+  const normalizedFleet = fleetName?.trim().toLocaleLowerCase();
+  return {
+    primary,
+    mismatch:
+      normalizedReturned && normalizedFleet && normalizedReturned !== normalizedFleet
+        ? `Fleet assignment: ${fleetName}`
+        : null,
+  };
+}
+
 /**
  * Shared fetch. Everything that reads a schedule goes through this so the
  * queryKey — which IS the URL under this app's queryClient — stays identical
@@ -125,8 +138,9 @@ export function useTechSchedule(ldap: string, start: string, end: string, enable
     // The global default is staleTime: Infinity. A schedule genuinely changes
     // during the day (an absence lands, a Vehicle - Change block is filed), so
     // these views opt back in to refetching.
-    staleTime: 5 * 60_000,
-    refetchOnWindowFocus: true,
+    staleTime: 15 * 60_000,
+    gcTime: 15 * 60_000,
+    refetchOnWindowFocus: false,
   });
 }
 
@@ -138,20 +152,45 @@ export function useTechSchedule(ldap: string, start: string, end: string, enable
  * operator to add a secret that is already set sends them to fix the one
  * thing that is correct. Require the route's own machine-readable signal.
  */
-export function describeScheduleError(error: unknown): { notConfigured: boolean; message: string } {
+export type ScheduleErrorKind =
+  | "CONFIG_MISSING"
+  | "AUTHENTICATION"
+  | "INVALID_REQUEST"
+  | "NOT_FOUND"
+  | "RATE_LIMITED"
+  | "UNAVAILABLE"
+  | "UNKNOWN";
+
+const SCHEDULE_ERROR_COPY: Record<ScheduleErrorKind, string> = {
+  CONFIG_MISSING: "Schedule feed is not connected yet. Add the schedule-feed credential in Replit Secrets.",
+  AUTHENTICATION: "Schedule access needs to be authenticated. Sign in again and retry.",
+  INVALID_REQUEST: "The schedule request was invalid. Close this card and try again.",
+  NOT_FOUND: "No schedule endpoint was found. Please contact support.",
+  RATE_LIMITED: "Too many schedule requests are in progress. Please try again shortly.",
+  UNAVAILABLE: "The schedule service is temporarily unavailable. Please try again shortly.",
+  UNKNOWN: "Could not load the schedule. Please try again.",
+};
+
+export function describeScheduleError(error: unknown): { kind: ScheduleErrorKind; message: string } {
   const raw = String((error as Error)?.message ?? error ?? "");
-  let notConfigured = /TECHS?_SHIFTS_API_KEY/.test(raw);
-  if (!notConfigured) {
-    const body = raw.slice(raw.indexOf(":") + 1).trim();
-    try {
-      const parsed = JSON.parse(body);
-      notConfigured = parsed?.code === "CONFIG_MISSING" || parsed?.configured === false;
-    } catch {
-      // Not JSON (an HTML error page, a proxy timeout). Then it is not a
-      // configuration answer and must not be reported as one.
+  const status = Number.parseInt(raw, 10);
+  const body = raw.slice(raw.indexOf(":") + 1).trim();
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed?.code === "CONFIG_MISSING" || parsed?.configured === false) {
+      return { kind: "CONFIG_MISSING", message: SCHEDULE_ERROR_COPY.CONFIG_MISSING };
     }
+  } catch {
+    // Upstream bodies may be HTML, text, or proxy output. They are never UI copy.
   }
-  return { notConfigured, message: raw };
+  const kind: ScheduleErrorKind =
+    status === 400 ? "INVALID_REQUEST" :
+    status === 401 || status === 403 ? "AUTHENTICATION" :
+    status === 404 ? "NOT_FOUND" :
+    status === 429 ? "RATE_LIMITED" :
+    status >= 500 ? "UNAVAILABLE" :
+    "UNKNOWN";
+  return { kind, message: SCHEDULE_ERROR_COPY[kind] };
 }
 
 function dayNum(iso: string): string {
@@ -363,7 +402,10 @@ export function TechScheduleView({
     return out;
   }, [start, weeks]);
 
-  const displayName = data?.techName || data?.roster?.name || name || null;
+  const { primary: displayName, mismatch: fleetNameMismatch } = getScheduleIdentityDisplay(
+    data?.techName || data?.roster?.name,
+    name,
+  );
 
   // -------------------------------------------------------------- loading
   if (isLoading) {
@@ -389,7 +431,8 @@ export function TechScheduleView({
   if (error) {
     // queryClient throws `${status}: ${body}`; 503 is the not-configured case,
     // which is a setup task rather than a fault and should read that way.
-    const { notConfigured, message: raw } = describeScheduleError(error);
+    const { kind, message } = describeScheduleError(error);
+    const notConfigured = kind === "CONFIG_MISSING";
     return (
       <div
         style={{
@@ -413,7 +456,7 @@ export function TechScheduleView({
           <div style={{ color: colors.inkSoft, fontSize: 11.5, wordBreak: "break-word" }}>
             {notConfigured
               ? "Add TECHS_SHIFTS_API_KEY to Replit Secrets to turn this on."
-              : raw}
+              : message}
           </div>
         </div>
       </div>
@@ -432,6 +475,11 @@ export function TechScheduleView({
           <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
             {normalizedLdap}
           </span>
+          {fleetNameMismatch ? (
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkSoft }}>
+              {fleetNameMismatch}
+            </span>
+          ) : null}
           {data?.district || data?.roster?.district ? (
             <Pill
               text={`District ${data?.district || data?.roster?.district}`}
@@ -497,7 +545,8 @@ export function TechScheduleView({
       ) : null}
 
       {/* week grid */}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div data-testid="tech-schedule-grid-scroll" style={{ maxWidth: "100%", overflowX: "auto" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 700 }}>
         {/* The weekday header carries the same 34px month-label spacer as each
             week row below it. Without it the header grid spans the full width
             while the day cells are inset, and every label sits ~40px left of
@@ -570,6 +619,7 @@ export function TechScheduleView({
             </div>
           </div>
         ))}
+        </div>
       </div>
 
       {/* summary */}
@@ -731,7 +781,8 @@ export function TechSchedulePickupCheck({
   }
 
   if (error) {
-    const { notConfigured, message } = describeScheduleError(error);
+    const { kind, message } = describeScheduleError(error);
+    const notConfigured = kind === "CONFIG_MISSING";
     return (
       <div
         style={{
@@ -748,7 +799,7 @@ export function TechSchedulePickupCheck({
         <span>
           {notConfigured
             ? "Schedule feed not connected (add TECHS_SHIFTS_API_KEY to Replit Secrets)."
-            : `Schedule unavailable — ${message}`}
+            : message}
         </span>
       </div>
     );

@@ -930,11 +930,8 @@ export async function initFormsSchema(): Promise<void> {
       WHERE outcome IS NULL;
   `);
 
-  // Install the one-row-per-token guard only after the intent + attempt ledger
-  // exists. The repair is serialized across concurrent boots and routes every
-  // source deletion through the same evidence gate used by normal request
-  // retirement. A duplicate that may own a booking survives for manual review;
-  // a harmless sibling is removed instead.
+  // This is a bounded, read-only readiness check. The concurrent index build
+  // and any duplicate diagnosis belong to the explicit migration, never boot.
   const { ensureTokenBackedRequestUniquenessForStartup } = await import("./cutover-orchestrator");
   await ensureTokenBackedRequestUniquenessForStartup();
 

@@ -1,6 +1,50 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
+
+test("schedule identity accepts only named roster RACFID or LDAP fields", async () => {
+  const { resolveTechScheduleIdentity, findRosterScheduleIdentity } = await import(
+    "../client/src/components/tech-schedule/techScheduleIdentity"
+  );
+
+  assert.deepEqual(resolveTechScheduleIdentity({ techRacfid: " tech01 " }), {
+    ldap: "TECH01",
+    source: "techRacfid",
+  });
+  assert.deepEqual(
+    resolveTechScheduleIdentity({ techRacfid: "TECH01", racfId: "RACF02", ldapId: "LDAP03" }),
+    { ldap: "TECH01", source: "techRacfid" },
+  );
+  assert.deepEqual(resolveTechScheduleIdentity({ racfId: " racf02 " }), {
+    ldap: "RACF02",
+    source: "racfId",
+  });
+  assert.deepEqual(resolveTechScheduleIdentity({ ldapId: " ldap03 " }), {
+    ldap: "LDAP03",
+    source: "ldapId",
+  });
+  assert.equal(resolveTechScheduleIdentity({ employeeId: "123456", techName: "Taylor Tech" }), null);
+  assert.equal(resolveTechScheduleIdentity("TECH01"), null);
+  assert.equal(resolveTechScheduleIdentity({ techRacfid: "   " }), null);
+  const roster = [
+    { techRacfid: "TECH01", employmentStatus: "A" },
+    { ldapId: "LDAP02", employmentStatus: "A" },
+  ];
+  assert.deepEqual(findRosterScheduleIdentity(" tech01 ", roster), {
+    ldap: "TECH01",
+    source: "techRacfid",
+  });
+  assert.deepEqual(findRosterScheduleIdentity("ldap02", roster), {
+    ldap: "LDAP02",
+    source: "ldapId",
+  });
+  assert.equal(
+    findRosterScheduleIdentity("EMP12345", roster),
+    null,
+    "an assignment value is not a schedule identity unless the roster confirms it",
+  );
+});
 
 test("rolling schedule window starts on the requested day and spans exactly 14 days", async () => {
   const schedule = await import("../client/src/components/tech-schedule/TechScheduleView");
@@ -96,8 +140,8 @@ test("technician hover cards load lazily, stop card clicks, and reuse the LDAP q
     root.render(
       React.createElement(QueryClientProvider, { client },
         React.createElement("div", { onClick: () => parentClicks++ },
-          React.createElement(TechnicianScheduleHoverCard, { ldap: "TECH01", name: "Taylor Tech" }),
-          React.createElement(TechnicianScheduleHoverCard, { ldap: "tech01", name: "Taylor Tech duplicate" }),
+          React.createElement(TechnicianScheduleHoverCard, { rosterCandidate: { techRacfid: "TECH01" }, name: "Taylor Tech" }),
+          React.createElement(TechnicianScheduleHoverCard, { rosterCandidate: { techRacfid: "tech01" }, name: "Taylor Tech duplicate" }),
         ),
       ),
     );
@@ -109,6 +153,8 @@ test("technician hover cards load lazily, stop card clicks, and reuse the LDAP q
     triggers[0].focus();
   });
   assert.equal(triggers[0].getAttribute("aria-expanded"), "true", "keyboard focus must open the schedule");
+  const controls = triggers[0].getAttribute("aria-controls");
+  assert.ok(controls, "the trigger must identify its schedule content");
   await (React as any).act(async () => {
     triggers[0].dispatchEvent(new (g.PointerEvent)("pointerdown", { bubbles: true }));
     triggers[0].dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true }));
@@ -122,10 +168,11 @@ test("technician hover cards load lazily, stop card clicks, and reuse the LDAP q
   assert.match(document.body.textContent || "", /Vehicle - Change/);
   const popup = document.body.querySelector('[aria-label="Schedule for Taylor Tech"]');
   assert.ok(popup);
+  assert.equal(popup.id, controls, "the content ID must match aria-controls");
   await (React as any).act(async () => popup.dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })));
   assert.equal(parentClicks, 0, "interacting with portalled content must not open the vehicle drawer");
   await (React as any).act(async () =>
-    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+    triggers[0].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
   );
   assert.equal(triggers[0].getAttribute("aria-expanded"), "false");
 
@@ -133,7 +180,7 @@ test("technician hover cards load lazily, stop card clicks, and reuse the LDAP q
   await (React as any).act(async () => {});
   assert.equal(requests.length, 1, "duplicate cards must reuse the normalized LDAP query");
   await (React as any).act(async () =>
-    document.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
+    triggers[1].dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })),
   );
   assert.equal(triggers[1].getAttribute("aria-expanded"), "false");
 
@@ -155,21 +202,71 @@ test("technician hover cards load lazily, stop card clicks, and reuse the LDAP q
   dom.window.close();
 });
 
-test("schedule errors distinguish an unavailable feed from a failed lookup", async () => {
+test("schedule errors use typed safe copy and never expose upstream bodies", async () => {
   const { describeScheduleError } = await import("../client/src/components/tech-schedule/TechScheduleView");
+  const unsafe = "<html>proxy stack at internal-host.example fake-secret=abc123</html>";
+  const cases = [
+    ["400", "INVALID_REQUEST"],
+    ["401", "AUTHENTICATION"],
+    ["404", "NOT_FOUND"],
+    ["429", "RATE_LIMITED"],
+    ["500", "UNAVAILABLE"],
+    ["502", "UNAVAILABLE"],
+  ] as const;
+  for (const [status, kind] of cases) {
+    const result = describeScheduleError(new Error(`${status}: ${unsafe}`));
+    assert.equal(result.kind, kind);
+    assert.doesNotMatch(result.message, /proxy|stack|internal-host|fake-secret|abc123/i);
+  }
+  assert.deepEqual(
+    describeScheduleError(new Error('503: {"code":"CONFIG_MISSING","configured":false,"detail":"fake-secret"}')),
+    {
+      kind: "CONFIG_MISSING",
+      message: "Schedule feed is not connected yet. Add the schedule-feed credential in Replit Secrets.",
+    },
+  );
+});
 
-  assert.deepEqual(
-    describeScheduleError(new Error('503: {"code":"CONFIG_MISSING","configured":false}')),
-    {
-      notConfigured: true,
-      message: '503: {"code":"CONFIG_MISSING","configured":false}',
-    },
+test("schedule queries stay fresh for fifteen minutes and do not refetch on window focus", async () => {
+  const source = await readFile(
+    new URL("../client/src/components/tech-schedule/TechScheduleView.tsx", import.meta.url),
+    "utf8",
   );
-  assert.deepEqual(
-    describeScheduleError(new Error('502: {"code":"UPSTREAM_UNAVAILABLE","message":"gateway timeout"}')),
-    {
-      notConfigured: false,
-      message: '502: {"code":"UPSTREAM_UNAVAILABLE","message":"gateway timeout"}',
-    },
+  assert.match(source, /staleTime:\s*15\s*\*\s*60_000/);
+  assert.match(source, /gcTime:\s*15\s*\*\s*60_000/);
+  assert.match(source, /refetchOnWindowFocus:\s*false/);
+});
+
+test("returned roster identity is authoritative and flags a differing fleet label", async () => {
+  const { getScheduleIdentityDisplay } = await import("../client/src/components/tech-schedule/TechScheduleView");
+  assert.deepEqual(getScheduleIdentityDisplay("Taylor Roster", "Taylor Fleet"), {
+    primary: "Taylor Roster",
+    mismatch: "Fleet assignment: Taylor Fleet",
+  });
+  assert.deepEqual(getScheduleIdentityDisplay(" Taylor Tech ", "taylor tech"), {
+    primary: " Taylor Tech ",
+    mismatch: null,
+  });
+  assert.deepEqual(getScheduleIdentityDisplay(null, "Taylor Fleet"), {
+    primary: "Taylor Fleet",
+    mismatch: null,
+  });
+});
+
+test("fourteen-day hover grid has a bounded horizontal scroll region and readable day widths", async () => {
+  const source = await readFile(
+    new URL("../client/src/components/tech-schedule/TechScheduleView.tsx", import.meta.url),
+    "utf8",
   );
+  assert.match(source, /data-testid="tech-schedule-grid-scroll"/);
+  assert.match(source, /minWidth:\s*700/);
+});
+
+test("hover cards do not install one document-wide key listener per rendered vehicle", async () => {
+  const source = await readFile(
+    new URL("../client/src/components/tech-schedule/TechnicianScheduleHoverCard.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /document\.addEventListener\(\s*["']keydown["']/);
+  assert.match(source, /onEscapeKeyDown=/);
 });
