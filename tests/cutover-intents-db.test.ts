@@ -20,8 +20,9 @@
  *  6. fs_comms_send_queue 'held' rows fail the drain claim predicate until
  *     flipped to 'pending' (cutover msg2: held until block VERIFIED).
  *
- * All fixtures use ZZCUT* ldaps + random-UUID source ids and are deleted in
- * before()/after(). NO external system is touched: no ETD, no ART, no Twilio.
+ * Every process gets its own ZZ<run>C namespace + random-UUID source ids and
+ * deletes only that namespace. NO external system is touched: no ETD, no ART,
+ * no Twilio.
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -61,7 +62,28 @@ import {
   type BlockReadbackRow,
 } from "../server/vrm/forms/cutover-orchestrator";
 
-const LDAP_PREFIX = "ZZCUT";
+const RUN_ID = crypto.randomBytes(4).toString("hex").toUpperCase();
+const LDAP_PREFIX = `ZZ${RUN_ID}C`;
+const CASE_PREFIX = `Z${crypto.randomBytes(4).toString("hex")}`.toUpperCase();
+const EMPLOYEE_ID = crypto.randomBytes(5).toString("hex").toUpperCase();
+
+function claimForRun(params: Parameters<typeof claimBookingWork>[0]) {
+  return claimBookingWork({ ...params, ldapPrefix: LDAP_PREFIX });
+}
+
+async function withCrossProcessLock<T>(name: string, work: () => Promise<T>): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [name]);
+    return await work();
+  } finally {
+    try {
+      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [name]);
+    } finally {
+      client.release();
+    }
+  }
+}
 
 async function cleanup() {
   await db.execute(sql`DELETE FROM vrm_rental_workflow_intents WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
@@ -71,8 +93,8 @@ async function cleanup() {
   await db.execute(sql`DELETE FROM all_techs WHERE upper(tech_racfid) LIKE ${LDAP_PREFIX + "%"}`);
   await db.execute(sql`DELETE FROM tpms_tech_profiles WHERE upper(enterprise_id) LIKE ${LDAP_PREFIX + "%"}`);
   await db.execute(sql`DELETE FROM fs_comms_contacts WHERE upper(ldap) LIKE ${LDAP_PREFIX + "%"}`);
-  await db.execute(sql`DELETE FROM vrm_rental_operations_cases WHERE case_key LIKE 'ZZCUT-%'`);
-  await db.execute(sql`DELETE FROM vrm_rental_identity_resolutions WHERE case_key LIKE 'ZZCUT-%'`);
+  await db.execute(sql`DELETE FROM vrm_rental_operations_cases WHERE case_key LIKE ${CASE_PREFIX + "%"}`);
+  await db.execute(sql`DELETE FROM vrm_rental_identity_resolutions WHERE case_key LIKE ${CASE_PREFIX + "%"}`);
 }
 
 async function insertIntent(over: Partial<Record<string, unknown>> = {}): Promise<number> {
@@ -183,16 +205,60 @@ describe("intent identity + live lock constraints", () => {
 // ---------------------------------------------------------------------------
 
 describe("claimBookingWork CAS", () => {
+  test("an exact claim can serve a ZZ fixture without opening the broad test queue", async () => {
+    const id = await insertIntent({ ldap: `${LDAP_PREFIX}DEFAULT`, status: "preview_pending" });
+
+    const exactClaim = await claimBookingWork({
+      runnerId: `exact-runner-${RUN_ID}`,
+      intentId: id,
+    });
+
+    assert.equal(exactClaim.length, 1);
+    assert.equal(exactClaim[0].intentId, id);
+  });
+
+  test("fixture-scoped claims do not lease another concurrent run's intent", async () => {
+    const claimPrefix = `${LDAP_PREFIX}SCOPE`;
+    const mine = await insertIntent({ ldap: `${claimPrefix}MINE`, status: "preview_pending" });
+    const theirs = await insertIntent({ ldap: `ZZOTHER${RUN_ID}`, status: "preview_pending" });
+    try {
+      const claimed = await claimBookingWork({
+        runnerId: `scoped-runner-${RUN_ID}`,
+        limit: 20,
+        ldapPrefix: claimPrefix,
+      });
+
+      assert.ok(claimed.some((item) => item.intentId === mine));
+      assert.ok(!claimed.some((item) => item.intentId === theirs));
+      const { rows } = await db.execute(sql`
+        SELECT claimed_by FROM vrm_rental_workflow_intents WHERE id = ${theirs}
+      `);
+      assert.equal((rows as any[])[0].claimed_by, null);
+    } finally {
+      await db.execute(sql`DELETE FROM vrm_rental_workflow_intents WHERE id = ${theirs}`);
+    }
+  });
+
+  test("fixture claim scopes reject SQL wildcard characters", async () => {
+    await assert.rejects(
+      () => claimBookingWork({
+        runnerId: `invalid-scope-${RUN_ID}`,
+        ldapPrefix: `${LDAP_PREFIX}%`,
+      }),
+      (error: any) => error?.code === "bad_fixture_scope",
+    );
+  });
+
   test("claim sets lease + increments fencing token; second claim inside lease returns nothing", async () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}CLAIM`, status: "preview_pending" });
 
-    const got = (await claimBookingWork({ runnerId: "test-runner-1", limit: 20 })).filter((i) => i.intentId === id);
+    const got = (await claimForRun({ runnerId: "test-runner-1", intentId: id })).filter((i) => i.intentId === id);
     assert.equal(got.length, 1, "first claim must return the preview_pending intent");
     assert.equal(got[0].kind, "preview");
     assert.equal(got[0].fencingToken, 1);
     assert.equal(got[0].executionMode, "dry_run");
 
-    const again = (await claimBookingWork({ runnerId: "test-runner-2", limit: 20 })).filter((i) => i.intentId === id);
+    const again = (await claimForRun({ runnerId: "test-runner-2", intentId: id })).filter((i) => i.intentId === id);
     assert.equal(again.length, 0, "a leased intent must be invisible to other runners");
 
     const { rows } = await db.execute(sql`
@@ -206,7 +272,7 @@ describe("claimBookingWork CAS", () => {
 
   test("workflowType filter: a rental_request claim never returns survey intents", async () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}TYPE`, status: "preview_pending" });
-    const items = (await claimBookingWork({ runnerId: "test-runner-3", limit: 20, workflowType: WORKFLOW_REQUEST }))
+    const items = (await claimForRun({ runnerId: "test-runner-3", intentId: id, workflowType: WORKFLOW_REQUEST }))
       .filter((i) => i.intentId === id);
     assert.equal(items.length, 0);
     const { rows } = await db.execute(sql`SELECT claimed_by FROM vrm_rental_workflow_intents WHERE id = ${id}`);
@@ -220,7 +286,7 @@ describe("claimBookingWork CAS", () => {
       SET claimed_by = 'dead-runner', fencing_token = 7, lease_expires_at = now() - interval '1 minute'
       WHERE id = ${id}
     `);
-    const got = (await claimBookingWork({ runnerId: "test-runner-4", limit: 20 })).filter((i) => i.intentId === id);
+    const got = (await claimForRun({ runnerId: "test-runner-4", intentId: id })).filter((i) => i.intentId === id);
     assert.equal(got.length, 1, "expired lease must be reclaimable");
     assert.equal(got[0].fencingToken, 8, "reclaim must fence out the dead runner's token 7");
   });
@@ -241,7 +307,7 @@ describe("claimBookingWork CAS", () => {
       WHERE id = ${id}
     `);
 
-    const item = (await claimBookingWork({ runnerId: "reconcile-runner", limit: 20 }))
+    const item = (await claimForRun({ runnerId: "reconcile-runner", intentId: id }))
       .find((candidate) => candidate.intentId === id);
 
     assert.ok(item, "the stranded intent is available only so its evidence can be reconciled");
@@ -639,7 +705,7 @@ describe("request lane source keying", () => {
          SET event_date = '2026-08-20', reservation_state = 'unknown'
        WHERE id = ${id}
     `);
-    const mine = (await claimBookingWork({ runnerId: "req-done-runner", limit: 50 })).find((i) => i.intentId === id);
+    const mine = (await claimForRun({ runnerId: "req-done-runner", intentId: id })).find((i) => i.intentId === id);
     assert.ok(mine, "claim must return the confirmed request fixture");
     assert.equal(mine!.requiresReconcile, true, "an ambiguous outcome must be readback-only");
 
@@ -688,7 +754,7 @@ describe("request lane source keying", () => {
 
     // Late postback after a cancellation: the cancel is final.
     const id2 = await insertIntent({ workflow_type: WORKFLOW_REQUEST, ldap: `${LDAP_PREFIX}RQCXL`, status: "confirmed" });
-    const mine2 = (await claimBookingWork({ runnerId: "req-cxl-runner", limit: 50 })).find((i) => i.intentId === id2);
+    const mine2 = (await claimForRun({ runnerId: "req-cxl-runner", intentId: id2 })).find((i) => i.intentId === id2);
     assert.ok(mine2, "claim must return the second request fixture");
     await db.execute(sql`UPDATE vrm_rental_workflow_intents SET status = 'cancelled' WHERE id = ${id2}`);
     const rb3 = await recordBookingPostback({
@@ -728,9 +794,16 @@ describe("request lane source keying", () => {
          SET event_date = '2026-08-20', reservation_state = 'unknown'
        WHERE id = ${id}
     `);
-    const mine = (await claimBookingWork({ runnerId: "req-conflict-runner", limit: 50 }))
+    const mine = (await claimForRun({ runnerId: "req-conflict-runner", intentId: id }))
       .find((i) => i.intentId === id);
-    assert.ok(mine);
+    if (!mine) {
+      const { rows: claimRows } = await db.execute(sql`
+        SELECT status, claimed_by, lease_expires_at, fencing_token
+        FROM vrm_rental_workflow_intents
+        WHERE id = ${id}
+      `);
+      assert.fail(`target claim was lost: ${JSON.stringify((claimRows as any[])[0] ?? null)}`);
+    }
 
     const result = await recordBookingPostback({
       intentId: id,
@@ -773,7 +846,7 @@ describe("op_open lease fencing", () => {
   test("an expired lease cannot authorize a new external operation; an active one can", async () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}LEASE2`, status: "confirmed" });
     const runner = "test-runner-lease";
-    const claimed = await claimBookingWork({ runnerId: runner, limit: 20 });
+    const claimed = await claimForRun({ runnerId: runner, intentId: id });
     const mine = claimed.find((c) => c.intentId === id);
     assert.ok(mine, "claim must return the confirmed fixture");
 
@@ -809,7 +882,7 @@ describe("live kill switch (VRM_CONTRACT_BLOCK_ENABLED)", () => {
     delete process.env[FLAG];
     try {
       const liveId = await insertIntent({ execution_mode: "live", ldap: `${LDAP_PREFIX}ARM`, status: "confirmed" });
-      const hidden = await claimBookingWork({ runnerId: "test-runner-arm", limit: 20 });
+      const hidden = await claimForRun({ runnerId: "test-runner-arm", intentId: liveId });
       assert.ok(!hidden.some((c) => c.intentId === liveId), "disarmed flag must hide live intents from the runner");
 
       const readyId = await insertIntent({
@@ -826,7 +899,7 @@ describe("live kill switch (VRM_CONTRACT_BLOCK_ENABLED)", () => {
       );
 
       process.env[FLAG] = "true";
-      const visible = await claimBookingWork({ runnerId: "test-runner-arm", limit: 20 });
+      const visible = await claimForRun({ runnerId: "test-runner-arm", intentId: liveId });
       assert.ok(visible.some((c) => c.intentId === liveId), "arming must resume live claims");
       // Armed confirm proceeds INTO the eligibility re-run: this fixture is
       // deliberately ineligible, so it demotes instead of 409ing.
@@ -894,7 +967,7 @@ describe("booked-unverified recovery lane", () => {
       WHERE id = ${fresh}
     `);
 
-    const items = await claimBookingWork({ runnerId: "test-runner-rcv", limit: 20 });
+    const items = await claimForRun({ runnerId: "test-runner-rcv", intentId: dead });
     const mine = items.find((i) => i.intentId === dead);
     assert.ok(mine, "booked-unverified with an expired lease must be reclaimable");
     assert.equal(mine!.kind, "book");
@@ -910,7 +983,7 @@ describe("booked-unverified recovery lane", () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}RCV4`, status: "booking" });
     await db.execute(sql`UPDATE vrm_rental_workflow_intents SET reservation_state = 'unknown' WHERE id = ${id}`);
 
-    const items = await claimBookingWork({ runnerId: "test-runner-rcv", limit: 20 });
+    const items = await claimForRun({ runnerId: "test-runner-rcv", intentId: id });
     const mine = items.find((i) => i.intentId === id);
     assert.ok(mine, "reconcile-directed booking must be claimable");
     assert.equal(mine!.requiresReconcile, true, "ambiguous outcomes must reconcile before any new booking");
@@ -1137,7 +1210,7 @@ describe("booked-unverified recovery lane", () => {
       SET lease_expires_at = now() - interval '1 minute'
       WHERE id = ${id}
     `);
-    const reclaimed = (await claimBookingWork({ runnerId: "next-result-runner", limit: 50 }))
+    const reclaimed = (await claimForRun({ runnerId: "next-result-runner", intentId: id }))
       .find((item) => item.intentId === id);
     assert.ok(reclaimed);
     assert.equal(reclaimed!.requiresReconcile, true, "the next owner must read back instead of booking again");
@@ -1163,7 +1236,7 @@ describe("booked-unverified recovery lane", () => {
       WHERE id = ${id}
     `);
 
-    const mine = (await claimBookingWork({ runnerId: "refusal-runner", limit: 20 }))
+    const mine = (await claimForRun({ runnerId: "refusal-runner", intentId: id }))
       .find((i) => i.intentId === id);
     assert.ok(mine, "a possibly-booked intent must be claimable for reconcile");
     assert.equal(mine!.requiresReconcile, true, "and it must be readback-first");
@@ -1195,7 +1268,7 @@ describe("booked-unverified recovery lane", () => {
 describe("atomic booking-attempt authorization (openBookingAttempt)", () => {
   test("active claim opens attempt 1 and renews the lease; unfinished attempt blocks a second", async () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}GATE`, status: "confirmed" });
-    const mine = (await claimBookingWork({ runnerId: "gate-runner", limit: 20 })).find((i) => i.intentId === id);
+    const mine = (await claimForRun({ runnerId: "gate-runner", intentId: id })).find((i) => i.intentId === id);
     assert.ok(mine, "claim must return the confirmed fixture");
 
     // Shrink the lease so the renewal is observable.
@@ -1218,7 +1291,7 @@ describe("atomic booking-attempt authorization (openBookingAttempt)", () => {
 
   test("a rival reclaim or an expired lease inserts NOTHING", async () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}GATE2`, status: "confirmed" });
-    const mine = (await claimBookingWork({ runnerId: "gate-r1", limit: 20 })).find((i) => i.intentId === id);
+    const mine = (await claimForRun({ runnerId: "gate-r1", intentId: id })).find((i) => i.intentId === id);
     assert.ok(mine, "claim must return the confirmed fixture");
 
     // Rival reclaims: the token moves on while gate-r1 still thinks it holds it.
@@ -1251,7 +1324,7 @@ describe("atomic booking-attempt authorization (openBookingAttempt)", () => {
 
   test("the DB itself refuses a second OPEN attempt (one-open partial unique index)", async () => {
     const id = await insertIntent({ ldap: `${LDAP_PREFIX}GATE3`, status: "confirmed" });
-    const mine = (await claimBookingWork({ runnerId: "gate-r3", limit: 20 })).find((i) => i.intentId === id);
+    const mine = (await claimForRun({ runnerId: "gate-r3", intentId: id })).find((i) => i.intentId === id);
     assert.ok(mine, "claim must return the confirmed fixture");
     const first = await openBookingAttempt(id, "gate-r3", mine!.fencingToken, {});
     assert.equal(first.attemptNo, 1);
@@ -1433,6 +1506,7 @@ describe("ART filing: kill-switch freeze + crash reconcile", () => {
     const id = await filingFixture();
     await openArtAttempt(id, 15);
     const healed = await reconcileOpenBlockAttempts({
+      ldapPrefix: LDAP_PREFIX,
       fetchRows: fakeReadback(
         [{ activity: "  VEHICLE - CHANGE ", startTime: "08:00:00", postcode: "60601-2200", snapshotTs: nowIso() }],
         nowIso(),
@@ -1474,6 +1548,7 @@ describe("ART filing: kill-switch freeze + crash reconcile", () => {
     `);
     // Stale readback so any OTHER open strands in the DB stay untouched (ambiguous).
     const healed = await reconcileOpenBlockAttempts({
+      ldapPrefix: LDAP_PREFIX,
       fetchRows: fakeReadback([], new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString()),
     });
     assert.ok(healed >= 1, "the stale claim must count as a sweep action");
@@ -1664,11 +1739,11 @@ describe("eligibility facts: Enterprise-only case binding (repair spec §1)", ()
     const surveyId = String((sv as any[])[0].id);
     await db.execute(sql`
       INSERT INTO all_techs (employee_id, tech_racfid, tech_name, employment_status, district_no, effective_date, synced_at)
-      VALUES ('990001', ${ldap}, 'ZZ Cut Elg', 'A', '8330', now(), now())
+      VALUES (${EMPLOYEE_ID}, ${ldap}, 'ZZ Cut Elg', 'A', '8330', now(), now())
     `);
     await db.execute(sql`
       INSERT INTO tpms_tech_profiles (tech_id, enterprise_id, truck_no, synced_at)
-      VALUES ('ZZT990001', ${ldap}, '61385', now())
+      VALUES (${`${RUN_ID}T`}, ${ldap}, '61385', now())
     `);
     await db.execute(sql`
       INSERT INTO fs_comms_contacts (ldap, phone, primary_state)
@@ -1682,8 +1757,8 @@ describe("eligibility facts: Enterprise-only case binding (repair spec §1)", ()
     });
     // case_key is varchar(10) in both case tables — keep fixtures short.
     for (const [key, vendor] of [
-      ["ZZCUT-ENT", "ENTERPRISE RENT A CAR"],
-      ["ZZCUT-HTZ", "HERTZ"],
+      [`${CASE_PREFIX}E`, "ENTERPRISE RENT A CAR"],
+      [`${CASE_PREFIX}H`, "HERTZ"],
     ] as const) {
       await db.execute(sql`
         INSERT INTO vrm_rental_operations_cases
@@ -1692,13 +1767,13 @@ describe("eligibility facts: Enterprise-only case binding (repair spec §1)", ()
       `);
       await db.execute(sql`
         INSERT INTO vrm_rental_identity_resolutions (case_key, state, resolved_employee_id)
-        VALUES (${key}, 'resolved', '990001')
+        VALUES (${key}, 'resolved', ${EMPLOYEE_ID})
       `);
     }
 
     const facts = await fetchEligibilityFacts({ workflowType: WORKFLOW_CUTOVER, sourceId: surveyId });
     assert.equal(facts.openCaseCount, 1, "the HERTZ case must not count — vendor filter is ENTERPRISE%");
-    assert.equal(facts.caseKey, "ZZCUT-ENT");
+    assert.equal(facts.caseKey, `${CASE_PREFIX}E`);
     assert.equal(facts.caseFacts?.ecars, "E1234567");
     assert.equal(facts.caseFacts?.rentingBranch, "DFW123");
     assert.equal(facts.tpmsTruck, "61385");
@@ -1761,7 +1836,10 @@ describe("cancel is TRUE (repair spec §4)", () => {
       // external effect is possible here: claims and readback postbacks are
       // DB-only — nothing dials ETD.
       process.env[FLAG] = "true";
-      const items = await claimBookingWork({ runnerId: "cancel-runner", limit: 50 });
+      const items = [
+        ...(await claimForRun({ runnerId: "cancel-runner", intentId: idNone })),
+        ...(await claimForRun({ runnerId: "cancel-runner", intentId: idFound })),
+      ];
       const mineNone = items.find((i) => i.intentId === idNone);
       const mineFound = items.find((i) => i.intentId === idFound);
       assert.ok(mineNone && mineFound, "cancel lane must serve cancel_pending_readback intents");
@@ -1824,7 +1902,7 @@ describe("cancel is TRUE (repair spec §4)", () => {
       await cancelIntent(id, "db-test", "tech declined");
 
       process.env[FLAG] = "true";
-      let items = await claimBookingWork({ runnerId: "cancel-runner", intentId: id });
+      let items = await claimForRun({ runnerId: "cancel-runner", intentId: id });
       let mine = items.find((i) => i.intentId === id)!;
       assert.ok(mine, "cancel lane serves the intent");
       assert.equal(mine.reservationEvidence.confirmation, null, "nothing on file yet");
@@ -1862,7 +1940,7 @@ describe("cancel is TRUE (repair spec §4)", () => {
       // Re-cancel: reservation_state is still booked_unverified → readback lane again.
       const again = await cancelIntent(id, "db-test", "cancel the hand booking");
       assert.equal(again.status, "cancel_pending_readback");
-      items = await claimBookingWork({ runnerId: "cancel-runner", intentId: id });
+      items = await claimForRun({ runnerId: "cancel-runner", intentId: id });
       mine = items.find((i) => i.intentId === id)!;
       assert.equal(mine.reservationEvidence.confirmation, "HAND77",
         "the claim serves the attached confirmation — without this the runner could never search on it");
@@ -2056,50 +2134,52 @@ describe("msg2 morning release gates (repair spec §7)", () => {
   });
 
   test("quiet-exception state (TX): blocked without a persisted policy; skip_msg2 policy skips", async () => {
-    const prior = ((await db.execute(sql`
-      SELECT value, updated_by FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}
-    `)).rows as any[])[0] ?? null;
-    try {
-      const ldap = `${LDAP_PREFIX}M2Q`;
-      const { rows: sv } = await db.execute(sql`
-        INSERT INTO vrm_rental_tech_survey (ldap, tech_name, has_rental, van_status)
-        VALUES (${ldap}, 'ZZ Quiet TX', true, 'in_shop')
-        RETURNING id
-      `);
-      const surveyId = String((sv as any[])[0].id);
-      await db.execute(sql`
-        INSERT INTO fs_comms_contacts (ldap, phone, primary_state) VALUES (${ldap}, '2145550101', 'TX')
-      `);
-      const id = await msg2Fixture(ldap, { source_id: surveyId });
-      await stageGuard(id);
-      // Event day in the RECIPIENT's timezone (TX → America/Chicago).
-      await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(0, "America/Chicago")} WHERE id = ${id}`);
-
-      await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
-      assert.equal(await getQuietStateFallback(), null);
-      assert.equal(await releaseMsg2IfDue(id), "blocked", "exception state without a persisted operator choice must hold");
-      let row = ((await db.execute(sql`
-        SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
-      `)).rows as any[])[0];
-      assert.equal(row.msg2_state, "held");
-      assert.match(String(row.last_error), /no fallback policy/);
-
-      await setQuietStateFallback("skip_msg2", "db-test");
-      assert.equal(await releaseMsg2IfDue(id), "skipped_policy");
-      assert.equal(await guardStatus(id), "skipped_policy");
-      row = ((await db.execute(sql`
-        SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
-      `)).rows as any[])[0];
-      assert.equal(row.msg2_state, "released");
-      assert.match(String(row.last_error), /skip_msg2/);
-    } finally {
-      await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
-      if (prior) {
-        await db.execute(sql`
-          INSERT INTO app_settings (key, value, updated_by, updated_at)
-          VALUES (${QUIET_FALLBACK_SETTING_KEY}, ${JSON.stringify(prior.value)}::jsonb, ${prior.updated_by ?? null}, now())
+    await withCrossProcessLock("vrm-cutover-quiet-fallback-db-test", async () => {
+      const prior = ((await db.execute(sql`
+        SELECT value, updated_by FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}
+      `)).rows as any[])[0] ?? null;
+      try {
+        const ldap = `${LDAP_PREFIX}M2Q`;
+        const { rows: sv } = await db.execute(sql`
+          INSERT INTO vrm_rental_tech_survey (ldap, tech_name, has_rental, van_status)
+          VALUES (${ldap}, 'ZZ Quiet TX', true, 'in_shop')
+          RETURNING id
         `);
+        const surveyId = String((sv as any[])[0].id);
+        await db.execute(sql`
+          INSERT INTO fs_comms_contacts (ldap, phone, primary_state) VALUES (${ldap}, '2145550101', 'TX')
+        `);
+        const id = await msg2Fixture(ldap, { source_id: surveyId });
+        await stageGuard(id);
+        // Event day in the RECIPIENT's timezone (TX → America/Chicago).
+        await db.execute(sql`UPDATE vrm_rental_workflow_intents SET event_date = ${localISO(0, "America/Chicago")} WHERE id = ${id}`);
+
+        await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
+        assert.equal(await getQuietStateFallback(), null);
+        assert.equal(await releaseMsg2IfDue(id), "blocked", "exception state without a persisted operator choice must hold");
+        let row = ((await db.execute(sql`
+          SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+        `)).rows as any[])[0];
+        assert.equal(row.msg2_state, "held");
+        assert.match(String(row.last_error), /no fallback policy/);
+
+        await setQuietStateFallback("skip_msg2", "db-test");
+        assert.equal(await releaseMsg2IfDue(id), "skipped_policy");
+        assert.equal(await guardStatus(id), "skipped_policy");
+        row = ((await db.execute(sql`
+          SELECT msg2_state, last_error FROM vrm_rental_workflow_intents WHERE id = ${id}
+        `)).rows as any[])[0];
+        assert.equal(row.msg2_state, "released");
+        assert.match(String(row.last_error), /skip_msg2/);
+      } finally {
+        await db.execute(sql`DELETE FROM app_settings WHERE key = ${QUIET_FALLBACK_SETTING_KEY}`);
+        if (prior) {
+          await db.execute(sql`
+            INSERT INTO app_settings (key, value, updated_by, updated_at)
+            VALUES (${QUIET_FALLBACK_SETTING_KEY}, ${JSON.stringify(prior.value)}::jsonb, ${prior.updated_by ?? null}, now())
+          `);
+        }
       }
-    }
+    });
   });
 });

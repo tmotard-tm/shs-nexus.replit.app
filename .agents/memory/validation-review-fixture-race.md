@@ -21,6 +21,19 @@ you look) — the churn came from the reviewer re-running fixture suites. Fix th
 suite's tolerance, not the fixtures. ZZ* is the reserved synthetic-key prefix
 (ZZANC*, ZZPROBE*); new DB fixtures should keep using it so the scrub keeps working.
 
+For DB-backed workflow suites, put the random run namespace immediately after `ZZ`
+rather than after a stable suite stem. Cleanup and every global claim/recovery sweep
+must accept that exact namespace; broad application sweeps must exclude reserved `ZZ`
+identities. Exact-ID operations are already isolated and may still serve fixtures.
+
+**Why:** A unique suffix such as `ZZEXEC<run>` is still inside an older runner's
+`ZZEXEC%` cleanup scope, and per-row cleanup alone does not stop a global queue or
+recovery sweep from leasing or settling another run's rows.
+
+**How to apply:** Use an alphanumeric, schema-length-safe `ZZ<random><suite>` prefix,
+validate it before composing a SQL `LIKE`, scope test sweeps to it, and repeatedly run
+the DB suites as separate parallel processes.
+
 ## Restart-all suite flakes (same family)
 
 Restarting the app workflow re-fires every test workflow simultaneously.

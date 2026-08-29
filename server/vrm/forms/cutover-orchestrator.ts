@@ -2292,6 +2292,20 @@ export type QueueItem = {
   preview: any | null;
 };
 
+function normalizeFixtureLdapPrefix(prefix: string): string {
+  const normalized = prefix.trim().toUpperCase();
+  // ZZ is the repository-wide synthetic identity marker. A runnable fixture
+  // namespace is ZZ + 8 random hex chars + a suite marker (E/C/L), optionally
+  // followed by a narrow alphanumeric sub-scope such as LANE or SCOPE.
+  if (!/^ZZ[0-9A-F]{8}[ECL][A-Z0-9]{0,7}$/.test(normalized)) {
+    throw new OrchestratorError(
+      "bad_fixture_scope",
+      "ldapPrefix must be a complete generated ZZ fixture namespace",
+      400,
+    );
+  }
+  return normalized;
+}
 /**
  * Atomically claim work for the Python runner. CAS per intent: free/expired
  * lease only, fencing token incremented on every (re)claim, RETURNING the
@@ -2302,6 +2316,13 @@ export async function claimBookingWork(params: {
   runnerId: string;
   limit?: number;
   workflowType?: string;
+  /**
+   * Optional queue namespace used by DB-backed checks that share one database.
+   * Broad production drains omit it and never claim the repository's
+   * ZZ-prefixed test identities. An exact intentId remains claimable because
+   * that selector is already isolated.
+   */
+  ldapPrefix?: string;
   /**
    * Narrow the claim to ONE intent. Used by the in-server executor when a staff
    * click should serve exactly the intent that was just created or confirmed,
@@ -2319,6 +2340,12 @@ export async function claimBookingWork(params: {
   const items: QueueItem[] = [];
   const typeFilter = params.workflowType ? sql`AND workflow_type = ${params.workflowType}` : sql``;
   const idFilter = params.intentId ? sql`AND id = ${params.intentId}` : sql``;
+  const fixturePrefix = params.ldapPrefix ? normalizeFixtureLdapPrefix(params.ldapPrefix) : null;
+  const ldapFilter = fixturePrefix
+    ? sql`AND upper(ldap) LIKE ${fixturePrefix + "%"}`
+    : params.intentId
+      ? sql``
+      : sql`AND upper(ldap) NOT LIKE 'ZZ%'`;
   // Master kill switch: while the flag is disarmed, live intents are invisible
   // to the runner. Re-arming resumes them exactly where they stood.
   const liveArmed = isContractBlockLive();
@@ -2363,6 +2390,7 @@ export async function claimBookingWork(params: {
         WHERE ${statusPredicate}
           ${typeFilter}
           ${idFilter}
+          ${ldapFilter}
           AND (execution_mode <> 'live' OR ${liveArmed}::boolean)
           AND (claimed_by IS NULL OR lease_expires_at IS NULL OR lease_expires_at < now())
           AND (next_retry_at IS NULL OR next_retry_at <= now())
@@ -3722,6 +3750,8 @@ export async function recordBookingPostback(params: {
 export type BlockReconcileDeps = {
   /** Injectable readback source (tests); defaults to the live ART snapshot. */
   fetchRows?: typeof fetchBlockReadbackRows;
+  /** Restrict a DB-backed fixture sweep to one validated ZZ namespace. */
+  ldapPrefix?: string;
   /** Test seam: runs between the filing-claim CAS and the attempt-ledger
    *  INSERT — the window where a concurrent open trips the one-open index. */
   beforeAttemptInsert?: () => Promise<void>;
@@ -3925,11 +3955,16 @@ export async function reconcileOpenBlockAttempt(
 
 /** Sweep lane: reconcile every stranded open art_block attempt (crash recovery). */
 export async function reconcileOpenBlockAttempts(deps?: BlockReconcileDeps): Promise<number> {
+  const fixturePrefix = deps?.ldapPrefix ? normalizeFixtureLdapPrefix(deps.ldapPrefix) : null;
+  const ldapFilter = fixturePrefix
+    ? sql`AND upper(i.ldap) LIKE ${fixturePrefix + "%"}`
+    : sql`AND upper(i.ldap) NOT LIKE 'ZZ%'`;
   const { rows } = await db.execute(sql`
     SELECT DISTINCT i.id FROM vrm_rental_workflow_intents i
     JOIN vrm_workflow_attempts a
       ON a.intent_id = i.id AND a.phase = 'art_block' AND a.outcome IS NULL
     WHERE i.status NOT IN ('completed','cancelled','abandoned')
+      ${ldapFilter}
     ORDER BY i.id
     LIMIT 20
   `);
@@ -3951,6 +3986,7 @@ export async function reconcileOpenBlockAttempts(deps?: BlockReconcileDeps): Pro
     SET block_state = 'retry', next_retry_at = now(), updated_at = now(),
         last_error = 'filing claim interrupted before any attempt was recorded; re-parked'
     WHERE i.block_state = 'filing'
+      ${ldapFilter}
       AND i.updated_at < now() - interval '10 minutes'
       AND i.status NOT IN ('completed','cancelled','abandoned')
       AND NOT EXISTS (

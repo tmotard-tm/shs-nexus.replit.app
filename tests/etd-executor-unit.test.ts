@@ -16,10 +16,10 @@
  * The orchestrator's own server-side schedule re-check (a real Snowflake-backed read,
  * NOT the executor's injected one) is CUTOVER-ONLY at every home — preview, confirm
  * and op_open. Request fixtures therefore pass through it untouched even though
- * ZZEXEC ldaps have no Snowflake schedule; the preview assertions are still written
+ * ZZ fixture ldaps have no Snowflake schedule; the preview assertions are still written
  * against the RUNNER-owned failure codes so they cannot pass for the wrong reason.
  *
- * All fixtures use ZZEXEC* ldaps and are deleted in before()/after().
+ * Every process gets its own ZZ<run>E namespace and deletes only that namespace.
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -59,7 +59,10 @@ import { safeErrorText, rejectionMessage, rejectionReasons, EtdClient as EtdClie
 import { useAccountAdditionalInfo, assertAdditionalInfoComplete } from "../server/vrm/etd/surgery";
 import type { EtdClient, CarClass } from "../server/vrm/etd/client";
 
-const LDAP_PREFIX = "ZZEXEC";
+const RUN_ID = crypto.randomBytes(4).toString("hex").toUpperCase();
+const LDAP_PREFIX = `ZZ${RUN_ID}E`;
+const EMPLOYEE_PREFIX = crypto.randomBytes(4).toString("hex").toUpperCase();
+let eligibilitySeq = 0;
 
 // --------------------------------------------------------------------- fakes
 
@@ -213,13 +216,14 @@ async function cleanup() {
  * test would pass for the wrong reason.
  */
 async function seedEligibility(ldap: string) {
+  const fixtureNo = String(++eligibilitySeq).padStart(3, "0");
   await db.execute(sql`
     INSERT INTO all_techs (employee_id, tech_racfid, tech_name, employment_status, district_no, effective_date, synced_at)
-    VALUES (${"99" + Math.floor(Math.random() * 1e6)}, ${ldap}, 'ZZ Exec Fixture', 'A', '8330', now(), now())
+    VALUES (${`${EMPLOYEE_PREFIX}${fixtureNo}`}, ${ldap}, 'ZZ Exec Fixture', 'A', '8330', now(), now())
   `);
   await db.execute(sql`
     INSERT INTO tpms_tech_profiles (tech_id, enterprise_id, truck_no, synced_at)
-    VALUES (${"ZZX" + Math.floor(Math.random() * 1e6)}, ${ldap}, '012345', now())
+    VALUES (${`${RUN_ID}T${fixtureNo}`}, ${ldap}, '012345', now())
   `);
   await db.execute(sql`
     INSERT INTO fs_comms_contacts (ldap, phone, primary_state) VALUES (${ldap}, '2145550142', 'OH')
@@ -818,6 +822,14 @@ describe("preview lane", () => {
       deps: { client, schedule: fakeSchedule() },
     });
 
+    if (!run.results[0]) {
+      const { rows } = await db.execute(sql`
+        SELECT status, claimed_by, lease_expires_at, fencing_token
+        FROM vrm_rental_workflow_intents
+        WHERE id = ${intentId}
+      `);
+      assert.fail(`DUR intent was not processed: ${JSON.stringify((rows as any[])[0] ?? null)}`);
+    }
     assert.equal(run.results[0].status, "preview_ready", "the three-day inventory rescues the preview");
     assert.deepEqual(quotes.map(quoteDays), [14, 7, 3], "only the documented duration ladder is tried");
     assert.deepEqual(
@@ -1326,7 +1338,11 @@ describe("booking lane", () => {
     const c = await makeRequestIntent({
       ldap: `${LDAP_PREFIX}LANEC`, status: "confirmed", preview: preview(),
     });
-    const claimed = await claimBookingWork({ runnerId: "test-limit", limit: 2 });
+    const claimed = await claimBookingWork({
+      runnerId: `test-limit-${RUN_ID}`,
+      limit: 2,
+      ldapPrefix: `${LDAP_PREFIX}LANE`,
+    });
     const summary = JSON.stringify(claimed.map((i) => ({ id: i.intentId, kind: i.kind, ldap: i.ldap })));
     const mine = claimed.filter((i) => [a.intentId, b.intentId, c.intentId].includes(i.intentId));
     assert.ok(claimed.length <= 2, `claimed ${claimed.length} with limit 2: ${summary}`);

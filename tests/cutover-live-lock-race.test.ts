@@ -17,9 +17,7 @@
  * createIntent's insert is the only external effect at creation time — no
  * ETD, no ART, no Twilio runs until preview/booking.
  *
- * Fixtures use ZZLLK* ldaps (distinct from the ZZEXT / ZZTOKX / ZZCUT
- * prefixes used by the sibling suites sharing this dev database) and are
- * deleted before/after.
+ * Every process gets its own ZZ<run>L namespace and deletes only that namespace.
  */
 import { test, describe, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -35,7 +33,9 @@ import {
 } from "../server/vrm/forms/cutover-orchestrator";
 import * as cutoverOrchestrator from "../server/vrm/forms/cutover-orchestrator";
 
-const LDAP_PREFIX = "ZZLLK";
+const RUN_ID = crypto.randomBytes(4).toString("hex").toUpperCase();
+const LDAP_PREFIX = `ZZ${RUN_ID}L`;
+const EMPLOYEE_PREFIX = crypto.randomBytes(4).toString("hex").toUpperCase();
 const FLAG = "VRM_CONTRACT_BLOCK_ENABLED";
 
 let savedFlag: string | undefined;
@@ -167,7 +167,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
     await seedBookingAttempt(ambiguousId, "timeout");
 
     const sourceLdap = `${LDAP_PREFIX}A4`;
-    const sourceNo = await seedEligibleRequest(sourceLdap, "ZZ730A4");
+    const sourceNo = await seedEligibleRequest(sourceLdap, `${EMPLOYEE_PREFIX}E1`);
     const sourceIntent = await createIntent({
       workflowType: WORKFLOW_REQUEST,
       sourceId: String(sourceNo),
@@ -258,7 +258,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
 
   test("control: the fixture passes the full eligibility gate and creates a LIVE intent", async () => {
     const ldap = `${LDAP_PREFIX}C1`;
-    const no = await seedEligibleRequest(ldap, "ZZ731C1");
+    const no = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}E2`);
 
     const { intent, created } = await createIntent({
       workflowType: WORKFLOW_REQUEST,
@@ -273,7 +273,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
 
   test("an orphan with pending reservation state and no attempts is abandoned before the replacement intent is created", async () => {
     const ldap = `${LDAP_PREFIX}R1`;
-    const no = await seedEligibleRequest(ldap, "ZZ731R1");
+    const no = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}E3`);
     const orphanId = await seedOrphanLiveIntent(ldap);
     assert.equal(await intentCountFor(ldap), 1);
 
@@ -295,7 +295,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
   test("an orphan with an open or unknown booking attempt fails closed for manual review", async () => {
     for (const [suffix, outcome] of [["O", null], ["U", "timeout"]] as const) {
       const ldap = `${LDAP_PREFIX}R2${suffix}`;
-      const no = await seedEligibleRequest(ldap, `ZZ732${suffix}`);
+      const no = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}${suffix}`);
       const orphanId = await seedOrphanLiveIntent(ldap);
       await seedBookingAttempt(orphanId, outcome);
 
@@ -324,7 +324,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
 
   test("a legitimate active prior request is never mistaken for an orphan", async () => {
     const ldap = `${LDAP_PREFIX}R3`;
-    const priorNo = await seedEligibleRequest(ldap, "ZZ733A");
+    const priorNo = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}E4`);
     const prior = await createIntent({
       workflowType: WORKFLOW_REQUEST,
       sourceId: String(priorNo),
@@ -336,7 +336,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
     await db.execute(sql`
       UPDATE vrm_rental_request SET status = 'returned' WHERE request_no = ${priorNo}
     `);
-    const nextNo = await seedEligibleRequest(ldap, "ZZ733B");
+    const nextNo = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}E5`);
 
     await assert.rejects(
       () =>
@@ -363,7 +363,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
 
   test("UUID-backed request intents block while their source exists and reclaim only after it is deleted", async () => {
     const ldap = `${LDAP_PREFIX}R4`;
-    const priorNo = await seedEligibleRequest(ldap, "ZZ734A");
+    const priorNo = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}E6`);
     const priorId = await requestIdFor(priorNo);
     const prior = await createIntent({
       workflowType: WORKFLOW_REQUEST,
@@ -374,7 +374,7 @@ describe("deleted-request live-lock recovery in createIntent", () => {
     await db.execute(sql`
       UPDATE vrm_rental_request SET status = 'returned' WHERE request_no = ${priorNo}
     `);
-    const nextNo = await seedEligibleRequest(ldap, "ZZ734B");
+    const nextNo = await seedEligibleRequest(ldap, `${EMPLOYEE_PREFIX}E7`);
 
     await assert.rejects(
       () =>
