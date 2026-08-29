@@ -262,9 +262,9 @@ test("aggregate preview codes explain that the submitted branch could not be quo
     NOW,
   );
   assert.equal(s.verdict, "failed");
-  assert.match(s.summary, /selected Enterprise branch.*could not be quoted/i);
-  assert.match(s.summary, /full street address, city, state, and ZIP/i);
-  assert.ok(s.actions.includes("open_workflow"));
+  assert.match(s.summary, /not a valid Enterprise branch/i);
+  assert.match(s.summary, /choose a valid Enterprise location/i);
+  assert.ok(s.actions.includes("edit_branch"));
 });
 
 test("failed intent (preview_failed) under an approved row reads failed with a fix", () => {

@@ -28,6 +28,7 @@ export type BookingVerdict =
 export type BookingActionKind =
   | "edit_class"      // jump to the vehicle-class editor
   | "edit_pickup"     // jump to the pickup date field
+  | "edit_branch"     // jump to Fleet's Enterprise branch override
   | "open_workflow"   // expand + scroll to the workflow panel
   | "resend_extension_email"; // POST /rental-request/:no/extension-email
 
@@ -197,15 +198,23 @@ export function explainBookingFailure(raw: string | null | undefined): FailureEx
       actions: ["open_workflow"],
     };
   }
+  if ((m = /reported branch\s*\(["']?([^)"']+)["']?\)\s*names no location/i.exec(inner))) {
+    return {
+      summary:
+        `${m[1]} is not a valid Enterprise branch. ` +
+        "Choose a valid Enterprise location in Fleet branch, including its full street address, city, state, and ZIP, then approve again.",
+      actions: ["edit_branch"],
+    };
+  }
   if (
     /\bquote_failed\b/i.test(inner)
     && /\bbranch_zip_missing\b/i.test(inner)
   ) {
     return {
       summary:
-        "The technician's selected Enterprise branch could not be quoted. " +
-        "Enter the full street address, city, state, and ZIP in Fleet branch, then open the booking workflow and retry.",
-      actions: ["open_workflow"],
+        "The submitted location is not a valid Enterprise branch. " +
+        "Choose a valid Enterprise location in Fleet branch, including its full street address, city, state, and ZIP, then approve again.",
+      actions: ["edit_branch"],
     };
   }
   if (/manual_review/i.test(inner)) {

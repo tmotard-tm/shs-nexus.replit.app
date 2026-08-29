@@ -153,11 +153,12 @@ g.fetch = dom.window.fetch = (async (input: any, init?: any) => {
       await new Promise<void>((resolve) => { releaseHeldDecision = resolve; });
       releaseHeldDecision = null;
     }
+    const acceptedAt = new Date().toISOString();
     return json({
       ok: true,
       decision: "APPROVE",
-      decidedAt: "2026-08-29T13:30:00.000Z",
-      updatedAt: "2026-08-29T13:30:00.000Z",
+      decidedAt: acceptedAt,
+      updatedAt: acceptedAt,
     });
   }
   if (p.endsWith("/rental-request/list")) {
@@ -335,6 +336,26 @@ test("Approve immediately says it is submitting, then says the booking is runnin
   assert.equal(decideCalls.length, 1, "a second click cannot submit another approval");
 });
 
+test("retry submission hides the previous failure until the new approval is accepted", async () => {
+  decideCalls.length = 0;
+  holdNextDecision = true;
+  await renderPage();
+  const drawer = await openDrawer(901);
+  const bar = drawer.querySelector('[data-testid="booking-action-bar"]');
+  const approve = buttons(drawer).find((b) => b.textContent === "APPROVE");
+  assert.ok(bar && approve);
+
+  await act(async () => { approve!.click(); });
+  await waitFor("the held retry POST", () => decideCalls.length === 1);
+  assert.match(bar!.textContent!, /Submitting approval/i);
+  assert.doesNotMatch(bar!.textContent!, /Booking failed|CFAR/i,
+    "the prior attempt must not compete with the new submission signal");
+
+  await act(async () => { releaseHeldDecision?.(); });
+  await waitFor("the retry to be accepted", () =>
+    /APPROVAL ACCEPTED.*BOOKING IS RUNNING/i.test(bar!.textContent ?? ""));
+});
+
 test("a stale pre-approval list response cannot resurrect the previous booking failure", async () => {
   decideCalls.length = 0;
   await renderPage();
@@ -350,6 +371,33 @@ test("a stale pre-approval list response cannot resurrect the previous booking f
   assert.equal(approve!.disabled, true);
 });
 
+test("an accepted approval stays locked through a pending no-signal poll", async () => {
+  decideCalls.length = 0;
+  await renderPage();
+  const drawer = await openDrawer(907);
+  const approve = buttons(drawer).find((b) => b.textContent === "APPROVE");
+  const bar = drawer.querySelector('[data-testid="booking-action-bar"]');
+  assert.ok(approve && bar);
+
+  await act(async () => { approve!.click(); });
+  await waitFor("the accepted booking notice", () =>
+    /APPROVAL ACCEPTED.*BOOKING IS RUNNING/i.test(bar!.textContent ?? ""));
+
+  rowOverrides.set(907, {
+    status: "pending",
+    decided_at: null,
+    updated_at: new Date(Date.now() + 60_000).toISOString(),
+    etd_error: null,
+    tech_reported_branch: "POLL APPLIED",
+  });
+  await waitFor("the pending poll to replace the row snapshot", () =>
+    /POLL APPLIED/.test(drawer.textContent ?? ""), 5_000);
+
+  assert.match(bar!.textContent!, /APPROVAL ACCEPTED.*BOOKING IS RUNNING/i);
+  assert.equal(approve!.disabled, true,
+    "none is not terminal evidence and cannot release the accepted-operation lock");
+});
+
 test("a newer server-written booking failure replaces the local running state", async () => {
   decideCalls.length = 0;
   await renderPage();
@@ -363,8 +411,8 @@ test("a newer server-written booking failure replaces the local running state", 
 
   rowOverrides.set(907, {
     status: "pending",
-    decided_at: "2026-08-29T13:30:00.000Z",
-    updated_at: "2026-08-29T13:31:00.000Z",
+    decided_at: new Date().toISOString(),
+    updated_at: new Date(Date.now() + 60_000).toISOString(),
     etd_error: "runner abort: could not create an ETD user for ZZDRW01: Unable to save the user",
   });
 
@@ -372,6 +420,42 @@ test("a newer server-written booking failure replaces the local running state", 
     /could not create a driver profile for ZZDRW01/i.test(drawer.textContent ?? ""), 5_000);
   assert.equal(approve!.disabled, false,
     "a fresh terminal failure releases the local in-progress lock for correction");
+});
+
+test("the pinned action bar carries the complete booking result without scrolling", async () => {
+  await renderPage();
+
+  const failedDrawer = await openDrawer(901);
+  const failedBar = failedDrawer.querySelector('[data-testid="booking-action-bar"]');
+  assert.ok(failedBar, "the pinned action bar is identifiable");
+  assert.match(failedBar!.textContent!, /Booking failed/i);
+  assert.match(failedBar!.textContent!, /vehicle class CFAR is no longer offered/i);
+  assert.ok(buttons(failedBar as HTMLElement).some((b) => b.textContent === "Pick a different class"),
+    "the relevant corrective action stays beside Approve");
+  await closeDrawer(901);
+
+  const bookedDrawer = await openDrawer(902);
+  const bookedBar = bookedDrawer.querySelector('[data-testid="booking-action-bar"]');
+  assert.match(bookedBar?.textContent ?? "", /Booked — confirmation SHS123456/i,
+    "the confirmation stays beside the action area");
+  await closeDrawer(902);
+});
+
+test("an invalid submitted location explains the Enterprise branch correction beside Approve", async () => {
+  rowOverrides.set(907, {
+    status: "approved",
+    decided_at: hourAgo,
+    tech_reported_branch: "Hertz Rental",
+    etd_error: "preview: quote_failed,class_unmapped,branch_zip_missing,no_date the technician's reported branch (\"Hertz Rental\") names no location - no street number, ZIP or state",
+  });
+  await renderPage();
+  const drawer = await openDrawer(907);
+  const bar = drawer.querySelector('[data-testid="booking-action-bar"]');
+  assert.ok(bar, "the pinned action bar");
+  assert.match(bar!.textContent!, /Hertz Rental.*not a valid Enterprise branch/i);
+  assert.match(bar!.textContent!, /choose a valid Enterprise location/i);
+  assert.ok(buttons(bar as HTMLElement).some((b) => b.textContent === "Choose Enterprise branch"),
+    "the correction jumps straight to Fleet branch rather than a hidden workflow");
 });
 
 test("failed booking: one consolidated card, plain language, quick action, raw error collapsed", async () => {

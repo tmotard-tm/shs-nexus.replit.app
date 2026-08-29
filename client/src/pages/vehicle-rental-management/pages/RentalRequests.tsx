@@ -11,6 +11,7 @@
  * row click opens the detail drawer, CSV of the filtered and sorted view.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode, type Ref } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, ArrowDown, ArrowUpDown, CalendarDays, ChevronRight, Search, Download, X } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
@@ -561,8 +562,10 @@ export default function RentalRequests() {
   const [quickMsg, setQuickMsg] = useState<{ text: string; bad: boolean } | null>(null);
   const classBoxRef = useRef<HTMLDivElement>(null);
   const pickupInputRef = useRef<HTMLInputElement>(null);
+  const branchInputRef = useRef<HTMLInputElement>(null);
   const workflowRef = useRef<HTMLDivElement>(null);
   const sendBackRef = useRef<HTMLDivElement>(null);
+  const [bookingActionBarEl, setBookingActionBarEl] = useState<HTMLDivElement | null>(null);
   // The approval SMS the technician will receive. Server-rendered default,
   // editable in place; `smsEdited` pins the approver's words against the
   // refresh that follows a pickup-date change. New requests only — an
@@ -968,6 +971,10 @@ export default function RentalRequests() {
   const jumpToPickup = () => {
     pickupInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
     pickupInputRef.current?.focus();
+  };
+  const jumpToBranch = () => {
+    branchInputRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    branchInputRef.current?.focus();
   };
 
   const filtered = useMemo(() => {
@@ -1522,7 +1529,11 @@ export default function RentalRequests() {
                 plain language, with the matching corrective action right
                 here. The raw machine text lives in the collapsed technical
                 expander; the workflow panel below repeats none of it. */}
-            {bookingSt && bookingSt.verdict !== "none" && (() => {
+            {bookingActionBarEl
+              && approvalSubmittingFor !== detail.request_no
+              && bookingSt
+              && bookingSt.verdict !== "none"
+              && createPortal((() => {
               const TONE: Record<string, [string, string]> = {
                 booked: [colors.green, colors.greenLight],
                 extension_approved: [colors.green, colors.greenLight],
@@ -1538,6 +1549,7 @@ export default function RentalRequests() {
                 edit_class: { label: "Pick a different class", onClick: jumpToClass,
                               show: !isExt(detail) && ["pending", "approved"].includes(detail.status) },
                 edit_pickup: { label: "Change pickup date", onClick: jumpToPickup, show: !isExt(detail) },
+                edit_branch: { label: "Choose Enterprise branch", onClick: jumpToBranch, show: !isExt(detail) },
                 open_workflow: { label: "Open the booking workflow", onClick: openWorkflowSection, show: !isExt(detail) },
                 resend_extension_email: {
                   label: "Resend the Enterprise email", onClick: () => quickResendExtEmail(detail.request_no),
@@ -1555,7 +1567,9 @@ export default function RentalRequests() {
               return (
                 <div style={{ background: bg, border: `1px solid ${fg}`, borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
                   <div style={{ fontFamily: fonts.syne, fontSize: 13, fontWeight: 700, color: fg, textTransform: "uppercase" }}>
-                    {bookingSt.headline}
+                    {acceptedBookingRunning && bookingSt.verdict === "in_progress"
+                      ? "Approval accepted — booking is running"
+                      : bookingSt.headline}
                   </div>
                   {bookingSt.verdict === "booked" ? (
                     <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, marginTop: 3 }}>
@@ -1628,7 +1642,7 @@ export default function RentalRequests() {
                   )}
                 </div>
               );
-            })()}
+            })(), bookingActionBarEl)}
 
             {/* Profitability factors — same factors the new-rentals check
                 uses, always in view. */}
@@ -2139,7 +2153,7 @@ export default function RentalRequests() {
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                   Fleet branch
                 </span>
-                <input type="text" value={approvedBranch}
+                <input type="text" value={approvedBranch} ref={branchInputRef}
                        onChange={(e) => setApprovedBranch(e.target.value)}
                        placeholder={detail.tech_reported_branch || "Street, city, state. Overrides every guard."}
                        style={{ ...ctrl, flex: 1 }} />
@@ -2354,7 +2368,8 @@ export default function RentalRequests() {
             {/* Pinned action bar — the decision is always one glance away,
                 never at the bottom of a long scroll. Same buttons, same
                 gate, same mutation as before the restructure. */}
-            <div style={{ flexShrink: 0, borderTop: `1px solid ${colors.rule}`, background: colors.surface, padding: "10px 20px 12px" }}>
+            <div data-testid="booking-action-bar"
+                 style={{ flexShrink: 0, borderTop: `1px solid ${colors.rule}`, background: colors.surface, padding: "10px 20px 12px" }}>
               {approvalSubmittingFor === detail.request_no && (
                 <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.accent, margin: "0 0 8px", fontWeight: 600 }}>
                   Submitting approval…
@@ -2362,11 +2377,13 @@ export default function RentalRequests() {
               )}
               {approvalSubmittingFor !== detail.request_no
                 && acceptedBookingRunning
+                && (!bookingSt || bookingSt.verdict === "none")
                 && (
                   <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.accent, margin: "0 0 8px", fontWeight: 600 }}>
-                    Approval accepted — booking is running. Enterprise can take up to 90 seconds; the confirmation or blocker will appear above.
+                    Approval accepted — booking is running. Enterprise can take up to 90 seconds; the confirmation or blocker will appear here.
                   </p>
                 )}
+              <div ref={setBookingActionBarEl} />
               {actionErr && <p style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, margin: "0 0 8px" }}>{actionErr}</p>}
               <div style={{ display: "flex", gap: 8 }}>
                 {(["APPROVE", "DENY", "DEFER"] as const).filter((d) => {
