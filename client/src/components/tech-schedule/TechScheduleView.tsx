@@ -12,7 +12,7 @@
  * makes this component safe to drop on a non-VRM page too.
  */
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CalendarDays, CalendarOff, Loader2, Truck, X } from "lucide-react";
 
@@ -80,6 +80,20 @@ export function addDaysISO(iso: string, days: number): string {
 export function startOfWeekISO(iso: string): string {
   const dow = new Date(`${iso}T00:00:00Z`).getUTCDay(); // 0 = Sunday
   return addDaysISO(iso, dow === 0 ? -6 : 1 - dow);
+}
+
+export function getTechScheduleWindow({
+  startDate,
+  weeks,
+  exactStart = false,
+}: {
+  startDate: string;
+  weeks: number;
+  exactStart?: boolean;
+}): { start: string; end: string; days: number } {
+  const days = weeks * 7;
+  const start = exactStart ? startDate : startOfWeekISO(startDate);
+  return { start, end: addDaysISO(start, days - 1), days };
 }
 
 export function todayET(): string {
@@ -305,6 +319,8 @@ export interface TechScheduleViewProps {
   weeks?: number;
   /** First day of the first week. Defaults to the week containing `highlightDate`, else this week. */
   startDate?: string | null;
+  /** Start on startDate exactly instead of anchoring the range to Monday. */
+  exactStart?: boolean;
   /** Hide the identity header when the host already shows the technician. */
   hideHeader?: boolean;
 }
@@ -315,6 +331,7 @@ export function TechScheduleView({
   highlightDate,
   weeks = 2,
   startDate,
+  exactStart = false,
   hideHeader = false,
 }: TechScheduleViewProps) {
   const normalizedLdap = (ldap || "").trim().toUpperCase();
@@ -322,11 +339,11 @@ export function TechScheduleView({
   // todayET() is read inside the memo, so it must also be a dependency or a
   // tab left open across midnight keeps rendering last week.
   const today = todayET();
-  const start = useMemo(
-    () => startOfWeekISO(startDate || highlightDate || today),
-    [startDate, highlightDate, today],
+  const window = useMemo(
+    () => getTechScheduleWindow({ startDate: startDate || highlightDate || today, weeks, exactStart }),
+    [startDate, highlightDate, today, weeks, exactStart],
   );
-  const end = useMemo(() => addDaysISO(start, weeks * 7 - 1), [start, weeks]);
+  const { start, end } = window;
 
   const { data, isLoading, error } = useTechSchedule(normalizedLdap, start, end);
 
@@ -496,7 +513,11 @@ export function TechScheduleView({
               gap: 6,
             }}
           >
-            {DOW.map((d) => (
+            {Array.from({ length: 7 }, (_, i) =>
+              exactStart
+                ? DOW[(new Date(`${addDaysISO(start, i)}T00:00:00Z`).getUTCDay() + 6) % 7]
+                : DOW[i],
+            ).map((d) => (
               <div
                 key={d}
                 style={{

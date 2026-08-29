@@ -40,6 +40,7 @@ import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership, isBYOV } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, fetchZipCoords, haversineDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
 import { LicensePlate } from "@/components/license-plate";
+import { TechnicianScheduleHoverCard } from "@/components/tech-schedule/TechnicianScheduleHoverCard";
 
 interface FleetVehiclesResponse {
   success: boolean;
@@ -212,8 +213,12 @@ function MismatchAssignmentSection({
         </div>
       ) : techId ? (
         <>
-          <p className="text-xs font-medium leading-tight flex items-center gap-1">
-            <span className="truncate">{techName || techId}</span>
+          <p className="text-xs font-medium leading-tight flex items-center gap-1 min-w-0">
+            <TechnicianScheduleHoverCard
+              ldap={techId}
+              name={techName || techId}
+              className="truncate"
+            />
             <TechStatusBadge status={getTechStatus(techId)} />
           </p>
           <p className="text-xs text-muted-foreground font-mono leading-tight">{techId}</p>
@@ -248,8 +253,12 @@ function MismatchAssignmentSection({
           </div>
           {vehicle.tpmsAssignedTechId?.trim() ? (
             <>
-              <p className="text-xs font-medium leading-tight flex items-center gap-1">
-                <span className="truncate">{vehicle.tpmsAssignedTechName?.trim() || vehicle.tpmsAssignedTechId}</span>
+              <p className="text-xs font-medium leading-tight flex items-center gap-1 min-w-0">
+                <TechnicianScheduleHoverCard
+                  ldap={vehicle.tpmsAssignedTechId.trim()}
+                  name={vehicle.tpmsAssignedTechName?.trim() || vehicle.tpmsAssignedTechId}
+                  className="truncate"
+                />
                 <TechStatusBadge status={getTechStatus(vehicle.tpmsAssignedTechId.trim())} />
               </p>
               <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.tpmsAssignedTechId}</p>
@@ -2591,7 +2600,11 @@ export default function FleetManagement() {
                               {vehicle.tpmsAssignedTechId ? (
                                 <div className="min-w-0">
                                   <p className="text-sm font-medium truncate flex items-center gap-1.5">
-                                    <span className="truncate">{vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}</span>
+                                    <TechnicianScheduleHoverCard
+                                      ldap={vehicle.tpmsAssignedTechId}
+                                      name={vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}
+                                      className="truncate"
+                                    />
                                     <TechStatusBadge status={getTechStatus(vehicle.tpmsAssignedTechId)} />
                                   </p>
                                   <p className="text-xs text-muted-foreground font-mono">{vehicle.tpmsAssignedTechId}</p>
