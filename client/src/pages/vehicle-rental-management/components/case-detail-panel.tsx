@@ -113,6 +113,8 @@ export interface CaseDetail {
  * compatible), the Ops Queue passes just the assigned truck + tech, and a
  * caller with nothing passes undefined — the panel fetches everything else. */
 export interface CaseRowContext {
+  vehicle_number?: string | null;
+  ticket_number?: string | null;
   assigned_truck?: string | null;
   tpms_tech?: string | null;
   wrong_truck?: boolean;
@@ -586,10 +588,13 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
   const [note, setNote] = useState("");
   const [truckTab, setTruckTab] = useState<"rental" | "assigned">("rental");
   const [phoneEdit, setPhoneEdit] = useState<ShopPhoneEditTarget | null>(null);
+  const c = data?.case;
+  const rentalUnit = String(row?.vehicle_number ?? c?.vehicle_number ?? "").trim() || null;
+  const rentalReference = String(row?.ticket_number ?? c?.ticket_number ?? caseKey.replace(/^db:/i, "")).trim() || caseKey;
+  const rentalHeading = rentalUnit ? `Rental unit ${rentalUnit}` : `Rental case ${rentalReference}`;
   // Every Holman scrape targets the truck currently on screen, never the case key.
   const activeTruck = truckTab === "assigned" && data?.assignedTruck?.truck
-    ? data.assignedTruck.truck : caseKey;
-  const c = data?.case;
+    ? data.assignedTruck.truck : rentalUnit;
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
   const notes = (data?.actions || []).filter((a) => a.action_type === "note");
@@ -612,7 +617,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
   const effShopStatus: string | null = reconciled?.effStatus ?? currentShop?.poStatus ?? null;
   // Newest LUCA dispatch about THIS rental truck — the shop LUCA actually dialed.
   const lucaDial = (data?.callLog || []).find((cl) => cl.source === "luca_dispatch" &&
-    (!cl.truck || String(cl.truck).replace(/^0+/, "") === String(caseKey).replace(/^0+/, ""))) ?? null;
+    (!cl.truck || (rentalUnit != null && String(cl.truck).replace(/^0+/, "") === rentalUnit.replace(/^0+/, "")))) ?? null;
   const portal = data?.portal ?? null;
   const assigned = data?.assignedTruck ?? null;
   const addNote = useMutation({
@@ -665,7 +670,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
       <div onClick={(e) => e.stopPropagation()} data-testid="case-detail-panel" style={{ width: 900, maxWidth: "94vw", maxHeight: "90vh", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 16, overflowY: "auto", boxShadow: "0 24px 70px rgba(0,0,0,0.4)", position: "relative" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: colors.background, borderBottom: `1px solid ${colors.rule}` }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
+            <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>{rentalHeading}</h2>
             {/* Rental origin callout — Holman-issued (book) vs direct billing
                 (manual Enterprise report), same vocabulary as every board row. */}
             {(() => {
@@ -679,9 +684,10 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
             })()}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={() => scrapeMut.mutate(activeTruck)} disabled={scrapeMut.isPending} title={`Pull truck ${activeTruck}'s current POs + comments live from Holman`}
+            <button type="button" onClick={() => { if (activeTruck) scrapeMut.mutate(activeTruck); }} disabled={scrapeMut.isPending || !activeTruck}
+              title={activeTruck ? `Pull truck ${activeTruck}'s current POs + comments live from Holman` : "No rental unit is available to refresh"}
               style={{ background: colors.surface, border: `1px solid ${colors.accent}`, borderRadius: 8, cursor: "pointer", color: colors.accent, padding: "5px 10px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>
-              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending ? `Scraping ${activeTruck}…` : `Refresh ${activeTruck} from Holman`}
+              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending && activeTruck ? `Scraping ${activeTruck}…` : activeTruck ? `Refresh ${activeTruck} from Holman` : "No rental unit to refresh"}
             </button>
             <button type="button" onClick={onClose} data-testid="button-case-panel-close" style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: "5px 8px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12 }}><X size={16} /> Close</button>
           </div>
@@ -770,7 +776,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
             {(() => {
               const at = row?.assigned_truck ?? null;
               const strip2 = (s: any) => String(s ?? "").replace(/^0+/, "");
-              const distinct = !!at && strip2(at) !== strip2(caseKey);
+              const distinct = !!at && (!rentalUnit || strip2(at) !== strip2(rentalUnit));
               const btn = (k: "rental" | "assigned", text: string, sub: string, warn: boolean) => (
                 <button type="button" onClick={() => setTruckTab(k)}
                   style={{ flex: 1, textAlign: "left", fontFamily: fonts.dmSans, padding: "8px 12px", borderRadius: 10, cursor: "pointer",
@@ -782,7 +788,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
               );
               return (
                 <div style={{ display: "flex", gap: 8 }}>
-                  {btn("rental", `Truck ${caseKey}`, "the rental van", false)}
+                  {btn("rental", rentalHeading, rentalUnit ? "the rental van" : "no rental unit resolved", false)}
                   {distinct
                     ? btn("assigned", `Truck ${at}`,
                         // at a glance: has anyone already investigated this mismatch?
@@ -804,7 +810,9 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                 to Holman/DMV/a shop never starts with a records hunt. */}
             {(() => {
               const canon = (s: any) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
-              const vid = (data?.vehicleIdentity ?? []).find((v) => v.truck === canon(activeTruck)) ?? null;
+              const vid = activeTruck
+                ? (data?.vehicleIdentity ?? []).find((v) => v.truck === canon(activeTruck)) ?? null
+                : null;
               const mono: CSSProperties = { fontFamily: fonts.jetbrains, fontSize: 14.5, fontWeight: 700, color: colors.ink, letterSpacing: "0.03em" };
               const copyBtn = (txt: string, what: string) => (
                 <button type="button" title={`Copy ${what}`}
@@ -816,7 +824,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
               return (
                 <section data-testid="vehicle-id-strip" style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: "10px 14px", display: "flex", flexWrap: "wrap", gap: "8px 32px", alignItems: "flex-start" }}>
                   <div>
-                    <div style={label}>License plate — truck {activeTruck}</div>
+                    <div style={label}>{activeTruck ? `License plate — truck ${activeTruck}` : "License plate — no rental unit"}</div>
                     {vid?.plate
                       ? <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2 }}><span style={mono}>{vid.plate}{vid.plateState ? ` · ${vid.plateState}` : ""}</span>{copyBtn(vid.plate, "Plate")}</div>
                       : <div style={{ fontSize: 12.5, color: colors.inkMuted, marginTop: 2 }}>no plate on file in the Holman feed</div>}
@@ -865,13 +873,16 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                       return d.length === 10 && !/^(\d)\1{9}$/.test(d) ? v : null;
                     };
                     const ph = manual ? shopMeta?.phone : (reconciled?.shopPhone || usable(portal?.poDetail?.[currentShop.poNumber]?.vendorPhone) || usable(portal?.shop?.phone));
-                    const openEdit = () => setPhoneEdit({ truck: caseKey, caseKey, shopName: currentShop.vendorName, phone: shopMeta?.phone ?? ph ?? null, locked: !!shopMeta?.phoneLocked, editedBy: shopMeta?.phoneEditedBy, editedAt: shopMeta?.phoneEditedAt });
-                    const editBtn = (
+                    const openEdit = () => {
+                      if (!rentalUnit) return;
+                      setPhoneEdit({ truck: rentalUnit, caseKey, shopName: currentShop.vendorName, phone: shopMeta?.phone ?? ph ?? null, locked: !!shopMeta?.phoneLocked, editedBy: shopMeta?.phoneEditedBy, editedAt: shopMeta?.phoneEditedAt });
+                    };
+                    const editBtn = rentalUnit ? (
                       <button type="button" title="Edit shop phone (with optional lock against scrapes)" onClick={openEdit}
                         style={{ background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, cursor: "pointer", color: colors.inkMuted, padding: "2px 7px", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontFamily: fonts.dmSans, fontWeight: 600 }}>
                         <Pencil size={10} /> Edit
                       </button>
-                    );
+                    ) : null;
                     return ph
                       ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                           <span>{fmtPhone(ph)}</span>
@@ -883,10 +894,12 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                             : <SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />}
                           {editBtn}
                         </div>
-                      : <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                          <button type="button" onClick={() => scrapeMut.mutate(caseKey)} disabled={scrapeMut.isPending} style={{ fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>
-                          <button type="button" onClick={openEdit} style={{ fontSize: 12, fontWeight: 600, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}><Pencil size={11} /> Enter manually</button>
-                        </div>;
+                      : rentalUnit
+                        ? <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                            <button type="button" onClick={() => scrapeMut.mutate(rentalUnit)} disabled={scrapeMut.isPending} style={{ fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>
+                            <button type="button" onClick={openEdit} style={{ fontSize: 12, fontWeight: 600, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}><Pencil size={11} /> Enter manually</button>
+                          </div>
+                        : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 6 }}>Rental unit unavailable — shop phone controls disabled.</div>;
                   })()}
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
@@ -1044,7 +1057,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                 truck this tech is actually assigned to. The assigned tab answers
                 even when there is nothing to show, so a hidden section can never
                 be mistaken for a missing feature. */}
-            <PoAndCallTabs truck={caseKey} poList={data!.poHistory} poSource={data!.poSource} portal={portal}
+            <PoAndCallTabs truck={rentalUnit ?? ""} poList={data!.poHistory} poSource={data!.poSource} portal={portal}
               callItems={data!.callLog || []} />
             {/* Holman message trail — the comment history, from the portal */}
             {portal && portal.messages.length > 0 && (

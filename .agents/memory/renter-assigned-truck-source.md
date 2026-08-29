@@ -9,4 +9,6 @@ description: Every "what truck is this renter actually assigned to" read must us
 
 **How to apply:** new queries needing the renter's truck must `LEFT JOIN all_techs atr` (keyed on the identity resolution's effective employee_id) then interpolate the fragment and read `ownp.own_pad` (or `rt.tpms_truck` for the strict TPMS-only value). Truckless `db:RA#` cases are correct-by-design — live TPMS genuinely has no truck for those techs. Note: a tech can appear on multiple TPMS rows, so the fragment's `ORDER BY last_seen_at DESC LIMIT 1` is load-bearing.
 
+**Case identity boundary:** a synthetic `db:RA#` case key is valid only as case identity for detail lookups, actions, and audit history. Never label it as a truck or pass it to a vehicle-keyed scrape, PO, identity, or shop-phone operation; those require a real `vehicle_number` or assigned truck.
+
 **Related open seam (not fixed):** the rental-request form's `correctedTruck` is unvalidated and the cutover orchestrator lets a request-entered truck beat TPMS in ETD special notes — tech-entered trucks are supposed to be impossible.

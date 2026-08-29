@@ -691,7 +691,7 @@ export default function RentalOperations() {
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
-      trk: (r) => Number(r.case_key), tech: (r) => r.renter_name_raw, emp: (r) => r.employee_status,
+      trk: (r) => r.vehicle_number, tech: (r) => r.renter_name_raw, emp: (r) => r.employee_status,
       hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, cls: (r) => r.rental_class,
       cost: (r) => r.daily_cost, ams: (r) => r.ams_status, shop: (r) => r.shop_name,
       days: (r) => r.days_open, ext: (r) => r.number_of_extensions, days_open: (r) => r.days_open,
@@ -1274,11 +1274,11 @@ export default function RentalOperations() {
           <thead>
             <tr>
               <th style={{ ...thStyle, width: 34, textAlign: "right" }}>#</th>
-              <Th col="trk" label="Truck" />
-              <Th col="tech" label="Tech" />
+              <Th col="tech" label="Technician" />
+              <Th col="tpms" label="Assigned Truck" />
+              <Th col="trk" label="Rental Unit" />
               <Th col="emp" label="Employment" />
               <Th col="hire" label="Status Date" />
-              <Th col="tpms" label="TPMS Assigned" />
               <Th col="veh" label="Vehicle" />
               <Th col="cls" label="Rental Class" />
               <Th col="cost" label="Daily Cost" style={{ textAlign: "right" }} />
@@ -1305,6 +1305,7 @@ export default function RentalOperations() {
               const shopPhoneShown: string | null = r.reconciledShop !== undefined
                 ? (r.reconciledShop?.shopPhone ?? null)
                 : (r.portal_shop_phone ?? null);
+              const rentalUnit = String(r.vehicle_number ?? "").trim() || null;
               const hireDays = daysSince(r.employee_status_date);
               // Rental origin callout — Holman-issued vs direct billing, on
               // every row (Tyler 2026-08-23: callout everywhere a rental shows).
@@ -1312,12 +1313,29 @@ export default function RentalOperations() {
               return (
                 <tr key={r.case_key} onClick={() => setPanelKey(r.case_key)} style={{ cursor: "pointer", background: tint, opacity: r.operator_mark === "closed" ? 0.72 : 1 }}>
                   <td style={{ ...tdStyle, textAlign: "right", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{pageStart + i + 1}</td>
+                  <td style={tdStyle}>
+                    {r.renter_name_raw}
+                    {r.ticket_status === "PENDED" && <Chip text="PENDED" fg={colors.red} bg={colors.redLight} />}
+                    {r.identity_state === "EXCEPTION" && <Chip text="no ID" fg={colors.red} bg={colors.redLight} />}
+                    {r.identity_state === "REVIEW" && <Chip text="review" fg={colors.amber} bg={colors.amberLight} />}
+                    {r.identity_confidence === "medium" && r.identity_state === "RESOLVED" && <Chip text="fuzzy" fg={colors.inkMuted} bg={colors.surface} />}
+                    {r.no_rental_auth && <Chip text="no rental auth" fg={colors.amber} bg={colors.amberLight} />}
+                  </td>
+                  <td style={{ ...tdStyle, fontSize: 12 }}>
+                    {/* The technician's actual assigned truck number (shared
+                        TPMS-first derivation — assigned_truck/own_pad). Never
+                        fall back to the rental unit, reservation, RA, or case key. */}
+                    {r.assigned_truck
+                      ? <span style={{ color: r.wrong_truck ? colors.red : colors.inkSoft, fontWeight: r.wrong_truck ? 600 : 400 }}>{r.assigned_truck}</span>
+                      : <span style={{ color: colors.inkMuted }}>Unassigned / No TPMS match</span>}
+                    {r.wrong_truck && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
+                    {r.tpms_tech && <div style={{ fontSize: 10, color: colors.inkMuted }}>{r.tpms_tech}</div>}
+                  </td>
                   <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
-                    {r.case_key}
-                    {/* Set by LUCA off a shop call, or by a lead in the Cases by
-                        Region workbook. Green because it is the good state, and
-                        loud because every day it sits unread is rental spend on
-                        a truck that is already fixed. */}
+                    {r.vehicle_number || <span style={{ color: colors.inkMuted }}>—</span>}
+                    {/* These badges describe the rental case, whose internal
+                        case_key remains the row/action identity even when a
+                        direct-billing row has no physical rental unit. */}
                     {r.workbook_status === "ready_for_pickup" && (
                       <Chip text="READY" fg={colors.green} bg={colors.greenLight} />
                     )}
@@ -1334,14 +1352,6 @@ export default function RentalOperations() {
                     )}
                   </td>
                   <td style={tdStyle}>
-                    {r.renter_name_raw}
-                    {r.ticket_status === "PENDED" && <Chip text="PENDED" fg={colors.red} bg={colors.redLight} />}
-                    {r.identity_state === "EXCEPTION" && <Chip text="no ID" fg={colors.red} bg={colors.redLight} />}
-                    {r.identity_state === "REVIEW" && <Chip text="review" fg={colors.amber} bg={colors.amberLight} />}
-                    {r.identity_confidence === "medium" && r.identity_state === "RESOLVED" && <Chip text="fuzzy" fg={colors.inkMuted} bg={colors.surface} />}
-                    {r.no_rental_auth && <Chip text="no rental auth" fg={colors.amber} bg={colors.amberLight} />}
-                  </td>
-                  <td style={tdStyle}>
                     {isUrgentEmp(r)
                       ? <span style={{ color: colors.red, fontWeight: 600 }}>{r.employee_status}</span>
                       : <span style={{ color: r.employee_status ? colors.ink : colors.red }}>{r.employee_status || "-"}</span>}
@@ -1352,15 +1362,6 @@ export default function RentalOperations() {
                         {fmtDate(r.employee_status_date)}<span style={{ color: colors.inkMuted }}> · {fmtDuration(hireDays)}</span>
                       </span>
                     ) : <span style={{ color: colors.inkMuted }}>—</span>}
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {/* The renter's ACTUAL assigned truck number (shared TPMS-first
-                        derivation — assigned_truck/own_pad). Red = it differs from
-                        the rental case truck (wrong_truck). The Holman-cache TPMS
-                        tech name (sparsely populated) is secondary detail only. */}
-                    {r.assigned_truck ? <span style={{ color: r.wrong_truck ? colors.red : colors.inkSoft, fontWeight: r.wrong_truck ? 600 : 400 }}>{r.assigned_truck}</span> : <span style={{ color: colors.inkMuted }}>none</span>}
-                    {r.wrong_truck && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
-                    {r.tpms_tech && <div style={{ fontSize: 10, color: colors.inkMuted }}>{r.tpms_tech}</div>}
                   </td>
                   <td style={tdStyle}>
                     {r.veh_desc || <span style={{ color: colors.red }}>-</span>}
@@ -1387,14 +1388,18 @@ export default function RentalOperations() {
                           <span>{fmtPhone(shopPhoneShown)}</span>
                           {r.shop_phone_locked && <span title={`Phone locked${r.shop_phone_edited_by ? ` by ${r.shop_phone_edited_by}` : ""} — Holman scrapes cannot replace it`} style={{ display: "inline-flex" }}><Lock size={10} color={colors.amber} /></span>}
                           {r.shop_phone_source === "manual" && !r.shop_phone_locked && <span title={`Entered manually${r.shop_phone_edited_by ? ` by ${r.shop_phone_edited_by}` : ""} — unlocked, so the next scrape may replace it`} style={{ fontSize: 9, color: colors.inkMuted, fontFamily: fonts.dmSans }}>manual</span>}
-                          <button type="button" title="Edit shop phone" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: r.case_key, caseKey: r.case_key, shopName: r.shop_name, phone: r.portal_shop_phone, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
-                            style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                          {rentalUnit
+                            ? <button type="button" title="Edit shop phone" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: rentalUnit, caseKey: r.case_key, shopName: r.shop_name, phone: r.portal_shop_phone, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
+                                style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                            : <span title="A rental unit is required before this vehicle-keyed phone can be edited" style={{ color: colors.inkMuted, fontFamily: fonts.dmSans }}>rental unit unavailable</span>}
                         </div>
                       : r.shop_name && !isDeclinedAuction(r.ams_bucket) ? (
                         <div style={{ fontSize: 10, color: colors.amber, display: "flex", alignItems: "center", gap: 4 }}>
                           <span title={r.portal_shop_phone ? `Scraped number ${fmtPhone(r.portal_shop_phone)} was set aside — it may belong to a different vendor than the repair PO. Enter a verified number.` : undefined}>{r.portal_shop_phone ? "no verified phone" : r.has_portal ? "no phone on file" : "not scraped"}</span>
-                          <button type="button" title="Enter shop phone manually" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: r.case_key, caseKey: r.case_key, shopName: r.shop_name, phone: null, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
-                            style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                          {rentalUnit
+                            ? <button type="button" title="Enter shop phone manually" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: rentalUnit, caseKey: r.case_key, shopName: r.shop_name, phone: null, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
+                                style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                            : <span title="A rental unit is required before this vehicle-keyed phone can be edited" style={{ color: colors.inkMuted }}>rental unit unavailable</span>}
                         </div>
                       ) : null}
                     {r.redirect_to_assigned && (
@@ -1421,7 +1426,9 @@ export default function RentalOperations() {
                         (no phone, opted out, termed) is resolved server-side and
                         reported in the preview rather than guessed at here. */}
                     {r.employee_id ? (
-                      <button type="button" title={`Text ${r.tech_name || "the technician"} to pick up truck ${r.case_key}`}
+                      <button type="button" title={r.assigned_truck
+                        ? `Text ${r.tech_name || "the technician"} to pick up assigned truck ${r.assigned_truck}`
+                        : `Text ${r.tech_name || "the technician"} about the rental return (no TPMS assignment)`}
                         onClick={() => setPickupFor(r.case_key)}
                         style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600, color: "#fff", background: colors.accent, border: `1px solid ${colors.accent}`, borderRadius: 7, padding: "4px 9px", cursor: "pointer" }}>
                         <MessageSquare size={12} /> Text

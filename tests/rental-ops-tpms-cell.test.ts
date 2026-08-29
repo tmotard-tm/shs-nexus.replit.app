@@ -1,19 +1,21 @@
 /**
- * Task #789 — pin the Rental Operations "TPMS Assigned" column so a refactor
+ * Pin the Rental Operations technician/truck identity columns so a refactor
  * cannot silently revert it to the sparsely-populated Holman tech name (the
  * original bug) or drop the red wrong-truck emphasis.
  *
  * What this suite pins, at the component boundary:
- *  1. The cell's PRIMARY content is the payload's assigned_truck number:
+ *  1. The Assigned Truck cell's PRIMARY content is assigned_truck:
  *     - assigned_truck + wrong_truck  → red, bold, with the "≠ rental truck" marker
  *     - assigned_truck matching       → plain (soft ink, weight 400), no marker
- *     - assigned_truck null           → muted "none" fallback
+ *     - assigned_truck null           → explicit no-TPMS-match fallback
  *     The Holman-cache tpms_tech name may only appear as the small secondary
  *     line, never as the primary content.
- *  2. Clicking the "TPMS Assigned" header sorts by assigned_truck (fixtures are
+ *  2. Technician, Assigned Truck, and Rental Unit are separate adjacent fields.
+ *     Synthetic direct-billing case keys never render as truck numbers.
+ *  3. Clicking the "Assigned Truck" header sorts by assigned_truck (fixtures are
  *     constructed so sorting by tpms_tech would produce a DIFFERENT order),
  *     with null assigned_truck rows always last.
- *  3. The CSV export keeps BOTH columns — tpms_tech_name carries the tech name
+ *  4. The CSV export keeps BOTH columns — tpms_tech_name carries the tech name
  *     and assigned_truck carries the truck number — so display, sort, and
  *     export cannot drift apart again.
  *
@@ -151,8 +153,20 @@ const MATCH = mkRow("80002", {
 const NONE = mkRow("80003", {
   assigned_truck: null, wrong_truck: false, tpms_tech: null,
 });
+const DIRECT = mkRow("db:RA9001", {
+  vehicle_number: "",
+  renter_name_raw: "DIRECT BILL TECH",
+  employee_id: "E-DIRECT",
+  assigned_truck: "61234",
+  wrong_truck: false,
+  ticket_number: "RA9001",
+  shop_name: "Direct Billing Repair Shop",
+  shop_phone: null,
+  portal_shop_phone: null,
+  has_portal: false,
+});
 // Deliberately NOT in assigned_truck order so the sort tests prove a re-order.
-const ROWS = [WRONG, MATCH, NONE];
+const ROWS = [WRONG, MATCH, NONE, DIRECT];
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -165,9 +179,49 @@ const BASE_MODEL = {
   generatedAt: new Date().toISOString(),
 };
 
+const requestedPaths: string[] = [];
+
 function route(method: string, url: URL): Response {
   const p = url.pathname;
   if (p.endsWith("/rental-operations/master")) return json({ ...BASE_MODEL, rows: ROWS });
+  const detail = p.match(/\/rental-operations\/master\/([^/]+)$/);
+  if (detail && method === "GET") {
+    const caseKey = decodeURIComponent(detail[1]);
+    const fixture = ROWS.find((r) => r.case_key === caseKey)!;
+    const directPo = fixture.case_key.startsWith("db:")
+      ? [{
+          poNumber: "PO-DB",
+          poDate: "2026-08-05",
+          poStatus: "APPROVED",
+          vendorType: "repair",
+          vendorName: "Direct Billing Repair Shop",
+          totalAmount: 125,
+          lineItems: [],
+        }]
+      : [];
+    return json({
+      case: fixture,
+      identity: null,
+      actions: [],
+      poHistory: directPo,
+      callLog: [],
+      vehicleIdentity: [],
+      assignedTruck: fixture.assigned_truck
+        ? { truck: fixture.assigned_truck, poHistory: [], notes: [] }
+        : null,
+      reconciledShop: directPo.length
+        ? {
+            shopName: "Direct Billing Repair Shop",
+            shopPhone: null,
+            effStatus: "APPROVED",
+            shopPoDate: "2026-08-05",
+            poNumber: "PO-DB",
+            openPoCount: 1,
+            portalAt: null,
+          }
+        : null,
+    });
+  }
   if (p.endsWith("/rental-operations/scrape-targets")) return json({ ok: true, found: 0, served: 0, targets: [] });
   if (p.endsWith("/rental-operations/settings")) {
     return json({
@@ -183,6 +237,7 @@ g.fetch = dom.window.fetch = (async (input: any, init?: any) => {
   const raw = typeof input === "string" ? input : input?.url ?? String(input);
   const url = new URL(raw, "http://localhost");
   const method = (init?.method || "GET").toUpperCase();
+  requestedPaths.push(url.pathname);
   return route(method, url);
 }) as any;
 
@@ -240,21 +295,28 @@ function headerCells(): HTMLTableCellElement[] {
   return [...dom.window.document.querySelectorAll("thead th")] as HTMLTableCellElement[];
 }
 
-/** Column index of the "TPMS Assigned" header among ALL header cells. */
-function tpmsColIndex(): number {
-  const idx = headerCells().findIndex((th) => (th.textContent || "").includes("TPMS Assigned"));
-  assert.ok(idx >= 0, "TPMS Assigned header renders");
+/** Column index for an exact grid header label. */
+function columnIndex(label: string): number {
+  const idx = headerCells().findIndex((th) => (th.textContent || "").trim().includes(label));
+  assert.ok(idx >= 0, `${label} header renders`);
   return idx;
+}
+
+/** Column index of the "Assigned Truck" header among ALL header cells. */
+function tpmsColIndex(): number {
+  return columnIndex("Assigned Truck");
 }
 
 function bodyRows(): HTMLTableRowElement[] {
   return [...dom.window.document.querySelectorAll("tbody tr")] as HTMLTableRowElement[];
 }
 
-/** The grid row for a given case truck number (Truck is the cell after "#"). */
+/** The grid row for a fixture, located by its technician name rather than case key. */
 function rowFor(caseKey: string): HTMLTableRowElement {
-  const row = bodyRows().find((tr) => (tr.cells[1]?.textContent || "").includes(caseKey));
-  assert.ok(row, `grid row for truck ${caseKey} renders`);
+  const fixture = ROWS.find((r) => r.case_key === caseKey);
+  assert.ok(fixture, `fixture ${caseKey} exists`);
+  const row = bodyRows().find((tr) => (tr.textContent || "").includes(fixture!.renter_name_raw));
+  assert.ok(row, `grid row for case ${caseKey} renders`);
   return row!;
 }
 
@@ -262,17 +324,21 @@ function tpmsCellOf(caseKey: string): HTMLTableCellElement {
   return rowFor(caseKey).cells[tpmsColIndex()];
 }
 
-/** Rendered truck-number order of the grid (Truck column, digits only). */
+function cellText(caseKey: string, label: string): string {
+  return rowFor(caseKey).cells[columnIndex(label)]?.textContent || "";
+}
+
+/** Rendered fixture order of the grid, recovered from technician names. */
 function truckOrder(): string[] {
   return bodyRows()
-    .map((tr) => (tr.cells[1]?.textContent || "").match(/\d{5}/)?.[0] || "")
+    .map((tr) => ROWS.find((r) => (tr.textContent || "").includes(r.renter_name_raw))?.case_key || "")
     .filter(Boolean);
 }
 
 async function clickTpmsHeader(): Promise<void> {
   const th = headerCells()[tpmsColIndex()];
   const btn = th.querySelector("button");
-  assert.ok(btn, "TPMS Assigned header is a sort button");
+  assert.ok(btn, "Assigned Truck header is a sort button");
   await act(async () => { btn!.click(); });
   await act(async () => { await new Promise((r) => setTimeout(r, 10)); });
 }
@@ -282,7 +348,41 @@ function colorOf(el: HTMLElement): string {
   return el.style.color || (el.getAttribute("style") || "").match(/color:\s*([^;]+)/)?.[1]?.trim() || "";
 }
 
-// ── 1. Cell content & state ──────────────────────────────────────────────────
+// ── 1. Technician, assigned-truck, and rental-unit semantics ────────────────
+
+test("grid pairs each technician with TPMS assigned truck and keeps rental unit separate", async () => {
+  await renderPage();
+  const labels = headerCells().map((th) => (th.textContent || "").trim());
+  const tech = labels.indexOf("Technician");
+  assert.ok(tech >= 0, "Technician header renders");
+  assert.deepEqual(labels.slice(tech, tech + 3), ["Technician", "Assigned Truck", "Rental Unit"]);
+
+  assert.match(cellText("80001", "Technician"), /TECH 80001/);
+  assert.match(cellText("80001", "Assigned Truck"), /99555/);
+  assert.doesNotMatch(cellText("80001", "Assigned Truck"), /80001/);
+  assert.match(cellText("80001", "Rental Unit"), /80001/);
+});
+
+test("truckless direct-billing row never presents its RA-derived case key as a truck", async () => {
+  await renderPage();
+  assert.match(cellText("db:RA9001", "Assigned Truck"), /61234/);
+  assert.doesNotMatch(cellText("db:RA9001", "Assigned Truck"), /RA9001|db:/i);
+  const rentalUnit = rowFor("db:RA9001").cells[columnIndex("Rental Unit")];
+  assert.equal(rentalUnit.querySelector("span")?.textContent, "—");
+  assert.doesNotMatch(rentalUnit.textContent || "", /RA9001|db:/i);
+  const shopCell = rowFor("db:RA9001").cells[columnIndex("Shop")];
+  assert.match(shopCell.textContent || "", /rental unit unavailable/i);
+  assert.equal(
+    [...shopCell.querySelectorAll("button")].filter((button) => /shop phone/i.test(button.title)).length,
+    0,
+    "truckless direct-billing row has no vehicle-keyed shop phone controls",
+  );
+  const textButton = [...rowFor("db:RA9001").querySelectorAll("button")]
+    .find((button) => (button.textContent || "").trim() === "Text");
+  assert.ok(textButton, "direct-billing row has its Text control");
+  assert.match(textButton!.title, /assigned truck 61234/i);
+  assert.doesNotMatch(textButton!.title, /truck db:RA9001/i);
+});
 
 test("TPMS Assigned cell: wrong-truck row renders the truck number in red with the mismatch marker", async () => {
   await renderPage();
@@ -311,14 +411,36 @@ test("TPMS Assigned cell: matching row renders the truck number plainly (no red,
   assert.ok(!(cell.textContent || "").includes("≠ rental truck"), "no mismatch marker on a matching row");
 });
 
-test("TPMS Assigned cell: null assigned_truck renders the muted 'none' fallback", async () => {
+test("Assigned Truck cell: null assigned_truck renders the explicit no-match state", async () => {
   await renderPage();
   const cell = tpmsCellOf("80003");
   const primary = cell.querySelector("span");
   assert.ok(primary, "cell has a fallback span");
-  assert.equal(primary!.textContent, "none", "fallback text is 'none'");
-  assert.equal(colorOf(primary!), colors.inkMuted, "'none' fallback is muted");
+  assert.equal(primary!.textContent, "Unassigned / No TPMS match");
+  assert.equal(colorOf(primary!), colors.inkMuted, "no-match fallback is muted");
   assert.ok(!/\d/.test(cell.textContent || ""), "no truck number invented for a null payload");
+});
+
+test("clicking a direct-billing row preserves the exact case key for detail lookup", async () => {
+  await renderPage();
+  requestedPaths.length = 0;
+  await act(async () => { rowFor("db:RA9001").click(); });
+  await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+  assert.ok(
+    requestedPaths.some((path) => path.endsWith("/rental-operations/master/db:RA9001")),
+    `detail request preserves case key; saw ${requestedPaths.join(", ")}`,
+  );
+  const panel = dom.window.document.querySelector('[data-testid="case-detail-panel"]');
+  assert.ok(panel, "case detail panel opens");
+  const text = panel!.textContent || "";
+  assert.match(text, /Rental case RA9001/i);
+  assert.match(text, /Rental unit unavailable — shop phone controls disabled/i);
+  assert.doesNotMatch(text, /Truck db:RA9001/i);
+  assert.doesNotMatch(text, /No phone yet — pull from Holman/i);
+  const titles = [...panel!.querySelectorAll("[title]")]
+    .map((el) => el.getAttribute("title") || "")
+    .join("\n");
+  assert.doesNotMatch(titles, /truck db:RA9001/i);
 });
 
 // ── 2. Sort accessor pinned to assigned_truck ────────────────────────────────
@@ -326,19 +448,19 @@ test("TPMS Assigned cell: null assigned_truck renders the muted 'none' fallback"
 // asc by tpms_tech would be ALPHA → ZULU (WRONG, MATCH). Null assigned_truck
 // sorts last in BOTH directions.
 
-test("TPMS Assigned sort: ascending orders by assigned_truck, nulls last", async () => {
+test("Assigned Truck sort: ascending orders by assigned_truck, nulls last", async () => {
   await renderPage();
-  assert.deepEqual(truckOrder(), ["80001", "80002", "80003"], "default order is payload order");
+  assert.deepEqual(truckOrder(), ["80001", "80002", "80003", "db:RA9001"], "default order is payload order");
   await clickTpmsHeader(); // asc
-  assert.deepEqual(truckOrder(), ["80002", "80001", "80003"],
+  assert.deepEqual(truckOrder(), ["db:RA9001", "80002", "80001", "80003"],
     "asc sorts by assigned_truck (would be 80001-first if the accessor reverted to tpms_tech)");
 });
 
-test("TPMS Assigned sort: descending keeps nulls last", async () => {
+test("Assigned Truck sort: descending keeps nulls last", async () => {
   await renderPage();
   await clickTpmsHeader(); // asc
   await clickTpmsHeader(); // desc
-  assert.deepEqual(truckOrder(), ["80001", "80002", "80003"],
+  assert.deepEqual(truckOrder(), ["80001", "80002", "db:RA9001", "80003"],
     "desc reverses by assigned_truck with the null row still last");
 });
 
