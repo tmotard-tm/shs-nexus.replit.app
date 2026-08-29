@@ -83,7 +83,10 @@ export function buildCutoverBlockArgs(input: CutoverBlockInput): CutoverBlockDec
       unit,
       truckNumber: input.truckNumber,
       date: input.date,
-      durationMinutes: 30,
+      // One hour, Tyler 2026-08-28 for the Monday 8/31 wave: the technician has to
+      // return the Holman car and collect a new direct-bill reservation in the same
+      // visit, which does not fit the 30 minutes a plain billing swap needed.
+      durationMinutes: 60,
       locationZip: zip,
       startTime: "08:00",
       // Pin by sending the same HH:MM the row starts at, per the API reference.
