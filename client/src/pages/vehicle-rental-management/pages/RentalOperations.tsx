@@ -595,8 +595,6 @@ export default function RentalOperations() {
   const [cohort, setCohort] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [amsF, setAmsF] = useState<string[]>([]);
-  const [catF, setCatF] = useState("");
-  const [classF, setClassF] = useState("");
   const [markF, setMarkF] = useState("");
   // Billing-origin facet — the same rentalOriginOf vocabulary as the row badge.
   // "" = all. Unknown-origin rows (rentalOriginOf → null) match NEITHER facet:
@@ -730,11 +728,6 @@ export default function RentalOperations() {
     for (const r of basePool) { const k = r.ams_status || "NOT IN VIEW"; c[k] = (c[k] || 0) + 1; }
     return Object.entries(c).sort((a, b) => b[1] - a[1]);
   }, [basePool]);
-  const classOptions = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const r of basePool) { if (r.rental_class) c[r.rental_class] = (c[r.rental_class] || 0) + 1; }
-    return Object.entries(c).sort((a, b) => b[1] - a[1]);
-  }, [basePool]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -763,8 +756,6 @@ export default function RentalOperations() {
         if (!hay.includes(q) && !phoneSearchMatches(q, [rentalShopPhone, r.call_shop_phone])) return false;
       }
       if (amsF.length > 0 && !amsF.includes(r.ams_status || "NOT IN VIEW")) return false;
-      if (catF && (r.class_bucket || r.actual_bucket || "unknown") !== catF) return false;
-      if (classF && r.rental_class !== classF) return false;
       if (markF) {
         const m = r.operator_mark || "none";
         if (markF === "none" ? m !== "none" : m !== markF) return false;
@@ -775,12 +766,12 @@ export default function RentalOperations() {
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [originPool, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
+  }, [originPool, basePool, cohort, search, amsF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
       trk: (r) => r.vehicle_number, tech: (r) => r.renter_name_raw, emp: (r) => r.employee_status,
-      hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, cls: (r) => r.rental_class,
+      hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, billing: (r) => rentalOriginOf(r.source)?.label ?? "",
       cost: (r) => r.daily_cost, ams: (r) => r.ams_status, shop: (r) => r.shop_name,
       days: (r) => r.days_open, ext: (r) => r.number_of_extensions, days_open: (r) => r.days_open,
       tpms: (r) => r.assigned_truck, lastrental: (r) => r.last_rental_date, npos: (r) => r.po_count,
@@ -798,7 +789,7 @@ export default function RentalOperations() {
   );
   useEffect(() => {
     setPage(0);
-  }, [cohort, search, amsF, catF, classF, markF, originF, includePended, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, sort]);
+  }, [cohort, search, amsF, markF, originF, includePended, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, sort]);
 
   // mutations
   const markMut = useMutation({
@@ -1077,12 +1068,20 @@ export default function RentalOperations() {
 
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_tech_name", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
-      "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po"];
+    // billing FIRST after the identity columns (Tyler 2026-08-30): the export was
+    // unreadable without it — 314 of 402 rentals are direct-billed and 90 are
+    // Holman, and nothing on the sheet said which was which. `billing` is the
+    // plain-English answer, `feed_source` is the raw value it derives from.
+    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_tech_name", "wrong_truck", "renter_own_truck",
+      "billing", "feed_source", "daily_cost", "vehicle", "actual_type", "type_mismatch", "cost_over", "ams_status", "cohort",
+      "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer",
+      "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
+      "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po", "assigned_ams_status", "registration_expired"];
     const body = sorted.map((r) => [
       r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
       r.tpms_tech || "", r.wrong_truck ? "YES" : "", r.renter_own_truck || "",
-      r.veh_desc || "", r.actual_vehicle_type || "", r.rental_class || "", r.daily_cost ?? "", r.class_median ?? "",
+      rentalOriginOf(r.source)?.label || "unknown", r.source || "", r.daily_cost ?? "",
+      r.veh_desc || "", r.actual_vehicle_type || "",
       r.type_mismatch ? "YES" : "", r.cost_over ? "YES" : "", r.ams_status || "", r.repair_cohort,
       r.shop_name || "", r.shop_po_status || "", r.call_shop_phone || r.portal_shop_phone || "", r.shop_city || "", r.shop_state || "",
       r.last_rental_date || "", r.no_rental_auth ? "YES" : "", r.po_count ?? "", r.odometer ?? "",
@@ -1090,6 +1089,7 @@ export default function RentalOperations() {
       r.operator_mark || "", r.identity_state || "", r.identity_confidence || "",
       r.workload_bucket || "", r.assigned_truck || "",
       r.assigned_truck_has_repair_po == null ? "" : (r.assigned_truck_has_repair_po ? "YES" : "NO"),
+      r.assigned_ams_status || "", r.registration_expired ? "YES" : "",
     ].map((c) => esc(String(c))));
     const csv = [headers.join(","), ...body.map((r) => r.join(","))].join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -1269,15 +1269,6 @@ export default function RentalOperations() {
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter truck, tech, shop, vehicle, phone…" style={{ ...selStyle, paddingLeft: 30, width: 240 }} />
         </div>
         <MultiSelect label="AMS statuses" options={amsOptions} values={amsF} onChange={setAmsF} style={selStyle} />
-        <select value={catF} onChange={(e) => setCatF(e.target.value)} style={selStyle}>
-          <option value="">all categories</option>
-          <option value="SEDAN">SEDAN ({stats.categories.SEDAN ?? 0})</option>
-          <option value="SUV/VAN/TRUCK">SUV/VAN/TRUCK ({stats.categories["SUV/VAN/TRUCK"] ?? 0})</option>
-        </select>
-        <select value={classF} onChange={(e) => setClassF(e.target.value)} style={selStyle}>
-          <option value="">all rental classes</option>
-          {classOptions.map(([k, n]) => <option key={k} value={k}>{k} ({n})</option>)}
-        </select>
         <select value={markF} onChange={(e) => setMarkF(e.target.value)} style={selStyle}>
           <option value="">all marks</option>
           <option value="none">unmarked</option>
@@ -1361,7 +1352,7 @@ export default function RentalOperations() {
               <Th col="emp" label="Employment" />
               <Th col="hire" label="Status Date" />
               <Th col="veh" label="Vehicle" />
-              <Th col="cls" label="Rental Class" />
+              <Th col="billing" label="Billing" />
               <Th col="cost" label="Daily Cost" style={{ textAlign: "right" }} />
               <Th col="ams" label="AMS" />
               <Th col="shop" label="Shop" />
@@ -1448,7 +1439,15 @@ export default function RentalOperations() {
                     {r.veh_desc || <span style={{ color: colors.red }}>-</span>}
                     {r.type_mismatch && <Chip text="mismatch" fg="#F97316" bg="rgba(249,115,22,.12)" />}
                   </td>
-                  <td style={{ ...tdStyle, fontSize: 12 }}>{r.rental_class || <span style={{ color: colors.red }}>-</span>}</td>
+                  <td style={{ ...tdStyle, fontSize: 12 }}>
+                    {origin
+                      ? <span title={origin.hint} style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600,
+                          color: origin.kind === "direct" ? colors.green : colors.inkSoft,
+                          background: origin.kind === "direct" ? colors.greenLight : colors.surface,
+                          border: `1px solid ${origin.kind === "direct" ? colors.green : colors.rule}`,
+                          borderRadius: 999, padding: "1px 8px" }}>{origin.label}</span>
+                      : <span title="The feed does not say who issued this rental" style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains }}>
                     {r.daily_cost == null ? <span style={{ color: colors.red }}>-</span> : (
                       <span style={{ color: r.cost_over ? colors.red : colors.ink, fontWeight: r.cost_over ? 700 : 400 }}>
