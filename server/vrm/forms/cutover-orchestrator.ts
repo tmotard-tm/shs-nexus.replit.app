@@ -981,7 +981,7 @@ export async function fetchEligibilityFacts(params: {
   if (isCutover && roster?.employeeId) {
     const empDigits = digitsOnly(roster.employeeId);
     const { rows } = await executor.execute(sql`
-      SELECT c.case_key, c.vehicle_number, c.feed_json, c.rental_vendor,
+      SELECT c.case_key, c.vehicle_number, c.feed_json, c.rental_vendor, c.source,
              c.ticket_number, c.claim_number, c.renting_city, c.renting_state,
              to_char(c.rental_start_date, 'YYYY-MM-DD') AS rental_start_date_s
       FROM vrm_rental_operations_cases c
@@ -1024,15 +1024,26 @@ export async function fetchEligibilityFacts(params: {
         // against quote.branchCode by the branch_pin_drift check and fail, or worse,
         // pin a reservation to a string that is not a branch code.
         //
-        // Under the current merge upsert this keeps whatever branch the case last
-        // had, which for a direct case is the branch of the rental it replaced. That
-        // is the one value here still worth distrusting; the merge is what keeps it
-        // alive. If the upsert ever moves to a plain replace, this goes NULL for
-        // every direct case and they fail the renting_branch_missing gate -- which
-        // is the correct outcome rather than a regression, because a direct case has
-        // by definition already cut over (201 of 221 measured on 2026-08-30 already
-        // hold a vrm_rental_cutover row).
-        rentingBranch: strOrNull(fj?.RENTING_BRANCH),
+        // (X) A DIRECT-BILLED CASE CANNOT OWN A BRANCH CODE, SO IT MUST NOT PIN ONE.
+        // This value reaches etd/executor.ts as `code` and becomes
+        // quote(prefer_branch_code=...), i.e. it decides which physical Enterprise
+        // counter the technician is sent to. The direct-billing feed never supplies
+        // RENTING_BRANCH, and the upsert MERGES rather than replaces (bcc2d31b,
+        // Tyler's call 2026-08-30), so a case that flipped from Holman to direct
+        // keeps the branch of the rental it REPLACED and nothing will ever clear it.
+        //
+        // Measured on prod 2026-08-30: 216 of 221 such cases still pinned a branch,
+        // 18 of them in a different city than the truck is now, and 4 IN A DIFFERENT
+        // STATE -- 24090 pinned Jamaica NY against a truck in Fayetteville NC, 24118
+        // Thornton CO against Las Vegas NV, 36544 La Crosse WI against El Dorado
+        // Hills CA, 46117 Baton Rouge LA against Clinton Township MI.
+        //
+        // NULL here fails the renting_branch_missing gate, which is the correct
+        // outcome and not a regression: a direct case has by definition already cut
+        // over (201 of the 221 already hold a vrm_rental_cutover row) and must not be
+        // booked a second time. Sending someone across the country is the worse
+        // failure than refusing to book them.
+        rentingBranch: c.source === "enterprise_direct" ? null : strOrNull(fj?.RENTING_BRANCH),
         rentingCity: strOrNull(c.renting_city) ?? strOrNull(fj?.RENTING_CITY_NAME),
         rentingState: strOrNull(c.renting_state) ?? strOrNull(fj?.RENTING_STATE),
         ecars: strOrNull(c.ticket_number) ?? strOrNull(fj?.ECARS_2_0_TKT_NBR),
