@@ -12,7 +12,7 @@
  */
 import assert from "node:assert/strict";
 import { classifyPoVendor, summarizePoLines, poLineType, isQualifyingRepairPo, isNeverShopVendor, NEVER_SHOP_RE, NEVER_SHOP_SQL_RE } from "./vendor-class";
-import { deriveWorkloadBucket } from "./workload";
+import { deriveWorkloadBucket, NON_WORKING_BUCKETS, ESCALATION_BUCKET } from "./workload";
 
 let passed = 0;
 let failed = 0;
@@ -215,31 +215,67 @@ test("JS and SQL never-shop patterns agree on every fixture", () => {
   ]) assert.equal(sqlAsJs.test(name), NEVER_SHOP_RE.test(name), name);
 });
 
-console.log("\nworkload — Tyler's LUCA workload rule");
+console.log("\nworkload — Tyler's LUCA workload rule (assigned-truck-first, 2026-08-30)");
 
-test("declined status is cannot_work", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: false }), "cannot_work");
+// The unit of work is the TECHNICIAN'S CURRENT TRUCK, never the rental case
+// truck. Decision order: unresolved tech → no truck → not ours → no PO → work.
+
+test("unresolved renter is the identity queue, never the call queue", () => {
+  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null, techUnresolved: true }), "tech_unresolved");
 });
-test("auction status is cannot_work", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "auction", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null }), "cannot_work");
+test("unresolved renter outranks everything, even a healthy assigned truck", () => {
+  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: true, techUnresolved: true }), "tech_unresolved");
 });
-test("cannot_work wins even when the assigned truck has a repair PO", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: true }), "cannot_work");
+
+test("NEW RULE: no assigned truck means nobody to go after", () => {
+  // Tyler 2026-08-30. Under the old rule this fell through to the rental truck
+  // and stayed callable; that is the resource the new rule gives back.
+  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null }), "no_assigned_truck");
 });
-test("renter assigned elsewhere with NO repair PO is the escalation cohort", () => {
+test("NEW RULE: no assigned truck wins over a declined rental van", () => {
+  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null }), "no_assigned_truck");
+});
+
+test("declined status on the tech's OWN truck is cannot_work", () => {
+  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: false }), "cannot_work");
+});
+test("auction status on the tech's OWN truck is cannot_work", () => {
+  assert.equal(deriveWorkloadBucket({ amsBucket: "auction", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: true }), "cannot_work");
+});
+test("REGRESSION: a declined RENTAL VAN never vetoes a different assigned truck", () => {
+  // The old rule returned cannot_work here, which is how a tech sitting in a
+  // rental with their own truck genuinely in a shop went uncalled. amsBucket
+  // describes the rental van; on a mismatch it says nothing about the target.
+  // LIVHR re-checks the target's live status twice before it dials.
+  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: true }), "workable");
+});
+
+test("assigned truck with NO repair PO escalates to a human", () => {
   assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: false }), "mismatch_no_po");
 });
-test("unknown repair-PO answer on a mismatch escalates (never assumed workable)", () => {
+test("NEW RULE: a CONGRUENT tech whose own truck has no repair PO also escalates", () => {
+  // Old rule called this workable, because it only checked the assigned truck's
+  // PO on a mismatch. Tyler 2026-08-30: a rental running with no repair behind
+  // it is a human problem whether or not the truck numbers agree.
+  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: false }), "mismatch_no_po");
+});
+test("unknown repair-PO answer escalates (never assumed workable)", () => {
   assert.equal(deriveWorkloadBucket({ amsBucket: "in_use", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: null }), "mismatch_no_po");
 });
-test("renter assigned elsewhere WITH a repair PO is workable", () => {
+
+test("assigned elsewhere WITH a repair PO is workable", () => {
   assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: true }), "workable");
 });
-test("congruent renter/truck is workable regardless of the assigned PO", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: false }), "workable");
+test("congruent tech/truck with a repair PO is workable", () => {
+  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: true }), "workable");
 });
-test("unresolved assigned truck is workable, not an escalation", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "unknown", assignedTruck: null, assignedMismatch: true, assignedHasRepairPo: null }), "workable");
+
+test("every non-working bucket is listed in NON_WORKING_BUCKETS", () => {
+  for (const b of ["tech_unresolved", "no_assigned_truck", "cannot_work"] as const) {
+    assert.ok(NON_WORKING_BUCKETS.includes(b), `${b} missing from NON_WORKING_BUCKETS`);
+  }
+  assert.ok(!NON_WORKING_BUCKETS.includes("workable"));
+  assert.ok(!NON_WORKING_BUCKETS.includes(ESCALATION_BUCKET));
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

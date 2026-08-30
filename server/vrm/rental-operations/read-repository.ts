@@ -702,7 +702,7 @@ export interface MasterRow {
   // expect bucket movement when it next shifts.
   assigned_truck_open_po_count: number;
   assigned_truck_has_repair_po: boolean | null;// null when there is no assigned truck
-  workload_bucket: WorkloadBucket;             // cannot_work | mismatch_no_po | workable
+  workload_bucket: WorkloadBucket;             // see ./workload — assigned-truck-first
   redirect_to_assigned: boolean;   // declined/auction + distinct assigned truck → call THAT shop
   call_target_truck: string | null;// the truck whose shop LUCA actually dials (rental or assigned)
   call_shop_name: string | null;
@@ -738,7 +738,7 @@ export interface MasterModel {
   identityStates: Record<string, number>;
   categories: Record<string, number>;
   amsBuckets: Record<string, number>;
-  workloadBuckets: Record<string, number>;   // cannot_work | mismatch_no_po | workable
+  workloadBuckets: Record<string, number>;   // see ./workload — assigned-truck-first
   mismatchCount: number;
   costOverCount: number;
   pendedCount: number;
@@ -910,7 +910,11 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
   const identityStates: Record<string, number> = {};
   const categories: Record<string, number> = { SEDAN: 0, "SUV/VAN/TRUCK": 0, unknown: 0 };
   const amsBuckets: Record<string, number> = {};
-  const workloadBuckets: Record<string, number> = { workable: 0, cannot_work: 0, mismatch_no_po: 0 };
+  // Seeded with EVERY bucket so a zero renders as 0 rather than vanishing from
+  // the response (the board's cohort chips read these counts directly).
+  const workloadBuckets: Record<string, number> = {
+    workable: 0, mismatch_no_po: 0, cannot_work: 0, no_assigned_truck: 0, tech_unresolved: 0,
+  };
   let mismatchCount = 0, costOverCount = 0, pendedCount = 0;
   let portalCorrectedCount = 0, closedByPortal = 0, openedByPortal = 0;
   const evidenceAges: number[] = [];
@@ -965,32 +969,59 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     r.portal_shop_phone = cleanPhone(r.portal_shop_phone);
     r.assigned_portal_phone = cleanPhone(r.assigned_portal_phone);
 
-    // ── effective LUCA call target (assigned-truck redirect) ──────────────────
+    // ── effective LUCA call target — THE TECH'S ASSIGNED TRUCK, ALWAYS ────────
+    // Tyler 2026-08-30, superseding the 2026-07-24 redirect-as-exception rule:
+    // "It's only supposed to be the truck they're assigned to. If they're not
+    // assigned a truck, then there's nobody to go after."
+    //
+    // WHY THE OLD RULE BROKE. It dialled the shop repairing the RENTAL truck and
+    // fell back to the tech's own truck only when the rental van was declined or
+    // auctioned. That was right under Holman, where a rental was always written
+    // against a real SHS truck. The direct-billing cutover ended it: Enterprise's
+    // report carries NO SHS truck number (see direct-billing-import.ts), 314 of
+    // 402 open cases are enterprise_direct, and case_key is a frozen snapshot of
+    // whatever TPMS said on import day. Measured on prod 2026-08-30: 22 open
+    // cases had the tech on a different truck than the case, LUCA spent 81 calls
+    // in 30 days on trucks those techs no longer had (truck 46953 took 20 calls
+    // while the tech's real truck 46541 took none), and only 3 of 387 LIVHR
+    // rentals carried a redirect payload.
+    //
+    // SAFE FOR THE CONGRUENT MAJORITY. When the assigned truck IS the case truck
+    // (351 of 402 on prod), apo/ashop join po_agg/shop_pick on the same key as
+    // po/shop, so every value chosen below is byte-identical to the old path.
     const isDeclAuction = amsBucket === "declined" || amsBucket === "auction";
     const assignedTruck = r.assigned_truck ? String(r.assigned_truck) : null;
     const assignedOpenPo = Number(r.assigned_open_po || 0);
-    // ── LUCA workload rule ───────────────────────────────────────────────────
-    // Congruent = the renter's assigned truck IS the rental-case truck. A
-    // mismatch means the tech is assigned a DIFFERENT truck, so THAT truck is
-    // the one that must carry a qualifying repair PO. No PO there = escalate.
     const assignedMismatch = !!(assignedTruck && strip(assignedTruck) !== strip(r.case_key));
     const assignedHasRepairPo = assignedTruck ? assignedOpenPo > 0 : null;
-    const workloadBucket = deriveWorkloadBucket({ amsBucket, assignedTruck, assignedMismatch, assignedHasRepairPo });
-    // The rental truck is callable on its OWN repair only if we still own it
-    // (not declined/auction) and it has an open repair PO + a verified phone.
-    const rentalOwnCallable = !isDeclAuction && openPo > 0 && !!r.portal_shop_phone;
-    // Redirect to the tech's ASSIGNED truck's shop when the rental truck is not
-    // workable on its own but the tech is driving a DIFFERENT truck and their own
-    // truck has an open repair + phone. Covers BOTH (a) declined/auction (we no
-    // longer own the rental van) AND (b) a non-declined rental whose repair is
-    // actually on the tech's own truck. The rental truck's own repair wins when
-    // it exists (that's the van the rental is written against).
-    const assignedCallable = !!assignedTruck && wrongTruck && assignedOpenPo > 0 && !!r.assigned_portal_phone;
-    const redirectToAssigned = !rentalOwnCallable && assignedCallable;
+    // No identity means no way to know which truck is theirs, so the case goes to
+    // the identity queue rather than the call queue. Dialling the case truck here
+    // is exactly the coin flip this rule exists to stop.
+    const techUnresolved = !r.employee_id;
+    const workloadBucket = deriveWorkloadBucket({
+      amsBucket, assignedTruck, assignedMismatch, assignedHasRepairPo, techUnresolved,
+    });
+    // amsBucket describes the RENTAL VAN. It only describes the truck we would
+    // call about when the assigned truck IS that van, so it may only veto on a
+    // congruent case. On a mismatch the target's live AMS status is re-checked
+    // twice downstream on LIVHR (build-case-file drops a declined/auction target,
+    // call-shop hard-blocks at the dial) — the board must not veto a healthy
+    // assigned truck because the van the rental was written against is scrap.
+    const targetIsDeclAuction = isDeclAuction && !assignedMismatch;
+    // redirect_to_assigned keeps its old meaning for LIVHR and the UI — the shop
+    // we dial belongs to a DIFFERENT truck than the rental case. It is now an
+    // OUTCOME of the rule rather than the gate that decides it.
+    const redirectToAssigned = !!assignedTruck && assignedMismatch && !techUnresolved;
     let callTargetTruck: string | null;
     let callShopName: string | null, callShopPhone: string | null, callShopAddress: string | null;
     let callShopPoNumber: string | null, callShopPoStatus: string | null, callOpenRepair: boolean;
-    if (redirectToAssigned) {
+    if (techUnresolved || !assignedTruck || targetIsDeclAuction) {
+      // Unknown renter, no current truck assignment (nobody to go after — this is
+      // the resource the new rule gives back), or their own truck is one we no
+      // longer own. No shop to call in any of the three.
+      callTargetTruck = null; callShopName = null; callShopPhone = null; callShopAddress = null;
+      callShopPoNumber = null; callShopPoStatus = null; callOpenRepair = false;
+    } else if (assignedMismatch) {
       callTargetTruck = assignedTruck;
       callShopName = r.assigned_shop_name ?? null;
       callShopPhone = r.assigned_portal_phone ?? null;
@@ -998,11 +1029,9 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       callShopPoNumber = r.assigned_shop_po_number ?? null;
       callShopPoStatus = r.assigned_shop_po_status ?? null;
       callOpenRepair = assignedOpenPo > 0;
-    } else if (isDeclAuction) {
-      // declined/auction with no distinct assigned truck to redirect to → excluded
-      callTargetTruck = null; callShopName = null; callShopPhone = null; callShopAddress = null;
-      callShopPoNumber = null; callShopPoStatus = null; callOpenRepair = false;
     } else {
+      // The assigned truck IS the case truck; read it through the rental-truck
+      // columns, which join the same CTEs on the same key.
       callTargetTruck = r.case_key;
       callShopName = r.shop_name ?? null;
       callShopPhone = r.portal_shop_phone ?? null;
@@ -1455,13 +1484,16 @@ export async function getSourceHealth(): Promise<SourceHealthModel> {
  * dials instead of FleetScope. Rules encoded in the master model:
  *  - PENDED (renter already turned the vehicle in / ticket closing) is excluded
  *    entirely — LUCA never works a rental that's already wrapping up.
- *  - Normal rental → call the shop repairing the RENTAL truck.
- *  - Declined Repair / Sent To Auction → we no longer own the rental van, so the
- *    call redirects to the shop repairing the tech's ASSIGNED truck
- *    (renter_own_truck). Declined/auction with no distinct assigned truck is
- *    excluded (nothing to call).
+ *  - The call target is the technician's CURRENT truck assignment, always
+ *    (Tyler 2026-08-30). Not the rental truck, and not a declined/auction-only
+ *    redirect — the assigned truck IS the rule. See ./workload for why the
+ *    direct-billing cutover made the rental truck the wrong key.
+ *  - No current assignment → nothing to call, and the case leaves the workload.
+ *  - Assigned truck with no qualifying repair PO → escalation, not a call.
  * Every shop row carries `truck` = the truck whose shop is dialed (call target),
- * plus rental_truck / assigned_truck / redirect_to_assigned for context.
+ * plus rental_truck / assigned_truck / redirect_to_assigned for context. The
+ * three non-calling cohorts come back as mismatchNoPo / noAssignedTruck /
+ * techUnresolved so nothing leaves the workload silently.
  */
 export async function getLucaFeed(): Promise<any> {
   const m = await getRentalOpsMaster({});
@@ -1486,9 +1518,31 @@ export async function getLucaFeed(): Promise<any> {
     portalCorrectedCount: m.portalCorrectedCount,
     cohortCorrections: m.cohortCorrections,
     poEvidenceAgeHours: m.poEvidenceAgeHours,
+    // ── the three cohorts LUCA does NOT call, each named and listed ──────────
+    // Tyler 2026-08-30: "escalate it to a human". mismatchNoPo is the escalation
+    // — a rental is running and the truck the tech actually has carries no
+    // qualifying repair PO, so nothing is going to end that rental on its own.
+    // Under the old rule this fired only on a truck-number mismatch; it now
+    // fires for a congruent tech too, which is the same operational problem.
     mismatchNoPo: rows.filter((r) => r.workload_bucket === "mismatch_no_po").map((r) => ({
       rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
       employee_id: r.employee_id, ams_status: r.ams_status, days_open: r.days_open,
+      assigned_truck_mismatch: r.assigned_truck_mismatch, source: r.source,
+      daily_cost: r.daily_cost, district: r.tech_district,
+    })),
+    // No current truck assignment: nobody to go after, so LUCA stops spending
+    // calls here. Listed rather than dropped — a tech in a rental with no truck
+    // is a real question for a human, it just is not a shop call.
+    noAssignedTruck: rows.filter((r) => r.workload_bucket === "no_assigned_truck").map((r) => ({
+      rental_truck: r.case_key, renter: r.renter_name_raw, employee_id: r.employee_id,
+      employment_status: r.employee_status, source: r.source,
+      days_open: r.days_open, daily_cost: r.daily_cost, district: r.tech_district,
+    })),
+    // Renter never resolved to an employee, so which truck is "theirs" is
+    // unknowable. Identity queue, not the call queue.
+    techUnresolved: rows.filter((r) => r.workload_bucket === "tech_unresolved").map((r) => ({
+      rental_truck: r.case_key, renter: r.renter_name_raw, identity_state: r.identity_state,
+      source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
     })),
     lastSyncAt: m.sourceHealth.lastSyncAt,
     shops: callable.map((r) => ({

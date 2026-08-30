@@ -178,7 +178,7 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
 // Tyler's LUCA workload rule: an explicit CAN-work / CANNOT-work split, plus
 // the escalation cohort (renter assigned a different truck that has no
 // qualifying repair PO). Server derives `workload_bucket`; these tabs read it.
-const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po"]);
+const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po", "no_assigned_truck", "tech_unresolved"]);
 const COHORTS: Array<{ key: string; label: string }> = [
   // All Rentals is the total and doubles as the workable count: everything here
   // that is not under Cannot work is a rental we still own and can act on. That is
@@ -187,7 +187,11 @@ const COHORTS: Array<{ key: string; label: string }> = [
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "auction_redirect", label: "Sent to Auction · LUCA will call" },
-  { key: "mismatch_no_po", label: "Mismatch · no repair PO" },
+  { key: "mismatch_no_po", label: "Escalate · no repair PO" },
+  // Tyler 2026-08-30: the call target is the tech's assigned truck, so these
+  // two cohorts have nothing for LUCA to dial. Listed, never silently dropped.
+  { key: "no_assigned_truck", label: "No assigned truck · nobody to chase" },
+  { key: "tech_unresolved", label: "Renter unresolved · identity queue" },
   { key: "pended", label: "Pended · turned in" },
   { key: "open_repair", label: "Open Repair Ticket" },
   { key: "no_open_repair", label: "No Open Repair" },
@@ -675,7 +679,9 @@ export default function RegionalCases() {
     const identityStates: Record<string, number> = {};
     // Tyler's workload rule — counted over the current pool so the tab badges
     // always tie out to what the grid actually shows.
-    const workload: Record<string, number> = { workable: 0, cannot_work: 0, mismatch_no_po: 0 };
+    const workload: Record<string, number> = {
+      workable: 0, cannot_work: 0, mismatch_no_po: 0, no_assigned_truck: 0, tech_unresolved: 0,
+    };
     let mismatch = 0, costOver = 0, callable = 0;
     let sawServerWorkload = false;
     for (const r of basePool) {
@@ -723,6 +729,8 @@ export default function RegionalCases() {
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
       else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
       else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
+      else if (cohort === "no_assigned_truck") { if (workloadBucketOf(r) !== "no_assigned_truck") return false; }
+      else if (cohort === "tech_unresolved") { if (workloadBucketOf(r) !== "tech_unresolved") return false; }
       else if (cohort === "auction_redirect") { if (!(isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable)) return false; }
       else if (cohort === "pended") { /* pool is already PENDED-only */ }
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;

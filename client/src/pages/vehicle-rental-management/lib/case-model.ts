@@ -103,7 +103,7 @@ export interface MasterRow {
   assigned_truck_mismatch: boolean;
   assigned_truck_open_po_count: number;
   assigned_truck_has_repair_po: boolean | null;
-  workload_bucket: "cannot_work" | "mismatch_no_po" | "workable";
+  workload_bucket: "tech_unresolved" | "no_assigned_truck" | "cannot_work" | "mismatch_no_po" | "workable";
   redirect_to_assigned: boolean;
   call_target_truck: string | null;
   call_shop_name: string | null;
@@ -141,14 +141,31 @@ export const isDeclinedAuction = (b: string) => b === "declined" || b === "aucti
 
 /** THE workload derivation. Used by BOTH the chip counts and the row filter so a
  * chip can never advertise a number and then open a grid that disagrees.
- * cannot_work comes from ams_bucket (the same field the Declined/Auction chips
- * count). The server's workload_bucket only splits escalation out of the rest;
- * when the running server predates that field, rows fall through to workable and
- * the escalation chip renders "—" instead of a misleading 0. */
-export type WorkloadBucket = "cannot_work" | "mismatch_no_po" | "workable";
+ *
+ * The SERVER's bucket wins whenever it is present (Tyler 2026-08-30). It is the
+ * only side that knows whether a Declined/Auction status belongs to the truck we
+ * would actually call about: once the call target became the technician's
+ * assigned truck, a scrapped rental van no longer makes the case unworkable when
+ * the tech's own truck is healthy and in a shop. Deriving cannot_work from
+ * ams_bucket here would put those rows back in the wrong chip.
+ *
+ * The ams_bucket fallback below is ONLY for a server build that predates the
+ * field; it keeps the old behaviour rather than silently calling everything
+ * workable. */
+export type WorkloadBucket =
+  | "tech_unresolved"
+  | "no_assigned_truck"
+  | "cannot_work"
+  | "mismatch_no_po"
+  | "workable";
+const SERVER_WORKLOAD_BUCKETS: ReadonlySet<string> = new Set<WorkloadBucket>([
+  "tech_unresolved", "no_assigned_truck", "cannot_work", "mismatch_no_po", "workable",
+]);
 export function workloadBucketOf(r: { ams_bucket: string; workload_bucket?: string | null }): WorkloadBucket {
+  if (r.workload_bucket && SERVER_WORKLOAD_BUCKETS.has(r.workload_bucket)) {
+    return r.workload_bucket as WorkloadBucket;
+  }
   if (isDeclinedAuction(r.ams_bucket)) return "cannot_work";
-  if (r.workload_bucket === "mismatch_no_po") return "mismatch_no_po";
   return "workable";
 }
 

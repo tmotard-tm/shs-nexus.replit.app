@@ -190,7 +190,7 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
 // Tyler's LUCA workload rule: an explicit CAN-work / CANNOT-work split, plus
 // the escalation cohort (renter assigned a different truck that has no
 // qualifying repair PO). Server derives `workload_bucket`; these tabs read it.
-const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po"]);
+const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po", "no_assigned_truck", "tech_unresolved"]);
 const COHORTS: Array<{ key: string; label: string }> = [
   // All Rentals is the total and doubles as the workable count: everything here
   // that is not under Cannot work is a rental we still own and can act on. That is
@@ -202,7 +202,11 @@ const COHORTS: Array<{ key: string; label: string }> = [
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "auction_redirect", label: "Sent to Auction · LUCA will call" },
-  { key: "mismatch_no_po", label: "Mismatch · no repair PO" },
+  { key: "mismatch_no_po", label: "Escalate · no repair PO" },
+  // Tyler 2026-08-30: the call target is the tech's assigned truck, so these
+  // two cohorts have nothing for LUCA to dial. Listed, never silently dropped.
+  { key: "no_assigned_truck", label: "No assigned truck · nobody to chase" },
+  { key: "tech_unresolved", label: "Renter unresolved · identity queue" },
   { key: "pended", label: "Pended · turned in" },
   { key: "open_repair", label: "Open Repair Ticket" },
   { key: "no_open_repair", label: "No Open Repair" },
@@ -614,7 +618,9 @@ export default function RentalOperations() {
     const identityStates: Record<string, number> = {};
     // Tyler's workload rule — counted over the current pool so the tab badges
     // always tie out to what the grid actually shows.
-    const workload: Record<string, number> = { workable: 0, cannot_work: 0, mismatch_no_po: 0 };
+    const workload: Record<string, number> = {
+      workable: 0, cannot_work: 0, mismatch_no_po: 0, no_assigned_truck: 0, tech_unresolved: 0,
+    };
     let mismatch = 0, costOver = 0, callable = 0;
     let sawServerWorkload = false;
     for (const r of basePool) {
@@ -661,6 +667,8 @@ export default function RentalOperations() {
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
       else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
       else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
+      else if (cohort === "no_assigned_truck") { if (workloadBucketOf(r) !== "no_assigned_truck") return false; }
+      else if (cohort === "tech_unresolved") { if (workloadBucketOf(r) !== "tech_unresolved") return false; }
       else if (cohort === "auction_redirect") { if (!(isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable)) return false; }
       else if (cohort === "pended") { /* pool is already PENDED-only */ }
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
@@ -1127,6 +1135,8 @@ export default function RentalOperations() {
             : c.key === "cannot_work" ? (stats.workload.cannot_work ?? 0)
             : c.key === "auction_redirect" ? auctionRedirectCount
             : c.key === "mismatch_no_po" ? (stats.sawServerWorkload ? (stats.workload.mismatch_no_po ?? 0) : "—")
+            : c.key === "no_assigned_truck" ? (stats.sawServerWorkload ? (stats.workload.no_assigned_truck ?? 0) : "—")
+            : c.key === "tech_unresolved" ? (stats.sawServerWorkload ? (stats.workload.tech_unresolved ?? 0) : "—")
             : c.key === "ready_for_pickup" ? readyForPickupChipCount
             : c.key === "pended" ? pendedTotal
             : (stats.cohorts[c.key] ?? 0);
@@ -1134,9 +1144,12 @@ export default function RentalOperations() {
           const danger = c.key === "cannot_work";
           const go = c.key === "luca_queue" || c.key === "auction_redirect";
           const pended = c.key === "pended" || c.key === "mismatch_no_po";
-          const accentC = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.accent;
-          const restColor = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.inkSoft;
-          const restBorder = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.rule;
+          // Neither of these is a problem to fix, they are work LUCA correctly
+          // does not do — muted, not amber, so they never read as an alarm.
+          const quiet = c.key === "no_assigned_truck" || c.key === "tech_unresolved";
+          const accentC = danger ? colors.red : go ? colors.green : pended ? colors.amber : quiet ? colors.inkMuted : colors.accent;
+          const restColor = danger ? colors.red : go ? colors.green : pended ? colors.amber : quiet ? colors.inkMuted : colors.inkSoft;
+          const restBorder = danger ? colors.red : go ? colors.green : pended ? colors.amber : quiet ? colors.rule : colors.rule;
           return (
             <button key={c.key} type="button" onClick={() => setCohort(c.key)}
               title={c.key === "cannot_work" ? "Declined Repair / Sent To Auction — we no longer own these vans. Hands off: no shop calls. A few still appear in the LUCA Call Queue via the assigned-truck redirect, which calls the shop holding the tech's OWN truck rather than this van. Everything NOT counted here is a rental we still own and can work."
@@ -1159,8 +1172,8 @@ export default function RentalOperations() {
       {/* Workload banner — the governing sentence for whichever workload tab is on */}
       {WORKLOAD_TABS.has(cohort) && (
         <div className="ro-banner" style={{ marginBottom: 12, padding: "11px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.5,
-          border: `1px solid ${cohort === "cannot_work" ? colors.red : cohort === "mismatch_no_po" ? colors.amber : colors.green}`,
-          background: cohort === "cannot_work" ? "rgba(239,68,68,.06)" : cohort === "mismatch_no_po" ? "rgba(245,158,11,.07)" : "rgba(34,197,94,.06)",
+          border: `1px solid ${cohort === "cannot_work" ? colors.red : cohort === "mismatch_no_po" ? colors.amber : colors.rule}`,
+          background: cohort === "cannot_work" ? "rgba(239,68,68,.06)" : cohort === "mismatch_no_po" ? "rgba(245,158,11,.07)" : colors.surface,
           color: colors.inkSoft }}>
           {cohort === "cannot_work" && (
             <><strong style={{ color: colors.red }}>{stats.workload.cannot_work ?? 0} rentals cannot be worked.</strong>{" "}
@@ -1174,9 +1187,19 @@ export default function RentalOperations() {
           )}
           {cohort === "mismatch_no_po" && stats.sawServerWorkload && (
             <><strong style={{ color: colors.amber }}>{stats.workload.mismatch_no_po ?? 0} rentals need escalation.</strong>{" "}
-              The renter is assigned a <em>different</em> truck than the one this rental is written against, and that assigned truck has no qualifying repair PO
-              (towing / roadside POs do not count unless parts or labor are on them). Nothing is in a shop, so nothing will close on its own.
-              {" "}<span style={{ color: colors.inkMuted }}>Escalation routing is a Tyler decision and is not automated — work this list manually for now.</span></>
+              The truck this technician is actually assigned carries no qualifying repair PO
+              (towing / roadside POs do not count unless parts or labor are on them). A rental is running with nothing in a shop behind it, so nothing will close on its own.
+              {" "}<span style={{ color: colors.inkMuted }}>Since 2026-08-30 this fires whether or not the truck numbers match: a congruent technician whose own truck has no repair is the same operational problem. Escalation routing is manual — work this list.</span></>
+          )}
+          {cohort === "no_assigned_truck" && (
+            <><strong>{stats.workload.no_assigned_truck ?? 0} rentals have no truck to chase.</strong>{" "}
+              The renter holds no current truck assignment, so there is no shop repairing anything for them and no call for LUCA to place.
+              {" "}<span style={{ color: colors.inkMuted }}>This is deliberate (Tyler 2026-08-30) and is where the saved calls come from. It is still worth a human asking why someone is in a rental with no vehicle assigned to them.</span></>
+          )}
+          {cohort === "tech_unresolved" && (
+            <><strong>{stats.workload.tech_unresolved ?? 0} rentals have no identified renter.</strong>{" "}
+              Identity never resolved to an employee, so we cannot know which truck is theirs and will not guess by calling the truck on the ticket.
+              {" "}<span style={{ color: colors.inkMuted }}>Resolve the renter first; the case rejoins the call queue automatically once it has an employee and a truck.</span></>
           )}
         </div>
       )}
