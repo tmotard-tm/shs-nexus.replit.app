@@ -556,7 +556,39 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
           veh_desc=EXCLUDED.veh_desc, rental_class=EXCLUDED.rental_class, rate_authorized=EXCLUDED.rate_authorized,
           renting_city=EXCLUDED.renting_city, renting_state=EXCLUDED.renting_state,
           last_import_run_id=EXCLUDED.last_import_run_id, present_in_latest=true,
-          last_seen_at=NOW(), dropped_from_feed_at=NULL, updated_at=NOW()
+          last_seen_at=NOW(), dropped_from_feed_at=NULL, updated_at=NOW(),
+          -- feed_json is MERGED, never replaced (Tyler 2026-08-30).
+          --
+          -- It used to be absent from this list entirely, so it was written once at
+          -- INSERT and then frozen forever while every scalar column beside it kept
+          -- moving. That is not cosmetic: book_cutover.py derives the reserved
+          -- vehicle class from feed_json, and on 2026-08-17 eleven technicians in one
+          -- wave were in a DIFFERENT vehicle than the pinned snapshot claimed
+          -- (JPAIGE Rogue -> F-150, KEDOH Outlander -> Pacifica), so the booker
+          -- reserved the wrong car. The workaround was --feed-override built by hand
+          -- from raw_rentals. This is that workaround made unnecessary.
+          --
+          -- ⛔ MERGE, NOT OVERWRITE, AND THE DIFFERENCE MATTERS. Sources carry
+          -- DIFFERENT KEY SHAPES: the Snowflake ECARS feed supplies RENTING_BRANCH /
+          -- RENTING_CITY_NAME / ECARS_2_0_TKT_NBR / RATE_AUTHORIZED, while the
+          -- manual Enterprise direct-billing report supplies AVG_RATE_PER_DAY /
+          -- ACTUAL_CHARGE_DAYS and no branch at all. A case that starts on ECARS and
+          -- is later taken over by the direct import keeps its original source's
+          -- keys: measured on prod 2026-08-30, 218 of 314 enterprise_direct cases
+          -- still held RENTING_BRANCH. A plain feed_json=EXCLUDED.feed_json would
+          -- have blanked the branch on all 218 and broken book_cutover.py and
+          -- build_reservation_queue.py, which read exactly that field.
+          --
+          -- `||` is a shallow right-wins merge, so each import refreshes the keys it
+          -- actually supplies and leaves every other source's keys standing. COALESCE
+          -- guards the nullable column, because NULL || x is NULL in jsonb.
+          --
+          -- Known limit, accepted on purpose: a key that DISAPPEARS upstream is not
+          -- cleared, it keeps its last known value. Losing another source's live keys
+          -- is the worse failure. The per-run snapshots in
+          -- vrm_rental_operations_raw_rentals remain the untouched audit trail of
+          -- exactly what each file said.
+          feed_json=COALESCE(vrm_rental_operations_cases.feed_json, '{}'::jsonb) || EXCLUDED.feed_json
         RETURNING id
       `);
       const caseId = (caseRes.rows[0] as any).id as string;
