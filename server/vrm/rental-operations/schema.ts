@@ -105,6 +105,24 @@ export async function initRentalOperationsSchema(): Promise<void> {
       last_import_run_id    VARCHAR,
       present_in_latest     BOOLEAN NOT NULL DEFAULT true, -- false = dropped off latest feed (returned/closed)
       dropped_from_feed_at  TIMESTAMPTZ,
+      -- What the sources have most recently delivered, MERGED key by key. Absent
+      -- from the ON CONFLICT list until 2026-08-30, so it used to freeze at first
+      -- sight; it now merges (see the long comment on the upsert in ingest.ts).
+      -- The immutable per-run archive is raw_rentals above, not this column.
+      --
+      -- A MERGE MEANS A KEY THE CURRENT SOURCE DOES NOT SUPPLY KEEPS ITS OLD VALUE,
+      -- and the sources do not share a key vocabulary, so an enterprise_direct case
+      -- still carries the ECARS keys of the Holman rental it REPLACED. Measured on
+      -- prod 2026-08-30: 0 of 221 such cases held an ECARS_2_0_TKT_NBR matching
+      -- their live ticket, 218 held a CLAIM_NUMBER where the case itself has none,
+      -- and the surviving RATE_AUTHORIZED ran 2.2x the real rate (46160: $55.75
+      -- against $25.05). Those keys will never self-correct, because the direct feed
+      -- supplies AVG_RATE_PER_DAY / RENTAL_AGREEMENT_NUMBER under different names.
+      --
+      -- SO: read the SCALAR columns first (ticket_number, claim_number,
+      -- rate_authorized, renting_city, renting_state, veh_desc, rental_start_date),
+      -- which always refreshed, and use feed_json only as the fallback. The only
+      -- field with no scalar home is RENTING_BRANCH.
       feed_json             JSONB,
       created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()

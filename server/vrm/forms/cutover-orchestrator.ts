@@ -567,28 +567,57 @@ export function renderMsg1(f: {
   branchAddress: string;
   firstName?: string;
   dayLabel?: string;
+  /**
+   * Minutes actually blocked on the route. MUST match what was filed.
+   *
+   * Was hardcoded to 30 here, and stayed hardcoded when the filed block moved to
+   * 60/90 on 2026-08-28. On 2026-08-30 that shipped two live texts telling
+   * technicians they had a 30-minute block when 60 and 90 had been filed.
+   * Defaults to 60 rather than throwing, because a wrong number is worse than a
+   * conservative one, but every caller should pass the value it filed.
+   */
+  minutes?: number;
+  /**
+   * True when the reserved class is NOT the class they are already driving.
+   *
+   * The old body asserted "You keep the vehicle you are driving ... nothing to
+   * hand back" unconditionally. For a swap that is wrong in both directions:
+   * they DO hand a vehicle back and they DO take a different one. CTHOMAS got
+   * that text on 2026-08-30 while moving from a Ford F-150 to a full-size sedan.
+   */
+  changesVehicle?: boolean;
+  /** What they are moving INTO, e.g. "a full-size sedan". Swaps only. */
+  newVehicleLabel?: string;
 }): string {
   const who = f.firstName ? `Hi ${f.firstName}, this is` : "This is";
   const when = f.dayLabel ?? "Tomorrow";
+  const mins = Number.isFinite(Number(f.minutes)) && Number(f.minutes) > 0
+    ? Math.round(Number(f.minutes))
+    : 60;
+  const vehicle = f.changesVehicle
+    ? `You will be changing vehicles at this stop. Hand back the vehicle you are driving now; the branch has ${f.newVehicleLabel ?? "a replacement"} reserved for you. Move your tools across before you leave. Bring your driver's license. There is nothing for you to pay.`
+    : `You keep the vehicle you are driving. This is a billing change only. The branch will close your current Holman agreement and re-sign the same vehicle under Sears direct billing. Bring your driver's license. There is nothing for you to pay and nothing to hand back. It usually takes about 15 minutes.`;
   return (
-    `${who} Sears Fleet. ${when}, we have blocked the first 30 minutes of your route, ` +
-    `8:00 AM, for you to stop at Enterprise ${f.branchName}, ${f.branchAddress}. ` +
-    `Confirmation ${f.conf}.\n\n` +
-    `You keep the vehicle you are driving. This is a billing change only. The branch will ` +
-    `close your current Holman agreement and re-sign the same vehicle under Sears direct ` +
-    `billing. Bring your driver's license. There is nothing for you to pay and nothing to ` +
-    `hand back. It usually takes about 15 minutes.\n\n` +
-    `If you have any issue and need immediate help, reach out to an agent in Sasha. Reply ` +
-    `back here with an update once it is completed. This inbox is monitored throughout the ` +
-    `day but not constantly.`
+    `${who} Sears Fleet. ${when}, we have blocked the first ${mins} minutes of your route, 8:00 AM, for you to stop at Enterprise ${f.branchName}, ${f.branchAddress}. Confirmation ${f.conf}.\n\n` +
+    `${vehicle}\n\n` +
+    `If you have any issue and need immediate help, reach out to an agent in Sasha. Reply back here with an update once it is completed. This inbox is monitored throughout the day but not constantly.`
   );
 }
 
-export function renderMsg2(f: { conf: string; branchName: string; branchAddress: string }): string {
+export function renderMsg2(f: {
+  conf: string;
+  branchName: string;
+  branchAddress: string;
+  /** Same contract as renderMsg1: never assert a duration that was not filed. */
+  minutes?: number;
+  changesVehicle?: boolean;
+}): string {
+  const mins = Number.isFinite(Number(f.minutes)) && Number(f.minutes) > 0
+    ? Math.round(Number(f.minutes))
+    : 60;
+  const vehicle = f.changesVehicle ? `You are changing vehicles at this stop: hand back the one you have and take the replacement the branch is holding. Move your tools across.` : `You keep your current vehicle; billing-only change (old agreement closed and re-signed under Sears direct billing).`;
   return (
-    `SHS Fleet reminder: today's 8:00 AM block — Enterprise ${f.branchName}, ${f.branchAddress}, ` +
-    `confirmation ${f.conf}. You keep your current vehicle; billing-only change (old agreement closed ` +
-    `and re-signed under Sears direct billing). Reply here with questions.`
+    `SHS Fleet reminder: today's 8:00 AM block (${mins} minutes) - Enterprise ${f.branchName}, ${f.branchAddress}, confirmation ${f.conf}. ${vehicle} Reply here with questions.`
   );
 }
 
@@ -952,7 +981,9 @@ export async function fetchEligibilityFacts(params: {
   if (isCutover && roster?.employeeId) {
     const empDigits = digitsOnly(roster.employeeId);
     const { rows } = await executor.execute(sql`
-      SELECT c.case_key, c.vehicle_number, c.feed_json, c.rental_vendor
+      SELECT c.case_key, c.vehicle_number, c.feed_json, c.rental_vendor,
+             c.ticket_number, c.claim_number, c.renting_city, c.renting_state,
+             to_char(c.rental_start_date, 'YYYY-MM-DD') AS rental_start_date_s
       FROM vrm_rental_operations_cases c
       JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
       WHERE c.present_in_latest = true
@@ -967,17 +998,49 @@ export async function fetchEligibilityFacts(params: {
       const c = list[0];
       caseKey = c.case_key;
       const fj = typeof c.feed_json === "string" ? safeJson(c.feed_json) : (c.feed_json ?? {});
+      // SCALAR COLUMN FIRST, feed_json only as the fallback.
+      //
+      // feed_json is MERGED on each import, not replaced (bcc2d31b), and the three
+      // feed sources do not share a key vocabulary: an enterprise_direct row
+      // supplies no ECARS_2_0_TKT_NBR, no CLAIM_NUMBER and no RATE_AUTHORIZED at
+      // all. A merge therefore CANNOT heal those keys -- nothing ever overwrites
+      // them -- so a case that moved from Holman billing to Enterprise direct keeps
+      // handing the branch the ECARS ticket and ARI claim of the rental it
+      // REPLACED, permanently. Measured on prod 2026-08-30: 0 of 221 open direct
+      // cases had a feed ECARS ticket matching their live one, and 218 carried a
+      // claim number where the case itself has none. Both values are printed
+      // verbatim onto the reservation as "CLOSE Enterprise Ticket" and
+      // "Holman ARI Claim", so the counter was being pointed at a dead contract.
+      //
+      // ticket_number and claim_number were correct the whole time and were never
+      // the frozen ones; the same is true of renting_city, renting_state and
+      // rental_start_date. Read those first and this class of bug cannot recur
+      // whichever way the upsert is written.
       caseFacts = {
         vehicleNumber: strOrNull(c.vehicle_number),
+        // NO SCALAR HOME FOR THE BRANCH CODE, and deliberately no substitute.
+        // enterprise_direct carries RENTING_STATION_NAME (a branch NAME) instead of
+        // RENTING_BRANCH (a branch CODE); feeding the name in here would be compared
+        // against quote.branchCode by the branch_pin_drift check and fail, or worse,
+        // pin a reservation to a string that is not a branch code.
+        //
+        // Under the current merge upsert this keeps whatever branch the case last
+        // had, which for a direct case is the branch of the rental it replaced. That
+        // is the one value here still worth distrusting; the merge is what keeps it
+        // alive. If the upsert ever moves to a plain replace, this goes NULL for
+        // every direct case and they fail the renting_branch_missing gate -- which
+        // is the correct outcome rather than a regression, because a direct case has
+        // by definition already cut over (201 of 221 measured on 2026-08-30 already
+        // hold a vrm_rental_cutover row).
         rentingBranch: strOrNull(fj?.RENTING_BRANCH),
-        rentingCity: strOrNull(fj?.RENTING_CITY_NAME),
-        rentingState: strOrNull(fj?.RENTING_STATE),
-        ecars: strOrNull(fj?.ECARS_2_0_TKT_NBR),
-        claim: strOrNull(fj?.CLAIM_NUMBER),
+        rentingCity: strOrNull(c.renting_city) ?? strOrNull(fj?.RENTING_CITY_NAME),
+        rentingState: strOrNull(c.renting_state) ?? strOrNull(fj?.RENTING_STATE),
+        ecars: strOrNull(c.ticket_number) ?? strOrNull(fj?.ECARS_2_0_TKT_NBR),
+        claim: strOrNull(c.claim_number) ?? strOrNull(fj?.CLAIM_NUMBER),
         year: strOrNull(fj?.RENTED_VEH_YEAR),
         make: strOrNull(fj?.RENTED_VEH_MAKE),
         model: strOrNull(fj?.RENTED_VEH_MODEL),
-        rentalStartDate: strOrNull(fj?.RENTAL_START_DATE),
+        rentalStartDate: strOrNull(c.rental_start_date_s) ?? strOrNull(fj?.RENTAL_START_DATE),
         vendor: strOrNull(c.rental_vendor),
       };
     }
@@ -5059,7 +5122,7 @@ export const CUTOVER_MSG1_ADOPTION_EPOCH = "2026-08-24T00:00:00Z";
  * tech containing it (or their exact confirmation number) counts as evidence
  * the technician was told, so the adoption lane will not text again.
  */
-export const MSG1_BODY_EVIDENCE_PHRASE = "blocked the first 30 minutes";
+export const MSG1_BODY_EVIDENCE_PHRASE = "blocked the first";
 
 /** Deterministic, valid-UUID source id so the intents unique index dedupes adoption races. */
 export function msg1AdoptionSourceId(ldap: string, confirmation: string): string {
