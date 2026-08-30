@@ -278,6 +278,46 @@ export const PO_EFFECTIVE_CTE = poEffectiveCte();
 // looked" must NOT read those — every portal-matched open PO would report
 // evidence exactly as fresh as our last look and re-arm forever. Take po_eff
 // and aggregate the ETL clocks yourself for that question.
+/**
+ * AMS status for the CALL TARGET, keyed by VIN, from the persisted bulk sweep.
+ *
+ * THE GAP THIS CLOSES (Tyler, 2026-08-30): `vrm_rental_operations_cases.ams_status`
+ * is enriched per CASE, so it describes the RENTAL van. Once the call target
+ * became the technician's ASSIGNED truck, the board had no AMS status at all for
+ * the vehicle it was actually deciding about — on 51 of 402 open cases those are
+ * different vehicles. The workload rule had to limit the declined/auction veto to
+ * congruent rows, which is the wrong shape.
+ *
+ * `ams_sweep_snapshot` is the same data getAmsTruckStatusMap serves in memory:
+ * payload->'data' is VIN → status label for 10,968 vehicles, rebuilt on a
+ * 30-minute TTL and re-persisted after every COMPLETE page walk. Reading it here
+ * needs no new sync, no new column and no AMS API call on the request path.
+ *
+ * ⛔ KEYED BY VIN ON PURPOSE — DO NOT "IMPROVE" THIS INTO A TRUCK-NUMBER MAP.
+ * The first cut built truck → status by expanding payload->'vehicleNumberByVin'
+ * and pulling each status with `payload->'data'->>vn.key`. That evaluates the
+ * scalar lookup PER ROW, detoasting the 177 KB jsonb 10,968 times, and measured
+ * 17,819 ms against 4 ms for the shape below — a 15-second query timeout and a
+ * 500 on the whole board. Expand `data` once and hash-join on VIN. The assigned
+ * truck's VIN already arrives via holman_vehicles_cache, so no second map is
+ * needed.
+ *
+ * VINs are upper-cased and trimmed on both sides, matching ams-enrich.ts. Blank
+ * labels become NULL: AMS returns "" for vehicles it holds but does not
+ * classify, and "" is not a status.
+ */
+export const AMS_BY_VIN_CTE = sql`
+  ams_by_vin AS (
+    SELECT upper(btrim(e.key))        AS vin,
+           NULLIF(btrim(e.value), '') AS ams_status,
+           s.built_at
+    FROM ams_sweep_snapshot s
+    CROSS JOIN LATERAL jsonb_each_text(s.payload->'data') AS e(key, value)
+    WHERE s.id = 'current'
+      AND NULLIF(btrim(e.key), '') IS NOT NULL
+  )
+`;
+
 export const PO_AGG_CTE = sql`
   po_agg AS (
     SELECT q.vehicle_number_padded AS truck,
@@ -285,6 +325,10 @@ export const PO_AGG_CTE = sql`
       count(*) FILTER (WHERE q.is_qualifying_repair AND q.po_status  = 'APPROVED')                         AS etl_open_po_count,
       count(*) FILTER (WHERE q.is_qualifying_repair AND q.eff_status IS DISTINCT FROM q.po_status)         AS portal_corrected_po_count,
       count(*)                                                                                            AS any_po_count,
+      -- Has this truck EVER carried a qualifying repair, at any status? Splits
+      -- "the repair finished" from "we have never seen a repair here" — two
+      -- answers the single open_po_count=0 test used to collapse into one.
+      count(*) FILTER (WHERE q.is_qualifying_repair)                                                      AS any_repair_po_count,
       to_char(max(q.po_date) FILTER (WHERE q.vendor_type = 'rental_placeholder'), 'YYYY-MM-DD')            AS last_rental_date,
       -- DELIBERATELY un-reconciled: has_rental_auth reads the RAW ETL status.
       -- A rental_placeholder PO going PAID is Enterprise finishing its billing
@@ -702,6 +746,18 @@ export interface MasterRow {
   // expect bucket movement when it next shifts.
   assigned_truck_open_po_count: number;
   assigned_truck_has_repair_po: boolean | null;// null when there is no assigned truck
+  /** has the assigned truck EVER carried a qualifying repair, at any status?
+   *  Separates "the repair finished" from "we have never seen a repair here". */
+  assigned_truck_any_repair_po: boolean | null;
+  /** the CALL TARGET's own AMS status + when the sweep behind it was built.
+   *  Null on a mismatch the AMS sweep has no row for — unknown, not declined. */
+  assigned_ams_status: string | null;
+  assigned_ams_bucket: string;
+  assigned_ams_at: string | null;
+  /** Holman's renewal date for the assigned truck, verbatim (M/D/YYYY or ""). */
+  assigned_reg_renewal: string | null;
+  /** true ONLY when that date exists and has passed. Blank = unknown. */
+  registration_expired: boolean;
   workload_bucket: WorkloadBucket;             // see ./workload — assigned-truck-first
   redirect_to_assigned: boolean;   // declined/auction + distinct assigned truck → call THAT shop
   call_target_truck: string | null;// the truck whose shop LUCA actually dials (rental or assigned)
@@ -770,6 +826,31 @@ export interface MasterModel {
   generatedAt: string;
 }
 
+/**
+ * Is a Holman registration renewal date in the past?
+ *
+ * `holman_vehicles_cache.reg_renewal_date` is free TEXT in M/D/YYYY, and Holman
+ * leaves it EMPTY on roughly 7,300 of 9,937 vehicles. Absence is therefore
+ * UNKNOWN, never "valid" and never "expired": returning true on a blank would
+ * park healthy trucks in the tags bucket, and this feeds a bucket that stops
+ * LUCA calling. Anything that does not parse cleanly returns false for the same
+ * reason — we only assert expiry from a date we can actually read.
+ */
+export function isRegistrationExpired(raw: unknown, today = new Date()): boolean {
+  const m = /^\s*(\d{1,2})\/(\d{1,2})\/(\d{4})\s*$/.exec(String(raw ?? ""));
+  if (!m) return false;
+  const [, mm, dd, yyyy] = m;
+  const M = Number(mm), D = Number(dd), Y = Number(yyyy);
+  // Reject impossible components rather than letting Date roll them over: "31/3/2026"
+  // would otherwise become July 2028 and silently report a dead tag as valid.
+  if (M < 1 || M > 12 || D < 1 || D > 31) return false;
+  const d = new Date(Y, M - 1, D);
+  if (Number.isNaN(d.getTime()) || d.getMonth() !== M - 1 || d.getDate() !== D) return false;
+  // Compare on the calendar day: a tag that expires today is still valid today.
+  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  return d < cutoff;
+}
+
 export function amsBucketOf(status: string | null): string {
   const s = (status || "").toLowerCase();
   if (!s) return "unknown";
@@ -787,7 +868,7 @@ export function amsBucketOf(status: string | null): string {
 export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}): Promise<MasterModel> {
   const includeDropped = opts.includeDropped === true;
   const res = await db.execute(sql`
-    WITH ${PO_EFFECTIVE_CTE}, ${PO_AGG_CTE}, ${SHOP_PICK_CTE}
+    WITH ${PO_EFFECTIVE_CTE}, ${PO_AGG_CTE}, ${SHOP_PICK_CTE}, ${AMS_BY_VIN_CTE}
     SELECT
       c.case_key, c.vehicle_number, c.source, c.rental_vendor, c.renter_name_raw,
       c.ticket_number, c.po_number, c.ticket_status,
@@ -846,6 +927,13 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       aph.shop_phone AS assigned_portal_phone,
       aph.shop_phone_locked AS assigned_phone_locked,
       apo.open_po_count AS assigned_open_po,
+      apo.any_repair_po_count AS assigned_any_repair_po,
+      -- The CALL TARGET's own AMS status + registration renewal. Before this the
+      -- board only ever knew the RENTAL van's status, which describes a different
+      -- vehicle on 51 of 402 open cases (Tyler 2026-08-30).
+      aams.ams_status AS assigned_ams_status,
+      aams.built_at   AS assigned_ams_at,
+      ahv.reg_renewal_date AS assigned_reg_renewal,
       COALESCE(NULLIF(TRIM(aph.shop_name_override), ''), ashop.vendor_name) AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
       ashop.vendor_city AS assigned_shop_city, ashop.vendor_state AS assigned_shop_state,
       ashop.vendor_zip AS assigned_shop_zip, ashop.po_number AS assigned_shop_po_number,
@@ -887,6 +975,10 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     LEFT JOIN po_agg   po    ON po.truck    = c.case_key
     LEFT JOIN shop_pick shop ON shop.truck  = c.case_key
     LEFT JOIN po_agg   apo   ON apo.truck   = ownp.own_pad
+    -- assigned truck -> VIN -> AMS status. ahv must come FIRST: aams joins on
+    -- the VIN it supplies.
+    LEFT JOIN holman_vehicles_cache ahv ON ahv.vehicle_number_display = ownp.own_pad
+    LEFT JOIN ams_by_vin aams ON aams.vin = upper(btrim(ahv.vin))
     LEFT JOIN shop_pick ashop ON ashop.truck = ownp.own_pad
     ${includeDropped ? sql`` : sql`WHERE c.present_in_latest = true`}
     ORDER BY c.days_open DESC NULLS LAST, c.case_key
@@ -913,7 +1005,8 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
   // Seeded with EVERY bucket so a zero renders as 0 rather than vanishing from
   // the response (the board's cohort chips read these counts directly).
   const workloadBuckets: Record<string, number> = {
-    workable: 0, mismatch_no_po: 0, cannot_work: 0, no_assigned_truck: 0, tech_unresolved: 0,
+    workable: 0, ready_to_recover: 0, blocked_registration: 0, status_conflict: 0,
+    no_repair_history: 0, cannot_work: 0, no_assigned_truck: 0, tech_unresolved: 0,
   };
   let mismatchCount = 0, costOverCount = 0, pendedCount = 0;
   let portalCorrectedCount = 0, closedByPortal = 0, openedByPortal = 0;
@@ -989,25 +1082,42 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     // SAFE FOR THE CONGRUENT MAJORITY. When the assigned truck IS the case truck
     // (351 of 402 on prod), apo/ashop join po_agg/shop_pick on the same key as
     // po/shop, so every value chosen below is byte-identical to the old path.
-    const isDeclAuction = amsBucket === "declined" || amsBucket === "auction";
     const assignedTruck = r.assigned_truck ? String(r.assigned_truck) : null;
     const assignedOpenPo = Number(r.assigned_open_po || 0);
+    const assignedAnyRepairPo = Number(r.assigned_any_repair_po || 0);
     const assignedMismatch = !!(assignedTruck && strip(assignedTruck) !== strip(r.case_key));
     const assignedHasRepairPo = assignedTruck ? assignedOpenPo > 0 : null;
+    const assignedHasAnyRepairPo = assignedTruck ? assignedAnyRepairPo > 0 : null;
     // No identity means no way to know which truck is theirs, so the case goes to
     // the identity queue rather than the call queue. Dialling the case truck here
     // is exactly the coin flip this rule exists to stop.
     const techUnresolved = !r.employee_id;
+    // ── the CALL TARGET's own AMS status (Tyler 2026-08-30) ──────────────────
+    // amsBucket above is the RENTAL VAN's. Until now that was the only status the
+    // board had, so the declined/auction veto could only be trusted on congruent
+    // rows and 51 of 402 cases were judged on the wrong vehicle. ams_by_truck
+    // resolves the ASSIGNED truck's status from the same AMS sweep the in-memory
+    // cache serves. Falls back to the rental van's bucket ONLY when the two are
+    // the same vehicle; on a mismatch with no sweep row the answer is "unknown",
+    // which must not read as declined.
+    const assignedAmsBucket = assignedMismatch
+      ? amsBucketOf(r.assigned_ams_status)
+      : amsBucketOf(r.assigned_ams_status ?? r.ams_status);
+    const targetIsDeclAuction =
+      assignedAmsBucket === "declined" || assignedAmsBucket === "auction";
+    // AMS still calling the target "In Repair" while Holman shows no open repair
+    // PO is two systems contradicting each other about the same truck on the same
+    // day (28 cases on prod 2026-08-30). Neither is trusted over the other here;
+    // the case is routed to a human to resolve rather than guessed at.
+    const amsSaysInRepair = assignedAmsBucket === "in_repair";
+    // Registration is EXPIRED only when we hold a renewal date and it has passed.
+    // Holman leaves reg_renewal_date empty on ~7,300 of 9,937 vehicles, so a
+    // missing date is UNKNOWN and must never be reported as expired.
+    const registrationExpired = isRegistrationExpired(r.assigned_reg_renewal);
     const workloadBucket = deriveWorkloadBucket({
-      amsBucket, assignedTruck, assignedMismatch, assignedHasRepairPo, techUnresolved,
+      amsBucket: assignedAmsBucket, assignedTruck, assignedMismatch, assignedHasRepairPo,
+      techUnresolved, assignedHasAnyRepairPo, registrationExpired, amsSaysInRepair,
     });
-    // amsBucket describes the RENTAL VAN. It only describes the truck we would
-    // call about when the assigned truck IS that van, so it may only veto on a
-    // congruent case. On a mismatch the target's live AMS status is re-checked
-    // twice downstream on LIVHR (build-case-file drops a declined/auction target,
-    // call-shop hard-blocks at the dial) — the board must not veto a healthy
-    // assigned truck because the van the rental was written against is scrap.
-    const targetIsDeclAuction = isDeclAuction && !assignedMismatch;
     // redirect_to_assigned keeps its old meaning for LIVHR and the UI — the shop
     // we dial belongs to a DIFFERENT truck than the rental case. It is now an
     // OUTCOME of the rule rather than the gate that decides it.
@@ -1098,6 +1208,12 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       assigned_truck_mismatch: assignedMismatch,
       assigned_truck_open_po_count: assignedOpenPo,
       assigned_truck_has_repair_po: assignedHasRepairPo,
+      assigned_truck_any_repair_po: assignedHasAnyRepairPo,
+      assigned_ams_status: r.assigned_ams_status ?? null,
+      assigned_ams_bucket: assignedAmsBucket,
+      assigned_ams_at: r.assigned_ams_at ? new Date(r.assigned_ams_at).toISOString() : null,
+      assigned_reg_renewal: r.assigned_reg_renewal ?? null,
+      registration_expired: registrationExpired,
       workload_bucket: workloadBucket,
       redirect_to_assigned: redirectToAssigned,
       call_target_truck: callTargetTruck, call_shop_name: callShopName, call_shop_phone: callShopPhone,
@@ -1491,9 +1607,11 @@ export async function getSourceHealth(): Promise<SourceHealthModel> {
  *  - No current assignment → nothing to call, and the case leaves the workload.
  *  - Assigned truck with no qualifying repair PO → escalation, not a call.
  * Every shop row carries `truck` = the truck whose shop is dialed (call target),
- * plus rental_truck / assigned_truck / redirect_to_assigned for context. The
- * three non-calling cohorts come back as mismatchNoPo / noAssignedTruck /
- * techUnresolved so nothing leaves the workload silently.
+ * plus rental_truck / assigned_truck / redirect_to_assigned for context. Every
+ * non-calling cohort comes back as its own named list — needsPermanentVehicle,
+ * readyToRecover, blockedRegistration, statusConflict, noRepairHistory,
+ * noAssignedTruck, techUnresolved — so nothing leaves the workload silently and
+ * each list has one owner and one next action.
  */
 export async function getLucaFeed(): Promise<any> {
   const m = await getRentalOpsMaster({});
@@ -1518,17 +1636,56 @@ export async function getLucaFeed(): Promise<any> {
     portalCorrectedCount: m.portalCorrectedCount,
     cohortCorrections: m.cohortCorrections,
     poEvidenceAgeHours: m.poEvidenceAgeHours,
-    // ── the three cohorts LUCA does NOT call, each named and listed ──────────
-    // Tyler 2026-08-30: "escalate it to a human". mismatchNoPo is the escalation
-    // — a rental is running and the truck the tech actually has carries no
-    // qualifying repair PO, so nothing is going to end that rental on its own.
-    // Under the old rule this fired only on a truck-number mismatch; it now
-    // fires for a congruent tech too, which is the same operational problem.
-    mismatchNoPo: rows.filter((r) => r.workload_bucket === "mismatch_no_po").map((r) => ({
+    // ── the cohorts LUCA does NOT call, each named, listed and owned ─────────
+    // Tyler 2026-08-30: "Split the 225 into those four lists." One "escalate"
+    // bucket held four unrelated jobs; each is now its own list with its own
+    // next action, ordered by certainty.
+    //
+    // 1. The truck is gone. No shop call will ever produce a vehicle for this
+    //    technician — they need a PERMANENT assignment. 93 of 351 congruent
+    //    cases on prod 2026-08-30, $3,798/day.
+    needsPermanentVehicle: rows.filter((r) => r.workload_bucket === "cannot_work").map((r) => ({
       rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
-      employee_id: r.employee_id, ams_status: r.ams_status, days_open: r.days_open,
-      assigned_truck_mismatch: r.assigned_truck_mismatch, source: r.source,
-      daily_cost: r.daily_cost, district: r.tech_district,
+      employee_id: r.employee_id, employment_status: r.employee_status,
+      ams_status: r.assigned_ams_status, ams_as_of: r.assigned_ams_at,
+      district: r.tech_district, source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
+    })),
+    // 2. Repair finished, truck healthy and legal. The tech should collect it and
+    //    the rental should end. This is the money list: 76 cases, ~$2,900/day.
+    readyToRecover: rows.filter((r) => r.workload_bucket === "ready_to_recover").map((r) => ({
+      rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
+      employee_id: r.employee_id, ams_status: r.assigned_ams_status,
+      shop_name: r.call_shop_name, shop_phone: r.call_shop_phone,
+      po_evidence_at: r.po_evidence_at, po_evidence_age_hours: r.po_evidence_age_hours,
+      district: r.tech_district, source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
+    })),
+    // 3. Repair finished but the tags are dead, so the truck cannot legally be
+    //    driven. Registration item, not a shop call. 37 cases, $1,560/day; 35 of
+    //    the 37 were already on the renewal workbench, so this is a chase, not a
+    //    discovery.
+    blockedRegistration: rows.filter((r) => r.workload_bucket === "blocked_registration").map((r) => ({
+      rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
+      employee_id: r.employee_id, reg_renewal_date: r.assigned_reg_renewal,
+      ams_status: r.assigned_ams_status,
+      district: r.tech_district, source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
+    })),
+    // 4. AMS says the truck is In Repair, Holman says the repair is closed. Two
+    //    systems contradicting each other about one truck on one day. NEITHER is
+    //    trusted over the other — a human resolves it. 28 cases.
+    statusConflict: rows.filter((r) => r.workload_bucket === "status_conflict").map((r) => ({
+      rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
+      employee_id: r.employee_id,
+      ams_says: r.assigned_ams_status, ams_as_of: r.assigned_ams_at,
+      holman_says: "no open qualifying repair PO",
+      po_evidence_at: r.po_evidence_at, po_evidence_age_hours: r.po_evidence_age_hours,
+      district: r.tech_district, source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
+    })),
+    // No PO history at all on the assigned truck. NOT the same as "no repair" —
+    // we have never seen this truck in the PO feed, so we know nothing about it.
+    noRepairHistory: rows.filter((r) => r.workload_bucket === "no_repair_history").map((r) => ({
+      rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
+      employee_id: r.employee_id, ams_status: r.assigned_ams_status,
+      district: r.tech_district, source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
     })),
     // No current truck assignment: nobody to go after, so LUCA stops spending
     // calls here. Listed rather than dropped — a tech in a rental with no truck
@@ -1543,6 +1700,14 @@ export async function getLucaFeed(): Promise<any> {
     techUnresolved: rows.filter((r) => r.workload_bucket === "tech_unresolved").map((r) => ({
       rental_truck: r.case_key, renter: r.renter_name_raw, identity_state: r.identity_state,
       source: r.source, days_open: r.days_open, daily_cost: r.daily_cost,
+    })),
+    // Every row carrying expired tags, INCLUDING callable ones. The bucket only
+    // fires when the repair is closed, but an open repair does not make dead tags
+    // go away — the truck still cannot be driven the day the shop finishes.
+    registrationExpiredAll: rows.filter((r) => r.registration_expired).map((r) => ({
+      rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
+      employee_id: r.employee_id, reg_renewal_date: r.assigned_reg_renewal,
+      workload_bucket: r.workload_bucket, callable: r.callable, daily_cost: r.daily_cost,
     })),
     lastSyncAt: m.sourceHealth.lastSyncAt,
     shops: callable.map((r) => ({

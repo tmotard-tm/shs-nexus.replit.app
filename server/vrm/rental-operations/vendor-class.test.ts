@@ -12,7 +12,8 @@
  */
 import assert from "node:assert/strict";
 import { classifyPoVendor, summarizePoLines, poLineType, isQualifyingRepairPo, isNeverShopVendor, NEVER_SHOP_RE, NEVER_SHOP_SQL_RE } from "./vendor-class";
-import { deriveWorkloadBucket, NON_WORKING_BUCKETS, ESCALATION_BUCKET } from "./workload";
+import { deriveWorkloadBucket, NON_WORKING_BUCKETS, CLOSED_REPAIR_BUCKETS } from "./workload";
+import { isRegistrationExpired } from "./read-repository";
 
 let passed = 0;
 let failed = 0;
@@ -215,67 +216,119 @@ test("JS and SQL never-shop patterns agree on every fixture", () => {
   ]) assert.equal(sqlAsJs.test(name), NEVER_SHOP_RE.test(name), name);
 });
 
-console.log("\nworkload — Tyler's LUCA workload rule (assigned-truck-first, 2026-08-30)");
+console.log("\nworkload — Tyler's LUCA workload rule (assigned-truck-first, 8 buckets, 2026-08-30)");
 
-// The unit of work is the TECHNICIAN'S CURRENT TRUCK, never the rental case
-// truck. Decision order: unresolved tech → no truck → not ours → no PO → work.
+// The unit of work is the TECHNICIAN'S CURRENT TRUCK. Decision order:
+// unresolved tech -> no truck -> not ours -> open repair -> no history ->
+// tags -> system conflict -> clean recovery.
+const W = (o: Partial<Parameters<typeof deriveWorkloadBucket>[0]>) =>
+  deriveWorkloadBucket({
+    amsBucket: "assigned", assignedTruck: "12345", assignedMismatch: false,
+    assignedHasRepairPo: true, assignedHasAnyRepairPo: true, ...o,
+  });
 
 test("unresolved renter is the identity queue, never the call queue", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null, techUnresolved: true }), "tech_unresolved");
+  assert.equal(W({ techUnresolved: true }), "tech_unresolved");
 });
 test("unresolved renter outranks everything, even a healthy assigned truck", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: true, techUnresolved: true }), "tech_unresolved");
+  assert.equal(W({ techUnresolved: true, assignedHasRepairPo: true }), "tech_unresolved");
+});
+test("no assigned truck means nobody to go after", () => {
+  assert.equal(W({ assignedTruck: null, assignedHasRepairPo: null, assignedHasAnyRepairPo: null }), "no_assigned_truck");
+});
+test("no assigned truck wins over a declined AMS status", () => {
+  assert.equal(W({ assignedTruck: null, amsBucket: "declined", assignedHasRepairPo: null }), "no_assigned_truck");
 });
 
-test("NEW RULE: no assigned truck means nobody to go after", () => {
-  // Tyler 2026-08-30. Under the old rule this fell through to the rental truck
-  // and stayed callable; that is the resource the new rule gives back.
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null }), "no_assigned_truck");
+// ── the truck is gone ────────────────────────────────────────────────────────
+test("declined assigned truck is cannot_work (needs a permanent vehicle)", () => {
+  assert.equal(W({ amsBucket: "declined" }), "cannot_work");
 });
-test("NEW RULE: no assigned truck wins over a declined rental van", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: null, assignedMismatch: false, assignedHasRepairPo: null }), "no_assigned_truck");
+test("auctioned assigned truck is cannot_work even with an OPEN repair PO", () => {
+  // 15 of 93 auction cases on prod still carried an open PO. We are not getting
+  // the truck back either way, so the answer is a vehicle, never a shop call.
+  assert.equal(W({ amsBucket: "auction", assignedHasRepairPo: true }), "cannot_work");
 });
-
-test("declined status on the tech's OWN truck is cannot_work", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: false }), "cannot_work");
-});
-test("auction status on the tech's OWN truck is cannot_work", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "auction", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: true }), "cannot_work");
-});
-test("REGRESSION: a declined RENTAL VAN never vetoes a different assigned truck", () => {
-  // The old rule returned cannot_work here, which is how a tech sitting in a
-  // rental with their own truck genuinely in a shop went uncalled. amsBucket
-  // describes the rental van; on a mismatch it says nothing about the target.
-  // LIVHR re-checks the target's live status twice before it dials.
-  assert.equal(deriveWorkloadBucket({ amsBucket: "declined", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: true }), "workable");
+test("REGRESSION: the status read is the ASSIGNED truck's, not the rental van's", () => {
+  // The caller passes assignedAmsBucket. A scrapped rental van paired with a
+  // healthy assigned truck must stay workable — that failure is how techs whose
+  // own truck was genuinely in a shop went uncalled.
+  assert.equal(W({ amsBucket: "assigned", assignedMismatch: true, assignedHasRepairPo: true }), "workable");
 });
 
-test("assigned truck with NO repair PO escalates to a human", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: false }), "mismatch_no_po");
+// ── the four-way split of the closed-repair cohort (Tyler 2026-08-30) ────────
+test("open repair PO is workable and outranks expired tags", () => {
+  // The shop call is still the right next action; tags get chased in parallel
+  // and the expired flag still rides on the row.
+  assert.equal(W({ assignedHasRepairPo: true, registrationExpired: true }), "workable");
 });
-test("NEW RULE: a CONGRUENT tech whose own truck has no repair PO also escalates", () => {
-  // Old rule called this workable, because it only checked the assigned truck's
-  // PO on a mismatch. Tyler 2026-08-30: a rental running with no repair behind
-  // it is a human problem whether or not the truck numbers agree.
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: false }), "mismatch_no_po");
+test("SPLIT 1: repair closed + expired tags is blocked_registration", () => {
+  assert.equal(W({ assignedHasRepairPo: false, registrationExpired: true }), "blocked_registration");
 });
-test("unknown repair-PO answer escalates (never assumed workable)", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_use", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: null }), "mismatch_no_po");
+test("SPLIT 2: repair closed + AMS still says In Repair is status_conflict", () => {
+  assert.equal(W({ assignedHasRepairPo: false, amsBucket: "in_repair", amsSaysInRepair: true }), "status_conflict");
+});
+test("SPLIT 3: repair closed, healthy and legal is ready_to_recover", () => {
+  assert.equal(W({ assignedHasRepairPo: false }), "ready_to_recover");
+});
+test("SPLIT 4: no repair history at all is NOT the same as no repair", () => {
+  assert.equal(W({ assignedHasRepairPo: false, assignedHasAnyRepairPo: false }), "no_repair_history");
+});
+test("unknown repair history is treated as no history, never as recovered", () => {
+  assert.equal(W({ assignedHasRepairPo: false, assignedHasAnyRepairPo: null }), "no_repair_history");
+});
+test("dead tags outrank a system conflict (hard blocker beats a soft one)", () => {
+  assert.equal(W({ assignedHasRepairPo: false, registrationExpired: true, amsSaysInRepair: true }), "blocked_registration");
+});
+test("no repair history outranks tags — we cannot claim a repair finished", () => {
+  assert.equal(W({ assignedHasRepairPo: false, assignedHasAnyRepairPo: false, registrationExpired: true }), "no_repair_history");
+});
+test("unknown repair-PO answer never lands in ready_to_recover", () => {
+  assert.notEqual(W({ assignedHasRepairPo: null, assignedHasAnyRepairPo: true }), "workable");
 });
 
-test("assigned elsewhere WITH a repair PO is workable", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: true, assignedHasRepairPo: true }), "workable");
-});
-test("congruent tech/truck with a repair PO is workable", () => {
-  assert.equal(deriveWorkloadBucket({ amsBucket: "in_repair", assignedTruck: "12345", assignedMismatch: false, assignedHasRepairPo: true }), "workable");
-});
-
-test("every non-working bucket is listed in NON_WORKING_BUCKETS", () => {
-  for (const b of ["tech_unresolved", "no_assigned_truck", "cannot_work"] as const) {
+test("bucket lists agree with the rule", () => {
+  for (const b of ["tech_unresolved", "no_assigned_truck", "cannot_work",
+                   "blocked_registration", "status_conflict", "ready_to_recover",
+                   "no_repair_history"] as const) {
     assert.ok(NON_WORKING_BUCKETS.includes(b), `${b} missing from NON_WORKING_BUCKETS`);
   }
   assert.ok(!NON_WORKING_BUCKETS.includes("workable"));
-  assert.ok(!NON_WORKING_BUCKETS.includes(ESCALATION_BUCKET));
+  for (const b of ["ready_to_recover", "blocked_registration", "status_conflict", "no_repair_history"] as const) {
+    assert.ok(CLOSED_REPAIR_BUCKETS.includes(b), `${b} missing from CLOSED_REPAIR_BUCKETS`);
+  }
+});
+
+console.log("\nregistration expiry — blank is UNKNOWN, never expired");
+
+const TODAY = new Date(2026, 7, 30); // 2026-08-30
+test("a past renewal date is expired", () => {
+  assert.equal(isRegistrationExpired("3/31/2026", TODAY), true);
+});
+test("a future renewal date is not expired", () => {
+  assert.equal(isRegistrationExpired("3/31/2027", TODAY), false);
+});
+test("a tag expiring TODAY is still valid today", () => {
+  assert.equal(isRegistrationExpired("8/30/2026", TODAY), false);
+});
+test("yesterday is expired", () => {
+  assert.equal(isRegistrationExpired("8/29/2026", TODAY), true);
+});
+test("⛔ BLANK is unknown, not expired (7,300 of 9,937 Holman rows are blank)", () => {
+  assert.equal(isRegistrationExpired("", TODAY), false);
+  assert.equal(isRegistrationExpired(null, TODAY), false);
+  assert.equal(isRegistrationExpired(undefined, TODAY), false);
+  assert.equal(isRegistrationExpired("   ", TODAY), false);
+});
+test("unparseable text is unknown, not expired", () => {
+  assert.equal(isRegistrationExpired("N/A", TODAY), false);
+  assert.equal(isRegistrationExpired("2026-03-31", TODAY), false);
+  // month 31 is impossible; rolling it over would turn a dead tag into a valid one
+  assert.equal(isRegistrationExpired("31/3/2026", TODAY), false);
+  assert.equal(isRegistrationExpired("2/30/2026", TODAY), false); // Feb 30 does not exist
+});
+test("surrounding whitespace parses", () => {
+  assert.equal(isRegistrationExpired("  6/30/2026  ", TODAY), true);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

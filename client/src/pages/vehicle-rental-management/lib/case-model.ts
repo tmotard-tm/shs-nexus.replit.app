@@ -103,7 +103,20 @@ export interface MasterRow {
   assigned_truck_mismatch: boolean;
   assigned_truck_open_po_count: number;
   assigned_truck_has_repair_po: boolean | null;
-  workload_bucket: "tech_unresolved" | "no_assigned_truck" | "cannot_work" | "mismatch_no_po" | "workable";
+  workload_bucket:
+    | "tech_unresolved"
+    | "no_assigned_truck"
+    | "cannot_work"
+    | "workable"
+    | "blocked_registration"
+    | "status_conflict"
+    | "ready_to_recover"
+    | "no_repair_history";
+  /** target truck facts (Tyler 2026-08-30) — the vehicle we would call about */
+  assigned_ams_status?: string | null;
+  assigned_ams_bucket?: string;
+  assigned_reg_renewal?: string | null;
+  registration_expired?: boolean;
   redirect_to_assigned: boolean;
   call_target_truck: string | null;
   call_shop_name: string | null;
@@ -156,10 +169,14 @@ export type WorkloadBucket =
   | "tech_unresolved"
   | "no_assigned_truck"
   | "cannot_work"
-  | "mismatch_no_po"
-  | "workable";
+  | "workable"
+  | "blocked_registration"
+  | "status_conflict"
+  | "ready_to_recover"
+  | "no_repair_history";
 const SERVER_WORKLOAD_BUCKETS: ReadonlySet<string> = new Set<WorkloadBucket>([
-  "tech_unresolved", "no_assigned_truck", "cannot_work", "mismatch_no_po", "workable",
+  "tech_unresolved", "no_assigned_truck", "cannot_work", "workable",
+  "blocked_registration", "status_conflict", "ready_to_recover", "no_repair_history",
 ]);
 export function workloadBucketOf(r: { ams_bucket: string; workload_bucket?: string | null }): WorkloadBucket {
   if (r.workload_bucket && SERVER_WORKLOAD_BUCKETS.has(r.workload_bucket)) {

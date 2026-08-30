@@ -178,7 +178,7 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
 // Tyler's LUCA workload rule: an explicit CAN-work / CANNOT-work split, plus
 // the escalation cohort (renter assigned a different truck that has no
 // qualifying repair PO). Server derives `workload_bucket`; these tabs read it.
-const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po", "no_assigned_truck", "tech_unresolved"]);
+const WORKLOAD_TABS = new Set(["cannot_work", "blocked_registration", "status_conflict", "ready_to_recover", "no_repair_history", "no_assigned_truck", "tech_unresolved"]);
 const COHORTS: Array<{ key: string; label: string }> = [
   // All Rentals is the total and doubles as the workable count: everything here
   // that is not under Cannot work is a rental we still own and can act on. That is
@@ -187,9 +187,12 @@ const COHORTS: Array<{ key: string; label: string }> = [
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "auction_redirect", label: "Sent to Auction · LUCA will call" },
-  { key: "mismatch_no_po", label: "Escalate · no repair PO" },
-  // Tyler 2026-08-30: the call target is the tech's assigned truck, so these
-  // two cohorts have nothing for LUCA to dial. Listed, never silently dropped.
+  // Tyler 2026-08-30: one "escalate" bucket held four unrelated jobs. Each is
+  // now its own list with its own owner and next action, ordered by certainty.
+  { key: "ready_to_recover", label: "Ready to recover · go collect it" },
+  { key: "blocked_registration", label: "Blocked · expired tags" },
+  { key: "status_conflict", label: "AMS vs Holman · conflict" },
+  { key: "no_repair_history", label: "No repair history · unknown" },
   { key: "no_assigned_truck", label: "No assigned truck · nobody to chase" },
   { key: "tech_unresolved", label: "Renter unresolved · identity queue" },
   { key: "pended", label: "Pended · turned in" },
@@ -680,7 +683,8 @@ export default function RegionalCases() {
     // Tyler's workload rule — counted over the current pool so the tab badges
     // always tie out to what the grid actually shows.
     const workload: Record<string, number> = {
-      workable: 0, cannot_work: 0, mismatch_no_po: 0, no_assigned_truck: 0, tech_unresolved: 0,
+      workable: 0, ready_to_recover: 0, blocked_registration: 0, status_conflict: 0,
+      no_repair_history: 0, cannot_work: 0, no_assigned_truck: 0, tech_unresolved: 0,
     };
     let mismatch = 0, costOver = 0, callable = 0;
     let sawServerWorkload = false;
@@ -727,10 +731,9 @@ export default function RegionalCases() {
     return pool.filter((r) => {
       if (cohort === "luca_queue") { if (!r.callable) return false; }
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
-      else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
-      else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
-      else if (cohort === "no_assigned_truck") { if (workloadBucketOf(r) !== "no_assigned_truck") return false; }
-      else if (cohort === "tech_unresolved") { if (workloadBucketOf(r) !== "tech_unresolved") return false; }
+      // Every workload tab filters on the SAME derivation the chips count, so a
+      // chip can never advertise a number and then open a grid that disagrees.
+      else if (WORKLOAD_TABS.has(cohort)) { if (workloadBucketOf(r) !== cohort) return false; }
       else if (cohort === "auction_redirect") { if (!(isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable)) return false; }
       else if (cohort === "pended") { /* pool is already PENDED-only */ }
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
