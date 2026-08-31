@@ -2027,12 +2027,16 @@ export async function getLucaRentalList(): Promise<any> {
       const redir = !!(m && m.redirect_to_assigned && m.callable);
       return {
         REDIRECT_TO_ASSIGNED: redir,
-        CALL_TARGET_TRUCK: redir ? (m.call_target_truck ?? null) : null,
-        CALL_SHOP_NAME: redir ? (m.call_shop_name ?? null) : null,
-        CALL_SHOP_PHONE: redir ? (m.call_shop_phone ?? null) : null,
-        CALL_SHOP_ADDRESS: redir ? (m.call_shop_address ?? null) : null,
-        CALL_SHOP_PO_NUMBER: redir ? (m.call_shop_po_number ?? null) : null,
-        CALL_SHOP_PO_STATUS: redir ? (m.call_shop_po_status ?? null) : null,
+        // The CALL_* block is no longer redirect-gated (Tyler 2026-08-31):
+        // the assigned truck is ALWAYS the follow-up target, so its shop
+        // travels on every row. Null only when the board itself resolved no
+        // call target (no assigned truck / unresolved tech / declined-auction).
+        CALL_TARGET_TRUCK: m.call_target_truck ?? null,
+        CALL_SHOP_NAME: m.call_shop_name ?? null,
+        CALL_SHOP_PHONE: m.call_shop_phone ?? null,
+        CALL_SHOP_ADDRESS: m.call_shop_address ?? null,
+        CALL_SHOP_PO_NUMBER: m.call_shop_po_number ?? null,
+        CALL_SHOP_PO_STATUS: m.call_shop_po_status ?? null,
       };
     })(),
     };
@@ -2209,7 +2213,7 @@ async function fetchPoHistoryWithFallback(truck: string): Promise<{ poHistory: a
 async function readPortalSnapshot(truck: string): Promise<any | null> {
   try {
     const pRes = await db.execute(sql`
-      SELECT hist, source, to_char(scraped_at,'YYYY-MM-DD') AS scraped_at,
+      SELECT hist, source, to_char(scraped_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS scraped_at,
              shop_name, shop_phone, shop_address, shop_src, po_count, msg_count,
              shop_phone_locked, shop_phone_source, shop_phone_edited_by,
              to_char(shop_phone_edited_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS shop_phone_edited_at
@@ -2234,8 +2238,20 @@ async function readPortalSnapshot(truck: string): Promise<any | null> {
         };
       }
     }
+    // Scrape change log for the drawer (Tyler 2026-08-31): the last 10 real
+    // content changes, newest first, i.e. what each refresh actually brought in.
+    let changes: any[] = [];
+    try {
+      const chRes = await db.execute(sql`
+        SELECT to_char(changed_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS changed_at, first_seen,
+               old_shop_name, new_shop_name, old_shop_phone, new_shop_phone,
+               old_po_count, new_po_count, old_msg_count, new_msg_count
+        FROM vrm_holman_portal_hist_changes
+        WHERE truck_no = ${truck} ORDER BY changed_at DESC LIMIT 10`);
+      changes = chRes.rows as any[];
+    } catch { /* table may predate a publish; the drawer just shows no log */ }
     return {
-      source: p.source, scrapedAt: p.scraped_at, msgCount: Number(p.msg_count || 0), poCount: Number(p.po_count || 0),
+      source: p.source, scrapedAt: p.scraped_at, msgCount: Number(p.msg_count || 0), poCount: Number(p.po_count || 0), changes,
       shop: {
         name: p.shop_name, phone: p.shop_phone, address: p.shop_address, src: p.shop_src,
         // manual edit + lock (Tyler 8/3) — the drawer shows provenance and lets

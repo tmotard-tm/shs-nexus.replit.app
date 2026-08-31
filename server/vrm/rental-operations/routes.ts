@@ -1303,6 +1303,46 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // POST scrape EVERY call-target truck on the board (Tyler 2026-08-31): "a
+  // scrape-all function that actually goes through and scrapes every single one
+  // of those truck numbers assigned to the tech." Enumerates the master's
+  // call_target_truck (falling back to assigned_truck), dedupes, and runs the
+  // whole list through scrapeAndStore in the background: ~20s of Chromium per
+  // truck, so ~350 trucks is roughly two hours. Guarded by the same in-flight
+  // flag as the delta sweep so it can never double-Chromium.
+  router.post("/rental-operations/scrape-all", async (_req, res) => {
+    try {
+      if (syncInFlight || scrapeSweepInFlight) {
+        return res.status(409).json({ error: "a sync or scrape sweep is already in flight; try again when it finishes" });
+      }
+      const { getRentalOpsMaster } = await import("./read-repository");
+      const master = await getRentalOpsMaster();
+      const trucks = Array.from(new Set(
+        (master.rows as any[])
+          .map((r) => String(r.call_target_truck ?? r.assigned_truck ?? "").trim())
+          .filter((t) => /^\d{4,7}$/.test(t)),
+      ));
+      if (!trucks.length) return res.status(400).json({ error: "no assigned trucks resolved on the board" });
+      scrapeSweepInFlight = true;
+      res.json({ ok: true, started: true, trucks: trucks.length, etaMinutes: Math.round((trucks.length * 20) / 60) });
+      (async () => {
+        const t0 = Date.now();
+        console.log(`[VRM/RentalOps] scrape-all starting: ${trucks.length} assigned trucks`);
+        const { scrapeAndStore } = await import("./scrape-service");
+        const report = await scrapeAndStore(trucks);
+        invalidateQueuePoContextCache("scrape-all");
+        invalidateTodaysQueueCache("scrape-all");
+        console.log(`[VRM/RentalOps] scrape-all done in ${((Date.now() - t0) / 60000).toFixed(1)}min: ` +
+          `${report.stored} changed, ${report.unchanged} unchanged, ${report.empty} empty, ${report.errors} errors`);
+      })()
+        .catch((e) => console.error("[VRM/RentalOps] scrape-all FAILED:", e?.stack || e?.message || e))
+        .finally(() => { scrapeSweepInFlight = false; });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] scrape-all failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "scrape-all failed" });
+    }
+  });
+
   // POST an operator-entered shop phone for ONE truck (Tyler 8/3) — the manual
   // Edit behind the phone shown on Rental Operations / Cases by Region.
   //   body { phone: "10 digits" | "", locked: boolean, case_key?: string }

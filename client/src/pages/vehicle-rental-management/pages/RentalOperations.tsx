@@ -616,8 +616,6 @@ export default function RentalOperations() {
   const [originF, setOriginF] = useState<"" | "holman" | "direct">("");
   const [includePended, setIncludePended] = useState(false);
   const [mismatchOnly, setMismatchOnly] = useState(false);
-  // Rental booked on a truck that is not the renter's own (TPMS first).
-  const [wrongTruckOnly, setWrongTruckOnly] = useState(false);
   const [newHireOnly, setNewHireOnly] = useState(false);
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
   // Repair-history facet — was three top-row chips (Open Repair Ticket / No
@@ -626,7 +624,7 @@ export default function RentalOperations() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const activeFilterCount =
     (amsF.length ? 1 : 0) + (markF ? 1 : 0) + (originF ? 1 : 0) + (repairF ? 1 : 0) +
-    (includePended ? 1 : 0) + (mismatchOnly ? 1 : 0) + (wrongTruckOnly ? 1 : 0) +
+    (includePended ? 1 : 0) + (mismatchOnly ? 1 : 0) +
     (newHireOnly ? 1 : 0) + (urgentEmpOnly ? 1 : 0);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
   const [page, setPage] = useState(0);
@@ -713,8 +711,6 @@ export default function RentalOperations() {
   // truck IS the tech's truck as of the last import, so divergence from live
   // TPMS is import lag that self-heals on the next daily import — never a red
   // flag (Tyler 2026-08-31).
-  const isRealWrongTruck = (r: MasterRow) => r.wrong_truck && r.source !== "enterprise_direct";
-  const wrongTruckCount = useMemo(() => basePool.filter(isRealWrongTruck).length, [basePool]);
   const pendedTotal = useMemo(() => originPool.filter((r) => r.ticket_status === "PENDED").length, [originPool]);
   // counts computed over the current pool so tab badges + KPIs always match the grid
   const stats = useMemo(() => {
@@ -788,17 +784,16 @@ export default function RentalOperations() {
         if (markF === "none" ? m !== "none" : m !== markF) return false;
       }
       if (mismatchOnly && !r.type_mismatch) return false;
-      if (wrongTruckOnly && !isRealWrongTruck(r)) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       if (repairF && r.repair_cohort !== repairF) return false;
       return true;
     });
-  }, [originPool, basePool, cohort, search, amsF, markF, repairF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
+  }, [originPool, basePool, cohort, search, amsF, markF, repairF, mismatchOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
-      trk: (r) => r.vehicle_number, tech: (r) => r.renter_name_raw, emp: (r) => r.employee_status,
+      trk: (r) => r.assigned_truck, tech: (r) => r.renter_name_raw, emp: (r) => r.employee_status,
       hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, billing: (r) => rentalOriginOf(r.source)?.label ?? "",
       cost: (r) => r.daily_cost, ams: (r) => r.ams_status, shop: (r) => r.shop_name,
       days: (r) => r.days_open, ext: (r) => r.number_of_extensions, days_open: (r) => r.days_open,
@@ -817,7 +812,7 @@ export default function RentalOperations() {
   );
   useEffect(() => {
     setPage(0);
-  }, [cohort, search, amsF, markF, repairF, originF, includePended, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, sort]);
+  }, [cohort, search, amsF, markF, repairF, originF, includePended, mismatchOnly, newHireOnly, urgentEmpOnly, sort]);
 
   // mutations
   const markMut = useMutation({
@@ -850,6 +845,17 @@ export default function RentalOperations() {
     mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/sync"),
     onSuccess: async () => { await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k }))); toast({ title: "Sync complete" }); },
     onError: (e: any) => toast({ title: "Sync failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  // Scrape EVERY assigned truck on the board (Tyler 2026-08-31). Fire-and-
+  // forget: the server answers immediately and Chromium works through the list
+  // in the background (~20s/truck).
+  const scrapeAllMut = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/scrape-all"),
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      toast({ title: "Scrape-all started", description: j?.trucks ? `${j.trucks} assigned trucks queued — roughly ${j.etaMinutes} minutes. Results land as each truck finishes.` : "" });
+    },
+    onError: (e: any) => toast({ title: "Scrape-all failed", description: String(e?.message || e), variant: "destructive" }),
   });
   const importMut = useMutation({
     mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return apiRequest("POST", "/api/vrm/rental-operations/imports/enterprise", fd); },
@@ -1095,22 +1101,22 @@ export default function RentalOperations() {
     // unreadable without it — 314 of 402 rentals are direct-billed and 90 are
     // Holman, and nothing on the sheet said which was which. `billing` is the
     // plain-English answer, `feed_source` is the raw value it derives from.
-    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_tech_name", "wrong_truck", "renter_own_truck",
+    const headers = ["assigned_truck", "rental_unit", "tech", "employee_id", "employment", "status_date", "tpms_tech_name",
       "billing", "feed_source", "daily_cost", "vehicle", "actual_type", "type_mismatch", "cost_over", "ams_status", "cohort",
-      "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer",
+      "shop", "shop_status", "shop_phone", "last_rental", "no_rental_auth", "po_count", "odometer",
       "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
-      "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po", "assigned_ams_status", "registration_expired"];
+      "workload_bucket", "assigned_truck_has_repair_po", "assigned_ams_status", "registration_expired"];
     const body = sorted.map((r) => [
-      r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
-      r.tpms_tech || "", r.wrong_truck ? "YES" : "", r.renter_own_truck || "",
+      r.assigned_truck || "", r.vehicle_number || "", r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
+      r.tpms_tech || "",
       rentalOriginOf(r.source)?.label || "unknown", r.source || "", r.daily_cost ?? "",
       r.veh_desc || "", r.actual_vehicle_type || "",
       r.type_mismatch ? "YES" : "", r.cost_over ? "YES" : "", r.ams_status || "", r.repair_cohort,
-      r.shop_name || "", r.shop_po_status || "", r.call_shop_phone || r.portal_shop_phone || "", r.shop_city || "", r.shop_state || "",
+      r.call_shop_name || "", r.call_shop_po_status || "", r.call_shop_phone || "",
       r.last_rental_date || "", r.no_rental_auth ? "YES" : "", r.po_count ?? "", r.odometer ?? "",
       r.days_open ?? "", r.number_of_extensions ?? "", r.ticket_status === "PENDED" ? "YES" : "",
       r.operator_mark || "", r.identity_state || "", r.identity_confidence || "",
-      r.workload_bucket || "", r.assigned_truck || "",
+      r.workload_bucket || "",
       r.assigned_truck_has_repair_po == null ? "" : (r.assigned_truck_has_repair_po ? "YES" : "NO"),
       r.assigned_ams_status || "", r.registration_expired ? "YES" : "",
     ].map((c) => esc(String(c))));
@@ -1208,6 +1214,11 @@ export default function RentalOperations() {
               <RefreshCw size={13} style={{ animation: sweepBusy ? "spin 1s linear infinite" : undefined }} /> {sweep.label}
             </button>
           )}
+          <button type="button" onClick={() => scrapeAllMut.mutate()} disabled={scrapeAllMut.isPending}
+            title="Scrape the Holman portal for EVERY assigned truck on the board (~20s per truck, runs in the background)"
+            style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <RefreshCw size={13} style={{ animation: scrapeAllMut.isPending ? "spin 1s linear infinite" : undefined }} /> Scrape all
+          </button>
           <AutoTextToggle />
           <ReminderPanelButton open={showReminders} onToggle={() => setShowReminders((v) => !v)} />
           <button type="button" onClick={exportCsv} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -1359,10 +1370,6 @@ export default function RentalOperations() {
               <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={mismatchOnly} onChange={(e) => setMismatchOnly(e.target.checked)} /> class mismatch only
               </label>
-              <label title="Rental truck differs from the renter's own truck (TPMS assignment, falling back to the roster)"
-                     style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
-                <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
-              </label>
               <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
                 <input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire (≤9 mo)
               </label>
@@ -1370,7 +1377,7 @@ export default function RentalOperations() {
                 <input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave
               </label>
               <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
-                <button type="button" onClick={() => { setAmsF([]); setMarkF(""); setOriginF(""); setRepairF(""); setIncludePended(false); setMismatchOnly(false); setWrongTruckOnly(false); setNewHireOnly(false); setUrgentEmpOnly(false); }}
+                <button type="button" onClick={() => { setAmsF([]); setMarkF(""); setOriginF(""); setRepairF(""); setIncludePended(false); setMismatchOnly(false); setNewHireOnly(false); setUrgentEmpOnly(false); }}
                   style={{ ...selStyle, cursor: "pointer" }}>Clear all</button>
                 <button type="button" onClick={() => setFiltersOpen(false)} style={{ ...selStyle, cursor: "pointer" }}>Done</button>
               </div>
@@ -1430,8 +1437,7 @@ export default function RentalOperations() {
             <tr>
               <th style={{ ...thStyle, width: 34, textAlign: "right" }}>#</th>
               <Th col="tech" label="Technician" />
-              <Th col="tpms" label="Assigned Truck" />
-              <Th col="trk" label="Rental Unit" />
+              <Th col="tpms" label="Truck (assigned)" />
               <Th col="emp" label="Employment" />
               <Th col="hire" label="Status Date" />
               <Th col="veh" label="Vehicle" />
@@ -1481,44 +1487,24 @@ export default function RentalOperations() {
                     {r.identity_confidence === "medium" && r.identity_state === "RESOLVED" && <Chip text="fuzzy" fg={colors.inkMuted} bg={colors.surface} />}
                     {r.no_rental_auth && <Chip text="no rental auth" fg={colors.amber} bg={colors.amberLight} />}
                   </td>
-                  <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {/* The technician's actual assigned truck number (shared
-                        TPMS-first derivation — assigned_truck/own_pad). Never
-                        fall back to the rental unit, reservation, RA, or case key. */}
-                    {r.assigned_truck
-                      ? <span style={{ color: isRealWrongTruck(r) ? colors.red : colors.inkSoft, fontWeight: isRealWrongTruck(r) ? 600 : 400 }}>{r.assigned_truck}</span>
-                      : <span style={{ color: colors.inkMuted }}>{origin?.kind === "direct" && isNewHire(r) ? "New hire — truck pending" : "Unassigned / No TPMS match"}</span>}
-                    {isRealWrongTruck(r) && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
-                    {r.wrong_truck && !isRealWrongTruck(r) && r.assigned_truck && (
-                      <div title="Direct-billed cases are keyed to the tech's truck at import time; TPMS moved since. The case re-keys itself on the next daily import — nothing to fix."
-                           style={{ fontSize: 10, color: colors.inkMuted }}>moved · re-keys next import</div>
-                    )}
-                    {r.tpms_tech && <div style={{ fontSize: 10, color: colors.inkMuted }}>{r.tpms_tech}</div>}
-                  </td>
                   <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
-                    {/* Old book: the rental VAN on the ticket — a genuinely
-                        different vehicle from the tech's own truck. Direct bill:
-                        the case is keyed to the tech, so this column faithfully
-                        shows the tech's LIVE truck (Tyler 2026-08-31), falling
-                        back to the import-time key only when TPMS has none. */}
-                    {origin?.kind === "direct"
-                      ? ((r.assigned_truck ?? r.vehicle_number) || (
-                          // Tyler 2026-08-31: a truckless direct case still has a
-                          // TECHNICIAN — say why the truck slot is empty instead of
-                          // a dash. Measured that day: 16 of 20 were brand-new
-                          // hires awaiting their first truck. The internal case
-                          // key stays db:<RA> — a shared literal key is exactly
-                          // how five techs once collided onto one row.
-                          isNewHire(r)
-                            ? <span title={`New hire (${fmtDate(r.employee_status_date)}) awaiting first truck assignment — keyed to Enterprise RA ${r.case_key.replace(/^db:/i, "")} until TPMS assigns one`}
-                                    style={{ fontSize: 10.5, fontWeight: 600, color: colors.amber, background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 999, padding: "1px 8px" }}>NEW HIRE</span>
-                            : <span title={`No current TPMS truck for this technician — awaiting assignment; keyed to Enterprise RA ${r.case_key.replace(/^db:/i, "")}`}
-                                    style={{ fontSize: 10.5, color: colors.inkMuted }}>no truck yet</span>
-                        ))
-                      : (r.vehicle_number || <span style={{ color: colors.inkMuted }}>—</span>)}
-                    {/* These badges describe the rental case, whose internal
-                        case_key remains the row/action identity even when a
-                        direct-billing row has no physical rental unit. */}
+                    {/* THE truck column (Tyler 2026-08-31): the report's rental
+                        unit no longer gets a column of its own. What shows is
+                        the truck the tech is ASSIGNED in TPMS as of the last
+                        sync — the vehicle every follow-up (shop, AMS, LUCA
+                        call) is keyed to. The rental unit off the report stays
+                        reachable in the hover title and the drawer. */}
+                    {r.assigned_truck
+                      ? <span title={r.vehicle_number && String(r.vehicle_number).replace(/^0+/, "") !== String(r.assigned_truck).replace(/^0+/, "")
+                              ? `Report shows the rental under unit ${r.vehicle_number}; all follow-up is on assigned truck ${r.assigned_truck}`
+                              : undefined}
+                              style={{ color: colors.ink }}>{r.assigned_truck}</span>
+                      : origin?.kind === "direct" && isNewHire(r)
+                        ? <span title={`New hire (${fmtDate(r.employee_status_date)}) awaiting first truck assignment — keyed to Enterprise RA ${r.case_key.replace(/^db:/i, "")} until TPMS assigns one`}
+                                style={{ fontSize: 10.5, fontWeight: 600, color: colors.amber, background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 999, padding: "1px 8px" }}>NEW HIRE</span>
+                        : <span title={`No current TPMS truck for this technician${r.case_key.startsWith("db:") ? ` — keyed to Enterprise RA ${r.case_key.replace(/^db:/i, "")}` : ""}`}
+                                style={{ fontSize: 10.5, color: colors.inkMuted, fontWeight: 400 }}>no truck assigned</span>}
+                    {r.tpms_tech && <div style={{ fontSize: 10, color: colors.inkMuted, fontWeight: 400 }}>{r.tpms_tech}</div>}
                     {r.workbook_status === "ready_for_pickup" && (
                       <Chip text="READY" fg={colors.green} bg={colors.greenLight} />
                     )}
@@ -1527,11 +1513,6 @@ export default function RentalOperations() {
                     )}
                     {r.research_active && !r.ready_verified && (
                       <Chip text="RESEARCH" fg={colors.amber} bg={colors.amberLight} />
-                    )}
-                    {origin && (
-                      <Chip text={origin.label} title={origin.hint}
-                        fg={origin.kind === "direct" ? colors.purple : colors.blue}
-                        bg={origin.kind === "direct" ? colors.purpleLight : colors.blueLight} />
                     )}
                   </td>
                   <td style={tdStyle}>
@@ -1576,38 +1557,38 @@ export default function RentalOperations() {
                     ) : <span style={{ color: colors.inkMuted }}>—</span>}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>
-                    {r.shop_name ? (
-                      <span>{r.shop_name}{r.shop_po_status && <span style={{ color: r.shop_po_status === "APPROVED" ? colors.green : colors.inkMuted, fontSize: 10, marginLeft: 6 }}>{r.shop_po_status === "APPROVED" ? "open PO" : "last PO"}</span>}</span>
-                    ) : <span style={{ color: colors.inkMuted }}>none</span>}
-                    {shopPhoneShown
-                      ? <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", gap: 4 }}>
-                          <span>{fmtPhone(shopPhoneShown)}</span>
-                          {r.shop_phone_locked && <span title={`Phone locked${r.shop_phone_edited_by ? ` by ${r.shop_phone_edited_by}` : ""} — Holman scrapes cannot replace it`} style={{ display: "inline-flex" }}><Lock size={10} color={colors.amber} /></span>}
-                          {r.shop_phone_source === "manual" && !r.shop_phone_locked && <span title={`Entered manually${r.shop_phone_edited_by ? ` by ${r.shop_phone_edited_by}` : ""} — unlocked, so the next scrape may replace it`} style={{ fontSize: 9, color: colors.inkMuted, fontFamily: fonts.dmSans }}>manual</span>}
-                          {rentalUnit
-                            ? <button type="button" title="Edit shop phone" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: rentalUnit, caseKey: r.case_key, shopName: r.shop_name, phone: r.portal_shop_phone, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
-                                style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
-                            : <span title="A rental unit is required before this vehicle-keyed phone can be edited" style={{ color: colors.inkMuted, fontFamily: fonts.dmSans }}>rental unit unavailable</span>}
-                        </div>
-                      : r.shop_name && !isDeclinedAuction(r.ams_bucket) ? (
-                        <div style={{ fontSize: 10, color: colors.amber, display: "flex", alignItems: "center", gap: 4 }}>
-                          <span title={r.portal_shop_phone ? `Scraped number ${fmtPhone(r.portal_shop_phone)} was set aside — it may belong to a different vendor than the repair PO. Enter a verified number.` : undefined}>{r.portal_shop_phone ? "no verified phone" : r.has_portal ? "no phone on file" : "not scraped"}</span>
-                          {rentalUnit
-                            ? <button type="button" title="Enter shop phone manually" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: rentalUnit, caseKey: r.case_key, shopName: r.shop_name, phone: null, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
-                                style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
-                            : <span title="A rental unit is required before this vehicle-keyed phone can be edited" style={{ color: colors.inkMuted }}>rental unit unavailable</span>}
-                        </div>
-                      ) : null}
-                    {r.redirect_to_assigned && (
-                      <div style={{ fontSize: 10.5, color: colors.green, marginTop: 3, display: "flex", alignItems: "center", gap: 3 }} title={`We no longer own the rental van (${r.ams_status}). LUCA calls the shop repairing the tech's assigned truck ${r.call_target_truck}.`}>
-                        <CornerDownRight size={11} /> call assigned #{r.call_target_truck}: {r.call_shop_name || "?"}{r.call_shop_phone ? ` · ${fmtPhone(r.call_shop_phone)}` : ""}
-                        {r.assigned_phone_locked && <span title="Assigned truck's shop phone is locked — scrapes cannot replace it" style={{ display: "inline-flex" }}><Lock size={10} color={colors.amber} /></span>}
-                        {r.call_target_truck && (
-                          <button type="button" title={`Edit shop phone for assigned truck ${r.call_target_truck}`} onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: r.call_target_truck!, caseKey: r.case_key, shopName: r.call_shop_name, phone: r.call_shop_phone, locked: r.assigned_phone_locked }); }}
-                            style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
-                        )}
-                      </div>
-                    )}
+                    {/* The ASSIGNED truck's shop of record (Tyler 2026-08-31):
+                        follow-up runs on the truck the tech owns, so the shop
+                        shown here is the one repairing THAT truck — the same
+                        call_shop_* the LUCA feed sends. The report truck's shop
+                        lives on in the drawer, not on the board. */}
+                    {(() => {
+                      const shopTruck = r.call_target_truck ?? r.assigned_truck ?? null;
+                      const shopName = r.call_shop_name ?? null;
+                      const shopPhone = r.call_shop_phone ?? null;
+                      const shopStatus = r.call_shop_po_status ?? null;
+                      const locked = shopTruck && rentalUnit && String(shopTruck).replace(/^0+/, "") === String(rentalUnit).replace(/^0+/, "")
+                        ? r.shop_phone_locked : r.assigned_phone_locked;
+                      if (!shopTruck) return <span style={{ color: colors.inkMuted }} title="No assigned truck resolved — nothing to follow up on">—</span>;
+                      if (!shopName) return <span style={{ color: colors.inkMuted }} title={`No qualifying repair PO on assigned truck ${shopTruck}`}>none</span>;
+                      return (
+                        <>
+                          <span>{shopName}{shopStatus && <span style={{ color: shopStatus === "APPROVED" ? colors.green : colors.inkMuted, fontSize: 10, marginLeft: 6 }}>{shopStatus === "APPROVED" ? "open PO" : "last PO"}</span>}</span>
+                          {shopPhone
+                            ? <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", gap: 4 }}>
+                                <span>{fmtPhone(shopPhone)}</span>
+                                {locked && <span title="Phone locked — Holman scrapes cannot replace it" style={{ display: "inline-flex" }}><Lock size={10} color={colors.amber} /></span>}
+                                <button type="button" title={`Edit shop phone for truck ${shopTruck}`} onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: shopTruck, caseKey: r.case_key, shopName, phone: shopPhone, locked }); }}
+                                  style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                              </div>
+                            : <div style={{ fontSize: 10, color: colors.amber, display: "flex", alignItems: "center", gap: 4 }}>
+                                <span>no verified phone</span>
+                                <button type="button" title={`Enter shop phone for truck ${shopTruck}`} onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: shopTruck, caseKey: r.case_key, shopName, phone: null, locked }); }}
+                                  style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                              </div>}
+                        </>
+                      );
+                    })()}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12, fontFamily: fonts.jetbrains }}>{r.last_rental_date ? fmtDate(r.last_rental_date) : <span style={{ color: colors.inkMuted }}>—</span>}</td>
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.days_open ?? ""}</td>

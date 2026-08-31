@@ -263,7 +263,7 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
                         style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, fontWeight: 700, fontFamily: fonts.dmSans, color: shopMeta?.phoneLocked ? colors.amber : colors.inkMuted, background: shopMeta?.phoneLocked ? colors.amberLight : colors.surface, border: `1px solid ${shopMeta?.phoneLocked ? colors.amber : colors.rule}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                         {shopMeta?.phoneLocked ? <Lock size={9} /> : null} manual{shopMeta?.phoneEditedBy ? ` · ${shopMeta.phoneEditedBy}` : ""}
                       </span>
-                    : <SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} />}
+                    : <SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDateTime(assigned.portal.scrapedAt) : undefined} />}
                 </div>
               : <button type="button" onClick={() => onScrape(assigned.truck)} disabled={scraping}
                   style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>
@@ -296,7 +296,7 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
         <section>
           <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
             <span>Holman message trail ({assigned.portal.messages.length})</span>
-            <SourceBadge kind="scrape" detail={assigned.portal.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} />
+            <SourceBadge kind="scrape" detail={assigned.portal.scrapedAt ? fmtDateTime(assigned.portal.scrapedAt) : undefined} />
           </div>
           <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 10 }}>
             {assigned.portal.messages.map((mg, k) => (
@@ -471,7 +471,7 @@ function PoHistorySection({ heading, poList, poSource, portal }: { heading: stri
                     return (
                       <div style={{ marginTop: 7 }}>
                         <div style={{ fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", display: "flex", alignItems: "center" }}>
-                          Holman portal <SourceBadge kind="scrape" detail={portal.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />
+                          Holman portal <SourceBadge kind="scrape" detail={portal.scrapedAt ? fmtDateTime(portal.scrapedAt) : undefined} />
                         </div>
                         {pd.vendorPhone && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>shop {fmtPhone(pd.vendorPhone)}{pd.vendorAddress ? ` · ${pd.vendorAddress}` : ""}</div>}
                         {(pd.createdBy || pd.estimatedReadyDate || pd.workCompletedDate) && <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>{pd.createdBy ? `by ${pd.createdBy}` : ""}{pd.estimatedReadyDate ? ` · est ready ${pd.estimatedReadyDate}` : ""}{pd.workCompletedDate ? ` · done ${pd.workCompletedDate}` : ""}</div>}
@@ -492,7 +492,25 @@ function PoHistorySection({ heading, poList, poSource, portal }: { heading: stri
           );
         })}
       </div>
-      {portal && <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>PO notes + shop phone are from the Holman portal scraper (scraped {portal.scrapedAt ? fmtDate(portal.scrapedAt) : "—"}); the PO list itself is {poSource === "cached_fallback" ? "the cached Snowflake fallback" : "live from the Snowflake feed"}.</div>}
+      {portal && <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>PO notes + shop phone are from the Holman portal scraper (scraped {portal.scrapedAt ? fmtDateTime(portal.scrapedAt) : "—"}); the PO list itself is {poSource === "cached_fallback" ? "the cached Snowflake fallback" : "live from the Snowflake feed"}.</div>}
+      {/* Scrape change log (Tyler 2026-08-31): every refresh that actually
+          changed this record, so "did the scrape do anything" is answerable
+          per record instead of by comparing memories of the page. */}
+      {Array.isArray((portal as any)?.changes) && (portal as any).changes.length > 0 && (
+        <div style={{ marginTop: 8 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: colors.inkSoft, marginBottom: 4 }}>Scrape change log</div>
+          {(portal as any).changes.map((c: any, i: number) => (
+            <div key={i} style={{ fontSize: 10.5, color: colors.inkMuted, padding: "2px 0", borderTop: i ? `1px solid ${colors.rule}` : "none" }}>
+              <span style={{ fontFamily: fonts.jetbrains, color: colors.inkSoft }}>{fmtDateTime(c.changed_at)}</span>
+              {c.first_seen ? " · first scrape" : ""}
+              {c.old_shop_name !== c.new_shop_name && <span> · shop {c.old_shop_name || "(none)"} → {c.new_shop_name || "(none)"}</span>}
+              {c.old_shop_phone !== c.new_shop_phone && <span> · phone {c.old_shop_phone ? fmtPhone(c.old_shop_phone) : "(none)"} → {c.new_shop_phone ? fmtPhone(c.new_shop_phone) : "(none)"}</span>}
+              {Number(c.old_po_count ?? -1) !== Number(c.new_po_count ?? -1) && <span> · POs {c.old_po_count ?? 0} → {c.new_po_count}</span>}
+              {Number(c.old_msg_count ?? -1) !== Number(c.new_msg_count ?? -1) && <span> · notes {c.old_msg_count ?? 0} → {c.new_msg_count}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -891,7 +909,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                                 style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, fontWeight: 700, fontFamily: fonts.dmSans, color: shopMeta?.phoneLocked ? colors.amber : colors.inkMuted, background: shopMeta?.phoneLocked ? colors.amberLight : colors.surface, border: `1px solid ${shopMeta?.phoneLocked ? colors.amber : colors.rule}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
                                 {shopMeta?.phoneLocked ? <Lock size={9} /> : null} manual{shopMeta?.phoneEditedBy ? ` · ${shopMeta.phoneEditedBy}` : ""}
                               </span>
-                            : <SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />}
+                            : <SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDateTime(portal.scrapedAt) : undefined} />}
                           {editBtn}
                         </div>
                       : rentalUnit
@@ -901,7 +919,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                           </div>
                         : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 6 }}>Rental unit unavailable — shop phone controls disabled.</div>;
                   })()}
-                  <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
+                  <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDateTime(portal.scrapedAt)}` : ""}</div>
                 </div>
               ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
               {/* Provenance: the shop LUCA actually dialed on its last dispatch.
@@ -1064,7 +1082,7 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
               <section>
                 <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
                   <span>Holman message trail ({portal.messages.length})</span>
-                  <SourceBadge kind="scrape" detail={portal.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />
+                  <SourceBadge kind="scrape" detail={portal.scrapedAt ? fmtDateTime(portal.scrapedAt) : undefined} />
                 </div>
                 <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 10 }}>
                   {portal.messages.map((mg, k) => (

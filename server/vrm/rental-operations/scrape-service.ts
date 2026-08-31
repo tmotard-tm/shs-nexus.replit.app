@@ -394,6 +394,22 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
       shop_address=EXCLUDED.shop_address, shop_src=EXCLUDED.shop_src, shop_phone_source=EXCLUDED.shop_phone_source,
       imported_at=NOW()
   `);
+  // CHANGE LOG (Tyler 2026-08-31): record WHAT this write changed, per record.
+  // Only real content changes reach this point (the no-op branch returned
+  // above), so every row here is a genuine delta. Non-fatal: a failed log line
+  // must never fail the scrape that produced the data.
+  try {
+    await db.execute(sql`
+      INSERT INTO vrm_holman_portal_hist_changes
+        (truck_no, first_seen, old_shop_name, new_shop_name, old_shop_phone, new_shop_phone,
+         old_po_count, new_po_count, old_msg_count, new_msg_count)
+      VALUES (${caseKey}, ${!prev}, ${prev?.shop_name ?? null}, ${next.shopName},
+              ${prev?.shop_phone ?? null}, ${next.shopPhone},
+              ${prev ? Number(prev.po_count ?? 0) : null}, ${next.poCount},
+              ${prev ? Number(prev.msg_count ?? 0) : null}, ${next.msgCount})`);
+  } catch (e: any) {
+    console.warn(`[VRM/Scrape] change-log write failed for ${caseKey} (non-fatal): ${e?.message || e}`);
+  }
   return { changed: true, empty: events.length === 0 };
 }
 
@@ -439,7 +455,9 @@ export async function scrapeAndStore(
   // onlyMissing:true; honour it rather than drop it on the floor. Delete this
   // shim once vrm-scrape.ts is updated to say what it means.
   const onlyMissing = opts.onlyMissing ?? (opts.force === false);
-  const scrapedAt = new Date().toISOString().slice(0, 10);
+  // Full timestamp, not a date (Tyler 2026-08-31): the column is TIMESTAMPTZ
+  // now, and a date-only stamp made same-day re-scrapes look like no-ops.
+  const scrapedAt = new Date().toISOString();
   const uniq = Array.from(new Set(caseKeys.map((k) => toDisplayNumber(k)).filter(Boolean)));
   let targets = uniq;
   if (onlyMissing && uniq.length) {

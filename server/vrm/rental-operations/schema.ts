@@ -345,6 +345,29 @@ export async function initRentalOperationsSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_name_override VARCHAR(160);`);
   await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_name_override_by VARCHAR(120);`);
   await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_name_override_at TIMESTAMPTZ;`);
+  // scraped_at carries TIME, not just the day (Tyler 2026-08-31): as a DATE a
+  // same-day re-scrape displayed the identical stamp, so operators concluded
+  // the refresh did nothing when it had in fact run. Idempotent: re-altering
+  // TIMESTAMPTZ to TIMESTAMPTZ is a no-op.
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ALTER COLUMN scraped_at TYPE TIMESTAMPTZ USING scraped_at::timestamptz;`);
+  // Per-record scrape CHANGE LOG (Tyler 2026-08-31): "if something is scraped
+  // and changed, we need to know that it changed on each record." One row per
+  // upsertTruck write that actually changed content: shop identity before and
+  // after plus the PO/message counters, so the drawer can show what a refresh
+  // brought in. Bump-only visits (nothing differed) do NOT log.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_holman_portal_hist_changes (
+      id            BIGSERIAL PRIMARY KEY,
+      truck_no      VARCHAR(10) NOT NULL,
+      changed_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      first_seen    BOOLEAN NOT NULL DEFAULT FALSE,
+      old_shop_name  TEXT,  new_shop_name  TEXT,
+      old_shop_phone VARCHAR(40), new_shop_phone VARCHAR(40),
+      old_po_count   INTEGER, new_po_count   INTEGER,
+      old_msg_count  INTEGER, new_msg_count  INTEGER
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_hph_changes_truck_idx ON vrm_holman_portal_hist_changes (truck_no, changed_at DESC);`);
   // JUNK-PHONE HEAL (Tyler 8/5, value-guarded, idempotent): old scrapes left
   // portal placeholder numbers (2222222222-style repeated digits) and other
   // unusable values in shop_phone. Read paths now clean them out of every
