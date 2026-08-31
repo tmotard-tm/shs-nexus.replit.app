@@ -518,6 +518,47 @@ function SourceHealthBadge({ sh }: { sh: MasterModel["sourceHealth"] }) {
   );
 }
 
+/** Friendly names for the five feed rows — the strip speaks meeting English,
+ *  not source_key. Unknown keys fall back to the raw key so a new feed shows
+ *  up instead of vanishing. */
+const SOURCE_LABELS: Record<string, string> = {
+  scheduled_sync: "ECARS report",
+  snowflake_enterprise: "Direct billing",
+  snowflake_holman: "Holman cost",
+  holman_etl_po: "Repair POs",
+  ams_status: "AMS status",
+  manual_enterprise_import: "Manual import",
+};
+
+/** Always-visible per-feed health strip (Tyler 2026-08-31: "so a red is
+ *  staring at you instead of waiting for someone to query for it"). One chip
+ *  per source, worst first, coloured by the DATA-age verdict — the same
+ *  effective_health the rollup pill summarizes, so the two can never
+ *  disagree. The full evidence line stays on hover. */
+function SourceHealthStrip({ sh }: { sh: MasterModel["sourceHealth"] }) {
+  const clocks = Array.isArray(sh?.clocks) ? sh.clocks : [];
+  if (!clocks.length) return null;
+  const sorted = [...clocks].sort((a, b) => HEALTH_RANK[healthOf(b)] - HEALTH_RANK[healthOf(a)]);
+  return (
+    <div className="ro-health-strip" style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
+      <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Feed health</span>
+      {sorted.map((c) => {
+        const lvl = healthOf(c);
+        const { fg, bg } = healthPaint(lvl);
+        const p50 = c.data_age_p50_hours;
+        const age = p50 == null ? "age ?" : `p50 ${fmtHours(p50)}`;
+        return (
+          <span key={c.source_key} title={healthClockLine(c).trim()}
+            style={{ display: "inline-flex", alignItems: "center", gap: 5, fontFamily: fonts.jetbrains, fontSize: 11, fontWeight: lvl === "green" ? 400 : 700, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "3px 10px", whiteSpace: "nowrap", cursor: "help" }}>
+            {lvl === "red" || lvl === "yellow" ? <AlertTriangle size={11} /> : null}
+            {SOURCE_LABELS[c.source_key] ?? c.source_key} · {age}{c.last_row_count != null ? ` · ${c.last_row_count} rows` : ""}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── multi-select filter (checkbox dropdown; empty selection = show all) ──────
 function MultiSelect({ label, options, values, onChange, style }: {
   label: string;
@@ -1226,6 +1267,9 @@ export default function RentalOperations() {
           </button>
         </div>
       </div>
+
+      {/* Per-feed health strip — always visible, worst first (Tyler 2026-08-31). */}
+      <SourceHealthStrip sh={sh} />
 
       {showReminders && <ExtensionRemindersPanel />}
 
