@@ -400,6 +400,12 @@ function truckOf(roster: RosterLite | null, ldap: string | null, ctx: DirectReso
  * report surname AGREES before asserting identity — a disagreeing strong link
  * degrades to REVIEW carrying the evidence, never a silent guess (same
  * philosophy as identity-resolver.ts: never render a guess as fact).
+ *
+ * Tiers: 1 reservation → 2 prior ticket → 3 ref-as-truck → 4 unique surname →
+ * 5 ref-as-LDAP → 6 SI-head truck via TPMS. Tiers 5–6 (Tyler 2026-08-31,
+ * "100% of them should be able to be resolved") read the two keys WE stamped
+ * on the reservation at booking; they sit AFTER the original four on purpose,
+ * so no row that resolved before them can change outcome.
  */
 export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): DirectResolution {
   // Premortem #3: a racf that maps to multiple roster identities must never
@@ -536,6 +542,70 @@ export function resolveDirectRow(row: DirectBillingRow, ctx: DirectResolveCtx): 
     if (cands.length === 1) {
       const t = truckOf(cands[0], null, ctx);
       return { preset: resolvedFromRoster(cands[0], "direct:surname_unique", "medium"), truck: t.truck, method: "direct:surname_unique", truckSource: t.truckSource, ldap: stampSafe(cands[0].racf) };
+    }
+  }
+
+  // 5) ref field IS the tech's LDAP. We wrote CLAIM_PO_EXTERNAL_REFERENCE onto
+  //    the reservation OURSELVES at booking (an LDAP like "JGAQUIN" when no
+  //    truck existed, a truck number otherwise), so a letter-bearing ref is a
+  //    deterministic per-tech key — it even splits two active roster techs who
+  //    share a full name (both Joshua Dickersons carry distinct refs). Measured
+  //    2026-08-31: 6 of the 12 then-unresolvable rows carried exactly this.
+  //    Surname must still agree; a disagreeing strong link degrades to REVIEW
+  //    carrying the evidence, never a silent guess.
+  if (row.refNumber && /[A-Z]/i.test(row.refNumber)) {
+    const roster = ctx.rosterByRacf.get(row.refNumber.trim().toUpperCase()) ?? null;
+    if (roster) {
+      if (surnameAgrees(row.lastName, roster.tech_name)) {
+        const t = truckOf(roster, null, ctx);
+        return { preset: resolvedFromRoster(roster, "direct:ref_ldap", "high"), truck: t.truck, method: "direct:ref_ldap", truckSource: t.truckSource, ldap: stampSafe(roster.racf) };
+      }
+      return {
+        preset: {
+          state: "REVIEW",
+          reason: `ref field LDAP ${row.refNumber.trim().toUpperCase()} is ${roster.tech_name} but the report surname is "${row.lastName}"`,
+          candidates: [candidateOf(roster)], method: "direct:ref_ldap", confidence: "low",
+        },
+        truck: null, method: "direct:ref_ldap", truckSource: null, ldap: null,
+      };
+    }
+  }
+
+  // 6) the SI head names the truck: "SHS TRUCK 046201. SHS FLEET - …". Tyler
+  //    2026-08-31: "the only thing that's needed is the first 7 characters …
+  //    that's the only place the truck number should live." We stamped that
+  //    truck at booking, so truck → TPMS tech is a deterministic reverse
+  //    lookup (measured: 7 of the 12 then-unresolvable rows carried it). Same
+  //    contract as tier 3: the SI truck confirms WHO — the case is still keyed
+  //    to the tech's LIVE TPMS truck, never to the stamped value, which is a
+  //    booking-time snapshot and goes stale the moment the tech is reassigned.
+  const siTruckMatch = /^\s*SHS\s+TRUCK\s+(\d{4,7})\b/i.exec(String(row.si ?? ""));
+  if (siTruckMatch) {
+    const siTruck = toCanonical(siTruckMatch[1]);
+    const tt = siTruck ? ctx.truckTechs.get(siTruck) : undefined;
+    if (tt) {
+      const roster = tt.employee_id ? ctx.rosterByEmployeeId.get(tt.employee_id) ?? null : null;
+      if (surnameAgrees(row.lastName, roster?.tech_name ?? tt.tech_name)) {
+        const live = truckOf(roster, null, ctx);
+        if (roster) {
+          return { preset: resolvedFromRoster(roster, "direct:si_truck", "high"), truck: live.truck, method: "direct:si_truck", truckSource: live.truckSource, ldap: stampSafe(roster.racf) };
+        }
+        return {
+          preset: {
+            state: "RESOLVED", employee_id: tt.employee_id || null, tech_name: tt.tech_name,
+            district_no: tt.district_no ?? null, confidence: "medium", method: "direct:si_truck",
+          },
+          truck: live.truck, method: "direct:si_truck", truckSource: live.truckSource, ldap: null,
+        };
+      }
+      return {
+        preset: {
+          state: "REVIEW",
+          reason: `SI names truck ${siTruckMatch[1]} whose TPMS tech is ${tt.tech_name ?? "unknown"} but the report surname is "${row.lastName}" (truck likely reassigned since booking)`,
+          candidates: roster ? [candidateOf(roster)] : [], method: "direct:si_truck", confidence: "low",
+        },
+        truck: null, method: "direct:si_truck", truckSource: null, ldap: null,
+      };
     }
   }
 
