@@ -117,7 +117,7 @@ export interface IStorage {
   updateApprovedCostImportMeta(headers: string[], keyColumn: string, totalRows: number, importedBy?: string): Promise<ApprovedCostImportMeta>;
   
   // Truck Consolidation operations
-  consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string; renterName?: string }>, consolidatedBy: string, preserveExistingDates?: boolean): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }>;
+  consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string; renterName?: string; techState?: string }>, consolidatedBy: string, preserveExistingDates?: boolean): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }>;
   getTruckConsolidations(limit?: number): Promise<TruckConsolidation[]>;
   
   // PMF Activity Log operations
@@ -1383,7 +1383,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Truck Consolidation operations
-  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string; renterName?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }> {
+  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string; renterName?: string; techState?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }> {
     // Get current trucks in the system
     const currentTrucks = await this.getAllTrucks();
     const currentTruckNumbers = new Set(currentTrucks.map(t => t.truckNumber.trim().toUpperCase()));
@@ -1421,6 +1421,13 @@ export class DatabaseStorage implements IStorage {
         shsOwner: "Oscar S",
         datePutInRepair: entry?.dateInRepair || null,
         renterName: entry?.renterName || null,
+        // Routing seed (Tyler 2026-08-31): when the anchored roster sync grew
+        // fs_trucks from 93 to ~370 trucks, every new row arrived with no
+        // state, so Annex A routing (tech state > shop state > plate state)
+        // matched nothing and the whole book parked with Rob Anderson under
+        // "Needs routing". The anchor knows the state — carry it in.
+        techState: entry?.techState || null,
+        techStateSource: entry?.techState ? "rental_ops_sync" : null,
       });
     }
     
@@ -1450,6 +1457,13 @@ export class DatabaseStorage implements IStorage {
         // name (renter_name_manual) is never clobbered by the feed.
         if (entry?.renterName && !truck.renterNameManual && (truck.renterName || "") !== entry.renterName) {
           updates.renterName = entry.renterName;
+        }
+        // Tech state mirrors the anchor on every sync (this is what routes the
+        // queue item to a region owner). A manually entered state is never
+        // clobbered — same contract as renterName above.
+        if (entry?.techState && truck.techStateSource !== "manual" && (truck.techState || "") !== entry.techState) {
+          updates.techState = entry.techState;
+          updates.techStateSource = "rental_ops_sync";
         }
         if (Object.keys(updates).length > 0) {
           await this.updateTruck(truck.id, updates);

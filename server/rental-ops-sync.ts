@@ -350,7 +350,7 @@ async function runRentalSync(
   // LIVHR fixed in 714a76da: "db:4RYGPG" → vehicle "4") — skip them, count
   // them, never invent a vehicle.
   let dbKeyedSkipped = 0;
-  const entryByVn = new Map<string, { truckNumber: string; dateInRepair?: string; renterName?: string; startMs: number }>();
+  const entryByVn = new Map<string, { truckNumber: string; dateInRepair?: string; renterName?: string; techState?: string; startMs: number }>();
   for (const r of openRows) {
     const rawKey = String(r.case_key ?? "");
     if (rawKey.startsWith("db:")) { dbKeyedSkipped++; continue; }
@@ -373,11 +373,16 @@ async function runRentalSync(
       (r.renter_name_raw ? String(r.renter_name_raw).trim() : "") ||
       (r.tech_name ? String(r.tech_name).trim() : "") || undefined;
     const startMs = startRaw ? new Date(String(startRaw)).getTime() || 0 : 0;
+    // Routing seed for the Today's Queue (Annex A resolves tech state FIRST):
+    // the renting branch state is where the tech is. Two-letter guard so junk
+    // never becomes a "state".
+    const st = String(r.renting_state ?? "").trim().toUpperCase();
+    const techState = /^[A-Z]{2}$/.test(st) ? st : undefined;
     const prev = entryByVn.get(vn);
     // One fs_trucks row per truck: on the rare double-case truck, keep the
     // newer rental (same rule the legacy Enterprise dedup used).
     if (!prev || startMs > prev.startMs) {
-      entryByVn.set(vn, { truckNumber: vn, dateInRepair, renterName, startMs });
+      entryByVn.set(vn, { truckNumber: vn, dateInRepair, renterName, techState, startMs });
     }
   }
   const entCount = bySource.enterprise ?? 0;

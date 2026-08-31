@@ -708,7 +708,13 @@ export default function RentalOperations() {
   // Default matches the Rentals Ops Dashboard (OPEN only). PENDED (turned-in /
   // closing tickets) are ingested but opt-in, so the headline count ties out.
   const basePool = useMemo(() => originPool.filter((r) => includePended || r.ticket_status !== "PENDED"), [originPool, includePended]);
-  const wrongTruckCount = useMemo(() => basePool.filter((r) => r.wrong_truck).length, [basePool]);
+  // Old-book rows only: there the case truck is the RENTAL VAN and a different
+  // assigned truck is a real operational fact. On direct-billed rows the case
+  // truck IS the tech's truck as of the last import, so divergence from live
+  // TPMS is import lag that self-heals on the next daily import — never a red
+  // flag (Tyler 2026-08-31).
+  const isRealWrongTruck = (r: MasterRow) => r.wrong_truck && r.source !== "enterprise_direct";
+  const wrongTruckCount = useMemo(() => basePool.filter(isRealWrongTruck).length, [basePool]);
   const pendedTotal = useMemo(() => originPool.filter((r) => r.ticket_status === "PENDED").length, [originPool]);
   // counts computed over the current pool so tab badges + KPIs always match the grid
   const stats = useMemo(() => {
@@ -782,7 +788,7 @@ export default function RentalOperations() {
         if (markF === "none" ? m !== "none" : m !== markF) return false;
       }
       if (mismatchOnly && !r.type_mismatch) return false;
-      if (wrongTruckOnly && !r.wrong_truck) return false;
+      if (wrongTruckOnly && !isRealWrongTruck(r)) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       if (repairF && r.repair_cohort !== repairF) return false;
@@ -1431,7 +1437,7 @@ export default function RentalOperations() {
               <Th col="veh" label="Vehicle" />
               <Th col="billing" label="Billing" />
               <Th col="cost" label="Daily Cost" style={{ textAlign: "right" }} />
-              <Th col="ams" label="AMS" />
+              <Th col="ams" label="AMS · own truck" />
               <Th col="shop" label="Shop" />
               <Th col="lastrental" label="Last Rental" />
               <Th col="days" label="Days" style={{ textAlign: "right" }} />
@@ -1445,7 +1451,12 @@ export default function RentalOperations() {
           <tbody>
             {visibleRows.map((r, i) => {
               const tint = r.operator_mark === "open" ? "rgba(34,197,94,.08)" : r.operator_mark === "closed" ? "rgba(148,163,184,.10)" : r.operator_mark === "pickup" ? "rgba(234,179,8,.10)" : undefined;
-              const ams = amsColor(r.ams_bucket);
+              // AMS answers "what state is the truck we would act on" — that is
+              // the tech's ASSIGNED truck (the call target) whenever we know it,
+              // the case truck otherwise. With two truck columns on the row, an
+              // unlabeled status was ambiguous (Tyler 2026-08-31).
+              const amsStatusShown = r.assigned_ams_status ?? r.ams_status;
+              const ams = amsColor(r.assigned_ams_status ? (r.assigned_ams_bucket ?? r.ams_bucket) : r.ams_bucket);
               // Shop-of-record phone = the server-reconciled pick ONLY (the
               // same number the queue card shows and LUCA dials) — never the
               // raw portal scrape, whose top-level phone can belong to a
@@ -1475,13 +1486,24 @@ export default function RentalOperations() {
                         TPMS-first derivation — assigned_truck/own_pad). Never
                         fall back to the rental unit, reservation, RA, or case key. */}
                     {r.assigned_truck
-                      ? <span style={{ color: r.wrong_truck ? colors.red : colors.inkSoft, fontWeight: r.wrong_truck ? 600 : 400 }}>{r.assigned_truck}</span>
+                      ? <span style={{ color: isRealWrongTruck(r) ? colors.red : colors.inkSoft, fontWeight: isRealWrongTruck(r) ? 600 : 400 }}>{r.assigned_truck}</span>
                       : <span style={{ color: colors.inkMuted }}>Unassigned / No TPMS match</span>}
-                    {r.wrong_truck && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
+                    {isRealWrongTruck(r) && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
+                    {r.wrong_truck && !isRealWrongTruck(r) && r.assigned_truck && (
+                      <div title="Direct-billed cases are keyed to the tech's truck at import time; TPMS moved since. The case re-keys itself on the next daily import — nothing to fix."
+                           style={{ fontSize: 10, color: colors.inkMuted }}>moved · re-keys next import</div>
+                    )}
                     {r.tpms_tech && <div style={{ fontSize: 10, color: colors.inkMuted }}>{r.tpms_tech}</div>}
                   </td>
                   <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
-                    {r.vehicle_number || <span style={{ color: colors.inkMuted }}>—</span>}
+                    {/* Old book: the rental VAN on the ticket — a genuinely
+                        different vehicle from the tech's own truck. Direct bill:
+                        the case is keyed to the tech, so this column faithfully
+                        shows the tech's LIVE truck (Tyler 2026-08-31), falling
+                        back to the import-time key only when TPMS has none. */}
+                    {origin?.kind === "direct"
+                      ? ((r.assigned_truck ?? r.vehicle_number) || <span style={{ color: colors.inkMuted }}>—</span>)
+                      : (r.vehicle_number || <span style={{ color: colors.inkMuted }}>—</span>)}
                     {/* These badges describe the rental case, whose internal
                         case_key remains the row/action identity even when a
                         direct-billing row has no physical rental unit. */}
@@ -1534,7 +1556,12 @@ export default function RentalOperations() {
                     )}
                   </td>
                   <td style={tdStyle}>
-                    {r.ams_status ? <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: ams.fg, background: ams.bg, border: `1px solid ${ams.fg}`, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase" }}>{r.ams_status}</span> : <span style={{ color: colors.inkMuted }}>—</span>}
+                    {amsStatusShown ? (
+                      <span title={r.assigned_ams_status && r.ams_status && r.assigned_ams_status !== r.ams_status
+                              ? `Assigned truck ${r.assigned_truck ?? ""}: ${r.assigned_ams_status} · rental unit ${r.vehicle_number ?? ""}: ${r.ams_status}`
+                              : `AMS status of the tech's own (assigned) truck`}
+                            style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: ams.fg, background: ams.bg, border: `1px solid ${ams.fg}`, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase" }}>{amsStatusShown}</span>
+                    ) : <span style={{ color: colors.inkMuted }}>—</span>}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>
                     {r.shop_name ? (
