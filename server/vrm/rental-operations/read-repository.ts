@@ -1048,7 +1048,15 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     const ownTruck = r.renter_own_truck ? String(r.renter_own_truck) : null;
     const wrongTruck = !!(ownTruck && strip(ownTruck) !== strip(r.case_key));
     const hasRentalAuth = !!r.has_rental_auth;
-    const noRentalAuth = !hasRentalAuth && cohort !== "no_history";
+    // "No rental auth" is a HOLMAN-BOOK concept: Enterprise bills the old book
+    // through a Holman rental-placeholder PO, and a rental running without an
+    // APPROVED one is the unauthorized-billing population the RMSHolman queue
+    // exists for. A DIRECT-BILLED rental has no Holman PO by design, so the
+    // question is meaningless there — measured 2026-08-31, the unscoped flag
+    // painted 106 of 314 direct rows amber for a billing system they do not
+    // use (and the 175 that "passed" only passed on their OLD rental's
+    // leftover placeholder). Old book only (Tyler 2026-08-31).
+    const noRentalAuth = !hasRentalAuth && cohort !== "no_history" && r.source !== "enterprise_direct";
     const odo = r.odometer == null ? null : Number(r.odometer);
 
     const amsBucket = amsBucketOf(r.ams_status);
