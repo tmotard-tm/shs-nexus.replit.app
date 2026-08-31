@@ -7,6 +7,7 @@ export type ExternalFleetScope = "modules:read" | "profiles:read" | "search:read
 export type ExternalFleetModuleId =
   | "rental_ops.open_rentals"
   | "fleet_management.full_listing"
+  | "onboarding.van_deliveries"
   | "fleet_scope.all_vehicles"
   | "fleet_scope.todays_queue"
   | "fleet_scope.rentals_dashboard"

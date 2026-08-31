@@ -35,9 +35,16 @@ import {
   type TechnicianProfile,
   type TruckProfile,
 } from "./profiles";
+import {
+  buildVanDeliveryModel,
+  renderVanDeliveryCsv,
+  VanDeliverySourceUnavailableError,
+  type VanDeliveryInput,
+  type VanDeliveryReadModel,
+} from "./van-delivery-read-model";
 import { toCanonical } from "../vehicle-number-utils";
 import { TpmsSearchSourceUnavailableError } from "./tpms-read-model";
-import { createEnvelope, type ExternalFleetScope, type SourceObservation } from "./types";
+import { createEnvelope, type ApiWarning, type ExternalFleetScope, type SourceObservation } from "./types";
 
 const API_PATH = "/api/external/fleet/v1";
 const RENTAL_OPS_FRESHNESS_WINDOW_SECONDS = 30 * 60;
@@ -80,6 +87,37 @@ const enterpriseIdPathSchema = z.string().trim().min(2).max(40)
 const truckNumberPathSchema = z.string().trim().min(1).max(20)
   .regex(/^\d+$/)
   .transform((value) => toCanonical(value));
+
+const VAN_DELIVERY_FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60;
+
+function vanDeliveryFreshness(sourceUpdatedAt: string | null) {
+  if (!sourceUpdatedAt) {
+    return { state: "unknown" as const, observedAt: null, ageSeconds: null };
+  }
+  const sourceTime = Date.parse(sourceUpdatedAt);
+  if (!Number.isFinite(sourceTime)) {
+    return { state: "unknown" as const, observedAt: null, ageSeconds: null };
+  }
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - sourceTime) / 1000));
+  return {
+    state: ageSeconds <= VAN_DELIVERY_FRESHNESS_WINDOW_SECONDS ? "fresh" as const : "stale" as const,
+    observedAt: sourceUpdatedAt,
+    ageSeconds,
+  };
+}
+
+type VanDeliveryBuilder = (
+  input: VanDeliveryInput,
+) => Promise<{ model: VanDeliveryReadModel; sourceUpdatedAt: string | null; warnings: ApiWarning[] }>;
+
+// New-hire van deliveries. `format=csv` exists because the consuming teams pull
+// this into Excel / Power Query, which will not read a JSON envelope.
+const vanDeliveryQuerySchema = z.object({
+  hiredFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  hiredTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  includeFutureHires: z.enum(["true", "false"]).default("false"),
+  format: z.enum(["json", "csv"]).default("json"),
+}).strict();
 
 const profileSearchQuerySchema = z.object({
   query: z.string().trim().min(2).max(120),
@@ -157,6 +195,7 @@ export function createExternalFleetReadRouter(
   fleetManagementListingBuilder: FleetManagementListingBuilder = buildFleetManagementListing,
   profileBuilders: ProfileBuilders = defaultProfileBuilders,
   openRentalEidSetBuilder: OpenRentalEidSetBuilder = computeOpenRentalEidSet,
+  vanDeliveryBuilder: VanDeliveryBuilder = buildVanDeliveryModel,
 ): Router {
   const router = express.Router();
 
@@ -431,6 +470,68 @@ export function createExternalFleetReadRouter(
           return res.status(503).json({ error: { code: "SOURCE_UNAVAILABLE", message: "The profile search sources are unavailable" } });
         }
         return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "The search request could not be completed" } });
+      }
+    },
+  );
+
+  // When did each new hire actually get their van?
+  //
+  // Derived, not recorded: Nexus owns the hire and the truck assignment, PAL
+  // Transport owns the completion date. Rows that no transport covers (a Holman
+  // tow, or a van handed over at the branch) come back `no_transport_record`
+  // with an empty date rather than an inferred one, so the coverage gap is
+  // visible in the data instead of hidden inside an average.
+  router.get(
+    "/modules/onboarding-van-deliveries",
+    requireExternalFleetScope("modules:read"),
+    async (req, res) => {
+      const parsed = vanDeliveryQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: {
+            code: "INVALID_QUERY",
+            message: "The query parameters are invalid",
+          },
+        });
+      }
+
+      try {
+        const { model, sourceUpdatedAt, warnings } = await vanDeliveryBuilder({
+          hiredFrom: parsed.data.hiredFrom,
+          hiredTo: parsed.data.hiredTo,
+          includeFutureHires: parsed.data.includeFutureHires === "true",
+        });
+
+        if (parsed.data.format === "csv") {
+          res.setHeader("Content-Type", "text/csv; charset=utf-8");
+          res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="new-hire-van-deliveries-${new Date().toISOString().slice(0, 10)}.csv"`,
+          );
+          return res.send(renderVanDeliveryCsv(model.rows));
+        }
+
+        return res.json(createEnvelope({
+          sourceUpdatedAt,
+          freshness: vanDeliveryFreshness(sourceUpdatedAt),
+          warnings,
+          data: model,
+        }));
+      } catch (error) {
+        if (error instanceof VanDeliverySourceUnavailableError) {
+          return res.status(503).json({
+            error: {
+              code: "SOURCE_UNAVAILABLE",
+              message: "The PAL Transport source is unavailable",
+            },
+          });
+        }
+        return res.status(500).json({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "The van delivery request could not be completed",
+          },
+        });
       }
     },
   );
