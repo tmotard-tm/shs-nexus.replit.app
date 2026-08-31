@@ -66,6 +66,20 @@ export interface SendMessageInput {
   force?: boolean; // bypass quiet-hours (send now)
   dryRun?: boolean; // resolve + gate checks only; no thread/queue/Twilio side effects
   /**
+   * Stable caller key for exactly-once acceptance (HERALD, 2026-08-30).
+   *
+   * Distinct from skipRecentDuplicate, which is a CONTENT heuristic (same digits
+   * + body + category within 24h) and therefore cannot tell a legitimate repeat
+   * from a retry, and cannot dedupe two different bodies that mean the same send.
+   * A key is exact and database-enforced.
+   *
+   * A keyed send is ALWAYS routed through the queue rather than sent inline, so a
+   * durable keyed record exists BEFORE any provider activity. That ordering is
+   * the whole point: a crash after Twilio accepts but before we record it is the
+   * failure that produces a double-text on the retry.
+   */
+  idempotencyKey?: string | null;
+  /**
    * Skip the send when an IDENTICAL message (same recipient digits + body +
    * category) was already sent or queued within the last 24h. Set on the API
    * surfaces only: machine callers retry on timeout, and without this guard a
@@ -141,6 +155,8 @@ async function enqueue(params: {
   senderName?: string | null;
   /** Queue row status; default 'pending'. 'held' rows are undrainable. */
   status?: string;
+  /** Stable caller key. Collides -> the EXISTING row id is returned, no new row. */
+  idempotencyKey?: string | null;
 }): Promise<string> {
   const [row] = await fsDb
     .insert(commsSendQueue)
@@ -158,9 +174,51 @@ async function enqueue(params: {
       status: params.status ?? "pending",
       createdBy: params.sentBy ?? null,
       senderName: params.senderName ?? null,
+      idempotencyKey: params.idempotencyKey ?? null,
     })
+    .onConflictDoNothing()
     .returning({ id: commsSendQueue.id });
+  // A collision means a concurrent caller already claimed this key between our
+  // lookup and this insert. The partial unique index is the backstop that makes
+  // that race safe; hand back the row that won so the caller sees one message,
+  // not an error and not a second text.
+  if (!row) {
+    const existing = params.idempotencyKey
+      ? await findQueueRowByIdempotencyKey(params.idempotencyKey)
+      : null;
+    if (existing) return existing.id;
+    throw new Error('enqueue produced no row and no idempotency key to recover it');
+  }
   return row.id;
+}
+
+/**
+ * The reconciliation lookup HERALD's contract requires: given a caller's stable
+ * key, what did we actually do with it? Returns null when the key is unknown.
+ */
+export async function findQueueRowByIdempotencyKey(key: string): Promise<{
+  id: string;
+  status: string;
+  twilioSid: string | null;
+  sentAt: Date | null;
+  scheduledFor: Date | null;
+  errorMessage: string | null;
+  createdAt: Date | null;
+} | null> {
+  const [row] = await fsDb
+    .select({
+      id: commsSendQueue.id,
+      status: commsSendQueue.status,
+      twilioSid: commsSendQueue.twilioSid,
+      sentAt: commsSendQueue.sentAt,
+      scheduledFor: commsSendQueue.scheduledFor,
+      errorMessage: commsSendQueue.errorMessage,
+      createdAt: commsSendQueue.createdAt,
+    })
+    .from(commsSendQueue)
+    .where(eq(commsSendQueue.idempotencyKey, key))
+    .limit(1);
+  return row ?? null;
 }
 
 /**
@@ -282,6 +340,21 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   if (await isOptedOut(phoneDigits)) {
     return { status: "skipped", reason: "recipient opted out" };
   }
+  // Exactly-once: a known key is answered from the prior row with no side effect.
+  // Checked before the content heuristic because it is exact, and before dryRun
+  // so a preview of an already-accepted key reports the truth rather than
+  // 'would send'.
+  if (input.idempotencyKey) {
+    const prior = await findQueueRowByIdempotencyKey(input.idempotencyKey);
+    if (prior) {
+      return {
+        status: 'skipped',
+        reason: `duplicate: idempotency key already accepted (queue row ${prior.id}, status ${prior.status})`,
+        queueId: prior.id,
+        ...(input.dryRun ? { dryRun: true } : {}),
+      };
+    }
+  }
   if (
     input.skipRecentDuplicate &&
     (await isRecentDuplicateSend(phoneDigits, input.body, input.category))
@@ -341,6 +414,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
       sentBy: input.sentBy,
       senderName: input.senderName,
       status: input.hold ? "held" : "pending",
+      idempotencyKey: input.idempotencyKey,
     });
     return { status: "queued", queueId, threadId: thread.id, segments };
   }
@@ -358,10 +432,33 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
       scheduledFor: quietUntil,
       sentBy: input.sentBy,
       senderName: input.senderName,
+      idempotencyKey: input.idempotencyKey,
     });
     return { status: "queued", queueId, threadId: thread.id, segments };
   }
 
+  // A keyed send never goes inline: the durable keyed row must exist BEFORE any
+  // provider activity, or a crash between Twilio accepting and us recording it
+  // leaves the caller's retry with nothing to match on — the exact double-text
+  // this contract exists to prevent. scheduled_for = now, so the normal drain
+  // picks it up on its next cycle.
+  if (input.idempotencyKey) {
+    const queueId = await enqueue({
+      ldap: input.ldap ?? null,
+      phone,
+      phoneDigits,
+      category: input.category,
+      body: input.body,
+      mediaUrl: input.mediaUrl ?? null,
+      managerCc: false, // already handled above
+      phoneLocked: !!input.phoneLocked,
+      scheduledFor: new Date(),
+      sentBy: input.sentBy,
+      senderName: input.senderName,
+      idempotencyKey: input.idempotencyKey,
+    });
+    return { status: 'queued', queueId, threadId: thread.id, segments };
+  }
   // Send now.
   const sid = await sendTwilioMessage(
     phone,

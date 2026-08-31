@@ -1742,6 +1742,12 @@ export const commsSendQueue = pgTable("fs_comms_send_queue", {
   attempts: integer("attempts").notNull().default(0),
   createdBy: text("created_by"),
   senderName: text("sender_name"),
+  // Caller-supplied stable key for exactly-once acceptance (HERALD, 2026-08-30).
+  // NULL for every human/UI send: a person may legitimately repeat a text, so the
+  // unique index behind this column is PARTIAL (WHERE idempotency_key IS NOT NULL).
+  // Machine callers that retry on timeout supply one and get the first row back
+  // instead of a second text. This is what HERALD's fail-closed gate is waiting on.
+  idempotencyKey: varchar("idempotency_key", { length: 200 }),
   createdAt: timestamp("created_at").default(sql`now()`),
   updatedAt: timestamp("updated_at").default(sql`now()`),
 });

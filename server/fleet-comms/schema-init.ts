@@ -207,6 +207,18 @@ CREATE INDEX IF NOT EXISTS "idx_fs_comms_send_queue_dedupe"
 -- the contact's current TPMS number (used for personal-number sends).
 ALTER TABLE "fs_comms_send_queue" ADD COLUMN IF NOT EXISTS "phone_locked" boolean NOT NULL DEFAULT false;
 
+-- Exactly-once acceptance for machine callers (HERALD, 2026-08-30). The index is
+-- PARTIAL on purpose: every human/UI send leaves idempotency_key NULL and must stay
+-- unconstrained (a person may legitimately repeat a text), while any caller that
+-- supplies a key gets a hard database-level guarantee rather than the content-based
+-- 24h heuristic in isRecentDuplicateSend(). Until this existed the table had NO
+-- uniqueness at all beyond its primary key, which is why HERALD's
+-- getHeraldNexusCapability() reported idempotency:false and its gate never called
+-- the sender.
+ALTER TABLE "fs_comms_send_queue" ADD COLUMN IF NOT EXISTS "idempotency_key" varchar(200);
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_comms_send_queue_idempotency_key"
+  ON "fs_comms_send_queue" ("idempotency_key") WHERE "idempotency_key" IS NOT NULL;
+
 -- LOA Rental SMS outreach state — one row per technician (Task #543).
 CREATE TABLE IF NOT EXISTS "fs_loa_outreach" (
   "ldap" varchar(60) PRIMARY KEY,

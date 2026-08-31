@@ -139,13 +139,29 @@ export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoR
 export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryResult> {
   await db.execute(sql`SELECT 1`); // pool warm-up
 
-  // which trucks? default = every present case, PLUS the assigned trucks
-  // (renter_own_truck) of every Declined/Auction case — LUCA redirects those
-  // calls to the shop repairing the tech's own truck, so its PO must land too.
+  // which trucks? default = every present case, PLUS the assigned truck
+  // (renter_own_truck) of EVERY case whose assigned truck differs from the
+  // rental case truck — LUCA redirects those calls to the shop repairing the
+  // tech's own truck, so its PO must land too.
+  //
+  // Widened 2026-08-30 (Tyler): this was restricted to Declined/Auction cases
+  // only. That restriction meant an 'Assigned to Tech' / 'In Repair' /
+  // 'Reserved For New Hire' rental whose tech drives a DIFFERENT truck never had
+  // that truck's PO history fetched, so assigned_open_po came back NULL, the
+  // redirect gate in read-repository.ts could not fire, and LUCA never called the
+  // shop actually holding the van. Measured that day: 22 assigned-truck
+  // mismatches, only 3 redirected, 7 blocked purely by the missing lookup —
+  // truck 21365 had been open 289 days that way. The mismatch predicate keeps the
+  // added set small (only trucks that actually differ from their case truck).
   let caseKeys = caseKeysIn;
   if (!caseKeys) {
     const r = await db.execute(sql`SELECT vehicle_number_padded FROM vrm_rental_operations_cases WHERE present_in_latest = true`);
-    caseKeys = (r.rows as any[]).map((x) => x.vehicle_number_padded);
+    // Drop NULL padded numbers: the 29 no-truck Enterprise-direct cases carry a
+    // synthetic "db:<ticket>" case_key and no vehicle_number, so they would push
+    // a null into the Snowflake IN-list for nothing.
+    caseKeys = (r.rows as any[])
+      .map((x) => x.vehicle_number_padded)
+      .filter((v): v is string => typeof v === "string" && v.length > 0);
     const assigned = await db.execute(sql`
       SELECT DISTINCT ownp.own_pad
       FROM vrm_rental_operations_cases c
@@ -153,8 +169,8 @@ export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryRes
       JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
       ${OWN_TRUCK_LATERALS}
       WHERE c.present_in_latest = true
-        AND (c.ams_status ILIKE '%declin%' OR c.ams_status ILIKE '%auction%')
         AND ownp.own_pad IS NOT NULL
+        AND ownp.own_pad IS DISTINCT FROM c.vehicle_number_padded
     `);
     const seen = new Set(caseKeys);
     for (const a of assigned.rows as any[]) {

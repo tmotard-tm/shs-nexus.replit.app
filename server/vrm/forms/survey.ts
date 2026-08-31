@@ -2254,7 +2254,7 @@ export async function buildCutoverStatusPayload(opts?: {
           FROM fs_comms_messages m
           WHERE m.direction = 'outbound'
             AND upper(COALESCE(m.ldap, '')) = upper(c.ldap)
-            AND (m.body ILIKE '%blocked the first 30 minutes%'
+            AND (m.body ILIKE '%blocked the first%'
                  OR (NULLIF(btrim(COALESCE(c.etd_reference, '')), '') IS NOT NULL
                      AND m.body ILIKE '%' || btrim(c.etd_reference) || '%'))
             AND (c.reserved_at IS NULL OR m.created_at >= c.reserved_at - interval '1 day')

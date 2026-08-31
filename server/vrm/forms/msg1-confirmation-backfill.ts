@@ -205,7 +205,7 @@ export function planMsg1Backfill(
 // ---------------------------------------------------------------------------
 
 /** Msg1/Msg2 wording markers — must track renderMsg1/renderMsg2 verbatim. */
-const WORDING_MARKERS = ["blocked the first 30 minutes", "8:00 am block"];
+const WORDING_MARKERS = ["blocked the first", "8:00 am block"];
 
 export type EvidenceMessage = {
   ldap?: string | null;
@@ -286,7 +286,7 @@ export async function fetchConfirmationEvidence(
       FROM fs_comms_messages m
      WHERE m.direction = 'outbound'
        AND m.created_at >= timestamp '2026-08-01'
-       AND (m.body ILIKE '%blocked the first 30 minutes%'
+       AND (m.body ILIKE '%blocked the first%'
             OR m.body ILIKE '%8:00 AM block%'
             OR m.body ILIKE '%conf%'
             OR m.body ILIKE '%reservation%')

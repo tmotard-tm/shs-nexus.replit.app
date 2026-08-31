@@ -63,7 +63,13 @@ import {
 import { storage } from "../storage";
 import { deepMergePermissions, getServerDefaultPermissions } from "../permission-utils";
 import type { RolePermissionSettings } from "@shared/schema";
-import { sendMessage, createBulkSend, processSendQueue, findRecentDuplicateDigits } from "./outbound";
+import {
+  sendMessage,
+  createBulkSend,
+  processSendQueue,
+  findRecentDuplicateDigits,
+  findQueueRowByIdempotencyKey,
+} from "./outbound";
 import { handleInbound } from "./inbound";
 import { COMMS_CONTACTS_SYNC_TYPE, syncCommsContacts } from "./contacts-sync";
 
@@ -1115,7 +1121,20 @@ export function registerCommsRoutes(app: Router): void {
       if (!ldap && !phone) return res.status(400).json({ message: "ldap or phone required" });
       const live = liveAllowed(req.body);
       const a = actor(req);
+      // Exactly-once acceptance (HERALD, 2026-08-30). HERALD has always sent this
+      // header; until now the route dropped it on the floor and fell back to the
+      // content-based 24h heuristic, which is why HERALD's own capability probe
+      // reported idempotency:false and its gate refused to dispatch. correlationId
+      // in the body is accepted as an equivalent for callers that cannot set
+      // headers. A keyed send is enqueued rather than sent inline, so the durable
+      // record always precedes any provider activity.
+      const singleKey =
+        (typeof req.headers["idempotency-key"] === "string" &&
+          String(req.headers["idempotency-key"]).trim()) ||
+        (typeof req.body?.correlationId === "string" && req.body.correlationId.trim()) ||
+        null;
       const result = await sendMessage({
+        idempotencyKey: singleKey ? singleKey.slice(0, 200) : null,
         ldap: ldap ?? null,
         phone: phone ?? null,
         category: cat,
@@ -1131,7 +1150,15 @@ export function registerCommsRoutes(app: Router): void {
         // {"allowDuplicate":true} is the intentional-resend escape hatch.
         skipRecentDuplicate: !allowDuplicate,
       });
-      res.json({ live, category: cat, source: req.commsApiSource?.name ?? null, ...result });
+      // idempotencyKey is echoed so a caller can correlate without re-deriving it,
+      // and so a duplicate answer is self-describing.
+      res.json({
+        live,
+        category: cat,
+        source: req.commsApiSource?.name ?? null,
+        idempotencyKey: singleKey,
+        ...result,
+      });
     } catch (e: any) {
       console.error("[Fleet-Comms] api/send error:", e?.message);
       res.status(500).json({ message: e?.message });
@@ -1172,9 +1199,26 @@ export function registerCommsRoutes(app: Router): void {
       }
       const live = liveAllowed(req.body);
       const a = actor(req);
+      // Exactly-once acceptance (HERALD, 2026-08-30). A caller may key each
+      // message individually, or send one Idempotency-Key header for the whole
+      // batch, in which case each message gets header#index — a retry of the same
+      // batch then collides message-for-message. Absent a key the behaviour is
+      // exactly as before: the content-based 24h heuristic and nothing more.
+      const batchKey =
+        typeof req.headers["idempotency-key"] === "string"
+          ? String(req.headers["idempotency-key"]).trim().slice(0, 160)
+          : "";
       const results: any[] = [];
-      for (const m of messages) {
+      for (let mi = 0; mi < messages.length; mi++) {
+        const m = messages[mi];
+        const perMessageKey =
+          typeof m.idempotencyKey === "string" && m.idempotencyKey.trim()
+            ? m.idempotencyKey.trim().slice(0, 200)
+            : batchKey
+              ? `${batchKey}#${mi}`
+              : null;
         const r = await sendMessage({
+          idempotencyKey: perMessageKey,
           ldap: m.ldap ?? null,
           phone: m.phone ?? null,
           category: m.category || defCat,
@@ -1192,13 +1236,90 @@ export function registerCommsRoutes(app: Router): void {
           // intentional identical re-send within 24h.
           skipRecentDuplicate: !allowDuplicate,
         });
-        results.push({ ldap: m.ldap ?? null, phone: m.phone ?? null, category: m.category || defCat, ...r });
+        results.push({
+          ldap: m.ldap ?? null,
+          phone: m.phone ?? null,
+          category: m.category || defCat,
+          idempotencyKey: perMessageKey,
+          ...r,
+        });
       }
       const summary: Record<string, number> = {};
       for (const r of results) summary[r.status] = (summary[r.status] || 0) + 1;
       res.json({ live, dryRun: !live, count: results.length, summary, results });
     } catch (e: any) {
       console.error("[Fleet-Comms] api/send-batch error:", e?.message);
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // GET /comms/api/capability — the contract HERALD (LIVHR) reads before it will
+  // dispatch live SMS. Its getHeraldNexusCapability() was hardcoded to
+  // idempotency:false because this endpoint did not exist and the send queue had
+  // no uniqueness beyond its primary key, so HERALD's fail-closed gate could
+  // never call the sender.
+  //
+  // These flags are DERIVED, never hand-set. idempotency is reported true only
+  // when the partial unique index is actually present in this database, so a
+  // deploy that has not run schema-init yet reports false and HERALD correctly
+  // keeps refusing. Do not replace this with a literal or an env var: the whole
+  // point of the gate is that the capability is proven, not asserted.
+  app.get("/comms/api/capability", apiOrGate, async (_req: any, res) => {
+    try {
+      const idx = await fsDb.execute(sql`
+        SELECT 1 FROM pg_indexes
+         WHERE tablename = 'fs_comms_send_queue'
+           AND indexname = 'uq_fs_comms_send_queue_idempotency_key'
+         LIMIT 1`);
+      const hasUniqueIndex = (idx.rows?.length ?? 0) > 0;
+      res.json({
+        // Enforced by uq_fs_comms_send_queue_idempotency_key + the pre-insert
+        // lookup in sendMessage. A keyed send is also never sent inline, so the
+        // durable record always precedes provider activity.
+        idempotency: hasUniqueIndex,
+        // GET /comms/api/idempotency/:key below.
+        reconciliation: hasUniqueIndex,
+        // Opt-out is checked in sendMessage before any send and returns
+        // status:"skipped", reason:"recipient opted out".
+        optOutEnforced: true,
+        // getNextAllowedSendTime() defers to the recipient's local window;
+        // force:true is the documented human override and is not available to
+        // the API send surfaces by default.
+        sendWindowEnforced: true,
+        detail: hasUniqueIndex
+          ? null
+          : "uq_fs_comms_send_queue_idempotency_key is missing — run schema-init on this database",
+      });
+    } catch (e: any) {
+      console.error("[Fleet-Comms] api/capability error:", e?.message);
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // GET /comms/api/idempotency/:key — reconciliation. Given a caller's stable
+  // key, report what actually happened to it. 404 means the key was never
+  // accepted, which is a meaningful answer: the caller may safely send it.
+  // Deliberately returns NO message body — the operator surface for HERALD is
+  // lifecycle data, not content (herald.SPEC.md, Operator surface).
+  app.get("/comms/api/idempotency/:key", apiOrGate, async (req: any, res) => {
+    try {
+      const key = String(req.params.key || "").trim();
+      if (!key) return res.status(400).json({ message: "key required" });
+      const row = await findQueueRowByIdempotencyKey(key);
+      if (!row) return res.status(404).json({ key, found: false });
+      res.json({
+        key,
+        found: true,
+        queueId: row.id,
+        status: row.status,
+        twilioSid: row.twilioSid,
+        sentAt: row.sentAt,
+        scheduledFor: row.scheduledFor,
+        errorMessage: row.errorMessage,
+        createdAt: row.createdAt,
+      });
+    } catch (e: any) {
+      console.error("[Fleet-Comms] api/idempotency error:", e?.message);
       res.status(500).json({ message: e?.message });
     }
   });
