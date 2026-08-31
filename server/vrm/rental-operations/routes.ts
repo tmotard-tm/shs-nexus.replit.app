@@ -23,6 +23,7 @@ import { OWNER_ROSTER } from "./annex-a-routing";
 import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
 import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED, READY_REPLACEABLE_MAIN_STATUSES } from "../../luca-writeback/mapper";
 import { runReadyConflictHeal, maybeAutoHealReadyConflicts } from "./ready-conflict-heal";
+import { maybeAutoHealEscalations } from "./escalation-heal";
 import { readLucaActivity, lucaActivityHealth, lucaConfigSummary, logLucaActivity } from "./luca-activity";
 import { evaluateShopContactUpdate } from "./shop-contact-intake";
 import { spawnRentalRequests, rentalRequestLinksFor } from "./scrape-service";
@@ -250,6 +251,8 @@ export function registerRentalOperationsRoutes(router: Router): void {
       // append, so the next refetch shows it healed. Nobody "updates Fleet
       // Scope" by hand — statuses are this system's job (Tyler 2026-08-11).
       maybeAutoHealReadyConflicts("queue-get");
+      // Escalations clear on evidence too (Tyler 2026-08-31) — same lazy shape.
+      maybeAutoHealEscalations("queue-get");
     } catch (e: any) {
       console.error("[VRM/RentalOps] queue failed:", e?.message || e);
       res.status(500).json({ success: false, error: e?.message || "queue failed" });
