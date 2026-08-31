@@ -356,6 +356,57 @@ const CHAINS = [
   "caliber collision", "valvoline", "goodyear", "mavis", "ntb", "tires plus",
   "christian brothers", "les schwab", "discount tire", "big o tires", "sears",
 ];
+/**
+ * Words that are never a caller's name. The positional fallback below takes the
+ * first capitalised token of the answer, and callers open with these constantly
+ * ("My name is...", "Uh, this is...", "The shop is..."). Measured 2026-08-31:
+ * 60 of the 71 transcripts containing "my name is <Name>" had stored one of
+ * these, or nothing, instead of the name.
+ */
+const NON_NAMES = new Set([
+  "my", "the", "uh", "um", "er", "ah", "oh", "so", "well", "yeah", "yep", "yes",
+  "no", "nope", "ok", "okay", "hi", "hello", "hey", "sure", "good", "morning",
+  "afternoon", "evening", "thanks", "thank", "this", "that", "it", "its", "we",
+  "our", "they", "he", "she", "i", "im", "and", "but", "just", "actually",
+]);
+
+/**
+ * Speech-to-text mis-hearings of chain names, mapped to the real chain.
+ *
+ * These are transcription errors, not extraction errors: the caller said the
+ * right thing and the ASR wrote it down wrong, so the text handed to the
+ * classifier genuinely reads "Pet Voice". Verified 2026-08-31 against call
+ * conv_2201m0e25qrcfj2bz861g8mfftra (8/19), whose transcript reads "calling
+ * from Pet Voice in Woodbridge, Virginia" - there is a Pep Boys in Woodbridge.
+ *
+ * Keep this narrow and only add a variant actually observed in a transcript.
+ * The real fix is a keyword hint list on the voice agent; this is the backstop.
+ */
+const CHAIN_MISHEARINGS: Record<string, string> = {
+  "pet voice": "pep boys",
+  "pep voice": "pep boys",
+  "pet boys": "pep boys",
+  "papa's boys": "pep boys",
+  "papas boys": "pep boys",
+  "pep poins": "pep boys",
+  "pep points": "pep boys",
+};
+
+/** First chain, or observed mis-hearing of one, mentioned in `text`. */
+function findChain(text: string): string | null {
+  const lower = text.toLowerCase();
+  const direct = CHAINS.find((c) => lower.includes(c));
+  if (direct) return direct;
+  for (const [heard, real] of Object.entries(CHAIN_MISHEARINGS)) {
+    if (lower.includes(heard)) return real;
+  }
+  return null;
+}
+
+/** Chain name in display case, e.g. "pep boys" -> "Pep Boys". */
+function titleChain(c: string): string {
+  return c.replace(/\b\w/g, (ch) => ch.toUpperCase());
+}
 const MONEY_RE = /\$\s?([0-9][0-9,]*(?:\.[0-9]{2})?)|\b([0-9][0-9,]{2,}(?:\.[0-9]{2})?)\s*dollars\b/i;
 const STATES = /\b(alabama|alaska|arizona|arkansas|california|colorado|connecticut|delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|new mexico|new york|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming)\b/i;
 
@@ -568,14 +619,55 @@ export function classifyInboundCall(
     // Williamsport.", "it's Aaron, and it's Pep Boys". Parsing that shape
     // directly produced junk like "it's Al, and I'm calling", so match a known
     // chain FIRST and only fall back to positional parsing.
-    const lowerAns = nameShopAns.toLowerCase();
-    const chain = CHAINS.find((c) => lowerAns.includes(c));
-    if (chain) shop_name = chain.replace(/\b\w/g, (c) => c.toUpperCase());
+    const chain = findChain(nameShopAns)
+      // The caller often names the shop outside this one answer ("Pep Boys,
+      // how can I help") leaving the scoped answer with no chain in it. A chain
+      // named anywhere in the call is still better evidence than the positional
+      // parse below. Measured 2026-08-31: 168 transcripts said "Pep Boy" but
+      // only 121 had shop_name set; 38 were null and 9 were wrong.
+      ?? findChain(allUser);
+    if (chain) shop_name = titleChain(chain);
 
     // Name = the first capitalised token after an introducer, ignoring filler.
-    const nm = /(?:my name(?:'s| is)|this is|it'?s|i'?m)\s+([A-Z][a-z'.-]{1,14})\b/.exec(nameShopAns)
-      ?? /^([A-Z][a-z'.-]{1,14})\b/.exec(nameShopAns);
-    if (nm && !CHAINS.some((c) => c.startsWith(nm[1].toLowerCase()))) caller_name = clean(nm[1]);
+    //
+    // The introducer alternation used to be case-SENSITIVE while every real
+    // transcript capitalises the opening word ("My name is Joe, and I'm calling
+    // from Pet Voice"). "my name is" therefore never matched, the positional
+    // fallback fired on the whole answer, and the stored name became the literal
+    // first word. Match the introducer case-insensitively, and when one is
+    // present read ONLY what follows it - falling back to position after a
+    // matched introducer is exactly what produced "My".
+    // Try each introducer in specificity order, then bare position.
+    //
+    // A weak introducer can match EARLIER in the sentence than the real one:
+    // "I'm calling from Pep Boys, my name is Tim" anchors on "I'm", and the
+    // token after it is "calling", so a single alternation over the whole
+    // answer picks the wrong anchor and yields nothing. Take the first
+    // candidate that produces a real name instead.
+    const NAME_TOKEN = /^\s*([A-Z][a-z'.-]{1,14})\b/;
+    const INTRODUCERS = [
+      /my name(?:'s| is)\s+/i,
+      /\bname(?:'s| is)\s+/i,
+      /\bthis is\s+/i,
+      /\bit'?s\s+/i,
+      /\bi'?m\s+/i,
+      /\bi am\s+/i,
+    ];
+    const isName = (t: string) =>
+      !CHAINS.some((c) => c.startsWith(t.toLowerCase())) && !NON_NAMES.has(t.toLowerCase());
+    for (const re of INTRODUCERS) {
+      const m = re.exec(nameShopAns);
+      if (!m) continue;
+      const t = NAME_TOKEN.exec(nameShopAns.slice(m.index + m[0].length));
+      if (t && isName(t[1])) { caller_name = clean(t[1]); break; }
+    }
+    if (!caller_name) {
+      // No usable introducer: the answer often just opens with the name
+      // ("Justin from Pep Boys"). NON_NAMES is what stops this arm from
+      // storing the filler word that used to land here.
+      const t = NAME_TOKEN.exec(nameShopAns);
+      if (t && isName(t[1])) caller_name = clean(t[1]);
+    }
 
     if (!shop_name) {
       // "<something> from|with|at <SHOP>" — stop at a conjunction or a city.
@@ -591,6 +683,10 @@ export function classifyInboundCall(
       shop_name = clean(cand);
       // A fragment with no letters, or that is just the caller's name, is worse
       // than nothing — the page shows "-" rather than a misleading string.
+      // Reject a candidate that is still a raw sentence fragment. Without this
+      // the positional parse stored things like "My name is Chico" as the shop.
+      if (shop_name && /^(?:my |the |this |it'?s |i'?m |i am |name(?:'s| is)\b)/i.test(shop_name)) shop_name = null;
+      if (shop_name && NON_NAMES.has(shop_name.toLowerCase())) shop_name = null;
       if (shop_name && (shop_name.length < 3 || shop_name.toLowerCase() === (caller_name || "").toLowerCase())) shop_name = null;
     }
   }
