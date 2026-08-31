@@ -1487,7 +1487,7 @@ export default function RentalOperations() {
                         fall back to the rental unit, reservation, RA, or case key. */}
                     {r.assigned_truck
                       ? <span style={{ color: isRealWrongTruck(r) ? colors.red : colors.inkSoft, fontWeight: isRealWrongTruck(r) ? 600 : 400 }}>{r.assigned_truck}</span>
-                      : <span style={{ color: colors.inkMuted }}>Unassigned / No TPMS match</span>}
+                      : <span style={{ color: colors.inkMuted }}>{origin?.kind === "direct" && isNewHire(r) ? "New hire — truck pending" : "Unassigned / No TPMS match"}</span>}
                     {isRealWrongTruck(r) && r.assigned_truck && <div style={{ fontSize: 10, color: colors.red }}>≠ rental truck</div>}
                     {r.wrong_truck && !isRealWrongTruck(r) && r.assigned_truck && (
                       <div title="Direct-billed cases are keyed to the tech's truck at import time; TPMS moved since. The case re-keys itself on the next daily import — nothing to fix."
@@ -1502,7 +1502,19 @@ export default function RentalOperations() {
                         shows the tech's LIVE truck (Tyler 2026-08-31), falling
                         back to the import-time key only when TPMS has none. */}
                     {origin?.kind === "direct"
-                      ? ((r.assigned_truck ?? r.vehicle_number) || <span style={{ color: colors.inkMuted }}>—</span>)
+                      ? ((r.assigned_truck ?? r.vehicle_number) || (
+                          // Tyler 2026-08-31: a truckless direct case still has a
+                          // TECHNICIAN — say why the truck slot is empty instead of
+                          // a dash. Measured that day: 16 of 20 were brand-new
+                          // hires awaiting their first truck. The internal case
+                          // key stays db:<RA> — a shared literal key is exactly
+                          // how five techs once collided onto one row.
+                          isNewHire(r)
+                            ? <span title={`New hire (${fmtDate(r.employee_status_date)}) awaiting first truck assignment — keyed to Enterprise RA ${r.case_key.replace(/^db:/i, "")} until TPMS assigns one`}
+                                    style={{ fontSize: 10.5, fontWeight: 600, color: colors.amber, background: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 999, padding: "1px 8px" }}>NEW HIRE</span>
+                            : <span title={`No current TPMS truck for this technician — awaiting assignment; keyed to Enterprise RA ${r.case_key.replace(/^db:/i, "")}`}
+                                    style={{ fontSize: 10.5, color: colors.inkMuted }}>no truck yet</span>
+                        ))
                       : (r.vehicle_number || <span style={{ color: colors.inkMuted }}>—</span>)}
                     {/* These badges describe the rental case, whose internal
                         case_key remains the row/action identity even when a
