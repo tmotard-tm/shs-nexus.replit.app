@@ -15,7 +15,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useSearch } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
+  Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown, SlidersHorizontal,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight,
   MessageSquare, Pencil, Lock, Bot, BellRing,
 } from "lucide-react";
@@ -265,32 +265,46 @@ const WORKLOAD_TAB_META: Record<string, { tone: "red" | "amber" | "muted"; title
         {" "}<span style={{ opacity: 0.75 }}>Resolve the renter first. The case rejoins the call queue automatically once it has an employee and a truck.</span></>
     ),
   },
+  // Grouped chip (Tyler 2026-08-31, "eliminate so much noise"): the five
+  // human-work buckets fold into ONE chip; the sub-row appears only when it is
+  // active, so the daily view is seven chips instead of fifteen.
+  needs_person: {
+    tone: "amber",
+    title: "Everything a person has to act on, folded into one chip: expired tags, AMS-vs-Holman conflicts, no repair history, no assigned truck, and unresolved renters. Click to expand the five sub-buckets.",
+    banner: (n) => (
+      <><strong>{n} rentals need a person.</strong>{" "}
+        Five distinct jobs live here — expired tags, an AMS-vs-Holman contradiction, no repair history, no assigned truck, or an unresolved renter. Pick a sub-bucket above to see its list and its specific next action.</>
+    ),
+  },
+};
+
+/** The five buckets the grouped "Needs a person" chip folds together. */
+const NEEDS_PERSON_KEYS = ["blocked_registration", "status_conflict", "no_repair_history", "no_assigned_truck", "tech_unresolved"] as const;
+const NEEDS_PERSON_SET: ReadonlySet<string> = new Set(NEEDS_PERSON_KEYS);
+const SUB_LABELS: Record<string, string> = {
+  blocked_registration: "Expired tags",
+  status_conflict: "AMS vs Holman",
+  no_repair_history: "No repair history",
+  no_assigned_truck: "No assigned truck",
+  tech_unresolved: "Renter unresolved",
 };
 
 const WORKLOAD_TABS = new Set(["cannot_work", "blocked_registration", "status_conflict", "ready_to_recover", "no_repair_history", "no_assigned_truck", "tech_unresolved"]);
 const COHORTS: Array<{ key: string; label: string }> = [
-  // All Rentals is the total and doubles as the workable count: everything here
-  // that is not under Cannot work is a rental we still own and can act on. That is
-  // why there is no separate Workable chip.
+  // ONE row, action-first (Tyler 2026-08-31): the chips are the things someone
+  // works today. Diagnostics (repair-history cohorts, AMS facet, marks,
+  // origins, the checkbox slicers) live behind the single Filters button, and
+  // the five human-work buckets fold into "Needs a person" with a sub-row on
+  // demand. The "Sent to Auction · LUCA will call" chip is gone: under the
+  // assigned-truck rule the redirect IS the normal path, and its rows already
+  // sit inside the LUCA Call Queue.
   { key: "all", label: "All Rentals" },
-  // Highest-value cohort on the page: the shop is finished, so every further
-  // day is pure rental spend on a truck that is just sitting there.
-  { key: "ready_for_pickup", label: "Ready for Pickup" },
   { key: "luca_queue", label: "LUCA Call Queue" },
-  { key: "cannot_work", label: "Cannot work · declined + auction" },
-  { key: "auction_redirect", label: "Sent to Auction · LUCA will call" },
-  // Tyler 2026-08-30: one "escalate" bucket held four unrelated jobs. Each is
-  // now its own list with its own owner and next action, ordered by certainty.
+  { key: "ready_for_pickup", label: "Ready for Pickup" },
   { key: "ready_to_recover", label: "Ready to recover · go collect it" },
-  { key: "blocked_registration", label: "Blocked · expired tags" },
-  { key: "status_conflict", label: "AMS vs Holman · conflict" },
-  { key: "no_repair_history", label: "No repair history · unknown" },
-  { key: "no_assigned_truck", label: "No assigned truck · nobody to chase" },
-  { key: "tech_unresolved", label: "Renter unresolved · identity queue" },
+  { key: "needs_person", label: "Needs a person" },
+  { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "pended", label: "Pended · turned in" },
-  { key: "open_repair", label: "Open Repair Ticket" },
-  { key: "no_open_repair", label: "No Open Repair" },
-  { key: "no_history", label: "No Portal History" },
 ];
 
 // workloadBucketOf / isDeclinedAuction / isNewHire / isUrgentEmp / daysSince
@@ -606,6 +620,14 @@ export default function RentalOperations() {
   const [wrongTruckOnly, setWrongTruckOnly] = useState(false);
   const [newHireOnly, setNewHireOnly] = useState(false);
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
+  // Repair-history facet — was three top-row chips (Open Repair Ticket / No
+  // Open Repair / No Portal History); diagnostic, so it moved into Filters.
+  const [repairF, setRepairF] = useState<"" | "open_repair" | "no_open_repair" | "no_history">("");
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilterCount =
+    (amsF.length ? 1 : 0) + (markF ? 1 : 0) + (originF ? 1 : 0) + (repairF ? 1 : 0) +
+    (includePended ? 1 : 0) + (mismatchOnly ? 1 : 0) + (wrongTruckOnly ? 1 : 0) +
+    (newHireOnly ? 1 : 0) + (urgentEmpOnly ? 1 : 0);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
   const [page, setPage] = useState(0);
   const [panelKey, setPanelKey] = useState<string | null>(null);
@@ -742,9 +764,8 @@ export default function RentalOperations() {
       // Every workload tab filters on the SAME derivation the chips count, so a
       // chip can never advertise a number and then open a grid that disagrees.
       else if (WORKLOAD_TABS.has(cohort)) { if (workloadBucketOf(r) !== cohort) return false; }
-      else if (cohort === "auction_redirect") { if (!(isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable)) return false; }
+      else if (cohort === "needs_person") { if (!NEEDS_PERSON_SET.has(workloadBucketOf(r))) return false; }
       else if (cohort === "pended") { /* pool is already PENDED-only */ }
-      else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
         const hay = `${r.case_key} ${r.renter_name_raw} ${r.shop_name || ""} ${r.veh_desc || ""} ${r.rental_class || ""} ${r.tech_name || ""}`.toLowerCase();
         // Shop-phone match (find the case from caller ID). Additive (OR) with
@@ -764,9 +785,10 @@ export default function RentalOperations() {
       if (wrongTruckOnly && !r.wrong_truck) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
+      if (repairF && r.repair_cohort !== repairF) return false;
       return true;
     });
-  }, [originPool, basePool, cohort, search, amsF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
+  }, [originPool, basePool, cohort, search, amsF, markF, repairF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -789,7 +811,7 @@ export default function RentalOperations() {
   );
   useEffect(() => {
     setPage(0);
-  }, [cohort, search, amsF, markF, originF, includePended, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, sort]);
+  }, [cohort, search, amsF, markF, repairF, originF, includePended, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, sort]);
 
   // mutations
   const markMut = useMutation({
@@ -1031,11 +1053,6 @@ export default function RentalOperations() {
   // The queue itself is still shown below as READ-ONLY context.
   const lucaQueue = useMemo(() => basePool.filter((r) => r.callable), [basePool]);
   const callAllRedirects = useMemo(() => lucaQueue.filter((r) => r.redirect_to_assigned).length, [lucaQueue]);
-  // Ask #2 (Tyler 2026-07-24): the Sent-To-Auction subset LUCA WILL call via the
-  // assigned-truck redirect — declined/auction van we no longer own, but the tech
-  // drives an assigned truck in an open repair, so LUCA dials THAT shop. Same
-  // predicate as the row filter so the chip count and grid can never disagree.
-  const auctionRedirectCount = useMemo(() => basePool.filter((r) => isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable).length, [basePool]);
   // Counted client-side off basePool - the SAME pool the cohort filter reads -
   // so the chip and the rows behind it cannot disagree. The server does ship a
   // readyForPickupCount, but that one is computed over EVERY row including the
@@ -1212,7 +1229,7 @@ export default function RentalOperations() {
         {COHORTS.map((c) => {
           const n: number | string = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
-            : c.key === "auction_redirect" ? auctionRedirectCount
+            : c.key === "needs_person" ? (stats.sawServerWorkload ? NEEDS_PERSON_KEYS.reduce((a, k) => a + (stats.workload[k] ?? 0), 0) : "—")
             // Every workload tab reads the same map. Renders "—" rather than 0 when
             // the running server predates workload_bucket, so a missing answer is
             // never mistaken for "none found".
@@ -1222,7 +1239,7 @@ export default function RentalOperations() {
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
           const meta = WORKLOAD_TAB_META[c.key];
-          const go = c.key === "luca_queue" || c.key === "auction_redirect";
+          const go = c.key === "luca_queue";
           const tone = meta?.tone ?? (c.key === "pended" ? "amber" : null);
           const toneC = tone === "red" ? colors.red : tone === "amber" ? colors.amber : tone === "muted" ? colors.inkMuted : null;
           const accentC = go ? colors.green : toneC ?? colors.accent;
@@ -1245,15 +1262,37 @@ export default function RentalOperations() {
         <AsOfStamp info={asOf} />
       </div>
 
+      {/* Needs-a-person sub-buckets — progressive disclosure: this row exists
+          only while the group (or one of its members) is selected, so the five
+          buckets cost zero header space the rest of the day. */}
+      {(cohort === "needs_person" || NEEDS_PERSON_SET.has(cohort)) && (
+        <div style={{ display: "flex", gap: 6, marginTop: -6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: colors.inkMuted, fontFamily: fonts.dmSans }}>within Needs a person:</span>
+          {NEEDS_PERSON_KEYS.map((k) => {
+            const active = cohort === k;
+            const cnt = stats.sawServerWorkload ? (stats.workload[k] ?? 0) : "—";
+            return (
+              <button key={k} type="button" title={WORKLOAD_TAB_META[k]?.title}
+                onClick={() => setCohort(active ? "needs_person" : k)}
+                style={{ fontFamily: fonts.dmSans, fontSize: 11.5, fontWeight: active ? 600 : 500,
+                  color: active ? "#fff" : colors.amber, background: active ? colors.amber : colors.surface,
+                  border: `1px solid ${colors.amber}`, borderRadius: 999, padding: "3px 10px", cursor: "pointer" }}>
+                {SUB_LABELS[k]} <span style={{ opacity: 0.7 }}>{cnt}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {/* Workload banner — the governing sentence for whichever workload tab is on.
           One lookup, so adding a bucket cannot leave a tab with no explanation. */}
-      {WORKLOAD_TABS.has(cohort) && WORKLOAD_TAB_META[cohort] && (
+      {WORKLOAD_TAB_META[cohort] && (
         <div className="ro-banner" style={{ marginBottom: 12, padding: "11px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.5,
           border: `1px solid ${WORKLOAD_TAB_META[cohort].tone === "red" ? colors.red : WORKLOAD_TAB_META[cohort].tone === "amber" ? colors.amber : colors.rule}`,
           background: WORKLOAD_TAB_META[cohort].tone === "red" ? "rgba(239,68,68,.06)" : WORKLOAD_TAB_META[cohort].tone === "amber" ? "rgba(245,158,11,.07)" : colors.surface,
           color: colors.inkSoft }}>
           {stats.sawServerWorkload
-            ? WORKLOAD_TAB_META[cohort].banner(stats.workload[cohort] ?? 0)
+            ? WORKLOAD_TAB_META[cohort].banner(cohort === "needs_person" ? NEEDS_PERSON_KEYS.reduce((a, k) => a + (stats.workload[k] ?? 0), 0) : (stats.workload[cohort] ?? 0))
             : (
               <><strong style={{ color: colors.amber }}>This cohort is unavailable.</strong>{" "}
                 The running server has not sent <code>workload_bucket</code>, so it cannot be computed. Restart the Nexus server to populate it.
@@ -1268,32 +1307,70 @@ export default function RentalOperations() {
           <Search size={14} style={{ position: "absolute", left: 10, top: 9, color: colors.inkMuted }} />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter truck, tech, shop, vehicle, phone…" style={{ ...selStyle, paddingLeft: 30, width: 240 }} />
         </div>
-        <MultiSelect label="AMS statuses" options={amsOptions} values={amsF} onChange={setAmsF} style={selStyle} />
-        <select value={markF} onChange={(e) => setMarkF(e.target.value)} style={selStyle}>
-          <option value="">all marks</option>
-          <option value="none">unmarked</option>
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-          <option value="pickup">Pick up</option>
-        </select>
-        {/* Billing-origin facet — same vocabulary as the row badge. Applied
-            upstream of every KPI/chip count, not just the grid. */}
-        <select value={originF} onChange={(e) => setOriginF(e.target.value as "" | "holman" | "direct")} style={selStyle}
-                title="Who issued — and therefore who bills — the rental. Same vocabulary as the row badge: holman = issued through the Holman book (ECARS feed), direct bill = Enterprise bills SHS directly. Rows whose origin the data can't prove match neither option, so the two counts can sum below the headline total.">
-          <option value="">all origins</option>
-          <option value="holman">holman ({originCounts.holman})</option>
-          <option value="direct">direct bill ({originCounts.direct})</option>
-        </select>
-        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }} title="PENDED = renter turned the vehicle in / ticket closing. Off by default so the count matches the Rentals Ops Dashboard."><input type="checkbox" checked={includePended} onChange={(e) => setIncludePended(e.target.checked)} /> include PENDED{pendedTotal ? ` (${pendedTotal})` : ""}</label>
-        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={mismatchOnly} onChange={(e) => setMismatchOnly(e.target.checked)} /> mismatch</label>
-        {/* The rental is booked on a truck that is not the renter's own. Counted
-            off basePool so the number does not move as other filters narrow. */}
-        <label title="Rental truck differs from the renter's own truck (TPMS assignment, falling back to the roster)"
-               style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
-          <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
-        </label>
-        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire (≤9 mo)</label>
-        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave</label>
+        {/* ONE Filters button (Tyler 2026-08-31, "eliminate so much noise"): the
+            AMS facet, marks, origins, repair history and every checkbox slicer
+            live in this popover. The badge counts active filters so a narrowed
+            grid can never look like the whole book. */}
+        <div style={{ position: "relative" }}>
+          <button type="button" onClick={() => setFiltersOpen((v) => !v)}
+            style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+              color: activeFilterCount ? "#fff" : undefined,
+              background: activeFilterCount ? colors.accent : undefined,
+              border: `1px solid ${activeFilterCount ? colors.accent : colors.rule}` }}>
+            <SlidersHorizontal size={13} /> Filters{activeFilterCount ? ` · ${activeFilterCount}` : ""}
+          </button>
+          {filtersOpen && (
+            <div style={{ position: "absolute", top: "calc(100% + 6px)", left: 0, zIndex: 40, minWidth: 300,
+              background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: 14,
+              display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 10px 30px rgba(0,0,0,.35)" }}>
+              <MultiSelect label="AMS statuses" options={amsOptions} values={amsF} onChange={setAmsF} style={selStyle} />
+              <select value={markF} onChange={(e) => setMarkF(e.target.value)} style={selStyle}>
+                <option value="">all marks</option>
+                <option value="none">unmarked</option>
+                <option value="open">Open</option>
+                <option value="closed">Closed</option>
+                <option value="pickup">Pick up</option>
+              </select>
+              {/* Billing-origin facet — same vocabulary as the row badge. Applied
+                  upstream of every KPI/chip count, not just the grid. */}
+              <select value={originF} onChange={(e) => setOriginF(e.target.value as "" | "holman" | "direct")} style={selStyle}
+                      title="Who issued — and therefore who bills — the rental. holman = issued through the Holman book (ECARS feed); direct bill = Enterprise bills SHS directly.">
+                <option value="">all origins</option>
+                <option value="holman">holman ({originCounts.holman})</option>
+                <option value="direct">direct bill ({originCounts.direct})</option>
+              </select>
+              {/* Repair-history facet — formerly three top-row chips. Diagnostic,
+                  so it lives here rather than costing permanent header space. */}
+              <select value={repairF} onChange={(e) => setRepairF(e.target.value as any)} style={selStyle}>
+                <option value="">all repair history</option>
+                <option value="open_repair">Open Repair Ticket ({stats.cohorts.open_repair ?? 0})</option>
+                <option value="no_open_repair">No Open Repair ({stats.cohorts.no_open_repair ?? 0})</option>
+                <option value="no_history">No Portal History ({stats.cohorts.no_history ?? 0})</option>
+              </select>
+              <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }} title="PENDED = renter turned the vehicle in / ticket closing. Off by default so the count matches the Rentals Ops Dashboard.">
+                <input type="checkbox" checked={includePended} onChange={(e) => setIncludePended(e.target.checked)} /> include PENDED{pendedTotal ? ` (${pendedTotal})` : ""}
+              </label>
+              <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={mismatchOnly} onChange={(e) => setMismatchOnly(e.target.checked)} /> class mismatch only
+              </label>
+              <label title="Rental truck differs from the renter's own truck (TPMS assignment, falling back to the roster)"
+                     style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
+              </label>
+              <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire (≤9 mo)
+              </label>
+              <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
+                <input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 2 }}>
+                <button type="button" onClick={() => { setAmsF([]); setMarkF(""); setOriginF(""); setRepairF(""); setIncludePended(false); setMismatchOnly(false); setWrongTruckOnly(false); setNewHireOnly(false); setUrgentEmpOnly(false); }}
+                  style={{ ...selStyle, cursor: "pointer" }}>Clear all</button>
+                <button type="button" onClick={() => setFiltersOpen(false)} style={{ ...selStyle, cursor: "pointer" }}>Done</button>
+              </div>
+            </div>
+          )}
+        </div>
         <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>
           {visibleRows.length} shown · {sorted.length} match{sorted.length === 1 ? "" : "es"}{isFetching ? " · refreshing…" : ""}
         </span>
