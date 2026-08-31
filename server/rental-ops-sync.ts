@@ -25,8 +25,6 @@ import {
   assertAdvisoryLockHeld,
 } from "./fleetscope-snowflake-sync-lock";
 
-const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
-const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
 
 // sync_logs.syncType used for Rental Ops → Fleet Scope reconciliation health.
 // This is the authoritative watermark for "did the reconciliation actually run"
@@ -55,23 +53,8 @@ function forceFromEnv(): boolean {
   return v === "1" || v === "true" || v === "yes";
 }
 
-function parseRentalDate(d: string | null | undefined): string | null {
-  if (!d) return null;
-  const s = String(d).trim();
-  if (!s || s === "null") return null;
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
-  if (/^\d{7}$/.test(s)) return `${s.slice(3)}-${s[0].padStart(2, "0")}-${s.slice(1, 3)}`;
-  if (/^\d{8}$/.test(s)) return `${s.slice(4)}-${s.slice(0, 2)}-${s.slice(2, 4)}`;
-  return s.slice(0, 10);
-}
 
-function entOriginalStart(r: any): string | null {
-  return parseRentalDate(r.ORIGINAL_START_DATE) || parseRentalDate(r.RENTAL_START_DATE);
-}
 
-const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
 const normVeh = (v: string) => {
   if (!v) return "";
@@ -265,7 +248,7 @@ async function recordTerminalRentalSync(
 }
 
 /** Read the per-feed last-known-good row counts (Guard #3). Null if unset. */
-async function readFeedWatermark(): Promise<{ ent: number; holman: number } | null> {
+async function readFeedWatermark(): Promise<{ ent: number; holman: number; direct?: number } | null> {
   try {
     const [row] = await db
       .select({ value: appSettings.value })
@@ -274,7 +257,10 @@ async function readFeedWatermark(): Promise<{ ent: number; holman: number } | nu
       .limit(1);
     const v: any = row?.value;
     if (v && typeof v.ent === "number" && typeof v.holman === "number") {
-      return { ent: v.ent, holman: v.holman };
+      // `direct` was added when the roster moved onto the anchor (2026-08-31);
+      // a pre-migration watermark simply lacks it, which the Guard #3 read
+      // treats as 0 so the first anchored run can never trip on it.
+      return { ent: v.ent, holman: v.holman, direct: typeof v.direct === "number" ? v.direct : undefined };
     }
     return null;
   } catch (e: any) {
@@ -284,8 +270,8 @@ async function readFeedWatermark(): Promise<{ ent: number; holman: number } | nu
 }
 
 /** Persist per-feed last-known-good row counts after a successful reconcile. */
-async function writeFeedWatermark(ent: number, holman: number): Promise<void> {
-  const value = { ent, holman, at: new Date().toISOString() };
+async function writeFeedWatermark(ent: number, holman: number, direct: number): Promise<void> {
+  const value = { ent, holman, direct, at: new Date().toISOString() };
   try {
     await db
       .insert(appSettings)
@@ -324,128 +310,107 @@ async function runRentalSync(
   force: boolean,
   assertLockHeld?: () => Promise<void>,
 ): Promise<RentalSyncResult> {
-  const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+  // ── THE ANCHOR (Tyler 2026-08-30 ruling) ──────────────────────────────────
+  // "Rental Operations should be the anchor table that feeds LUCA and is
+  //  mirrored on the Fleet agents' rental table … rental operations, cases by
+  //  region, ops queue are supposed to be shared info and essentially 3 views
+  //  of the same list of rentals."
+  //
+  // This sync used to derive the roster from the OLD-BOOK Snowflake tables
+  // directly (Enterprise ECARS + Holman non-Enterprise). That predates the
+  // direct-billing conversion: the direct-billed rentals never entered
+  // fs_trucks, so the Ops Queue and the FleetScope Rentals dashboard drifted
+  // away from the board as the fleet converted — measured 2026-08-30: 93 trucks
+  // in fs_trucks vs 402 open cases on the board, and queue cards showing the
+  // ECARS renter while the board showed the current report's. The roster now
+  // reads getRentalOpsMaster() — the SAME reconciled model the board renders
+  // and the LUCA feed serves — so the three surfaces cannot diverge in
+  // population or names again. Snowflake still feeds the system, but only
+  // upstream of the anchor (the VRM ingest), never beside it.
+  const { getRentalOpsMaster } = await import("./vrm/rental-operations/read-repository");
+  const master = await getRentalOpsMaster({});
+  // PENDED = renter already turned the vehicle in / ticket closing. Excluded
+  // everywhere work is dispatched (board default, LUCA feed) — same here.
+  const openRows: any[] = master.rows.filter((r: any) => r.ticket_status !== "PENDED");
 
-  if (!isSnowflakeConfigured()) {
-    throw new Error("[RentalOpsSync] Snowflake is not configured — sync aborted");
-  }
-
-  const sf = getSnowflakeService();
-  await sf.connect();
-
-  const fileFilter = (table: string) =>
-    `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${table})`;
-
-  const [ticketRows, holmanRows] = await Promise.all([
-    sf.executeQuery(
-      `SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${fileFilter(RENTAL_TICKET_TABLE)} AND TICKET_STATUS='OPEN' LIMIT 5000`
-    ) as Promise<any[]>,
-    sf.executeQuery(
-      `SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${fileFilter(RENTAL_OPEN_TABLE)} LIMIT 5000`
-    ) as Promise<any[]>,
-  ]);
-
-  // SAFETY GUARD #1 (ABSOLUTE — never overridable, even by force): a healthy
-  // fetch returns thousands of rows across the two source tables. If BOTH come
-  // back empty, Snowflake returned nothing (bad FILE_DATE, transient read
-  // failure, etc.) — refuse to reconcile, because consolidating against an empty
-  // list would archive/delete the entire dashboard. Zero open rentals across the
-  // whole company is never a legitimate business state.
-  if (ticketRows.length === 0 && holmanRows.length === 0) {
+  // SAFETY GUARD #1 (ABSOLUTE — never overridable, even by force): zero open
+  // rentals across the whole company is never a legitimate business state.
+  // Consolidating against an empty list would archive/delete the entire
+  // dashboard, so refuse outright.
+  if (openRows.length === 0) {
     throw new Error(
-      "[RentalOpsSync] Snowflake returned 0 rows from BOTH rental source tables — aborting before consolidation to avoid wiping the dashboard",
+      "[RentalOpsSync] The Rental Operations anchor returned 0 open cases — aborting before consolidation to avoid wiping the dashboard",
     );
   }
 
-  // SAFETY GUARD #3: a SINGLE feed came back empty while the last known-good run
-  // had it populated. Each feed is a full daily snapshot; the dominant Enterprise
-  // table in particular is always populated in a healthy state. A stale/broken
-  // single feed would otherwise prune that feed's entire population from
-  // fs_trucks. First run (no watermark) treats either-empty as suspicious — the
-  // `?? 1` makes a missing watermark behave as "was non-empty" (safe default).
-  // Overridable via force for the rare case a feed is legitimately empty.
+  const bySource = { enterprise: 0, holman_non_enterprise: 0, enterprise_direct: 0 } as Record<string, number>;
+  // db:-keyed direct cases carry NO truck number at all (Enterprise's report
+  // has none and identity could not resolve one). fs_trucks is keyed by truck
+  // number, and canonicalizing a "db:" key MINTS FAKE TRUCKS (the exact bug
+  // LIVHR fixed in 714a76da: "db:4RYGPG" → vehicle "4") — skip them, count
+  // them, never invent a vehicle.
+  let dbKeyedSkipped = 0;
+  const entryByVn = new Map<string, { truckNumber: string; dateInRepair?: string; renterName?: string; startMs: number }>();
+  for (const r of openRows) {
+    const rawKey = String(r.case_key ?? "");
+    if (rawKey.startsWith("db:")) { dbKeyedSkipped++; continue; }
+    const vn = normVeh(String(r.vehicle_number ?? rawKey));
+    if (!vn) { dbKeyedSkipped++; continue; }
+    bySource[String(r.source)] = (bySource[String(r.source)] ?? 0) + 1;
+    // Date semantics preserved from the legacy derivation: the Holman book
+    // anchors on PO_DATE (falling back to rental start); the Enterprise books
+    // anchor on the rental start. preserveExistingDates=true below means this
+    // only ever FILLS a blank — an existing date_put_in_repair is never moved.
+    const startRaw: string | null =
+      r.source === "holman_non_enterprise"
+        ? (r.po_date ?? r.rental_start_date ?? null)
+        : (r.rental_start_date ?? null);
+    const dateInRepair = startRaw ? String(startRaw).slice(0, 10) : undefined;
+    // Same renter the board shows for this case (the current report's name,
+    // falling back to the identity-resolved tech) — this is what keeps queue
+    // cards and board rows carrying the SAME name for the SAME truck.
+    const renterName =
+      (r.renter_name_raw ? String(r.renter_name_raw).trim() : "") ||
+      (r.tech_name ? String(r.tech_name).trim() : "") || undefined;
+    const startMs = startRaw ? new Date(String(startRaw)).getTime() || 0 : 0;
+    const prev = entryByVn.get(vn);
+    // One fs_trucks row per truck: on the rare double-case truck, keep the
+    // newer rental (same rule the legacy Enterprise dedup used).
+    if (!prev || startMs > prev.startMs) {
+      entryByVn.set(vn, { truckNumber: vn, dateInRepair, renterName, startMs });
+    }
+  }
+  const entCount = bySource.enterprise ?? 0;
+  const holmanCount = bySource.holman_non_enterprise ?? 0;
+  const directCount = bySource.enterprise_direct ?? 0;
+
+  // SAFETY GUARD #3: a SINGLE book came back empty while the last known-good
+  // run had it populated. Each book is full daily state; one going 0-but-was-not
+  // means its upstream feed broke, and consolidating would prune that book's
+  // entire population from fs_trucks. Overridable via force for a genuine drain
+  // (e.g. the Holman book truly emptying at the end of the conversion).
   const wm = await readFeedWatermark();
-  const entEmptyButWasNot = ticketRows.length === 0 && (wm?.ent ?? 1) > 0;
-  const holmanEmptyButWasNot = holmanRows.length === 0 && (wm?.holman ?? 1) > 0;
-  if (!force && (entEmptyButWasNot || holmanEmptyButWasNot)) {
-    const which = entEmptyButWasNot
-      ? `Enterprise (last-good ${wm?.ent ?? "n/a"})`
-      : `Holman (last-good ${wm?.holman ?? "n/a"})`;
+  const drained: string[] = [];
+  if (entCount === 0 && (wm?.ent ?? 1) > 0) drained.push(`Enterprise (last-good ${wm?.ent ?? "n/a"})`);
+  if (holmanCount === 0 && (wm?.holman ?? 1) > 0) drained.push(`Holman (last-good ${wm?.holman ?? "n/a"})`);
+  if (directCount === 0 && (wm?.direct ?? 0) > 0) drained.push(`Direct billing (last-good ${wm?.direct})`);
+  if (!force && drained.length) {
     throw new Error(
-      `[RentalOpsSync] ${which} rental feed returned 0 rows but was non-empty on the last good ` +
-        "run — aborting before consolidation (a stale/broken single feed would prune its entire " +
-        "population from fs_trucks). Pass force to override a genuinely empty feed.",
+      `[RentalOpsSync] ${drained.join(" and ")} came back 0 rows but was non-empty on the last good ` +
+        "run — aborting before consolidation (a stale/broken book would prune its entire " +
+        "population from fs_trucks). Pass force to push a genuine drain through.",
     );
   }
-  if (force && (ticketRows.length === 0 || holmanRows.length === 0)) {
-    console.warn(
-      `[RentalOpsSync] FORCE: proceeding despite an empty feed ` +
-        `(ent=${ticketRows.length}, holman=${holmanRows.length}).`,
-    );
+  if (force && drained.length) {
+    console.warn(`[RentalOpsSync] FORCE: proceeding despite drained book(s): ${drained.join(", ")}.`);
   }
 
-  // Build set of all vehicle numbers in Enterprise ticket table
-  const allEntVns = new Set<string>();
-  for (const r of ticketRows) {
-    const vn = normVeh(r.VEHICLE_NUMBER || "");
-    if (vn) allEntVns.add(vn);
-  }
-
-  // SEGMENT 1: Enterprise open tickets, deduplicated by vehicle (latest RENTAL_START_DATE)
-  const entByVehicle = new Map<string, any>();
-  for (const r of ticketRows) {
-    const vn = normVeh(r.VEHICLE_NUMBER || "");
-    if (!vn) continue;
-    const existing = entByVehicle.get(vn);
-    const rDate = new Date(r.RENTAL_START_DATE || "2000-01-01").getTime();
-    const eDate = existing ? new Date(existing.RENTAL_START_DATE || "2000-01-01").getTime() : 0;
-    if (!existing || rDate > eDate) entByVehicle.set(vn, r);
-  }
-
-  const enterpriseEntries = Array.from(entByVehicle.entries()).map(([vn, r]) => ({
-    truckNumber: vn,
-    // Use same date as daysOpen counter: COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE)
-    dateInRepair: entOriginalStart(r) ?? undefined,
-    // Same renter the Rental Ops dashboard shows for this ticket
-    renterName: (r.RENTER_NAME ? String(r.RENTER_NAME).trim() : "") || undefined,
-  }));
-
-  // SEGMENT 2: Holman non-Enterprise vehicles not in Enterprise ticket table
-  const holmanByVehicle = new Map<string, any[]>();
-  for (const r of holmanRows) {
-    const vn = normVeh(r.VEHICLE_NUMBER || "");
-    if (!vn) continue;
-    if (isEntVendor(r.RENTAL_VENDOR)) continue;
-    if (allEntVns.has(vn)) continue;
-    if (!holmanByVehicle.has(vn)) holmanByVehicle.set(vn, []);
-    holmanByVehicle.get(vn)!.push(r);
-  }
-
-  const holmanEntries = Array.from(holmanByVehicle.entries()).map(([vn, group]) => {
-    const sorted = group.sort(
-      (a: any, b: any) =>
-        new Date(b.PO_DATE || "2000-01-01").getTime() -
-        new Date(a.PO_DATE || "2000-01-01").getTime()
-    );
-    const r = sorted[0];
-    // Use same date as daysOpen counter: PO_DATE falling back to RENTAL_START_DATE
-    const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
-    // Holman open report carries FIRST_NAME + LAST_NAME (RENTER_NAME on some rows)
-    const renter = (r.RENTER_NAME
-      ? String(r.RENTER_NAME).trim()
-      : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim());
-    return {
-      truckNumber: vn,
-      dateInRepair: startDate ?? undefined,
-      renterName: renter || undefined,
-    };
-  });
-
-  const allEntries = [...enterpriseEntries, ...holmanEntries];
+  const allEntries = Array.from(entryByVn.values()).map(({ startMs, ...e }) => e);
 
   console.log(
-    `[RentalOpsSync] Found ${allEntries.length} open rental vehicles ` +
-    `(${enterpriseEntries.length} Enterprise, ${holmanEntries.length} Holman non-Enterprise)`
+    `[RentalOpsSync] Anchor holds ${openRows.length} open cases → ${allEntries.length} trucks ` +
+    `(${entCount} Enterprise, ${holmanCount} Holman non-Enterprise, ${directCount} direct-billed; ` +
+    `${dbKeyedSkipped} db:-keyed cases skipped — no truck number exists for them)`
   );
 
   // SAFETY GUARD #2: the derived open-rental list is suspiciously short. The
@@ -521,7 +486,7 @@ async function runRentalSync(
 
   // Record per-feed last-known-good counts for Guard #3 — only after a successful
   // consolidation + log completion, inside the advisory lock.
-  await writeFeedWatermark(ticketRows.length, holmanRows.length);
+  await writeFeedWatermark(entCount, holmanCount, directCount);
 
   return {
     ...result,
