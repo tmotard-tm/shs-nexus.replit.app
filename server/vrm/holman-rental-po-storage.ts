@@ -429,18 +429,55 @@ const NEW_SYSTEM_LATERALS = (ldapRef: string) => `
       WHERE UPPER(r.ldap) = UPPER(${ldapRef}) AND r.status NOT IN ('denied', 'voided')
       ORDER BY r.created_at DESC
       LIMIT 1
-    ) rq ON TRUE`;
+    ) rq ON TRUE
+    LEFT JOIN LATERAL (
+      -- THE REPORT IS THE AUTHORITY (Tyler 2026-08-31: "The cutover push
+      -- shouldn't matter since we have the reporting — it should only show
+      -- that if they have a record on the new rental reporting"). A booking
+      -- stamp is intent; an open enterprise_direct case on the current
+      -- Enterprise Open RA Detail Report is reality. Matched by LDAP two
+      -- ways: through identity resolution → roster racf (covers every
+      -- resolved case) and through enterprise_id_feed (the racf the import
+      -- stamped directly), so neither leg's gaps hide a live rental.
+      SELECT dc.ticket_number AS ra_number
+      FROM vrm_rental_operations_cases dc
+      LEFT JOIN vrm_rental_identity_resolutions di ON di.case_key = dc.case_key
+      LEFT JOIN all_techs dat
+        ON dat.employee_id = COALESCE(di.override_employee_id, di.resolved_employee_id)
+      WHERE dc.present_in_latest
+        AND dc.source = 'enterprise_direct'
+        AND COALESCE(dc.ticket_status, '') <> 'PENDED'
+        AND (
+          UPPER(TRIM(COALESCE(dat.tech_racfid, ''))) = UPPER(${ldapRef})
+          OR UPPER(TRIM(COALESCE(dc.enterprise_id_feed, ''))) = UPPER(${ldapRef})
+        )
+      ORDER BY dc.rental_start_date DESC NULLS LAST
+      LIMIT 1
+    ) dr ON TRUE`;
 
 /**
- * Select expressions over the NEW_SYSTEM_LATERALS aliases. The reservation
- * reference is taken from whichever door is actually booked — a failed
- * cutover row's etd_reference must never masquerade as a live reservation.
+ * Select expressions over the NEW_SYSTEM_LATERALS aliases.
+ *
+ * STANDING = the direct-billing REPORT, nothing else (Tyler 2026-08-31). The
+ * cutover push and the self-serve form are intent — they book the reservation —
+ * but only the tech actually appearing on the daily Enterprise report proves a
+ * live direct-billed rental. Consequences, accepted by the ruling: a tech whose
+ * reservation was booked today does not flag until tomorrow's report lands, and
+ * a tech whose booked reservation lapsed uncollected never flags at all — in
+ * both cases a Holman request gets the ordinary redirect deny, not the
+ * "already switched" one.
+ *
+ * The reservation reference shown beside the badge prefers the booked door's
+ * ETD confirmation (a failed cutover row's etd_reference must never masquerade
+ * as live) and falls back to the report row's RA number, so the badge and the
+ * switched-SMS always have a concrete reference to cite.
  */
 const NEW_SYSTEM_STANDING_EXPRS = `
-      CASE WHEN COALESCE(co.booked, FALSE) OR rq.status = 'booked'
-           THEN 'booked' ELSE 'none' END AS "directBillingStanding",
-      CASE WHEN COALESCE(co.booked, FALSE) THEN co.etd_reference
-           WHEN rq.status = 'booked' THEN rq.etd_reference
+      CASE WHEN dr.ra_number IS NOT NULL THEN 'booked' ELSE 'none' END AS "directBillingStanding",
+      CASE WHEN dr.ra_number IS NULL THEN NULL
+           WHEN COALESCE(co.booked, FALSE) AND co.etd_reference IS NOT NULL THEN co.etd_reference
+           WHEN rq.status = 'booked' AND rq.etd_reference IS NOT NULL THEN rq.etd_reference
+           ELSE dr.ra_number
       END AS "cutoverEtdReference",
       rq.request_no AS "newSystemRequestNo",
       rq.status AS "newSystemRequestStatus"`;
