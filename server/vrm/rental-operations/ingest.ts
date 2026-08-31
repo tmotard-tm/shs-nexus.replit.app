@@ -127,6 +127,8 @@ export interface IngestOptions {
   fileDate?: string; // YYYY-MM-DD to pin a specific feed date (else MAX)
   amsMode?: "full" | "cached" | "skip"; // full = build AMS map (~2min); cached = request-path fast; skip
   landPo?: boolean; // default true
+  /** default true on scheduled runs: pull the Snowflake direct-billing batch after the ECARS land */
+  directBilling?: boolean;
 }
 
 export interface IngestResult {
@@ -145,6 +147,14 @@ export interface IngestResult {
   amsWithStatus?: number;
   skipped?: boolean;
   skipReason?: string;
+  /** outcome of the Snowflake direct-billing rider (scheduled runs only) */
+  directBilling?: {
+    imported: boolean;
+    fileDate: string | null;
+    cases?: number;
+    skipReason?: string;
+    error?: string;
+  };
 }
 
 function dateFilter(table: string, fileDate?: string): string {
@@ -579,7 +589,7 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
           -- have blanked the branch on all 218 and broken book_cutover.py and
           -- build_reservation_queue.py, which read exactly that field.
           --
-          -- `||` is a shallow right-wins merge, so each import refreshes the keys it
+          -- The || operator is a shallow right-wins merge, so each import refreshes the keys it
           -- actually supplies and leaves every other source's keys standing. COALESCE
           -- guards the nullable column, because NULL || x is NULL in jsonb.
           --
@@ -785,11 +795,42 @@ export async function runRentalOpsIngest(opts: IngestOptions = {}): Promise<Inge
     }
   }
 
+  // ── Snowflake direct-billing rider (Tyler 2026-08-30) ────────────────────
+  // The manual TransformCo xlsx upload is replaced by Tim's Snowflake landing
+  // of the same file; it rides the scheduled sync so direct-billed rentals
+  // stay current without anyone uploading anything. Non-fatal by construction:
+  // the ECARS land above already committed, and a direct-billing failure —
+  // including a preflight refusal (count collapse / date regression), which is
+  // the guard WORKING — must not turn a good scheduled run red. The import
+  // itself gates on FILE_DATE, so the 30-minute cron re-lands nothing: it
+  // imports exactly once per new batch.
+  let directBilling: IngestResult["directBilling"];
+  if (runType === "scheduled_sync" && opts.directBilling !== false) {
+    try {
+      const { importDirectBillingFromSnowflake } = await import("./direct-billing-import");
+      const out = await importDirectBillingFromSnowflake({});
+      directBilling = out.skipped
+        ? { imported: false, fileDate: out.fileDate, skipReason: out.skipReason }
+        : { imported: true, fileDate: out.fileDate, cases: out.result?.totalCases };
+      console.log(
+        out.skipped
+          ? `[VRM/RentalOps] direct-billing rider: skipped — ${out.skipReason}`
+          : `[VRM/RentalOps] direct-billing rider: imported ${out.result?.totalCases ?? "?"} cases from Snowflake batch ${out.fileDate}`,
+      );
+    } catch (e: any) {
+      directBilling = { imported: false, fileDate: null, error: String(e?.message || e) };
+      console.error(
+        "[VRM/RentalOps] direct-billing rider failed (scheduled sync itself is unaffected):",
+        e?.message || e,
+      );
+    }
+  }
+
   return {
     runId, fileDate,
     enterpriseCount: p.enterpriseCount, holmanCount: p.holmanCount, pendedCount: p.pendedCount,
     totalCases: p.totalCases, resolved: p.resolved, review: p.review, exception: p.exception,
-    dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus,
+    dropped: p.dropped, poLanded, openRepairTrucks, amsWithStatus, directBilling,
   };
 }
 

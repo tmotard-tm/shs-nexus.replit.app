@@ -1690,6 +1690,35 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // Snowflake trigger for the SAME direct-billing lane — no file. Pulls the
+  // newest batch Tim's flow landed (PARTS_SUPPLYCHAIN.ENTERPRISE) and runs the
+  // identical import path as the xlsx upload. The scheduled sync calls this
+  // logic automatically; this route exists for an on-demand pull ("Marisol's
+  // file just landed, import it now") and for force re-lands.
+  router.post("/rental-operations/imports/direct-billing/snowflake", requireImportOperator, async (req: any, res) => {
+    if (syncInFlight) return res.status(409).json({ error: "a sync/import is already running" });
+    syncInFlight = true;
+    try {
+      const { importDirectBillingFromSnowflake, DirectImportBlockedError } = await import("./direct-billing-import");
+      const acceptWarnings = req.body?.acceptWarnings === true || req.body?.acceptWarnings === "true" || req.body?.acceptWarnings === "1";
+      const force = req.body?.force === true || req.body?.force === "true" || req.body?.force === "1";
+      try {
+        const out = await importDirectBillingFromSnowflake({ acceptWarnings, force });
+        return res.json({ ok: true, ...out });
+      } catch (e: any) {
+        if (e instanceof DirectImportBlockedError) {
+          return res.status(409).json({ blocked: true, error: e.message, preflight: e.preflight });
+        }
+        throw e;
+      }
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] snowflake direct-billing import failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "import failed" });
+    } finally {
+      syncInFlight = false;
+    }
+  });
+
   // Durable import-run ledger for the direct-billing report (premortem #6:
   // a disappearing toast must never be the only record of a failed upload).
   // Read-only; session-auth like the rest of the VRM read surface.

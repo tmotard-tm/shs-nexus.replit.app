@@ -1510,3 +1510,150 @@ export async function importDirectBillingReport(input: {
     offPageCheckStatus, offPageDoubleBills, offPageUnknownIdentity, offPageTotal,
   };
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Snowflake lane (Tyler 2026-08-30) — the same report, without the upload.
+//
+// Tim Motard's flow lands Marisol's daily "TransformCo - Open RA Detail
+// Report.xlsx" into PARTS_SUPPLYCHAIN.ENTERPRISE.ENTERPRISE_OPEN_RENTAL_REPORT
+// (loader SVC_SCA_AUTO, one batch per FILE_DATE). Verified 2026-08-30 before
+// wiring: the 2026-08-29 batch is 314 rows — the exact row count of that day's
+// manual xlsx import — same filename, dates already ISO, numbers plain strings.
+//
+// This is deliberately ONLY a new FRONT END. It fetches and maps to
+// DirectBillingRow, then hands off to importDirectBillingReport(), so identity
+// resolution (tech-first, truck = live TPMS), persist, the enterprise_direct
+// sweep scope, the preflight guards, the run ledger, switchover stamping — and
+// therefore what LUCA receives — are byte-identical to the manual path. The
+// xlsx upload route stays as the fallback.
+//
+// ⛔ THE ONE COLUMN THAT DOES NOT ROUND-TRIP: the xlsx header "1.0 Ticket
+// Number" normalizes to "10ticketnumber"; Snowflake stores it as
+// C_1_0_TICKET_NUMBER. Mapped explicitly below — that is "the part that made
+// it not match" and this line is the fix. Everything else matches 1:1 (22 of
+// 23 headers verified against the table on 2026-08-30).
+// ═════════════════════════════════════════════════════════════════════════════
+
+const SNOWFLAKE_DIRECT_TABLE =
+  "PARTS_SUPPLYCHAIN.ENTERPRISE.ENTERPRISE_OPEN_RENTAL_REPORT";
+
+export interface SnowflakeDirectBatch {
+  rows: DirectBillingRow[];
+  /** the batch's FILE_DATE (YYYY-MM-DD) — provenance for the run ledger */
+  fileDate: string | null;
+  /** SOURCE_FILENAME as loaded (e.g. "20260829073418_TransformCo - …xlsx") */
+  sourceFilename: string | null;
+}
+
+export async function fetchDirectBillingFromSnowflake(): Promise<SnowflakeDirectBatch> {
+  const { getSnowflakeService } = await import("../../snowflake-service");
+  const svc = getSnowflakeService();
+  await svc.connect();
+  // Latest FILE_DATE only — every upload is FULL open-ticket state, same as the
+  // xlsx. A backfill re-run can land a date twice, so keep the newest LOADED_TS
+  // row per rental agreement; a reload can never duplicate an RA.
+  const raw: any[] = await svc.executeQuery(`
+    SELECT RENTAL_AGREEMENT_NUMBER, C_1_0_TICKET_NUMBER, RESERVATION_NUMBER,
+           RENTAL_DATE, RETURN_DATE, RENTAL_STATION_NAME, RENTAL_CITY, RENTAL_STATE,
+           ACTUAL_CHARGE_DAYS, RENTAL_DAYS, TOTAL_RENTAL_CHARGES, AVG_RATE_PER_DAY,
+           MAKE, MODEL, YEAR, LICENSE_PLATE, UNIT_NUMBER, VIN,
+           FIRST_NAME, LAST_NAME, BOOKING_SOURCE_GROUP,
+           CLAIM_PO_EXTERNAL_REFERENCE_NUMBER, SPECIAL_INSTRUCTIONS,
+           TO_CHAR(FILE_DATE, 'YYYY-MM-DD') AS FILE_DATE, SOURCE_FILENAME
+    FROM ${SNOWFLAKE_DIRECT_TABLE}
+    WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${SNOWFLAKE_DIRECT_TABLE})
+    QUALIFY ROW_NUMBER() OVER (
+      PARTITION BY RENTAL_AGREEMENT_NUMBER ORDER BY LOADED_TS DESC
+    ) = 1
+  `);
+  const rows: DirectBillingRow[] = [];
+  for (const r of raw) {
+    const ra = String(r.RENTAL_AGREEMENT_NUMBER ?? "").trim().toUpperCase();
+    if (!ra) continue;
+    const si = strOrNull(r.SPECIAL_INSTRUCTIONS);
+    rows.push({
+      raNumber: ra,
+      // the header-mismatch fix (see the block comment above)
+      ticket10: strOrNull(r.C_1_0_TICKET_NUMBER),
+      reservation: strOrNull(r.RESERVATION_NUMBER),
+      rentalDate: coerceReportDate(r.RENTAL_DATE),
+      returnDate: coerceReportDate(r.RETURN_DATE),
+      stationName: strOrNull(r.RENTAL_STATION_NAME),
+      city: strOrNull(r.RENTAL_CITY),
+      state: strOrNull(r.RENTAL_STATE),
+      chargeDays: intOrNull(r.ACTUAL_CHARGE_DAYS),
+      rentalDays: intOrNull(r.RENTAL_DAYS),
+      totalCharges: numOrNull(r.TOTAL_RENTAL_CHARGES),
+      avgRate: numOrNull(r.AVG_RATE_PER_DAY),
+      make: strOrNull(r.MAKE), model: strOrNull(r.MODEL), year: strOrNull(r.YEAR),
+      plate: strOrNull(r.LICENSE_PLATE), unit: strOrNull(r.UNIT_NUMBER), vin: strOrNull(r.VIN),
+      firstName: strOrNull(r.FIRST_NAME),
+      lastName: String(r.LAST_NAME ?? "").trim().toUpperCase(),
+      bookingSource: strOrNull(r.BOOKING_SOURCE_GROUP),
+      refNumber: strOrNull(r.CLAIM_PO_EXTERNAL_REFERENCE_NUMBER),
+      si,
+      replacesTicket: extractReplacesTicket(si),
+    });
+  }
+  return {
+    rows,
+    fileDate: strOrNull(raw[0]?.FILE_DATE),
+    sourceFilename: strOrNull(raw[0]?.SOURCE_FILENAME),
+  };
+}
+
+export interface SnowflakeDirectImportOutcome {
+  skipped: boolean;
+  skipReason?: string;
+  fileDate: string | null;
+  sourceFilename: string | null;
+  result?: DirectImportResult;
+}
+
+/**
+ * Import the newest Snowflake batch through the SAME pipeline as the manual
+ * upload. Adds exactly one behavior the manual path does not need: an
+ * idempotence gate for the scheduled caller. The table publishes one batch per
+ * day, and every import is a full-state persist + sweep + stamp — re-running a
+ * FILE_DATE the ledger already recorded as successfully imported is pure churn,
+ * so it is skipped (force=true overrides, for a deliberate re-land).
+ *
+ * The preflight guards are NOT bypassed here: a count collapse or date
+ * regression still refuses the import unless acceptWarnings is passed, exactly
+ * as the confirm dialog does on the manual path. The scheduled caller never
+ * passes it, so a degraded batch stops the lane loudly instead of sweeping.
+ */
+export async function importDirectBillingFromSnowflake(
+  input: { acceptWarnings?: boolean; force?: boolean } = {},
+  deps: Partial<DirectImportDeps> = {},
+): Promise<SnowflakeDirectImportOutcome> {
+  const batch = await fetchDirectBillingFromSnowflake();
+  if (!batch.rows.length) {
+    throw new Error(
+      `Snowflake direct-billing table ${SNOWFLAKE_DIRECT_TABLE} returned no rows for its max FILE_DATE`,
+    );
+  }
+  if (!input.force) {
+    const baseline = await (deps.loadBaseline ?? loadDirectImportBaseline)();
+    // Older manual runs recorded file_date NULL, so a null baseline date never
+    // blocks — the first Snowflake import establishes the watermark.
+    if (baseline?.fileDate && batch.fileDate && batch.fileDate <= baseline.fileDate) {
+      return {
+        skipped: true,
+        skipReason: `batch FILE_DATE ${batch.fileDate} already imported (baseline ${baseline.fileDate})`,
+        fileDate: batch.fileDate,
+        sourceFilename: batch.sourceFilename,
+      };
+    }
+  }
+  const result = await importDirectBillingReport(
+    {
+      rows: batch.rows,
+      fileDate: batch.fileDate,
+      sourceLabel: `snowflake:${batch.sourceFilename ?? SNOWFLAKE_DIRECT_TABLE}`,
+      acceptWarnings: input.acceptWarnings,
+    },
+    deps,
+  );
+  return { skipped: false, fileDate: batch.fileDate, sourceFilename: batch.sourceFilename, result };
+}
