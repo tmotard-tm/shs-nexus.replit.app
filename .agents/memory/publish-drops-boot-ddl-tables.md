@@ -1,15 +1,15 @@
 ---
-name: Publish proposes DROP TABLE for boot-DDL tables
-description: Why the deploy dialog generates destructive DROP statements for fs_* tables, and the ordering rule that prevents it
+name: Publish proposes DROP for boot-DDL objects
+description: Why the deploy dialog generates destructive DROP statements when development has not booted current schema code
 ---
 
 The publish flow's auto-migration diffs the **development database against the production
 database** — not the Drizzle schema files. `drizzle.config.ts` carries
 `tablesFilter: ["!fs_*"]`, and that filter does **not** protect these tables from this diff.
 
-Every `fs_*` module (fleet-comms, truck-maintenance, fleet-scope) creates its tables with
-idempotent raw SQL run at app boot, not through Drizzle migrations. So a table exists in a
-database only once an app instance has **booted the code that creates it**.
+Many `fs_*` and `vrm_*` modules create or alter tables with idempotent raw SQL run at app
+boot, not through Drizzle migrations. So an object exists in a database only once an app
+instance has **booted the code that creates it and completed that initialization step**.
 
 **The failure mode:** merge a task that adds a boot-DDL module → publish (prod boots the new
 code and creates the tables) → the workspace dev app is still running the pre-merge process,
@@ -25,6 +25,11 @@ app before opening the publish dialog**. Booting the merged code recreates the t
 adds new columns) in dev, and the diff collapses to additive `ADD COLUMN` statements for the
 columns prod has not booted yet. Approving a DROP would destroy live rows — the tables come
 back empty at the next prod boot, which hides the loss.
+
+A port-conflicted or orphaned dev server is equivalent to not restarting: production can
+boot the new release and materialize new DDL while dev remains on old code. A clean dev
+restart causing large numbers of proposed table/column DROPs to disappear is direct evidence
+of asymmetric boot initialization, not lost source edits.
 
 Diagnose by listing the tables in both databases (`information_schema.tables`) before
 approving anything; the side that is *missing* them is the side that has not booted the code.
