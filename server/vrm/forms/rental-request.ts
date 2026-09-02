@@ -809,6 +809,92 @@ async function loadRequestApprovalTemplates(): Promise<{ standard: string; monda
 const SELF_SERVE_DAILY_CAP = 1;
 
 
+/**
+ * Days after which a BOOKED request nobody ever collected is presumed finished.
+ *
+ * WHY THIS EXISTS
+ * ---------------
+ * `settledEvidenceSql()` below retired a booked row only on POSITIVE return
+ * evidence: no open rental case AND a case that dropped off the Enterprise book
+ * after the request was created. A reservation that is booked but never picked
+ * up NEVER BECOMES A CASE, so it never reaches the book, so it can never leave
+ * it. `last_drop` stays NULL (or stays at some older rental's date) and the row
+ * sits at `booked` holding `vrm_rental_request_open_live_uniq` until the
+ * guard's 30-day lookback ages it out.
+ *
+ * Measured on prod 2026-09-02: 14 technicians in exactly that state, the oldest
+ * two stuck 15 days, and 104 blocked form attempts by 34 technicians in 14 days.
+ * CNEWELL hit the door 7 times in two days while holding no rental at all.
+ *
+ * Tyler's ruling 2026-09-02: "it should be able to rebook after 5 days ... and
+ * the form needs to allow the request." This is that 5 days.
+ *
+ * ⚠ This is a PRESUMPTION, not evidence — the Enterprise book cannot prove a
+ * rental is not out. `bookGradedRedSql()` is the safety rail: the presumption
+ * is only taken while the rental feed is actually reporting, because a stale
+ * feed makes "no open case" a lie rather than a fact.
+ */
+const NO_SHOW_SETTLE_DAYS = 5;
+
+/**
+ * Is the rental book currently too broken to read absence from it?
+ *
+ * `open_n = 0` means "no open rental case for this technician". That is only
+ * meaningful while the feed that populates those cases is healthy. The feed sat
+ * RED and unrefreshed 2026-08-28 → 08-31 (three consecutive "green" syncs
+ * returned the identical Friday file), and during that window absence proved
+ * nothing at all.
+ *
+ * ⛔ Grade on `health_status`, NEVER `last_status` — `last_status` says
+ * `completed` because the JOB ran, regardless of whether it brought data.
+ *
+ * The two keys are the lanes a technician's live rental actually lands in:
+ * `manual_direct_billing_import` feeds cases.source `enterprise_direct`
+ * (370 rows matched both sides when checked 2026-09-02) and
+ * `snowflake_enterprise` feeds cases.source `enterprise`. A MISSING health row
+ * deliberately does NOT hold the presumption — an absent grade must not
+ * permanently re-break the door this change exists to open. Only an explicit
+ * `red` holds it.
+ */
+function bookGradedRedSql() {
+  return sql`EXISTS (
+    SELECT 1 FROM vrm_rental_source_health h
+     WHERE h.source_key IN ('manual_direct_billing_import', 'snowflake_enterprise')
+       AND h.health_status = 'red'
+  )`;
+}
+
+/**
+ * THE ONE DEFINITION of "this booked request row is finished".
+ *
+ * Expects `r` (vrm_rental_request) and `b` (the open_n / last_drop aggregate)
+ * in scope, which both callers provide under those aliases.
+ *
+ * ⛔⛔ This is a single shared fragment ON PURPOSE. `liveRequestGuard` decides
+ * whether the FORM opens and `closeSettledRequests` decides whether the ROW is
+ * retired, and `vrm_rental_request_open_live_uniq` does not care what the guard
+ * decided. When those two definitions drifted on 2026-08-26 the technician
+ * sailed past the door and the INSERT died on a duplicate key instead — an
+ * hour lost with a technician standing at an Enterprise counter. Change this
+ * function, never one caller.
+ */
+function settledEvidenceSql() {
+  return sql`(
+    COALESCE(b.open_n, 0) = 0
+    AND (
+      -- Evidence: the vehicle demonstrably came back after this request.
+      (b.last_drop IS NOT NULL AND b.last_drop > r.created_at)
+      -- Presumption: nobody ever collected it. See NO_SHOW_SETTLE_DAYS.
+      OR (
+        COALESCE(r.etd_booked_at, r.created_at)
+          < now() - make_interval(days => ${NO_SHOW_SETTLE_DAYS})
+        AND NOT ${bookGradedRedSql()}
+      )
+    )
+  )`;
+}
+
+
 interface SubmitContext {
   /** The token row, or null on the open front door. */
   tokenRow: any | null;
@@ -2325,8 +2411,56 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         });
       }
 
+      // ⛔⛔ A pending EXTENSION for the same technician blocks this release.
+      //
+      // `vrm_rental_request_open_live_xtype_uniq` is UNIQUE (ldap) WHERE
+      // token_id IS NULL AND ((extension AND pending) OR (new AND
+      // pending/approved)). This route moves the row from `booked` to
+      // `pending`, walking straight into that key, and the failure surfaced as
+      // a 500 carrying a raw "Failed query:" SQL dump. So the ONE staff escape
+      // from a stuck booked row was itself broken for exactly the technicians
+      // who had been pushed into filing an extension BECAUSE the New option was
+      // greyed out. Measured 2026-09-02: CNEWELL #153/#265, BRANGE #170/#268.
+      //
+      // Named rather than silently cleared: releasing a booking is not on its
+      // own proof that the extension is moot (the technician may still hold a
+      // car), so the caller opts in with `voidBlockingExtension` and their name
+      // goes on it. closeSettledRequests handles the settled case by itself.
+      const voidBlockingExtension = req.body?.voidBlockingExtension === true;
+      const { rows: blockers } = await db.execute(sql`
+        SELECT request_no FROM vrm_rental_request
+         WHERE ldap = (SELECT ldap FROM vrm_rental_request WHERE request_no = ${no})
+           AND token_id IS NULL
+           AND COALESCE(request_type, 'new') = 'extension'
+           AND status = 'pending'
+      `);
+      const blockingExt = (blockers as any[]).map((r) => Number(r.request_no));
+      if (blockingExt.length && !voidBlockingExtension) {
+        return res.status(409).json({
+          message: `This technician has pending extension request #${blockingExt.join(", #")}, `
+                 + "which holds the same one-request-per-technician slot as the released row. "
+                 + "Void that extension first, or resend with voidBlockingExtension: true to "
+                 + "void it as part of this release.",
+          blockingExtensions: blockingExt,
+        });
+      }
+
       const note = `reservation ${claimed} cancelled in ETD and released by ${actor}: ${reason}`;
       const upd = await db.transaction(async (tx) => {
+        if (blockingExt.length) {
+          // Inside the transaction: if the release below fails, the extension
+          // must not be left voided for a row that never moved.
+          await tx.execute(sql`
+            UPDATE vrm_rental_request
+               SET status = 'voided',
+                   decision_note = COALESCE(NULLIF(btrim(decision_note), '') || ' | ', '')
+                     || ${`auto-voided by ${actor} while releasing booking ${claimed} on request #${no}`},
+                   updated_at = now()
+             WHERE request_no = ANY(${blockingExt})
+               AND COALESCE(request_type, 'new') = 'extension'
+               AND status = 'pending'
+          `);
+        }
         const { rows } = await tx.execute(sql`
           UPDATE vrm_rental_request
              SET status = 'pending',
@@ -3272,6 +3406,10 @@ export async function liveRequestGuard(ldap: string): Promise<{
            COALESCE(b.open_n, 0)::int AS open_n,
            (CASE WHEN b.last_drop IS NOT NULL AND b.last_drop > r.created_at
                  THEN 1 ELSE 0 END)::int AS dropped_after_create,
+           -- The verdict itself, from the SAME fragment closeSettledRequests
+           -- uses. Computed in SQL rather than reassembled in JS so the door
+           -- and the row can never disagree again.
+           (CASE WHEN ${settledEvidenceSql()} THEN 1 ELSE 0 END)::int AS settled_now,
            to_char(b.last_drop AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS dropped_at
     FROM vrm_rental_request r
     CROSS JOIN book b
@@ -3287,11 +3425,14 @@ export async function liveRequestGuard(ldap: string): Promise<{
   // rental case, AND a case dropped off the Enterprise book AFTER this request
   // was created. A settled row is a finished rental, not an in-flight request,
   // so it blocks nothing.
+  // `openRentals === 0` is also inside settledEvidenceSql(); kept here as a
+  // belt-and-braces read of the same fact, and because it is the one condition
+  // a reviewer checks first when asking "could this hand out a second car".
   const isSettled = (r: any) =>
     r.status === "booked" &&
     r.request_type !== "extension" &&
     openRentals === 0 &&
-    Number(r.dropped_after_create ?? 0) === 1;
+    Number(r.settled_now ?? 0) === 1;
 
   const liveNew = all.find((r) => r.request_type !== "extension" && !isSettled(r)) ?? null;
   const liveExt = all.find((r) => r.request_type === "extension" && r.status === "pending") ?? null;
@@ -3371,23 +3512,73 @@ export async function closeSettledRequests(ldap: string): Promise<number[]> {
       )
       UPDATE vrm_rental_request r
          SET status = 'closed',
+             -- Say WHICH of the two paths retired it. An evidence close and a
+             -- presumption close must never read the same in a report: one saw
+             -- the car come back, the other saw nothing for five days.
              decision_note = COALESCE(NULLIF(btrim(r.decision_note), '') || ' | ', '')
-               || 'auto-closed: vehicle back, off the Enterprise book '
-               || to_char(b.last_drop AT TIME ZONE 'UTC', 'YYYY-MM-DD'),
+               || CASE WHEN b.last_drop IS NOT NULL AND b.last_drop > r.created_at
+                       THEN 'auto-closed: vehicle back, off the Enterprise book '
+                            || to_char(b.last_drop AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+                       ELSE 'auto-closed: reservation '
+                            || COALESCE(NULLIF(btrim(r.etd_reference), ''), '(none)')
+                            || ' never appeared on the rental book within '
+                            || ${NO_SHOW_SETTLE_DAYS}::text
+                            || ' days - PRESUMED not collected, not proven returned'
+                  END,
              updated_at = now()
         FROM book b
        WHERE r.ldap = ${ldap}
          AND r.status = 'booked'
          AND COALESCE(r.request_type, 'new') <> 'extension'
-         AND COALESCE(b.open_n, 0) = 0
-         AND b.last_drop IS NOT NULL
-         AND b.last_drop > r.created_at
+         AND ${settledEvidenceSql()}
       RETURNING r.request_no
     `);
     const closed = (rows as any[]).map((r) => Number(r.request_no));
     if (closed.length) {
       console.log(`[rental-request] auto-closed returned rental request(s) for ${ldap}: #${closed.join(", #")}`);
     }
+
+    // Retire a pending EXTENSION once a NEW row beside it has settled.
+    //
+    // ⛔⛔ THE THIRD INDEX. `vrm_rental_request_open_live_xtype_uniq` is
+    // UNIQUE (ldap) WHERE token_id IS NULL AND ((extension AND pending) OR
+    // (new AND pending/approved)) — it treats a pending extension and a
+    // pending NEW as ONE slot per technician. liveRequestGuard ALREADY
+    // believes such an extension is moot (`extBlocksNew` goes null the moment
+    // a settled row exists beside it), so without this the guard opens the
+    // door and the INSERT dies on a duplicate key: the exact guard-versus-index
+    // split that cost an hour on 2026-08-26, one index over.
+    //
+    // It is also what broke the only staff escape hatch: release-booking moves
+    // the stuck row to `pending`, straight into the same key, so Fleet could
+    // not unstick these technicians from the UI either (CNEWELL #153/#265 and
+    // BRANGE #170/#268, both 2026-09-02).
+    //
+    // `voided`, not `closed`: on this table VOID already means "this request
+    // was itself the mistake, the technician hears nothing", which is exactly
+    // what an extension filed only because the New option was greyed out is.
+    // A technician pushed down that path never asked for it.
+    if (closed.length) {
+      const { rows: ext } = await db.execute(sql`
+        UPDATE vrm_rental_request
+           SET status = 'voided',
+               decision_note = COALESCE(NULLIF(btrim(decision_note), '') || ' | ', '')
+                 || 'auto-voided: rental request #'
+                 || ${closed.join(", #")}
+                 || ' settled, so there is no live rental left to extend',
+               updated_at = now()
+         WHERE ldap = ${ldap}
+           AND token_id IS NULL
+           AND COALESCE(request_type, 'new') = 'extension'
+           AND status = 'pending'
+        RETURNING request_no
+      `);
+      const voided = (ext as any[]).map((r) => Number(r.request_no));
+      if (voided.length) {
+        console.log(`[rental-request] auto-voided moot extension(s) for ${ldap}: #${voided.join(", #")}`);
+      }
+    }
+
     return closed;
   } catch (e: any) {
     console.error(`[rental-request] closeSettledRequests(${ldap}) failed:`, e?.message || e);
