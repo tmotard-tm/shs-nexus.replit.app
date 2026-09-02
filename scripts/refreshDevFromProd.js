@@ -133,12 +133,21 @@ async function copyTable(prod, dev, { schema, name }) {
   const fullName = `${escapeIdentifier(schema)}.${escapeIdentifier(name)}`;
   console.log(`\n==> Copying ${fullName}`);
 
-  // Get ordered column list with data types from prod
+  // Get ordered column list with data types from prod.
+  //
+  // GENERATED columns are excluded on purpose. They cannot be INSERTed
+  // (Postgres: "cannot insert a non-DEFAULT value into column", routine
+  // rewriteTargetListIU); the target computes them itself. Prod has five,
+  // all on vrm_rental_request (claim_variance_days, policy_complete) and
+  // vrm_rental_tech_survey (corrected_shop, record_mismatch, truck_mismatch).
+  // Without this filter the 2026-09-02 rebuild copied 175 tables, hit
+  // corrected_shop, and ROLLED BACK all of it.
   const colsRes = await prod.query(
     `
     SELECT column_name, data_type, udt_name
     FROM information_schema.columns
     WHERE table_schema = $1 AND table_name = $2
+      AND is_generated = 'NEVER'
     ORDER BY ordinal_position
   `,
     [schema, name]
