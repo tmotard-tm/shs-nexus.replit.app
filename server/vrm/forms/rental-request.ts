@@ -957,6 +957,27 @@ async function screenAndRecord(ctx: SubmitContext): Promise<{ code: number; json
     };
   }
 
+  // Structure, not just presence. Measured 2026-09-03: 215 of 215 requests in
+  // 30 days carried no ZIP and 15 named only "City, ST"; the single word
+  // "Enterprise" once booked a California technician at Boston Logan. The form
+  // composes this as "street, city, ST zip" and the ETD executor parses state
+  // and ZIP back out of it, so refuse anything that does not carry all four.
+  // Enforced here, not only in the browser, because this handler serves both
+  // the open door and the tokenised link.
+  if (!isExtension && nearestBranch) {
+    const parts = nearestBranch.split(",");
+    const street = parts[0] ?? "";
+    const tail = /(?:^|[\s,])([A-Z]{2})\s+(\d{5})(?:-\d{4})?\s*$/.exec(nearestBranch.toUpperCase());
+    if (parts.length < 3 || !/\d/.test(street) || !tail) {
+      return {
+        code: 400,
+        json: {
+          success: false,
+          message: "The Enterprise location needs a street address with a number, the city, the 2-letter state and the 5-digit ZIP.",
+        },
+      };
+    }
+  }
   const category = isExtension ? null : (s(b.problemCategory, 40) ?? "");
   if (!isExtension && !PROBLEM_CATEGORIES.has(category as string)) {
     return { code: 400, json: { success: false, message: "Please choose what is wrong with the vehicle." } };

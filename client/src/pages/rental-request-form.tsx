@@ -201,6 +201,26 @@ export default function RentalRequestForm() {
   const [shopState, setShopState] = useState("");
   const [shopPhone, setShopPhone] = useState("");
   const [nearestBranch, setNearestBranch] = useState("");
+  // The branch is stored as ONE string (tech_reported_branch) that the ETD
+  // executor already parses for state and ZIP. It is composed from four parts
+  // so every submission carries a street number, city, 2-letter state and a
+  // 5-digit ZIP. Measured 2026-09-03: 215 of 215 requests in 30 days had no ZIP
+  // and 15 named only "City, ST", which the geocoder cannot place. Tyler:
+  // "typing in a city and state is not acceptable."
+  const [branchStreet, setBranchStreet] = useState("");
+  const [branchCity, setBranchCity] = useState("");
+  const [branchState, setBranchState] = useState("");
+  const [branchZip, setBranchZip] = useState("");
+  const composeBranch = (st: string, ci: string, sa: string, zp: string) =>
+    [st.trim(), ci.trim(), [sa.trim().toUpperCase(), zp.trim()].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const setBranchPart = (part: "street" | "city" | "state" | "zip", v: string) => {
+    const clean = part === "state" ? v.toUpperCase().slice(0, 2) : part === "zip" ? v.replace(/[^0-9]/g, "").slice(0, 5) : v;
+    const next = { street: branchStreet, city: branchCity, state: branchState, zip: branchZip, [part]: clean };
+    if (part === "street") setBranchStreet(clean); else if (part === "city") setBranchCity(clean);
+    else if (part === "state") setBranchState(clean); else setBranchZip(clean);
+    setNearestBranch(composeBranch(next.street, next.city, next.state, next.zip));
+    clearErr("nearestBranch"); clearErr("branchStreet"); clearErr("branchCity"); clearErr("branchState"); clearErr("branchZip");
+  };
   const [appointmentDate, setAppointmentDate] = useState("");
 
   const [acks, setAcks] = useState<Record<string, boolean>>({});
@@ -325,6 +345,12 @@ export default function RentalRequestForm() {
   };
 
   const validate = () => {
+    const branchErrors = () => {
+      if (!/\d/.test(branchStreet)) e.branchStreet = "Street address with a number, e.g. 2841 Airline Blvd.";
+      if (!branchCity.trim()) e.branchCity = "City.";
+      if (!/^[A-Z]{2}$/.test(branchState.trim().toUpperCase())) e.branchState = "2-letter state.";
+      if (!/^\d{5}$/.test(branchZip.trim())) e.branchZip = "5-digit ZIP.";
+    };
     const e: Record<string, string> = {};
     if (!identityOk) e.identityOk = "Please confirm your details.";
     if (typeMismatch && !typeMismatchExplanation.trim()) {
@@ -352,11 +378,9 @@ export default function RentalRequestForm() {
     }
     if (isNoVan) {
       if (!appointmentDate) e.appointmentAt = "When is your first day on the road?";
-      if (!nearestBranch.trim()) e.nearestBranch = "We need the closest Enterprise branch. Google it if you are not sure.";
+      branchErrors();
     }
-    if (identity?.isByov && !isNoVan && !nearestBranch.trim()) {
-      e.nearestBranch = "We need the Enterprise pickup location for your reservation. Google it if you are not sure.";
-    }
+    if (identity?.isByov && !isNoVan) branchErrors();
     if (!identity?.isByov && !isNoVan) {
       if (!shopName.trim()) e.shopName = "Which shop?";
       if (!shopAddress.trim()) e.shopAddress = "We need the shop's street address.";
@@ -368,7 +392,7 @@ export default function RentalRequestForm() {
         e.shopPhone = "Enter the shop's 10-digit phone number.";
       }
       if (!appointmentDate) e.appointmentAt = "When is it going in?";
-      if (!nearestBranch.trim()) e.nearestBranch = "We need the Enterprise location for your reservation. Google it if you are not sure.";
+      branchErrors();
     }
     if (!coreAll || INDIVIDUAL_ACKS.some(([k]) => !acks[k])) e.acks = "Please tick every box.";
     setFieldErrors(e);
@@ -867,16 +891,30 @@ export default function RentalRequestForm() {
                   </>)}
                   <div className="space-y-2">
                     <Label htmlFor="branch2">Which Enterprise location do you need the reservation to be made? (no airports, if possible)</Label>
-                    <Input id="branch2" value={nearestBranch}
-                           placeholder="e.g. Enterprise, 2841 Airline Blvd, Portsmouth"
-                           onChange={(e) => { setNearestBranch(e.target.value); clearErr("nearestBranch"); }} />
+                    <Input id="branch2-street" value={branchStreet} placeholder="Street address, e.g. 2841 Airline Blvd"
+                           onChange={(e) => setBranchPart("street", e.target.value)} />
+                    {fieldErrors.branchStreet && <p className="text-sm text-red-600">{fieldErrors.branchStreet}</p>}
+                    <div className="grid grid-cols-6 gap-2">
+                      <div className="col-span-3">
+                        <Input id="branch2-city" value={branchCity} placeholder="City" onChange={(e) => setBranchPart("city", e.target.value)} />
+                        {fieldErrors.branchCity && <p className="text-sm text-red-600">{fieldErrors.branchCity}</p>}
+                      </div>
+                      <div className="col-span-1">
+                        <Input id="branch2-state" value={branchState} placeholder="ST" maxLength={2} onChange={(e) => setBranchPart("state", e.target.value)} />
+                        {fieldErrors.branchState && <p className="text-sm text-red-600">{fieldErrors.branchState}</p>}
+                      </div>
+                      <div className="col-span-2">
+                        <Input id="branch2-zip" value={branchZip} placeholder="ZIP" inputMode="numeric" maxLength={5} onChange={(e) => setBranchPart("zip", e.target.value)} />
+                        {fieldErrors.branchZip && <p className="text-sm text-red-600">{fieldErrors.branchZip}</p>}
+                      </div>
+                    </div>
                     <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
                       <p className="font-semibold">This is where your rental will be. It has to be right.</p>
                       <p className="mt-1">
                         Your reservation is sent to this location and this is where you pick the
                         car up. If you do not know it, stop and Google{" "}
                         <span className="font-semibold">&quot;Enterprise Rent-A-Car near me&quot;</span>{" "}
-                        right now, and type in the name and street of the closest branch.
+                        right now, and enter its street address, city, state and ZIP below.
                       </p>
                     </div>
                     {fieldErrors.nearestBranch && <p className="text-sm text-red-600">{fieldErrors.nearestBranch}</p>}
@@ -947,16 +985,30 @@ export default function RentalRequestForm() {
                       {fieldErrors.appointmentAt && <p className="text-sm text-red-600">{fieldErrors.appointmentAt}</p>}
                       <div className="space-y-2">
                         <Label htmlFor="branch">Which Enterprise location do you need the reservation to be made? (no airports, if possible)</Label>
-                        <Input id="branch" value={nearestBranch}
-                               placeholder="e.g. Enterprise, 2841 Airline Blvd, Portsmouth"
-                               onChange={(e) => { setNearestBranch(e.target.value); clearErr("nearestBranch"); }} />
+                        <Input id="branch-street" value={branchStreet} placeholder="Street address, e.g. 2841 Airline Blvd"
+                               onChange={(e) => setBranchPart("street", e.target.value)} />
+                        {fieldErrors.branchStreet && <p className="text-sm text-red-600">{fieldErrors.branchStreet}</p>}
+                        <div className="grid grid-cols-6 gap-2">
+                          <div className="col-span-3">
+                            <Input id="branch-city" value={branchCity} placeholder="City" onChange={(e) => setBranchPart("city", e.target.value)} />
+                            {fieldErrors.branchCity && <p className="text-sm text-red-600">{fieldErrors.branchCity}</p>}
+                          </div>
+                          <div className="col-span-1">
+                            <Input id="branch-state" value={branchState} placeholder="ST" maxLength={2} onChange={(e) => setBranchPart("state", e.target.value)} />
+                            {fieldErrors.branchState && <p className="text-sm text-red-600">{fieldErrors.branchState}</p>}
+                          </div>
+                          <div className="col-span-2">
+                            <Input id="branch-zip" value={branchZip} placeholder="ZIP" inputMode="numeric" maxLength={5} onChange={(e) => setBranchPart("zip", e.target.value)} />
+                            {fieldErrors.branchZip && <p className="text-sm text-red-600">{fieldErrors.branchZip}</p>}
+                          </div>
+                        </div>
                         <div className="rounded-md border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
                           <p className="font-semibold">This is where your rental will be. It has to be right.</p>
                           <p className="mt-1">
                             Your reservation is sent to this location and this is where you pick the
                             car up. If you do not know it, stop and Google{" "}
                             <span className="font-semibold">&quot;Enterprise Rent-A-Car near me&quot;</span>{" "}
-                            right now, and type in the name and street of the closest branch.
+                            right now, and enter its street address, city, state and ZIP below.
                           </p>
                         </div>
                         {fieldErrors.nearestBranch && <p className="text-sm text-red-600">{fieldErrors.nearestBranch}</p>}
