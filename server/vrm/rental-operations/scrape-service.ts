@@ -134,6 +134,7 @@ function parseDate(s: any): number { const m = String(s ?? "").match(/(\d{1,2})\
 
 import type { RentalRequestResult } from "./holman-svc-scrape";
 
+import { kickLucaRentalSync } from "./luca-sync-kick";
 /**
  * Read the "View Rental Request" page(s) for a truck, in the isolated worker.
  *
@@ -479,6 +480,12 @@ export async function scrapeAndStore(
       else if (out.empty) empty++;
       else stored++;
     }
+  }
+  // Tyler, 2026-09-03: new scrape information goes to LUCA immediately, not on
+  // LIVHR's next scheduled pull. Only when something actually changed; a scrape
+  // that confirmed the board is unchanged has nothing to push.
+  if (stored + empty > 0) {
+    void kickLucaRentalSync(`scrape ${scrapedAt}: ${stored} changed, ${empty} emptied`);
   }
   return { requested: caseKeys.length, targeted: targets.length, skipped, stored, unchanged, empty, errors, scrapedAt };
 }
