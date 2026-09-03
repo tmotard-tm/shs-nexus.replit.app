@@ -183,24 +183,6 @@ async function runSync(): Promise<void> {
       console.log('[Scheduled Sync] Continuing...');
     }
 
-    // Rental Ops → Fleet Scope Rentals Dashboard auto-sync
-    console.log('\n--- Syncing Rental Ops → Fleet Scope Rentals Dashboard ---');
-    console.log('[Scheduled Sync] Syncing open rental vehicles into Fleet Scope...');
-
-    try {
-      const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
-      const rentalSyncResult = await syncRentalOpsToFleetScope('scheduled_task');
-      console.log(`[Scheduled Sync] Rental Ops sync complete:`);
-      console.log(`  - Vehicles in open rentals: ${rentalSyncResult.vehiclesInRentalOps}`);
-      console.log(`  - Added to Fleet Scope: ${rentalSyncResult.added.length}`);
-      console.log(`  - Removed from Fleet Scope: ${rentalSyncResult.removed.length}`);
-      console.log(`  - Date in repair filled: ${rentalSyncResult.updated}`);
-      console.log(`  - Unchanged: ${rentalSyncResult.unchanged}`);
-    } catch (rentalError) {
-      console.error('[Scheduled Sync] Rental Ops sync failed (non-fatal):', rentalError);
-      console.log('[Scheduled Sync] Continuing...');
-    }
-
     // Offboarding Queue Gap-Check
     console.log('\n--- Running Offboarding Queue Gap-Check ---');
     console.log('[Scheduled Sync] Creating missing offboarding tasks across all 5 queues...');

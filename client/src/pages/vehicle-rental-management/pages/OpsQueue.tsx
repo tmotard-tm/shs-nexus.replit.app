@@ -24,7 +24,6 @@ import { TechTextModal } from "../components/tech-text-modal";
 import { ShopInfoPanel } from "../components/shop-info-panel";
 import { DetailPanel, amsBucketOfLabel, amsColorOf, amsTintOf } from "../components/case-detail-panel";
 import { LIST_QUERY_KEYS } from "../lib/query-keys";
-import { rentalOriginOf } from "../lib/case-model";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -1016,16 +1015,6 @@ const ROW_TEXT: React.CSSProperties = { fontSize: 13, color: colors.inkSoft, lin
 
 /** Rental origin callout — Holman-issued (book) vs direct billing (manual
  * Enterprise report). Same vocabulary as the case boards and drawer. */
-function OriginPill({ source }: { source?: string | null }) {
-  const o = rentalOriginOf(source);
-  if (!o) return null;
-  const fg = o.kind === "direct" ? colors.purple : colors.blue;
-  const bg = o.kind === "direct" ? colors.purpleLight : colors.blueLight;
-  return (
-    <span title={o.hint} style={{ fontFamily: fonts.dmSans, fontSize: 9.5, fontWeight: 700, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "0 7px", lineHeight: "15px", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{o.label}</span>
-  );
-}
-
 /** WHO column: truck number on top, then tech name / phone / owner stacked. */
 function IdentityCell({ item, dismissed }: { item: QueueItem; dismissed: boolean }) {
   return (
@@ -1037,7 +1026,6 @@ function IdentityCell({ item, dismissed }: { item: QueueItem; dismissed: boolean
         }}>
           {item.truckNumber}
         </span>
-        {item.rentalSource && <OriginPill source={item.rentalSource} />}
         {item.techState && <span style={ROW_LABEL}>{item.techState}</span>}
       </div>
       {item.techName && (
@@ -1606,7 +1594,6 @@ function BucketRow({
           ),
         },
         chips?.portalAt ? { label: "Portal", node: formatShortDate(chips.portalAt) } : null,
-        chips?.daysInRental != null ? { label: "Rental", node: `${chips.daysInRental} days so far` } : null,
         item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
       ]} />
 
@@ -2415,7 +2402,6 @@ export default function OpsQueue() {
                     }}
                   >
                     <span style={{ fontFamily: fonts.jetbrains, fontSize: 14, color: colors.ink }}>{item.truckNumber}</span>
-                    {item.rentalSource && <OriginPill source={item.rentalSource} />}
                     {item.techName && <span style={{ fontSize: 13, color: colors.inkMuted }}>{item.techName}</span>}
                     <StatusPill label="Status" value={item.fleetScopeStatus} />
                     <StatusPill label="PO" value={item.holmanStatus} />
@@ -2452,6 +2438,9 @@ export default function OpsQueue() {
               assigned_truck: it.renterAssignedTruck ?? it.assignedTruck ?? null,
               wrong_truck: !!it.assignedTruck,
               tpms_tech: it.techName ?? null,
+              // Days-in-rental moved off the card into this drawer (Tyler, 2026-09-03):
+              // the queue's own computed number, so drawer and queue always agree.
+              days_in_rental: it.contextChips?.daysInRental ?? null,
             } : undefined}
             onClose={() => setPanelKey(null)}
             onMark={doMark}

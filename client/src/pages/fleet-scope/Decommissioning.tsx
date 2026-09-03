@@ -70,7 +70,6 @@ interface DecommissioningVehicle {
   sentToProcurementAt: string | null;
   techMatchSource: string | null; // 'truck' for direct match, 'manager_zip_fallback' for nearest manager ZIP match
   isAssigned: boolean; // Whether truck # is currently found in TPMS_EXTRACT
-  withRental: boolean; // Whether truck # exists in Rentals Dashboard
   repairTrackerSource: boolean; // Whether address/phone came from Repair Tracker
   nearestTechName: string | null;
   nearestTechPhone: string | null;
@@ -602,7 +601,6 @@ export default function Decommissioning() {
       "District": v.district ? v.district.replace(/^0+/, "") : "",
       "AMS Status": v.amsStatus || "",
       "Assigned": v.isAssigned ? "Yes" : "No",
-      "With Rental": v.withRental ? "Yes" : "No",
       "Date Added": v.createdAt ? new Date(v.createdAt).toLocaleDateString() : "",
       "Address": v.address || "",
       "Zip Code": v.zipCode || "",
@@ -1137,7 +1135,6 @@ export default function Decommissioning() {
                         </Select>
                       </div>
                     </TableHead>
-                    <TableHead className="w-24 text-center">With Rental</TableHead>
                     <TableHead className="w-32">
                       <div className="flex flex-col gap-1">
                         <span>Date Added</span>
@@ -1252,11 +1249,6 @@ export default function Decommissioning() {
                       <TableCell className="text-sm text-center">
                         <span className={vehicle.isAssigned ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>
                           {vehicle.isAssigned ? "Yes" : "No"}
-                        </span>
-                      </TableCell>
-                      <TableCell className="text-sm text-center" data-testid={`cell-with-rental-${vehicle.id}`}>
-                        <span className={vehicle.withRental ? "text-blue-600 dark:text-blue-400 font-medium" : "text-muted-foreground"}>
-                          {vehicle.withRental ? "Yes" : "No"}
                         </span>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">

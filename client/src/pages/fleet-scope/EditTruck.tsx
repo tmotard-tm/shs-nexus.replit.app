@@ -590,31 +590,6 @@ export default function EditTruck() {
                       </FormItem>
                     )}
                   />
-
-                  <FormField
-                    control={form.control}
-                    name="rentalReturned"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Rental Returned</FormLabel>
-                        <Select 
-                          onValueChange={(value) => field.onChange(value === "yes")} 
-                          value={field.value ? "yes" : "no"}
-                        >
-                          <FormControl>
-                            <SelectTrigger data-testid="select-rental-returned">
-                              <SelectValue placeholder="Select..." />
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="yes">Yes</SelectItem>
-                            <SelectItem value="no">No</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
                 </div>
 
                 <FormField

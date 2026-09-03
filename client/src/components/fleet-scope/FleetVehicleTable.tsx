@@ -50,7 +50,6 @@ interface CategoryFilter {
   generalStatus?: string;
   subStatus?: string;
   excludePmf?: boolean;
-  isRental?: boolean;
   truckStatus?: string;
   label: string;
 }
@@ -84,7 +83,6 @@ interface FleetVehicleTableProps {
   mapSelections?: MapSelection[];
   visibleMapCategories?: Set<CategoryKey>;
   onMapFiltersChange?: (filters: MapFilters) => void;
-  rentalTruckNumbers?: Set<string>;
 }
 
 interface ColumnFilterPopoverProps {
@@ -230,7 +228,7 @@ function VehicleSearchPopover({ value, onChange, onClear }: VehicleSearchPopover
   );
 }
 
-export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClearCategoryFilter, mapSelections = [], visibleMapCategories, onMapFiltersChange, rentalTruckNumbers = new Set() }: FleetVehicleTableProps) {
+export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClearCategoryFilter, mapSelections = [], visibleMapCategories, onMapFiltersChange }: FleetVehicleTableProps) {
   const [search, setSearch] = useState('');
   const [vehicleNumberSearch, setVehicleNumberSearch] = useState('');
   // Deferred copies keep typing responsive: inputs update instantly while the
@@ -242,31 +240,10 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   const [subStatusFilters, setSubStatusFilters] = useState<Set<string>>(new Set());
   const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
   const [samsaraStatusFilters, setSamsaraStatusFilters] = useState<Set<string>>(new Set());
-  const [rentalFilter, setRentalFilter] = useState<string>('');
   const [byovFilter, setByovFilter] = useState<string>(() => {
     const stored = sessionStorage.getItem('fleet-byov-filter') ?? '';
     return ['Yes', 'No'].includes(stored) ? stored : '';
   });
-
-  // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
-  const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
-    queryKey: ['/api/rental-ops/open-vehicle-numbers'],
-    staleTime: 30 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    retry: false,
-  });
-  const rentalOpsVehicleSet = useMemo(() => {
-    const s = new Set<string>();
-    if (!rentalOpsData?.vehicleNumbers) return s;
-    for (const vn of rentalOpsData.vehicleNumbers) {
-      s.add(vn);
-      const canonical = toCanonical(vn);
-      if (canonical) s.add(canonical);
-      const display = toDisplayNumber(vn);
-      if (display) s.add(display);
-    }
-    return s;
-  }, [rentalOpsData]);
 
   // AMS truck-status map: VIN → human-readable label (single fetch for whole table)
   const { data: amsTruckStatusMap, isLoading: amsStatusLoading } = useQuery<Record<string, string | null>>({
@@ -379,11 +356,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
 
   const uniqueGeneralStatuses = useMemo(() => {
     const statuses = new Set(vehicles.map(v => getSpareDisplayLabel(v)).filter(Boolean));
-    if (rentalTruckNumbers.size > 0) {
-      statuses.add('Rental');
-    }
     return Array.from(statuses).sort();
-  }, [vehicles, rentalTruckNumbers]);
+  }, [vehicles]);
 
   const uniqueSubStatuses = useMemo(() => {
     const statuses = new Set(vehicles.map(v => v.subStatus).filter(Boolean));
@@ -425,7 +399,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     setSubStatusFilters(new Set());
     setCategoryFilters(new Set());
     setSamsaraStatusFilters(new Set());
-    setRentalFilter('');
     setByovFilter('');
     setSearch('');
     setVehicleNumberSearch('');
@@ -433,7 +406,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
 
   const hasActiveFilters = assignmentFilters.size > 0 || generalStatusFilters.size > 0 || 
                            subStatusFilters.size > 0 || categoryFilters.size > 0 || 
-                           samsaraStatusFilters.size > 0 || rentalFilter || byovFilter || search || vehicleNumberSearch;
+                           samsaraStatusFilters.size > 0 || byovFilter || search || vehicleNumberSearch;
 
   // Helper to parse maintenance value from string like "$36,871.91" to number
   const parseMaintenanceValue = (value: string | undefined): number | null => {
@@ -458,7 +431,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     }
     if (gs === 'PMF') return 'pmf';
     return 'onRoad';
-  }, [rentalTruckNumbers]);
+  }, []);
 
   const getVehicleAssignedCategory = useCallback((v: Vehicle): CategoryKey => {
     return v.assignmentStatus === 'Assigned' ? 'assigned' : 'unassigned';
@@ -473,7 +446,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     let result = vehicles;
     if (categoryFilter) {
       result = result.filter(v => {
-        if (categoryFilter.isRental) return rentalTruckNumbers.has(v.vehicleNumber?.toString().padStart(6, '0'));
         if (categoryFilter.truckStatus) {
           // Match the AMS scorecard counts, which exclude vehicles whose
           // VehicleNumber starts with 88 or 088. Only applied when the user
@@ -532,7 +504,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
       });
     }
     return result;
-  }, [vehicles, categoryFilter, mapSelections, visibleMapCategories, getVehicleMapCategory, getVehicleAssignedCategory, rentalTruckNumbers]);
+  }, [vehicles, categoryFilter, mapSelections, visibleMapCategories, getVehicleMapCategory, getVehicleAssignedCategory]);
 
   const filteredVehicles = useMemo(() => {
     let result = preFilteredVehicles.filter(vehicle => {
@@ -552,17 +524,14 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
       
       const matchesAssignment = assignmentFilters.size === 0 || assignmentFilters.has(vehicle.assignmentStatus);
       const matchesGeneralStatus = generalStatusFilters.size === 0 || 
-        generalStatusFilters.has(getSpareDisplayLabel(vehicle)) || 
-        (generalStatusFilters.has('Rental') && rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0')));
+        generalStatusFilters.has(getSpareDisplayLabel(vehicle));
       const matchesSubStatus = subStatusFilters.size === 0 || subStatusFilters.has(vehicle.subStatus);
       const matchesCategory = categoryFilters.size === 0 || categoryFilters.has(vehicle.inventoryProductCategory);
       const matchesSamsaraStatus = samsaraStatusFilters.size === 0 || samsaraStatusFilters.has(vehicle.samsaraStatus || 'Not Installed');
-      const isRental = rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0'));
-      const matchesRental = !rentalFilter || (rentalFilter === 'Yes' ? isRental : !isRental);
       const isByov = byovAuditMap.has(vehicle.vehicleNumber);
       const matchesByov = !byovFilter || (byovFilter === 'Yes' ? isByov : !isByov);
       
-      return matchesSearch && matchesVehicleNumber && matchesAssignment && matchesGeneralStatus && matchesSubStatus && matchesCategory && matchesSamsaraStatus && matchesRental && matchesByov;
+      return matchesSearch && matchesVehicleNumber && matchesAssignment && matchesGeneralStatus && matchesSubStatus && matchesCategory && matchesSamsaraStatus && matchesByov;
     });
     
     // Apply sorting if a sort column is selected
@@ -592,7 +561,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     }
     
     return result;
-  }, [preFilteredVehicles, deferredSearch, deferredVehicleNumberSearch, assignmentFilters, generalStatusFilters, subStatusFilters, categoryFilters, samsaraStatusFilters, rentalFilter, byovFilter, rentalTruckNumbers, byovAuditMap, sortColumn, sortDirection]);
+  }, [preFilteredVehicles, deferredSearch, deferredVehicleNumberSearch, assignmentFilters, generalStatusFilters, subStatusFilters, categoryFilters, samsaraStatusFilters, byovFilter, byovAuditMap, sortColumn, sortDirection]);
 
   // New filter/search/data ⇒ start the window from the top again.
   useEffect(() => {
@@ -818,7 +787,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     testIdPrefix="assignment"
                   />
                 </TableHead>
-                <TableHead className="whitespace-nowrap bg-muted">Rental</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">AMS Status</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">
                   <ColumnFilterPopover
@@ -868,52 +836,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     onClear={() => setCategoryFilters(new Set())}
                     testIdPrefix="category"
                   />
-                </TableHead>
-                <TableHead className="whitespace-nowrap bg-muted">
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={`h-auto p-1 font-medium text-left justify-start gap-1 ${rentalFilter ? 'text-primary' : ''}`}
-                        data-testid="button-filter-rental"
-                      >
-                        Rental
-                        <Filter className={`w-3 h-3 ${rentalFilter ? 'opacity-100' : 'opacity-50'}`} />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-36 p-2" align="start">
-                      <div className="space-y-1">
-                        <Button
-                          variant={rentalFilter === '' ? 'secondary' : 'ghost'}
-                          size="sm"
-                          className="w-full justify-start text-xs"
-                          onClick={() => setRentalFilter('')}
-                          data-testid="filter-rental-all"
-                        >
-                          All
-                        </Button>
-                        <Button
-                          variant={rentalFilter === 'Yes' ? 'secondary' : 'ghost'}
-                          size="sm"
-                          className="w-full justify-start text-xs"
-                          onClick={() => setRentalFilter('Yes')}
-                          data-testid="filter-rental-yes"
-                        >
-                          Yes
-                        </Button>
-                        <Button
-                          variant={rentalFilter === 'No' ? 'secondary' : 'ghost'}
-                          size="sm"
-                          className="w-full justify-start text-xs"
-                          onClick={() => setRentalFilter('No')}
-                          data-testid="filter-rental-no"
-                        >
-                          No
-                        </Button>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
                 </TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">
                   <Popover>
@@ -1017,13 +939,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           <Badge className={getAssignmentBadgeColor(vehicle.assignmentStatus)}>
                             {vehicle.assignmentStatus}
                           </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {(rentalOpsVehicleSet.has(vehicle.vehicleNumber)
-                            || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
-                            || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber))) && (
-                            <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
-                          )}
                         </TableCell>
                         <TableCell>
                           {amsStatusLoading ? (
@@ -1140,13 +1055,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           </div>
                         </TableCell>
                         <TableCell>{vehicle.inventoryProductCategory || '-'}</TableCell>
-                        <TableCell data-testid={`text-rental-${vehicle.vehicleNumber}`}>
-                          {rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0')) ? (
-                            <Badge className="bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">Yes</Badge>
-                          ) : (
-                            <span className="text-sm text-muted-foreground">No</span>
-                          )}
-                        </TableCell>
                         <TableCell data-testid={`text-byov-${vehicle.vehicleNumber}`}>
                           {byovAuditMap.has(vehicle.vehicleNumber) ? (
                             <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">Yes</Badge>

@@ -44,7 +44,6 @@ interface USMapVehiclesProps {
   onMapFiltersChange?: (filters: MapFilters) => void;
   activeSelections?: MapSelection[];
   visibleCategories?: Set<CategoryKey>;
-  rentalsByState?: Record<string, number>;
 }
 
 export type CategoryKey = 'onRoad' | 'repairShop' | 'pmf' | 'byov' | 'confirmedSpare' | 'needsReconfirmation' | 'assigned' | 'unassigned';
@@ -234,75 +233,7 @@ const regionMapping: Record<string, { name: string; colorClass: string }> = {
   'MT': { name: 'West', colorClass: 'text-green-600 dark:text-green-400' }, 'WY': { name: 'West', colorClass: 'text-green-600 dark:text-green-400' },
 };
 
-function RentalsByStatePanel({ rentalsByState }: { rentalsByState: Record<string, number> }) {
-  const [expanded, setExpanded] = useState(false);
-
-  const sortedStates = useMemo(() => {
-    return Object.entries(rentalsByState)
-      .sort((a, b) => b[1] - a[1]);
-  }, [rentalsByState]);
-
-  const totalRentals = useMemo(() => sortedStates.reduce((sum, [, count]) => sum + count, 0), [sortedStates]);
-
-  const regionTotals = useMemo(() => {
-    const totals: Record<string, number> = { East: 0, Central: 0, West: 0, Other: 0 };
-    for (const [state, count] of sortedStates) {
-      const region = regionMapping[state]?.name || 'Other';
-      totals[region] += count;
-    }
-    return totals;
-  }, [sortedStates]);
-
-  return (
-    <div 
-      className="absolute bottom-3 right-3 z-10 bg-background/95 backdrop-blur-sm border rounded-md shadow-sm"
-      style={{ maxWidth: '220px' }}
-      data-testid="panel-rentals-by-state"
-    >
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="w-full flex items-center justify-between gap-2 px-3 py-2 text-xs font-medium hover-elevate rounded-md"
-        data-testid="button-toggle-rentals-panel"
-      >
-        <span className="flex items-center gap-1.5">
-          <Truck className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
-          <span>Rentals by State</span>
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-            {totalRentals}
-          </Badge>
-        </span>
-        {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronUp className="w-3 h-3" />}
-      </button>
-      {expanded && (
-        <div className="px-3 pb-2 space-y-2">
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground border-b pb-1.5 flex-wrap">
-            <span className="text-blue-600 dark:text-blue-400 font-medium">East: {regionTotals.East}</span>
-            <span className="text-amber-600 dark:text-amber-400 font-medium">Central: {regionTotals.Central}</span>
-            <span className="text-green-600 dark:text-green-400 font-medium">West: {regionTotals.West}</span>
-            {regionTotals.Other > 0 && <span className="font-medium">Other: {regionTotals.Other}</span>}
-          </div>
-          <div className="max-h-[280px] overflow-y-auto space-y-0.5" data-testid="list-rentals-by-state">
-            {sortedStates.map(([state, count]) => {
-              const region = regionMapping[state];
-              return (
-                <div 
-                  key={state} 
-                  className="flex items-center justify-between text-[11px] px-1 py-0.5 rounded"
-                  data-testid={`rental-state-${state}`}
-                >
-                  <span className={`font-medium ${region?.colorClass || 'text-foreground'}`}>{state}</span>
-                  <span className="font-mono tabular-nums text-muted-foreground">{count}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChange, activeSelections = [], visibleCategories: externalVisibleCategories, rentalsByState }: USMapVehiclesProps) {
+export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChange, activeSelections = [], visibleCategories: externalVisibleCategories }: USMapVehiclesProps) {
   const allCategoryKeys = useMemo(() => new Set(categories.map(c => c.key)), []);
   const visibleCategories = externalVisibleCategories || allCategoryKeys;
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);

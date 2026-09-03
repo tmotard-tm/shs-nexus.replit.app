@@ -1160,35 +1160,6 @@ async function getLastRentalSyncDateFromDb(): Promise<string | null> {
 }
 
 /**
- * True if a rental reconcile is currently mid-flight (a 'running' sync_logs row
- * started within the last `thresholdMinutes`). Belt-and-suspenders on top of the
- * advisory lock: lets the startup catch-up yield to an in-progress Scheduled
- * Deployment run instead of opening a redundant attempt the lock would reject.
- * Bounded by a recent window so a crashed run's stale 'running' row can't block
- * catch-up forever. Fail-open (the advisory lock remains the real guard).
- */
-async function hasRecentRunningRentalSync(thresholdMinutes = 20): Promise<boolean> {
-  try {
-    const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000);
-    const [row] = await db
-      .select({ id: syncLogs.id })
-      .from(syncLogs)
-      .where(
-        and(
-          eq(syncLogs.syncType, 'rental_ops_fleet_scope'),
-          eq(syncLogs.status, 'running'),
-          gte(syncLogs.startedAt, cutoff),
-        ),
-      )
-      .limit(1);
-    return !!row;
-  } catch (err: any) {
-    console.error('[Scheduler] Could not check for running rental sync (non-fatal):', err?.message);
-    return false;
-  }
-}
-
-/**
  * Run a catch-up offboarding sync if one hasn't happened today (EST).
  * Mirrors the rental catch-up pattern: checks the DB sync log for
  * create_offboarding_tasks and skips if it already ran today.
@@ -1213,43 +1184,6 @@ async function runCatchUpOffboardingSyncIfNeeded(): Promise<void> {
     console.log(`[Scheduler] Startup offboarding catch-up complete — Techs processed: ${offboardingResult.techsProcessed}, Tasks created: ${offboardingResult.tasksCreated}, Skipped: ${offboardingResult.tasksSkipped}`);
   } catch (err: any) {
     console.error('[Scheduler] Startup catch-up offboarding sync failed (non-fatal):', err?.message);
-  }
-}
-
-/**
- * Run a catch-up rental sync if one hasn't happened today (EST).
- * Safe to call on every startup — reads the DB so multiple restarts
- * in the same day will only trigger one sync.
- */
-async function runCatchUpRentalSyncIfNeeded(): Promise<void> {
-  if (!isSnowflakeConfigured()) return;
-  try {
-    const lastDbSyncDate = await getLastRentalSyncDateFromDb();
-    const todayStr = getDateString(getESTDate());
-    if (lastDbSyncDate === todayStr) {
-      console.log(`[Scheduler] Rental sync already ran today (${todayStr}), skipping startup catch-up`);
-      return;
-    }
-    // Yield to an in-progress reconcile (e.g. the Scheduled Deployment) so we
-    // don't open a redundant attempt the advisory lock would only reject anyway.
-    if (await hasRecentRunningRentalSync()) {
-      console.log('[Scheduler] A rental reconcile is currently running — skipping startup catch-up');
-      return;
-    }
-    console.log(`[Scheduler] Startup catch-up: last rental sync was ${lastDbSyncDate ?? 'never'}, running now...`);
-    const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
-    const result = await syncRentalOpsToFleetScope('startup_catchup');
-    if (result.added.length > 0 || result.removed.length > 0 || result.updated > 0) {
-      try {
-        const { invalidateTrucksCache } = await import('./fleet-scope-routes');
-        invalidateTrucksCache();
-      } catch (invErr: any) {
-        console.warn('[Scheduler] invalidateTrucksCache (post-startup-catchup) failed (non-fatal):', invErr?.message);
-      }
-    }
-    console.log(`[Scheduler] Startup catch-up complete — Added: ${result.added.length}, Removed: ${result.removed.length}, Date-filled: ${result.updated}, Unchanged: ${result.unchanged}`);
-  } catch (err: any) {
-    console.error('[Scheduler] Startup catch-up rental sync failed (non-fatal):', err?.message);
   }
 }
 
@@ -1304,13 +1238,7 @@ export function startSyncScheduler(): void {
       setTimeout(() => { checkAndRunSync(); }, 5000);
     });
   } else {
-    console.log('[Scheduler] Production mode detected - daily sync setInterval disabled');
-    setTimeout(() => {
-      runCatchUpRentalSyncIfNeeded().catch(err =>
-        console.error('[Scheduler] Production startup rental catch-up error:', err?.message)
-      );
-    }, 15000);
-    setTimeout(() => {
+    console.log('[Scheduler] Production mode detected - daily sync setInterval disabled');    setTimeout(() => {
       runCatchUpOffboardingSyncIfNeeded().catch(err =>
         console.error('[Scheduler] Production startup offboarding catch-up error:', err?.message)
       );

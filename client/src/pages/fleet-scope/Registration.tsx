@@ -481,15 +481,6 @@ export default function Registration() {
     queryKey: ["/api/fs/pmf/registration-stickers-needed"],
   });
 
-  const { data: rentalVehicleData } = useQuery<{ vehicleNumbers: string[] }>({
-    queryKey: ["/api/rental-ops/open-vehicle-numbers"],
-    staleTime: 5 * 60 * 1000,
-  });
-
-  const rentalVehicleSet = useMemo(() => {
-    return new Set(rentalVehicleData?.vehicleNumbers ?? []);
-  }, [rentalVehicleData]);
-
   const pmfStickerAssetIds = useMemo(() => {
     if (!pmfStickersData?.assetIds) return new Set<string>();
     return new Set(pmfStickersData.assetIds.map(id => String(id)));
@@ -1854,8 +1845,6 @@ export default function Registration() {
                               </div>
                               {truck.amsAlert ? (
                                 <span className={`text-xs font-normal ${truck.amsAlert.toLowerCase().includes('auction') ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{truck.amsAlert}</span>
-                              ) : rentalVehicleSet.has((truck.truckNumber.replace(/^0+/, '') || '0').padStart(5, '0')) ? (
-                                <span className="text-xs text-blue-600 dark:text-blue-400 font-normal">Rental</span>
                               ) : truck.amsStatusUnknown ? (
                                 <span className="text-xs text-muted-foreground font-normal" title="AMS lists this truck but its status could not be resolved">AMS status unknown</span>
                               ) : null}

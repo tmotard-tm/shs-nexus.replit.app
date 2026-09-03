@@ -15,12 +15,16 @@
  * dualAgentRunAuthorize, whose machine branch validates the `x-agent-token`
  * header against LIVHR's AGENT_RUN_SECRET.
  *
- * Fire-and-forget, never throws, never blocks the scrape. Without the secret
- * it logs once and does nothing, so a missing secret cannot break a scrape.
+ * Uses the credential that has connected Nexus to LIVHR since LUCA launched:
+ * AGENT_RUN_SECRET, present in both environments. No new secret is required.
+ * Tyler, 2026-09-03: "Everything's already connected. I don't need to add any
+ * more secrets."
+ *
+ * Fire-and-forget, never throws, never blocks the scrape.
  */
 
 const LIVHR_BASE = (process.env.LIVHR_BASE_URL || "").replace(/\/+$/, "");
-const TOKEN = process.env.LIVHR_AGENT_RUN_SECRET || "";
+const TOKEN = process.env.AGENT_RUN_SECRET || "";
 let warnedOnce = false;
 
 export async function kickLucaRentalSync(reason: string): Promise<void> {
@@ -28,8 +32,7 @@ export async function kickLucaRentalSync(reason: string): Promise<void> {
     if (!warnedOnce) {
       warnedOnce = true;
       console.warn(
-        "[luca-sync-kick] LIVHR_BASE_URL or LIVHR_AGENT_RUN_SECRET not set - scrapes will NOT " +
-          "push to LUCA until both exist (LIVHR_AGENT_RUN_SECRET = LIVHR's AGENT_RUN_SECRET).",
+        "[luca-sync-kick] LIVHR_BASE_URL or AGENT_RUN_SECRET not set - scrapes will NOT push to LUCA.",
       );
     }
     return;

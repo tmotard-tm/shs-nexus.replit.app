@@ -1633,25 +1633,6 @@ export default function TruckDetail() {
                                 </FormItem>
                               )}
                             />
-
-                            <FormField
-                              control={form.control}
-                              name="rentalReturned"
-                              render={({ field }) => (
-                                <FormItem className="flex items-center gap-2 space-y-0">
-                                  <FormControl>
-                                    <Checkbox
-                                      checked={field.value}
-                                      onCheckedChange={field.onChange}
-                                      data-testid="checkbox-rental-returned"
-                                    />
-                                  </FormControl>
-                                  <FormLabel className="text-sm font-normal cursor-pointer">
-                                    Rental vehicle returned
-                                  </FormLabel>
-                                </FormItem>
-                              )}
-                            />
                           </div>
                         </div>
                       </div>

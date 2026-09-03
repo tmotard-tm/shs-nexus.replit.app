@@ -21,7 +21,6 @@ import Decommissioning from "./Decommissioning";
 import ProcurementHistory from "./ProcurementHistory";
 import ToolAudit from "./ToolAudit";
 import CallHistory from "./CallHistory";
-import TechProfitability from "./TechProfitability";
 import TodaysQueue from "./TodaysQueue";
 import TechSchedules from "./TechSchedules";
 import { VehicleSearch, DiscrepancyFinder } from "./PlaceholderPages";
@@ -83,7 +82,6 @@ export default function FleetScopeLayout() {
                 <Route path="/fleet-scope/call-history" component={CallHistory} />
                 {/* Old bookmarks: the Batch Caller page became read-only Call History */}
                 <Route path="/fleet-scope/batch-caller" component={CallHistory} />
-                <Route path="/fleet-scope/rental-profitability" component={TechProfitability} />
                 <Route path="/fleet-scope/queue" component={TodaysQueue} />
                 <Route path="/fleet-scope/vehicle-search" component={VehicleSearch} />
                 <Route path="/fleet-scope/tech-schedules" component={TechSchedules} />

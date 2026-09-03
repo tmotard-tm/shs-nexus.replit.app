@@ -130,8 +130,6 @@ interface AllVehiclesResponse {
       inTpms: boolean;
     }>;
   };
-  rentalCount?: number;
-  rentalTruckNumbers?: string[];
 }
 
 interface ByovWeeklySnapshot {
@@ -227,7 +225,7 @@ export default function AllVehicles() {
   const { currentUser } = useUser();
   const { toast } = useToast();
   const [weeklyTrendsOpen, setWeeklyTrendsOpen] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<{generalStatus?: string; subStatus?: string; excludePmf?: boolean; isRental?: boolean; truckStatus?: string; label: string} | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<{generalStatus?: string; subStatus?: string; excludePmf?: boolean; truckStatus?: string; label: string} | null>(null);
   const [scorecardViewMode, setScorecardViewMode] = useState<'ams' | 'other'>('ams');
   const [mapSelections, setMapSelections] = useState<MapSelection[]>([]);
   const [visibleMapCategories, setVisibleMapCategories] = useState<Set<CategoryKey>>(
@@ -275,10 +273,6 @@ export default function AllVehicles() {
     enabled: weeklyTrendsOpen,
   });
 
-  const { data: weeklyRentalStats } = useQuery<Array<{weekYear: number; weekNumber: number; newRentals: number; rentalsReturned: number; totalImports: number}>>({
-    queryKey: ["/api/fs/rentals/weekly-stats"],
-  });
-
   const { data: pickupsThisWeek } = useQuery<{ count: number; label: string }>({
     queryKey: ["/api/fs/pickups-scheduled-this-week"],
   });
@@ -307,29 +301,6 @@ export default function AllVehicles() {
 
   const now = new Date();
   const currentWeek = { year: getISOWeekYear(now), week: getISOWeek(now) };
-  const [manualWeekYear, setManualWeekYear] = useState(currentWeek.year);
-  const [manualWeekNumber, setManualWeekNumber] = useState(currentWeek.week);
-  const [manualNewRentals, setManualNewRentals] = useState<string>("");
-  const [manualReturned, setManualReturned] = useState<string>("");
-  const [showRentalInput, setShowRentalInput] = useState(false);
-
-  const saveManualRentalMutation = useMutation({
-    mutationFn: async (data: { weekYear: number; weekNumber: number; newRentals: number; rentalsReturned: number }) => {
-      const response = await apiRequest("POST", "/api/fs/rentals/weekly-manual", data);
-      return response.json();
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/rentals/weekly-stats"] });
-      toast({ title: "Saved", description: `W${manualWeekNumber} data saved successfully` });
-      setManualNewRentals("");
-      setManualReturned("");
-      setShowRentalInput(false);
-    },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
-  });
-
   const { data: pmfData } = useQuery<{ rows: Array<{ status: string; assetId: string }> }>({
     queryKey: ["/api/fs/pmf"],
   });
@@ -531,44 +502,6 @@ export default function AllVehicles() {
     { border: 'border-indigo-200 dark:border-indigo-800', bg: 'bg-indigo-50 dark:bg-indigo-900/20', text: 'text-indigo-700 dark:text-indigo-400', subtext: 'text-indigo-600 dark:text-indigo-500' },
     { border: 'border-pink-200 dark:border-pink-800', bg: 'bg-pink-50 dark:bg-pink-900/20', text: 'text-pink-700 dark:text-pink-400', subtext: 'text-pink-600 dark:text-pink-500' },
   ];
-
-  const rentalTruckSet = useMemo(() => {
-    if (!data?.rentalTruckNumbers) return new Set<string>();
-    return new Set(data.rentalTruckNumbers.map(n => n.toString().padStart(6, '0')));
-  }, [data?.rentalTruckNumbers]);
-
-  const rentalCountInFleet = useMemo(() => {
-    if (!data?.vehicles || rentalTruckSet.size === 0) return 0;
-    return data.vehicles.filter(v => rentalTruckSet.has(v.vehicleNumber?.toString().padStart(6, '0'))).length;
-  }, [data?.vehicles, rentalTruckSet]);
-
-  const rentalsByState = useMemo(() => {
-    if (!data?.vehicles || rentalTruckSet.size === 0) return {};
-    const byState: Record<string, number> = {};
-    for (const v of data.vehicles) {
-      if (rentalTruckSet.has(v.vehicleNumber?.toString().padStart(6, '0'))) {
-        const state = v.locationState?.toUpperCase().trim();
-        if (state) {
-          byState[state] = (byState[state] || 0) + 1;
-        }
-      }
-    }
-    return byState;
-  }, [data?.vehicles, rentalTruckSet]);
-
-  const rentalChartData = useMemo(() => {
-    if (!weeklyRentalStats) return [];
-    return weeklyRentalStats
-      .slice(0, 8)
-      .reverse()
-      .map(w => ({
-        name: `W${w.weekNumber}`,
-        weekNumber: w.weekNumber,
-        weekYear: w.weekYear,
-        newRentals: w.newRentals,
-        rentalsReturned: w.rentalsReturned,
-      }));
-  }, [weeklyRentalStats]);
 
   const samsaraStats = useMemo(() => {
     if (!data?.vehicles) return null;
@@ -1042,159 +975,11 @@ export default function AllVehicles() {
                   </Card>
                 )}
 
-                {/* Card F - Rentals */}
-                {data.rentalCount !== undefined && data.rentalCount > 0 && (
-                  <Card
-                    className={`cursor-pointer hover-elevate border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-900/20 ${categoryFilter?.label === 'Rentals' ? 'ring-2 ring-primary' : ''}`}
-                    onClick={() => setCategoryFilter({ isRental: true, label: 'Rentals' })}
-                    data-testid="card-rentals"
-                  >
-                    <CardContent className="p-4">
-                      <p className="text-xs font-medium text-rose-700 dark:text-rose-400">Rentals</p>
-                      <div className="text-2xl font-bold text-rose-700 dark:text-rose-400" data-testid="text-rental-count-card">
-                        {data.rentalCount.toLocaleString()}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
               </div>
               )}
 
-              {/* Row 2: Rental Trend Chart + BYOV */}
+              {/* Row 2: BYOV */}
               <div className="grid gap-4 lg:grid-cols-2">
-                {/* Rental Vehicles Outstanding + Trend Chart */}
-                {data.rentalCount !== undefined && data.rentalCount > 0 && (
-                  <Card data-testid="card-rental-section">
-                    <CardHeader className="pb-2 pt-3 px-4">
-                      <div className="flex items-center justify-between flex-wrap gap-2">
-                        <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                          <Car className="w-4 h-4 text-purple-600" />
-                          Rental Vehicles Outstanding
-                        </CardTitle>
-                        <div className="text-2xl font-bold text-purple-700 dark:text-purple-400" data-testid="text-rental-count">
-                          {data.rentalCount.toLocaleString()}
-                        </div>
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Total vehicles currently in the repair dashboard (rentals outstanding)
-                      </p>
-                    </CardHeader>
-                    <CardContent className="px-4 pb-3">
-                      {rentalChartData.length > 0 && (
-                        <div data-testid="chart-rental-trends" style={{ width: '100%', height: 200 }}>
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart
-                              data={rentalChartData}
-                              margin={{ top: 5, right: 10, left: -10, bottom: 5 }}
-                              onClick={(state) => {
-                                if (state?.activePayload?.[0]?.payload) {
-                                  const clicked = state.activePayload[0].payload;
-                                  setManualWeekNumber(clicked.weekNumber);
-                                  setManualWeekYear(clicked.weekYear);
-                                  setManualNewRentals(String(clicked.newRentals || ""));
-                                  setManualReturned(String(clicked.rentalsReturned || ""));
-                                  setShowRentalInput(true);
-                                }
-                              }}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-                              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                              <YAxis tick={{ fontSize: 11 }} />
-                              <Tooltip />
-                              <Legend wrapperStyle={{ fontSize: 11 }} />
-                              <Bar dataKey="newRentals" name="New Rentals" fill="#3b82f6" radius={[2, 2, 0, 0]} />
-                              <Bar dataKey="rentalsReturned" name="Returned" fill="#22c55e" radius={[2, 2, 0, 0]} />
-                            </BarChart>
-                          </ResponsiveContainer>
-                          <p className="text-[10px] text-muted-foreground text-center mt-1">Click a bar to edit its data</p>
-                        </div>
-                      )}
-                      {showRentalInput && (
-                        <div className="border-t pt-3 mt-3" data-testid="rental-input-panel">
-                          <div className="flex items-center justify-between mb-2">
-                            <p className="text-xs font-medium text-muted-foreground">
-                              Edit W{manualWeekNumber} / {manualWeekYear}
-                            </p>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => setShowRentalInput(false)}
-                              data-testid="button-close-rental-input"
-                            >
-                              <X className="w-3 h-3" />
-                            </Button>
-                          </div>
-                          <div className="flex items-end gap-2 flex-wrap">
-                            <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-muted-foreground">Week #</label>
-                              <Input
-                                type="number"
-                                min={1}
-                                max={53}
-                                value={manualWeekNumber}
-                                onChange={(e) => setManualWeekNumber(parseInt(e.target.value) || 1)}
-                                className="h-8 w-16 text-xs"
-                                data-testid="input-manual-week"
-                              />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-muted-foreground">Year</label>
-                              <Input
-                                type="number"
-                                min={2024}
-                                max={2030}
-                                value={manualWeekYear}
-                                onChange={(e) => setManualWeekYear(parseInt(e.target.value) || 2026)}
-                                className="h-8 w-20 text-xs"
-                                data-testid="input-manual-year"
-                              />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-blue-600">New Rentals</label>
-                              <Input
-                                type="number"
-                                min={0}
-                                placeholder="0"
-                                value={manualNewRentals}
-                                onChange={(e) => setManualNewRentals(e.target.value)}
-                                className="h-8 w-20 text-xs"
-                                data-testid="input-manual-new-rentals"
-                              />
-                            </div>
-                            <div className="flex flex-col gap-1">
-                              <label className="text-[10px] text-green-600">Returned</label>
-                              <Input
-                                type="number"
-                                min={0}
-                                placeholder="0"
-                                value={manualReturned}
-                                onChange={(e) => setManualReturned(e.target.value)}
-                                className="h-8 w-20 text-xs"
-                                data-testid="input-manual-returned"
-                              />
-                            </div>
-                            <Button
-                              size="sm"
-                              disabled={saveManualRentalMutation.isPending}
-                              onClick={() => {
-                                saveManualRentalMutation.mutate({
-                                  weekYear: manualWeekYear,
-                                  weekNumber: manualWeekNumber,
-                                  newRentals: parseInt(manualNewRentals) || 0,
-                                  rentalsReturned: parseInt(manualReturned) || 0,
-                                });
-                              }}
-                              data-testid="button-save-manual-rental"
-                            >
-                              {saveManualRentalMutation.isPending ? "Saving..." : "Save"}
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                )}
 
                 {/* BYOV Weekly Enrollment History */}
                 {byovSnapshots?.snapshots && byovSnapshots.snapshots.length > 0 && (
@@ -1253,13 +1038,13 @@ export default function AllVehicles() {
                   </Card>
                 )}
 
-                {/* Pickups Scheduled This Week - For rental return */}
+                {/* Pickups Scheduled This Week */}
                 <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20" data-testid="card-pickups-scheduled">
                   <CardHeader className="pb-2 pt-3 px-4">
                     <div className="flex items-center justify-between flex-wrap gap-2">
                       <CardTitle className="text-sm font-semibold flex items-center gap-2">
                         <CalendarCheck className="w-4 h-4 text-green-600" />
-                        Pickups Scheduled This Week - For rental return
+                        Pickups Scheduled This Week
                       </CardTitle>
                       <div className="text-2xl font-bold text-green-700 dark:text-green-400" data-testid="text-pickups-count">
                         {pickupsThisWeek?.count ?? 0}
@@ -1614,7 +1399,6 @@ export default function AllVehicles() {
                       state: extractStateFromLocation(tech.location),
                       inTpms: tech.inTpms
                     })) || []}
-                    rentalsByState={rentalsByState}
                     onMapFiltersChange={handleMapFiltersChange}
                     activeSelections={mapSelections}
                     visibleCategories={visibleMapCategories}
@@ -1631,7 +1415,6 @@ export default function AllVehicles() {
                 mapSelections={mapSelections}
                 visibleMapCategories={visibleMapCategories}
                 onMapFiltersChange={handleMapFiltersChange}
-                rentalTruckNumbers={rentalTruckSet}
               />
             </div>
           ) : null}

@@ -58,14 +58,6 @@ interface WeeklyMetrics {
   snapshotCount: number;
 }
 
-interface RentalWeeklyStats {
-  weekYear: number;
-  weekNumber: number;
-  newRentals: number;
-  rentalsReturned: number;
-  totalImports: number;
-}
-
 interface AmsActiveWeekly {
   weekStart: string;
   weekEnd: string;
@@ -147,10 +139,6 @@ export default function MetricsDashboard() {
     queryKey: ["/api/fs/metrics/weekly"],
   });
   
-  const { data: rentalWeeklyStats, isLoading: loadingRentalStats } = useQuery<RentalWeeklyStats[]>({
-    queryKey: ["/api/fs/rentals/weekly-stats"],
-  });
-
   const captureMutation = useMutation({
     mutationFn: async () => {
       const response = await fetch("/api/fs/metrics/capture", {
@@ -481,89 +469,6 @@ export default function MetricsDashboard() {
                   <p className="text-sm text-muted-foreground">On Road Rate</p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Rental Reconciliation Stats */}
-        <div className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <FileInput className="w-5 h-5" />
-                Rental Reconciliation (Weekly)
-              </CardTitle>
-              <p className="text-sm text-muted-foreground italic">Manual imports done near EOW</p>
-            </CardHeader>
-            <CardContent>
-              {loadingRentalStats ? (
-                <div className="space-y-3">
-                  <Skeleton className="h-10 w-full" />
-                  <Skeleton className="h-10 w-full" />
-                </div>
-              ) : !rentalWeeklyStats || rentalWeeklyStats.length === 0 ? (
-                <div className="text-center py-8 text-muted-foreground">
-                  <FileInput className="w-12 h-12 mx-auto mb-3 opacity-50" />
-                  <p>No rental reconciliation data yet.</p>
-                  <p className="text-sm mt-1">Import a rental truck list to start tracking.</p>
-                </div>
-              ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Week</TableHead>
-                      <TableHead className="text-center">
-                        <span className="flex items-center justify-center gap-1">
-                          <ArrowUpRight className="w-4 h-4 text-green-600" />
-                          New Rentals
-                        </span>
-                      </TableHead>
-                      <TableHead className="text-center">
-                        <span className="flex items-center justify-center gap-1">
-                          <ArrowDownRight className="w-4 h-4 text-red-600" />
-                          Returned
-                        </span>
-                      </TableHead>
-                      <TableHead className="text-center">
-                        <span className="flex items-center justify-center gap-1">
-                          Net Change
-                        </span>
-                      </TableHead>
-                      <TableHead className="text-center">Imports</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {rentalWeeklyStats.slice(0, 8).map((week) => {
-                      const netChange = week.newRentals - week.rentalsReturned;
-                      return (
-                        <TableRow key={`${week.weekYear}-W${week.weekNumber}`}>
-                          <TableCell className="font-medium">
-                            {week.weekYear}-W{String(week.weekNumber).padStart(2, '0')}
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className="text-green-600 font-semibold">
-                              +{week.newRentals}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className="text-red-600 font-semibold">
-                              -{week.rentalsReturned}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-center">
-                            <span className={`font-semibold ${netChange > 0 ? 'text-green-600' : netChange < 0 ? 'text-red-600' : 'text-muted-foreground'}`}>
-                              {netChange > 0 ? '+' : ''}{netChange}
-                            </span>
-                          </TableCell>
-                          <TableCell className="text-center text-muted-foreground">
-                            {week.totalImports}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              )}
             </CardContent>
           </Card>
         </div>

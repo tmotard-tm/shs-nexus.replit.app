@@ -385,7 +385,7 @@ interface POPriorityResponse {
 }
 
 const PRIORITY_COLUMNS_ORDER = [
-  'PRIORITY', 'PO_NUMBER', 'DECLINED_REPAIR', 'HAS_RENTAL', 'DATE_IN_REPAIR', 'PO_DATE', 'PO_STATUS', 'REPAIR_TYPE_DESCRIPTION', 'CLIENT_VEHICLE_NUMBER',
+  'PRIORITY', 'PO_NUMBER', 'DECLINED_REPAIR', 'DATE_IN_REPAIR', 'PO_DATE', 'PO_STATUS', 'REPAIR_TYPE_DESCRIPTION', 'CLIENT_VEHICLE_NUMBER',
   'HOLMAN_VEHICLE_NUMBER', 'SERIAL_NO', 'VENDOR_NAME', 'VENDOR_ID',
   'PO_LINE_NUMBER', 'DESCRIPTION', 'LINE_ITEM_COST', 'TOTAL_LINE_ITEM_AMOUNT',
   'ATA_GROUP_DESC', 'ATA_CODE', 'YEAR', 'MAKE', 'MODEL', 'STATE', 'DISTRICT',
@@ -546,7 +546,6 @@ function POPriorityView() {
                   <th className="text-left py-2 px-3 font-medium">Priority</th>
                   <th className="text-left py-2 px-3 font-medium">PO Number</th>
                   <th className="text-left py-2 px-3 font-medium">Declined</th>
-                  <th className="text-left py-2 px-3 font-medium">Rental</th>
                   <th className="text-left py-2 px-3 font-medium">Date In Repair</th>
                   <th className="text-left py-2 px-3 font-medium">Line Items</th>
                   <th className="text-left py-2 px-3 font-medium">Status</th>
@@ -592,13 +591,6 @@ function POPriorityView() {
                           {first.DECLINED_REPAIR === 'Declined' && (
                             <span className="px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
                               Declined
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-2 px-3" data-testid={`text-rental-${group.poNumber}`}>
-                          {first.HAS_RENTAL === 'Yes' && (
-                            <span className="px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                              Yes
                             </span>
                           )}
                         </td>
@@ -660,10 +652,6 @@ function POPriorityView() {
                                             ) : col === 'DECLINED_REPAIR' && row[col] === 'Declined' ? (
                                               <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300">
                                                 Declined
-                                              </span>
-                                            ) : col === 'HAS_RENTAL' && row[col] === 'Yes' ? (
-                                              <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300">
-                                                Yes
                                               </span>
                                             ) : formatCellValue(row[col], col)}
                                           </td>

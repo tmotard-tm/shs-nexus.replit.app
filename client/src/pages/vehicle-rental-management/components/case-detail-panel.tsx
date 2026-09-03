@@ -28,6 +28,13 @@ import {
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { rentalOriginOf } from "../lib/case-model";
+
+/** Whole days since an ISO date; the board-opened fallback for days_in_rental. */
+function daysSinceDate(iso: string): number | null {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
+}
 import { fmtDate, fmtDateTime, fmtPhone } from "../lib/format";
 import { LIST_QUERY_KEYS } from "../lib/query-keys";
 import { describeAction } from "../lib/activity-log";
@@ -123,6 +130,8 @@ export interface CaseRowContext {
   odometer_date?: string | null;
   last_rental_date?: string | null;
   has_rental_auth?: boolean;
+  /** Days since the rental started, as the Ops Queue computed it (server/todays-queue.ts). */
+  days_in_rental?: number | null;
 }
 
 // Board list keys now live in ../lib/query-keys so the boards, this panel and
@@ -698,6 +707,20 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
               const bg = o.kind === "direct" ? colors.purpleLight : colors.blueLight;
               return (
                 <span title={o.hint} style={{ fontFamily: fonts.dmSans, fontSize: 10.5, fontWeight: 700, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "2px 9px", textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap" }}>{o.label}</span>
+              );
+            })()}
+            {/* Days so far: moved off the Ops Queue card into this drawer
+                (Tyler, 2026-09-03). Prefers the queue's own number; falls back to
+                the case's rental start when the panel is opened from a board. */}
+            {(() => {
+              const start = c?.rental_start_date_s || c?.rental_start_date;
+              const days = row?.days_in_rental ?? (start ? daysSinceDate(String(start)) : null);
+              if (days == null) return null;
+              return (
+                <span title="Days since the rental started" data-testid="case-days-in-rental"
+                  style={{ fontFamily: fonts.dmSans, fontSize: 11.5, fontWeight: 600, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                  {days} days so far
+                </span>
               );
             })()}
           </div>
