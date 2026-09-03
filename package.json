@@ -9,6 +9,7 @@
     "build:workers": "esbuild server/vrm/rental-operations/holman-svc-scrape-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/vrm/rental-operations/holman-svc-scrape-worker.js && esbuild server/holman-login-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/holman-login-worker.js && esbuild server/holman-renter-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/holman-renter-worker.js && node -e \"['dist/holman-login-worker.js','dist/holman-renter-worker.js','dist/vrm/rental-operations/holman-svc-scrape-worker.js'].forEach(f=>{if(!require('fs').existsSync(f))throw new Error('missing worker bundle: '+f)})\"",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
+    "preflight": "G3_DRY_RUN=1 bash scripts/guardrails/g3-migration-safety-gate.sh && tsx scripts/guardrails/g9-schema-parity-gate.ts",
     "db:push": "drizzle-kit push",
     "deploy:snapshot": "tsx scripts/guardrails/g2-pre-deploy-snapshot.ts",
     "deploy:integrity": "tsx scripts/guardrails/g4-post-deploy-integrity.ts",
