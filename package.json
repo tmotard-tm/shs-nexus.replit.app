@@ -5,7 +5,7 @@
   "license": "MIT",
   "scripts": {
     "dev": "NODE_ENV=development tsx server/index.ts",
-    "build": "npm run deploy:snapshot && bash scripts/guardrails/g3-migration-safety-gate.sh && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && npm run build:workers && npm run deploy:record",
+    "build": "npm run deploy:snapshot && bash scripts/guardrails/g3-migration-safety-gate.sh && tsx scripts/guardrails/g9-schema-parity-gate.ts && vite build && esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist && npm run build:workers && npm run deploy:record",
     "build:workers": "esbuild server/vrm/rental-operations/holman-svc-scrape-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/vrm/rental-operations/holman-svc-scrape-worker.js && esbuild server/holman-login-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/holman-login-worker.js && esbuild server/holman-renter-worker.ts --platform=node --packages=external --bundle --format=esm --outfile=dist/holman-renter-worker.js && node -e \"['dist/holman-login-worker.js','dist/holman-renter-worker.js','dist/vrm/rental-operations/holman-svc-scrape-worker.js'].forEach(f=>{if(!require('fs').existsSync(f))throw new Error('missing worker bundle: '+f)})\"",
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc",
