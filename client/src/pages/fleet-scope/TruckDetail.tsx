@@ -181,12 +181,6 @@ export default function TruckDetail() {
   const getBackUrl = () => {
     const params = new URLSearchParams(searchString);
     const from = params.get("from");
-    if (from === "dashboard") {
-      return "/fleet-scope/dashboard";
-    }
-    if (from === "queue") {
-      return "/fleet-scope/queue";
-    }
     return "/fleet-scope";
   };
 

@@ -273,6 +273,19 @@ export default function AllVehicles() {
     enabled: weeklyTrendsOpen,
   });
 
+  // The one rental figure Fleet Scope is allowed to show (Tyler, 2026-09-03),
+  // read from VRM's own open-rentals feed so it can never disagree with the board.
+  const { data: vrmOpenRentals } = useQuery<{ data?: unknown[]; total?: number }>({
+    queryKey: ["/api/rental-ops/open"],
+    queryFn: async () => {
+      const res = await fetch("/api/rental-ops/open", { credentials: "include" });
+      if (!res.ok) return { data: [] };
+      return res.json();
+    },
+    staleTime: 10 * 60 * 1000,
+  });
+  const openRentalCount = vrmOpenRentals?.total ?? vrmOpenRentals?.data?.length ?? null;
+
   const { data: pickupsThisWeek } = useQuery<{ count: number; label: string }>({
     queryKey: ["/api/fs/pickups-scheduled-this-week"],
   });
@@ -971,6 +984,18 @@ export default function AllVehicles() {
                           </span>
                         </div>
                       </div>
+                    </CardContent>
+                  </Card>
+                )}
+                {/* Card F - Open Rentals: the only rental figure on Fleet Scope; VRM's number, not a filter. */}
+                {openRentalCount != null && (
+                  <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20" data-testid="card-open-rentals">
+                    <CardContent className="p-4">
+                      <p className="text-xs font-medium text-blue-700 dark:text-blue-400">Open Rentals</p>
+                      <div className="text-2xl font-bold text-blue-700 dark:text-blue-400" data-testid="text-open-rentals-count">
+                        {openRentalCount.toLocaleString()}
+                      </div>
+                      <p className="text-xs text-blue-600 dark:text-blue-500">Managed on Vehicle Rental Management</p>
                     </CardContent>
                   </Card>
                 )}

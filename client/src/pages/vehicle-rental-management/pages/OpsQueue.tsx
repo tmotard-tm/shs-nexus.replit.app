@@ -24,6 +24,8 @@ import { TechTextModal } from "../components/tech-text-modal";
 import { ShopInfoPanel } from "../components/shop-info-panel";
 import { DetailPanel, amsBucketOfLabel, amsColorOf, amsTintOf } from "../components/case-detail-panel";
 import { LIST_QUERY_KEYS } from "../lib/query-keys";
+import { rentalOriginOf } from "../lib/case-model";
+import { cn } from "@/lib/utils";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -444,60 +446,44 @@ interface OwnerSummary {
   cats: Array<{ key: string; label: string; count: number; priority: number }>;
 }
 
-/** One card per person: their open-case categories at a glance; click the name
- *  to drill into their queue with the full case detail + actions. */
-function PeopleCards({ summaries, onPick }: { summaries: OwnerSummary[]; onPick: (owner: string) => void }) {
-  const pill = (fg: string, bg: string): React.CSSProperties => ({
-    fontSize: 12.5, fontWeight: 700, color: fg, backgroundColor: bg,
-    padding: "1px 8px", borderRadius: 999,
-  });
+/** People row, inline under the region pills. Tyler, 2026-09-03: "I like the view
+ *  of the people ... vs a separate tab they have to click into on VRM." Same markup
+ *  Fleet Scope's Today's Queue used, so it reads the same. Click a person to drill
+ *  into their bucket, Everyone to come back. */
+function PeopleBar({ summaries, active, onPick }: {
+  summaries: OwnerSummary[];
+  active: string | null;
+  onPick: (owner: string | null) => void;
+}) {
   return (
-    <div className="oq-people-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: 10, padding: 14 }}>
-      {summaries.map((s) => (
+    <div className="oq-people-bar grid gap-2 py-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+      <button
+        data-testid="bucket-everyone"
+        onClick={() => onPick(null)}
+        className={cn(
+          "text-left rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/40",
+          active === null && "ring-2 ring-primary",
+        )}
+      >
+        <div className="text-base font-bold">Everyone</div>
+        <div className="text-sm text-muted-foreground">{summaries.reduce((n, b) => n + b.open, 0)} open</div>
+      </button>
+      {summaries.map((b) => (
         <button
-          key={s.owner}
-          data-testid={`person-${s.owner.replace(/\W+/g, "-").toLowerCase()}`}
-          onClick={() => onPick(s.owner)}
-          className="oq-card"
-          style={{ ...bucketCardStyle, display: "flex", flexDirection: "column", gap: 8, padding: "14px 16px" }}
-        >
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-            <span style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 16.5, color: colors.ink }}>{s.owner}</span>
-            <span style={{ fontSize: 13, fontWeight: 600, color: colors.inkMuted, whiteSpace: "nowrap" }}>{s.open} open</span>
-          </div>
-          {(s.overdue > 0 || s.dueToday > 0 || s.needsRouting > 0) && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {s.overdue > 0 && <span style={pill("#fff", "#b3261e")}>{s.overdue} overdue</span>}
-              {s.dueToday > 0 && <span style={pill(colors.red, colors.redLight)}>{s.dueToday} due today</span>}
-              {s.needsRouting > 0 && <span style={pill(colors.amber, colors.amberLight)}>⚠ {s.needsRouting} unrouted</span>}
-            </div>
+          key={b.owner}
+          data-testid={`bucket-${b.owner.replace(/\W+/g, "-").toLowerCase()}`}
+          onClick={() => onPick(b.owner)}
+          className={cn(
+            "text-left rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/40",
+            active === b.owner && "ring-2 ring-primary",
           )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            {s.cats.length === 0 ? (
-              <span style={{ fontSize: 13.5, color: colors.inkMuted, fontStyle: "italic" }}>Nothing open right now.</span>
-            ) : (
-              <>
-                {s.cats.slice(0, 5).map((c) => {
-                  const meta = PRIORITY_META[c.priority] ?? PRIORITY_META[3];
-                  return (
-                    <div key={c.key} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                      <span style={{ fontSize: 13.5, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", backgroundColor: meta.fg, marginRight: 6 }} />
-                        {c.label}
-                      </span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: colors.ink, fontFamily: fonts.jetbrains }}>{c.count}</span>
-                    </div>
-                  );
-                })}
-                {s.cats.length > 5 && (
-                  <span style={{ fontSize: 12.5, color: colors.inkMuted }}>+{s.cats.length - 5} more categor{s.cats.length - 5 === 1 ? "y" : "ies"}</span>
-                )}
-              </>
-            )}
+        >
+          <div className="text-base font-bold">{b.owner}</div>
+          <div className="text-sm text-muted-foreground">
+            {b.open} open{b.dueToday > 0 && <> · {b.dueToday} due</>}
+            {b.overdue > 0 && <span className="text-red-600 dark:text-red-400 font-bold"> · {b.overdue} overdue</span>}
           </div>
-          <span style={{ fontSize: 13, fontWeight: 700, color: colors.accent, display: "inline-flex", alignItems: "center", gap: 4, marginTop: "auto" }}>
-            Open {s.owner.split(" ")[0]}'s queue <ChevronRight size={12} />
-          </span>
+          {b.needsRouting > 0 && <div className="text-xs text-red-600 dark:text-red-400">⚠ {b.needsRouting} needs routing</div>}
         </button>
       ))}
     </div>
@@ -1015,6 +1001,16 @@ const ROW_TEXT: React.CSSProperties = { fontSize: 13, color: colors.inkSoft, lin
 
 /** Rental origin callout — Holman-issued (book) vs direct billing (manual
  * Enterprise report). Same vocabulary as the case boards and drawer. */
+function OriginPill({ source }: { source?: string | null }) {
+  const o = rentalOriginOf(source);
+  if (!o) return null;
+  const fg = o.kind === "direct" ? colors.purple : colors.blue;
+  const bg = o.kind === "direct" ? colors.purpleLight : colors.blueLight;
+  return (
+    <span title={o.hint} style={{ fontFamily: fonts.dmSans, fontSize: 9.5, fontWeight: 700, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "0 7px", lineHeight: "15px", textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{o.label}</span>
+  );
+}
+
 /** WHO column: truck number on top, then tech name / phone / owner stacked. */
 function IdentityCell({ item, dismissed }: { item: QueueItem; dismissed: boolean }) {
   return (
@@ -1026,6 +1022,7 @@ function IdentityCell({ item, dismissed }: { item: QueueItem; dismissed: boolean
         }}>
           {item.truckNumber}
         </span>
+        {item.rentalSource && <OriginPill source={item.rentalSource} />}
         {item.techState && <span style={ROW_LABEL}>{item.techState}</span>}
       </div>
       {item.techName && (
@@ -1594,6 +1591,7 @@ function BucketRow({
           ),
         },
         chips?.portalAt ? { label: "Portal", node: formatShortDate(chips.portalAt) } : null,
+        chips?.daysInRental != null ? { label: "Rental", node: `${chips.daysInRental} days so far` } : null,
         item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
       ]} />
 
@@ -1611,7 +1609,7 @@ export default function OpsQueue() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeBucket, setActiveBucket] = useState<string | null>(null);
-  const [view, setView] = useState<"buckets" | "people" | "board">("buckets");
+  const [view, setView] = useState<"buckets" | "board">("buckets");
   // Work-type bucket filter — one person owns one bucket. Composes with the
   // owner drill-down and the region filter; null = all work types.
   const [activeWorkBucket, setActiveWorkBucket] = useState<string | null>(null);
@@ -1915,7 +1913,7 @@ export default function OpsQueue() {
     // ops-queue / oq-* are style-free hooks for the small-laptop compact
     // density block in client/src/index.css (Task #823; pattern from #820).
     // This page styles inline, so those overrides carry !important.
-    <div className="ops-queue" style={{ fontFamily: fonts.dmSans, maxWidth: 1720, margin: "0 auto" }}>
+    <div className="ops-queue" style={{ fontFamily: fonts.dmSans }}>
       {/* Header */}
       <div className="oq-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 6 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
@@ -1981,7 +1979,7 @@ export default function OpsQueue() {
           </div>
         ) : (
           <div className="oq-controls" style={{ display: "flex", alignItems: "center", gap: 6, margin: "12px 0" }}>
-            {([["buckets", "Bucket board"], ["people", "By person"], ["board", "Step board"]] as const).map(([v, label]) => (
+            {([["buckets", "Bucket board"], ["board", "Step board"]] as const).map(([v, label]) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -2000,33 +1998,6 @@ export default function OpsQueue() {
           </div>
         )
       )}
-
-      {/* Work-type bucket strip — same server rollup both surfaces render, so
-          counts here always match Fleet Scope's Today's Queue. */}
-      {!isLoading && data?.success && (
-        <WorkTypeStrip buckets={workTypeBuckets} active={activeWorkBucket} onPick={onPickWorkBucket} />
-      )}
-
-      {/* Featured-bucket banner: states the bucket's confidence/mission. */}
-      {!isLoading && activeWorkBucket !== null && (() => {
-        const wb = workTypeBuckets.find((b) => b.key === activeWorkBucket);
-        if (!wb?.featured || !wb.description) return null;
-        const fg = WORK_BUCKET_FG[wb.key] ?? colors.inkSoft;
-        const bg = wb.key === "vehicle_ready_schedule" ? colors.greenLight : colors.blueLight;
-        return (
-          <div
-            className="oq-banner"
-            data-testid={`workbucket-banner-${wb.key}`}
-            style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 8, border: `1px solid ${fg}`, backgroundColor: bg }}
-          >
-            <div style={{ fontSize: 14, fontWeight: 700, color: fg, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
-              {wb.key === "vehicle_ready_schedule" ? <PhoneCall size={13} /> : <Truck size={13} />}
-              {wb.label}
-            </div>
-            <div style={{ fontSize: 13.5, color: colors.inkSoft }}>{wb.description}</div>
-          </div>
-        );
-      })()}
 
       {/* Region filter — bucket + step boards */}
       {activeBucket === null && (view === "board" || view === "buckets") && (
@@ -2062,6 +2033,37 @@ export default function OpsQueue() {
           )}
         </div>
       )}
+
+      {/* People row: inline, no tab to click into (Tyler, 2026-09-03). */}
+      {!isLoading && ownerSummaries.length > 0 && (
+        <PeopleBar summaries={ownerSummaries} active={activeBucket} onPick={setActiveBucket} />
+      )}
+      {/* Work-type bucket strip — same server rollup both surfaces render, so
+          counts here always match the people row above. */}
+      {!isLoading && data?.success && (
+        <WorkTypeStrip buckets={workTypeBuckets} active={activeWorkBucket} onPick={onPickWorkBucket} />
+      )}
+
+      {/* Featured-bucket banner: states the bucket's confidence/mission. */}
+      {!isLoading && activeWorkBucket !== null && (() => {
+        const wb = workTypeBuckets.find((b) => b.key === activeWorkBucket);
+        if (!wb?.featured || !wb.description) return null;
+        const fg = WORK_BUCKET_FG[wb.key] ?? colors.inkSoft;
+        const bg = wb.key === "vehicle_ready_schedule" ? colors.greenLight : colors.blueLight;
+        return (
+          <div
+            className="oq-banner"
+            data-testid={`workbucket-banner-${wb.key}`}
+            style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 8, border: `1px solid ${fg}`, backgroundColor: bg }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: fg, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+              {wb.key === "vehicle_ready_schedule" ? <PhoneCall size={13} /> : <Truck size={13} />}
+              {wb.label}
+            </div>
+            <div style={{ fontSize: 13.5, color: colors.inkSoft }}>{wb.description}</div>
+          </div>
+        );
+      })()}
 
       {/* Needs-routing strip — landing + step board */}
       {activeBucket === null && needsRoutingItems.length > 0 && (
@@ -2182,9 +2184,6 @@ export default function OpsQueue() {
               )}
             </div>
           )
-        ) : view === "people" ? (
-          /* ── People landing: category summary per person ── */
-          <PeopleCards summaries={ownerSummaries} onPick={setActiveBucket} />
         ) : items.length === 0 && (selectedRegions.size > 0 || activeWorkBucket !== null) ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 180, gap: 8, fontSize: 15, color: colors.inkMuted }}>
             <span>
@@ -2402,6 +2401,7 @@ export default function OpsQueue() {
                     }}
                   >
                     <span style={{ fontFamily: fonts.jetbrains, fontSize: 14, color: colors.ink }}>{item.truckNumber}</span>
+                    {item.rentalSource && <OriginPill source={item.rentalSource} />}
                     {item.techName && <span style={{ fontSize: 13, color: colors.inkMuted }}>{item.techName}</span>}
                     <StatusPill label="Status" value={item.fleetScopeStatus} />
                     <StatusPill label="PO" value={item.holmanStatus} />
@@ -2438,9 +2438,6 @@ export default function OpsQueue() {
               assigned_truck: it.renterAssignedTruck ?? it.assignedTruck ?? null,
               wrong_truck: !!it.assignedTruck,
               tpms_tech: it.techName ?? null,
-              // Days-in-rental moved off the card into this drawer (Tyler, 2026-09-03):
-              // the queue's own computed number, so drawer and queue always agree.
-              days_in_rental: it.contextChips?.daysInRental ?? null,
             } : undefined}
             onClose={() => setPanelKey(null)}
             onMark={doMark}

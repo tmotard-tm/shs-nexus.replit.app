@@ -16,8 +16,6 @@ import {
 import {
   CalendarDays,
   Car,
-  LayoutDashboard,
-  ClipboardList,
   Search,
   Truck,
   ParkingCircle,
@@ -31,18 +29,11 @@ import {
   AlertTriangle,
   User,
   LogOut,
-  Phone,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import searsLogo from "@assets/image_1764154330093.png";
 
 const navGroups = [
-  {
-    label: "Action Center",
-    items: [
-      { title: "Today's Queue", href: "/fleet-scope/queue", icon: ClipboardList },
-    ],
-  },
   {
     label: "Fleet Operations",
     items: [
@@ -57,7 +48,6 @@ const navGroups = [
   {
     label: "Repair Pipeline",
     items: [
-      { title: "Fleet Dashboard", href: "/fleet-scope/dashboard", icon: LayoutDashboard },
       { title: "Purchase Orders", href: "/fleet-scope/pos", icon: Receipt },
       { title: "Decommissioning", href: "/fleet-scope/decommissioning", icon: Trash2 },
     ],
@@ -75,7 +65,6 @@ const navGroups = [
     label: "Tools",
     items: [
       { title: "Holman Research", href: "/fleet-scope/holman-research", icon: Wrench },
-      { title: "Call History", href: "/fleet-scope/call-history", icon: Phone },
     ],
   },
 ];
